@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%sveltekit.assets%/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skrive</title>
+    <style>
+      :root {
+        --skrive-bg: #f7f5f0;
+        --skrive-fg: #1a1a1a;
+        --skrive-muted: #6b6b6b;
+        --skrive-link: #1a1a1a;
+        --skrive-selection: rgba(26, 26, 26, 0.14);
+        --skrive-rule: rgba(26, 26, 26, 0.08);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --skrive-bg: #131313;
+          --skrive-fg: #f0ede5;
+          --skrive-muted: #8a8a8a;
+          --skrive-link: #f0ede5;
+          --skrive-selection: rgba(240, 237, 229, 0.18);
+          --skrive-rule: rgba(240, 237, 229, 0.1);
+        }
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background-color: var(--skrive-bg);
+        color: var(--skrive-fg);
+        font-family:
+          -apple-system,
+          BlinkMacSystemFont,
+          "Inter",
+          system-ui,
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+    </style>
+    %sveltekit.head%
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div style="display: contents">%sveltekit.body%</div>
+  </body>
+</html>
