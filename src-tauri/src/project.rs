@@ -150,6 +150,40 @@ pub fn write(root: &Path, rel: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
+/// Create a new empty Markdown file at the given project-relative path.
+/// Refuses if the file already exists (to prevent silent overwrites) and
+/// validates that `rel` stays inside the project root. Parent directories
+/// are created as needed.
+pub fn create_new_file(root: &Path, rel: &Path) -> Result<()> {
+    if !is_markdown(rel) {
+        return Err(Error::NotMarkdown);
+    }
+
+    // Reject absolute paths, root components, and any `..` traversal.
+    for component in rel.components() {
+        match component {
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => {
+                return Err(Error::PathOutsideProject);
+            }
+            _ => {}
+        }
+    }
+
+    let canonical_root = root.canonicalize()?;
+    let absolute = canonical_root.join(rel);
+    if absolute.exists() {
+        return Err(Error::Io(format!("{} already exists", rel.display())));
+    }
+
+    if let Some(parent) = absolute.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(absolute, "")?;
+    Ok(())
+}
+
 /// Confine `rel` to `root`. Symlinks and `..` traversal that would escape the
 /// project are rejected. The returned path is absolute.
 pub fn resolve_within(root: &Path, rel: &Path) -> Result<PathBuf> {

@@ -1,14 +1,16 @@
 <script lang="ts">
-  // Shown when no project is loaded. Single "Open project" button that calls
-  // the system directory picker and asks the Rust core to scan the chosen path.
-  // This is the entire v0.0 onboarding experience — the eventual welcome page
-  // with recent-projects list is a later polish pass.
+  // Shown when no project is loaded. Two paths forward: open an existing
+  // directory as a project, or create a new directory via the NewProjectDialog.
+  // The eventual welcome screen with recent-projects list is a later polish
+  // pass, but the two-button shape is already where we want it to be.
 
   import { project } from "$lib/stores/project.svelte";
   import { pickProjectDirectory } from "$lib/dialog";
+  import NewProjectDialog from "./NewProjectDialog.svelte";
 
   let error = $state<string | null>(null);
   let busy = $state(false);
+  let showNewDialog = $state(false);
 
   async function handleOpen() {
     error = null;
@@ -24,20 +26,44 @@
       busy = false;
     }
   }
+
+  function handleNew() {
+    error = null;
+    showNewDialog = true;
+  }
 </script>
 
 <div class="empty-state">
   <div class="inner">
     <h1>Skrive</h1>
     <p class="tagline">Write seriously.</p>
-    <button type="button" onclick={handleOpen} disabled={busy}>
-      {busy ? "Opening…" : "Open project…"}
-    </button>
+    <div class="actions">
+      <button
+        type="button"
+        class="primary"
+        onclick={handleOpen}
+        disabled={busy}
+      >
+        {busy ? "Opening…" : "Open project…"}
+      </button>
+      <button
+        type="button"
+        class="secondary"
+        onclick={handleNew}
+        disabled={busy}
+      >
+        Create new project…
+      </button>
+    </div>
     {#if error}
       <p class="error">{error}</p>
     {/if}
   </div>
 </div>
+
+{#if showNewDialog}
+  <NewProjectDialog onClose={() => (showNewDialog = false)} />
+{/if}
 
 <style>
   .empty-state {
@@ -73,10 +99,15 @@
     letter-spacing: 0.02em;
   }
 
+  .actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
   button {
-    border: 1px solid var(--skrive-fg);
-    background: transparent;
-    color: var(--skrive-fg);
     padding: 0.625rem 1.5rem;
     font: inherit;
     font-size: 0.9375rem;
@@ -84,13 +115,30 @@
     cursor: pointer;
     transition:
       background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-      color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
-    margin-top: 0.75rem;
+      color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+      border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  button:hover:not(:disabled) {
+  button.primary {
+    border: 1px solid var(--skrive-fg);
+    background: transparent;
+    color: var(--skrive-fg);
+  }
+
+  button.primary:hover:not(:disabled) {
     background-color: var(--skrive-fg);
     color: var(--skrive-bg);
+  }
+
+  button.secondary {
+    border: 1px solid var(--skrive-rule);
+    background: transparent;
+    color: var(--skrive-muted);
+  }
+
+  button.secondary:hover:not(:disabled) {
+    border-color: var(--skrive-fg);
+    color: var(--skrive-fg);
   }
 
   button:disabled {

@@ -1,10 +1,15 @@
 <script lang="ts">
   // Temporary sidebar that lists every Markdown file in the project and every
-  // currently open tab. This is intentionally rough — Step 2 replaces it with
-  // the real sidebar (hideable, styled, with icons) and a separate tab bar
-  // above the editor. For Step 1, this is our only way to navigate.
+  // currently open tab. Also hosts the inline "new file" flow — click `+`,
+  // type a name, press Enter. Intentionally rough; Step 2 replaces this with
+  // the real sidebar (styled, hideable, with icons) and a separate tab bar
+  // above the editor.
 
   import { project } from "$lib/stores/project.svelte";
+
+  let creatingFile = $state(false);
+  let newFileName = $state("");
+  let createError = $state<string | null>(null);
 
   async function handleOpenFile(path: string) {
     try {
@@ -17,13 +22,87 @@
   function handleCloseTab(index: number) {
     project.closeTab(index);
   }
+
+  function startCreateFile() {
+    creatingFile = true;
+    newFileName = "";
+    createError = null;
+  }
+
+  async function confirmCreateFile() {
+    const trimmed = newFileName.trim();
+    if (!trimmed) {
+      cancelCreateFile();
+      return;
+    }
+    const fullName = trimmed.endsWith(".md") ? trimmed : `${trimmed}.md`;
+    try {
+      await project.createFile(fullName);
+      creatingFile = false;
+      newFileName = "";
+      createError = null;
+    } catch (e) {
+      createError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  function cancelCreateFile() {
+    creatingFile = false;
+    newFileName = "";
+    createError = null;
+  }
+
+  function handleNewFileKey(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      confirmCreateFile();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cancelCreateFile();
+    }
+  }
 </script>
 
 <aside class="debug-file-list">
   <header>
     <span class="title">Files</span>
-    <span class="count">{project.manifest?.files.length ?? 0}</span>
+    <div class="header-actions">
+      <span class="count">{project.manifest?.files.length ?? 0}</span>
+      <button
+        type="button"
+        class="icon-button"
+        aria-label="New file"
+        title="New file"
+        onclick={startCreateFile}
+        disabled={creatingFile}
+      >
+        +
+      </button>
+    </div>
   </header>
+
+  {#if creatingFile}
+    <div class="new-file-row">
+      <!-- svelte-ignore a11y_autofocus -->
+      <input
+        type="text"
+        bind:value={newFileName}
+        onkeydown={handleNewFileKey}
+        placeholder="filename.md"
+        autofocus
+      />
+    </div>
+    {#if createError}
+      <p class="create-error">{createError}</p>
+    {/if}
+  {/if}
+
+  {#if (project.manifest?.files.length ?? 0) === 0 && !creatingFile}
+    <p class="empty-hint">
+      This project has no markdown files yet. Click <strong>+</strong> to create one.
+    </p>
+  {/if}
+
   <ul class="files">
     {#each project.manifest?.files ?? [] as file (file.path)}
       <li>
@@ -95,6 +174,12 @@
     border-top: 1px solid var(--skrive-rule);
   }
 
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
   .title {
     font-weight: 600;
     font-size: 11px;
@@ -107,6 +192,79 @@
     font-size: 11px;
     color: var(--skrive-muted);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  .icon-button {
+    background: transparent;
+    border: 1px solid var(--skrive-rule);
+    border-radius: 3px;
+    color: var(--skrive-muted);
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    line-height: 1;
+    width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition:
+      border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+      color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .icon-button:hover:not(:disabled) {
+    border-color: var(--skrive-fg);
+    color: var(--skrive-fg);
+  }
+
+  .icon-button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .new-file-row {
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid var(--skrive-rule);
+  }
+
+  .new-file-row input {
+    width: 100%;
+    padding: 0.375rem 0.5rem;
+    border: 1px solid var(--skrive-fg);
+    border-radius: 3px;
+    background: var(--skrive-bg);
+    color: var(--skrive-fg);
+    font: inherit;
+    font-size: 13px;
+    box-sizing: border-box;
+  }
+
+  .new-file-row input:focus {
+    outline: none;
+  }
+
+  .create-error {
+    margin: 0;
+    padding: 0.25rem 1rem 0.5rem;
+    font-size: 11px;
+    color: #a84030;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    border-bottom: 1px solid var(--skrive-rule);
+  }
+
+  .empty-hint {
+    padding: 1rem;
+    margin: 0;
+    font-size: 12px;
+    color: var(--skrive-muted);
+    line-height: 1.5;
+  }
+
+  .empty-hint strong {
+    color: var(--skrive-fg);
+    font-weight: 600;
   }
 
   ul {

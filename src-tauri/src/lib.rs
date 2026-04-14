@@ -5,6 +5,7 @@ mod commands;
 mod error;
 mod frontmatter;
 mod link_graph;
+mod persistence;
 mod project;
 mod watcher;
 
@@ -21,6 +22,12 @@ pub fn run() {
             commands::read_file,
             commands::write_file,
             commands::watch_project,
+            commands::create_directory,
+            commands::create_file,
+            commands::load_project_state,
+            commands::save_project_state,
+            commands::load_app_state,
+            commands::save_app_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

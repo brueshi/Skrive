@@ -6,6 +6,7 @@
 //! path traversal outside the project root.
 
 use crate::error::{Error, Result};
+use crate::persistence::{self, AppUiState, ProjectUiState};
 use crate::project::{self, FileContent, ProjectManifest, ProjectState};
 use crate::watcher;
 use notify::RecommendedWatcher;
@@ -88,4 +89,89 @@ pub async fn watch_project(
     let mut watcher_slot = state.watcher.lock().await;
     *watcher_slot = Some(watcher);
     Ok(())
+}
+
+// =========================== Creation commands ===========================
+
+/// Create a new directory at `{parent}/{name}`. Used by the "Create new
+/// project" flow. Does not canonicalize or scan — the caller is expected
+/// to follow up with `open_project` on the returned path.
+#[tauri::command]
+pub async fn create_directory(parent: String, name: String) -> Result<String> {
+    // Reject names that contain path separators, null bytes, or are empty.
+    // We deliberately don't try to sanitize — if the name is invalid, the
+    // user gets an error and fixes it.
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(Error::Io("directory name cannot be empty".into()));
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') || trimmed.contains('\0') {
+        return Err(Error::Io(format!(
+            "directory name contains invalid characters: {}",
+            trimmed
+        )));
+    }
+
+    let parent_path = PathBuf::from(&parent);
+    if !parent_path.is_dir() {
+        return Err(Error::Io(format!("{} is not a directory", parent)));
+    }
+
+    let new_path = parent_path.join(trimmed);
+    if new_path.exists() {
+        return Err(Error::Io(format!(
+            "{} already exists",
+            new_path.display()
+        )));
+    }
+
+    std::fs::create_dir(&new_path)?;
+    Ok(new_path.to_string_lossy().into_owned())
+}
+
+/// Create a new empty Markdown file at the given project-relative path inside
+/// the currently open project. Refuses if the file already exists.
+#[tauri::command]
+pub async fn create_file(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    let root = {
+        let project = state.project.lock().await;
+        let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
+        project.root.clone()
+    };
+    project::create_new_file(&root, &PathBuf::from(&path))
+}
+
+// =========================== Persistence commands ===========================
+
+#[tauri::command]
+pub async fn load_project_state(
+    app: AppHandle,
+    project_path: String,
+) -> Result<Option<ProjectUiState>> {
+    persistence::read_project_state(&app, &project_path)
+}
+
+#[tauri::command]
+pub async fn save_project_state(
+    app: AppHandle,
+    project_path: String,
+    ui_state: ProjectUiState,
+) -> Result<()> {
+    persistence::write_project_state(&app, &project_path, &ui_state)
+}
+
+#[tauri::command]
+pub async fn load_app_state(app: AppHandle) -> Result<AppUiState> {
+    persistence::read_app_state(&app)
+}
+
+#[tauri::command]
+pub async fn save_app_state(
+    app: AppHandle,
+    ui_state: AppUiState,
+) -> Result<()> {
+    persistence::write_app_state(&app, &ui_state)
 }
