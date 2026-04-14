@@ -118,6 +118,8 @@ The tabs decision changes Step 1's shape slightly: the project store uses `tabs:
 
 ## Step 3 — Phase 2.2 inline preview spike
 
+**Status.** Done. All three questions answered yes on `spike/phase-2.2-decorations`. See [`spike-2.2-report.md`](spike-2.2-report.md). Go decision recorded; Step 4 is unblocked.
+
 **Goal.** Prove the technical feasibility of inline previews via CodeMirror decorations *before* committing to the full implementation.
 
 **This is a throwaway.** Code written here is not expected to ship. The goal is a yes/no answer to three questions.
