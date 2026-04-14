@@ -16,6 +16,8 @@ The tabs decision changes Step 1's shape slightly: the project store uses `tabs:
 
 ## Step 1 — File dialog plumbing
 
+**Status.** Done. Shipped in `8dbd5ac` and `d126311`.
+
 **Goal.** Replace the hardcoded sample document with a real "Open project…" flow.
 
 **Why first.** Without this, nothing else in Phase 2 can be tested against real projects. It's also the smallest possible useful change after Phase 1.
@@ -50,6 +52,8 @@ The tabs decision changes Step 1's shape slightly: the project store uses `tabs:
 ---
 
 ## Step 2 — Phase 2.1 split view layout
+
+**Status.** Done. The three-mode surface, real sidebar, header, tab bar, auto-save, watcher reload, and per-project UI state persistence are all in place. Deferred for later: cursor/scroll persistence, sidebar drag-resize, and the `preferences.svelte.ts` app-wide store with recent-projects history.
 
 **Goal.** Build the three-mode editor surface (raw / split / preview), wire it up properly with a real sidebar, persist state, and handle saving.
 

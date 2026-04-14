@@ -29,7 +29,11 @@ export type Tab = {
   path: string;
   content: FileContent;
   dirty: boolean;
+  layoutMode: LayoutMode;
+  splitDividerRatio: number;
 };
+
+export type LayoutMode = "raw" | "split" | "preview";
 
 // =========================== Persistence types ===========================
 // These mirror the Rust `persistence::ProjectUiState` / `AppUiState` shapes.

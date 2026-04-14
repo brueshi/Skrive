@@ -1,17 +1,22 @@
 // The project store — single source of truth for the currently open project,
-// the set of open tabs, and the active tab. Every file operation the frontend
-// does flows through the methods on `project`.
+// the set of open tabs, the active tab, and the session's layout state. Every
+// file operation and layout change flows through the methods on `project`.
 //
-// Shape is tab-based from day one per the A2 decision, but the tab-bar UI
-// doesn't exist yet. The debug file list is the only way to open tabs in the
-// current iteration.
+// Shape is tab-based per the A2 decision. Each tab owns its own layout mode
+// and split-divider position so that switching files restores the view the
+// user last had on that specific file.
 //
 // Pattern note: the methods are defined as standalone helper functions and
 // then attached to the `project` object. This lets methods freely call each
 // other without `this` binding or circular reference issues.
 
 import { invoke } from "@tauri-apps/api/core";
-import type { FileContent, ProjectManifest, Tab } from "$lib/types";
+import type {
+  FileContent,
+  LayoutMode,
+  ProjectManifest,
+  Tab,
+} from "$lib/types";
 
 // Module-level reactive state. Svelte 5 tracks reads through the proxy so
 // any component that touches `project.*` subscribes to exactly the fields
@@ -19,6 +24,15 @@ import type { FileContent, ProjectManifest, Tab } from "$lib/types";
 let manifest = $state<ProjectManifest | null>(null);
 let tabs = $state<Tab[]>([]);
 let activeTabIndex = $state(-1);
+
+// Sidebar visibility and width live at the project level, not per tab —
+// toggling it affects the whole workspace. Width is reserved for when we
+// make the sidebar drag-resizable; for Step 2 it's just persisted.
+let sidebarVisible = $state(true);
+let sidebarWidth = $state(260);
+
+const DEFAULT_LAYOUT_MODE: LayoutMode = "raw";
+const DEFAULT_SPLIT_RATIO = 0.5;
 
 // =========================== Helper implementations ===========================
 
@@ -39,7 +53,13 @@ async function openTabImpl(path: string): Promise<void> {
   }
 
   const content = await invoke<FileContent>("read_file", { path });
-  tabs.push({ path, content, dirty: false });
+  tabs.push({
+    path,
+    content,
+    dirty: false,
+    layoutMode: DEFAULT_LAYOUT_MODE,
+    splitDividerRatio: DEFAULT_SPLIT_RATIO,
+  });
   activeTabIndex = tabs.length - 1;
 }
 
@@ -67,8 +87,8 @@ function switchTabImpl(index: number): void {
 
 /**
  * Called by the editor's onChange when the user types. Updates the active
- * tab's body in place and flags it dirty. No disk write happens here —
- * save is Step 2.
+ * tab's body in place and flags it dirty. The disk write is driven by the
+ * auto-save effect in +page.svelte, not here.
  */
 function updateActiveTabContentImpl(body: string): void {
   if (activeTabIndex < 0) return;
@@ -76,6 +96,52 @@ function updateActiveTabContentImpl(body: string): void {
   if (!tab) return;
   tab.content.body = body;
   tab.dirty = true;
+}
+
+/**
+ * Mark a tab clean after its contents have been successfully written to disk.
+ * Called by the auto-save driver.
+ */
+function markTabSavedImpl(path: string): void {
+  const tab = tabs.find((t) => t.path === path);
+  if (tab) tab.dirty = false;
+}
+
+/**
+ * Replace the body of the tab at `path` with fresh content from disk.
+ * Used when the watcher reports a file changed on disk and the user agrees
+ * to (or implicitly accepts) a reload.
+ */
+async function reloadTabImpl(path: string): Promise<void> {
+  const tab = tabs.find((t) => t.path === path);
+  if (!tab) return;
+  const fresh = await invoke<FileContent>("read_file", { path });
+  tab.content = fresh;
+  tab.dirty = false;
+}
+
+function setLayoutModeImpl(mode: LayoutMode): void {
+  if (activeTabIndex < 0) return;
+  const tab = tabs[activeTabIndex];
+  if (!tab) return;
+  tab.layoutMode = mode;
+}
+
+function setSplitDividerRatioImpl(ratio: number): void {
+  if (activeTabIndex < 0) return;
+  const tab = tabs[activeTabIndex];
+  if (!tab) return;
+  // Clamp so neither pane collapses to nothing — 15%/85% matches the common
+  // editor-pane minimums and leaves room for the divider hit area.
+  tab.splitDividerRatio = Math.max(0.15, Math.min(0.85, ratio));
+}
+
+function setSidebarVisibleImpl(visible: boolean): void {
+  sidebarVisible = visible;
+}
+
+function toggleSidebarImpl(): void {
+  sidebarVisible = !sidebarVisible;
 }
 
 function closeProjectImpl(): void {
@@ -86,8 +152,8 @@ function closeProjectImpl(): void {
 
 /**
  * Re-scan the current project. Used after creating a new file so the manifest
- * reflects it immediately — once the watcher is wired up in Step 2, this will
- * become unnecessary because watcher events will refresh the file list.
+ * reflects it immediately — once the watcher drives manifest refreshes, this
+ * will fire from watcher events instead of explicit calls.
  */
 async function refreshManifestImpl(): Promise<void> {
   if (!manifest) return;
@@ -134,12 +200,24 @@ export const project = {
   get hasProject() {
     return manifest !== null;
   },
+  get sidebarVisible() {
+    return sidebarVisible;
+  },
+  get sidebarWidth() {
+    return sidebarWidth;
+  },
 
   openProject: openProjectImpl,
   openTab: openTabImpl,
   closeTab: closeTabImpl,
   switchTab: switchTabImpl,
   updateActiveTabContent: updateActiveTabContentImpl,
+  markTabSaved: markTabSavedImpl,
+  reloadTab: reloadTabImpl,
+  setLayoutMode: setLayoutModeImpl,
+  setSplitDividerRatio: setSplitDividerRatioImpl,
+  setSidebarVisible: setSidebarVisibleImpl,
+  toggleSidebar: toggleSidebarImpl,
   closeProject: closeProjectImpl,
   refreshManifest: refreshManifestImpl,
   createProject: createProjectImpl,
