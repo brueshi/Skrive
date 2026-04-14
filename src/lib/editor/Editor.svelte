@@ -27,7 +27,9 @@
     historyKeymap,
   } from "@codemirror/commands";
   import { markdown } from "@codemirror/lang-markdown";
+  import { GFM } from "@lezer/markdown";
   import { skriveTheme } from "./skrive-theme";
+  import { inlinePreview } from "./decorations";
 
   type Props = {
     value?: string;
@@ -61,7 +63,8 @@
           history(),
           drawSelection(),
           highlightActiveLine(),
-          markdown(),
+          markdown({ extensions: GFM }),
+          ...inlinePreview(),
           keymap.of([...defaultKeymap, ...historyKeymap]),
           skriveTheme,
           updateListener,
@@ -102,5 +105,52 @@
 
   :global(.cm-editor) {
     height: 100%;
+  }
+
+  /* Inline-preview decoration styles. Mark decorations in
+     src/lib/editor/decorations/ apply these class names to the text
+     *inside* hidden markup, so the visual emphasis survives even when
+     the surrounding `**`, `*`, or `~~` are replaced to nothing.
+
+     Scoped under `.cm-content` so specificity beats lang-markdown's
+     built-in highlight classes — otherwise the stable-emphasis state
+     field would keep losing to the parser's transient "not bold" view
+     during active typing. */
+  :global(.cm-content .cm-md-bold) {
+    font-weight: 700;
+  }
+  :global(.cm-content .cm-md-italic) {
+    font-style: italic;
+  }
+  :global(.cm-content .cm-md-strikethrough) {
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+  }
+
+  /* Inline code: the grammar doesn't tag the content of an InlineCode
+     span with `t.monospace` (only the `CodeMark` backticks are tagged),
+     so we apply the monospace font here via decoration class. Subtle
+     background tint distinguishes code from surrounding prose without
+     fighting the editorial tone. */
+  :global(.cm-content .cm-md-code) {
+    font-family:
+      ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, Consolas,
+      monospace;
+    font-size: 0.92em;
+    background: var(--skrive-rule);
+    border-radius: 2px;
+    padding: 0 0.2em;
+  }
+
+  /* Inline image widget rendered in place of `![alt](src)` on non-cursor
+     lines. Capped so a runaway asset can't hijack the line height; the
+     aspect ratio is preserved by max-width + max-height working together.
+     Users who want a bigger view can drop into preview mode. */
+  :global(.cm-content .cm-md-image) {
+    max-height: 3em;
+    max-width: 20em;
+    vertical-align: middle;
+    border-radius: 3px;
+    object-fit: contain;
   }
 </style>

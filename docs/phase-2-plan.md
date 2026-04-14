@@ -148,6 +148,8 @@ The tabs decision changes Step 1's shape slightly: the project store uses `tabs:
 
 ## Step 4 — Phase 2.2 inline preview implementation
 
+**Status.** Done. Production decorations live in `src/lib/editor/decorations/` (`shared.ts`, `emphasis.ts`, `headings.ts`, `links.ts`, `code.ts`, `images.ts`, plus `stable.ts` for cursor-line emphasis stabilization). GFM is enabled in the markdown language. The spike code and spike route have been removed. Known limitation: a residual flicker during active typing when CommonMark whitespace rules transiently invalidate an emphasis span — this is inherent to inline previewing and the mitigation lives in `stable.ts`. Deferred: math (`$...$`) → Phase 2.2.5, and a fenced-code-block language picker parked for a separate mini-phase.
+
 **Goal.** Build the full inline preview system based on what the spike learned.
 
 **This step is conditional on Step 3 succeeding.** The deliverables and complexity estimate below are *if* the spike works as expected. If the spike forces a rearchitecture, this section gets rewritten.

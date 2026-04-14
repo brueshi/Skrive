@@ -50,7 +50,16 @@ const baseTheme = EditorView.theme({
 });
 
 // Markdown-aware syntax highlighting. The colors are deliberately restrained:
-// emphasis, headings, code, and links are the only meaningful contrasts.
+// headings, code, and links are the only meaningful contrasts.
+//
+// Emphasis (bold / italic / strikethrough) is *intentionally absent* here.
+// The inline-preview decoration system in src/lib/editor/decorations/ owns
+// that styling — applying it via HighlightStyle as well would create two
+// parallel sources of `font-weight: 700` for bold text, and they'd fight
+// during active typing when the parser briefly drops an emphasis node
+// (e.g. trailing whitespace before a closing `**`). The decorations are
+// the single source of truth so the user's view stays stable across every
+// keystroke.
 const skriveHighlightStyle = HighlightStyle.define([
   {
     tag: t.heading,
@@ -60,8 +69,6 @@ const skriveHighlightStyle = HighlightStyle.define([
   { tag: t.heading1, fontSize: "1.6em", lineHeight: "1.3" },
   { tag: t.heading2, fontSize: "1.35em", lineHeight: "1.35" },
   { tag: t.heading3, fontSize: "1.15em" },
-  { tag: t.emphasis, fontStyle: "italic" },
-  { tag: t.strong, fontWeight: "700" },
   { tag: t.link, color: "var(--skrive-link)", textDecoration: "underline" },
   { tag: t.url, color: "var(--skrive-muted)" },
   {

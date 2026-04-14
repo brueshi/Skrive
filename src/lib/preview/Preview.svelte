@@ -7,7 +7,15 @@
   // The rendered HTML is inserted via `{@html}`. We consider file content
   // trusted input (see markdown.ts for the justification). If that ever
   // changes, sanitize in the pipeline, not here.
+  //
+  // Debouncing note: the body prop updates on every keystroke. Re-running
+  // marked on each keystroke produces visible flicker when the user types
+  // a character that temporarily breaks an emphasis span (e.g. a trailing
+  // space inside `**bold **`, which CommonMark treats as not-bold until the
+  // text is typed further). A 150ms debounce coalesces keystroke bursts into
+  // a single render, so those transient states never reach the DOM.
 
+  import { onDestroy } from "svelte";
   import { renderMarkdown } from "./markdown";
 
   type Props = {
@@ -16,7 +24,33 @@
 
   let { body }: Props = $props();
 
-  let html = $derived(renderMarkdown(body));
+  const DEBOUNCE_MS = 150;
+  let debouncedBody = $state("");
+  let pending: ReturnType<typeof setTimeout> | null = null;
+  let mounted = false;
+
+  $effect(() => {
+    // Read `body` so the effect re-runs when it changes.
+    const next = body;
+    if (!mounted) {
+      // First pass — take the initial body immediately so the preview
+      // renders the opened file with no delay.
+      mounted = true;
+      debouncedBody = next;
+      return;
+    }
+    if (pending) clearTimeout(pending);
+    pending = setTimeout(() => {
+      debouncedBody = next;
+      pending = null;
+    }, DEBOUNCE_MS);
+  });
+
+  onDestroy(() => {
+    if (pending) clearTimeout(pending);
+  });
+
+  let html = $derived(renderMarkdown(debouncedBody));
 </script>
 
 <div class="preview" role="document">
