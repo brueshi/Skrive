@@ -185,10 +185,10 @@ These are the Phase 2 critical-path icons. The split view, sidebar, and header b
 
 | | Name | What it is | Notes |
 |---|---|---|---|
-| `[ ]` | `search` | Magnifying glass | Search field affordance, command palette indicator. |
-| `[ ]` | `plus` | Plus sign | New file, add anything. Pair with `chevron-down` to test consistency between angles and intersections. |
-| `[ ]` | `x` | Close mark | Dismiss dialogs, close panels, clear inputs. **Custom-drawn** — not a font character. |
-| `[ ]` | `check` | Checkmark | Confirmation, completed state, "saved" affordance. |
+| `[~]` | `search` | Magnifying glass | Circle `cx=10.5 cy=10.5 r=6`, handle at **45°** from the ring edge to `(19.5, 19.5)`. Tried 40° first — it fought the lens; a magnifier handle has to read as a continuation of the ring, not a kink off it. Documented exception to the constant. |
+| `[~]` | `plus` | Plus sign | Two 14-unit orthogonal strokes through center, round caps. Orthogonal by nature — stays out of the constant vote. |
+| `[~]` | `x` | Close mark | Two 12-unit diagonals at **45°**, meeting at `(12, 12)`. **A deliberate exception to the 40° rule** — a dismissal mark must be perpendicular or it reads as broken instead of deliberate. Custom-drawn, not a font character. |
+| `[~]` | `check` | Checkmark | Polyline `5,13 → 10,17 → 19,8`. Descent 38.7°, ascent 41.2° — both near enough to **40°** that they read as one angle. Second icon to echo the constant after `chevron-down`. |
 | `[ ]` | `chevron-up` | Same line as `chevron-down`, rotated 180° | Don't draw twice — rotate via CSS or a single shared component. |
 | `[ ]` | `chevron-left` | Back navigation | Same — could share a base shape with `chevron-down`. |
 | `[ ]` | `chevron-right` | Forward navigation, disclosure | Same. |
@@ -226,7 +226,8 @@ A place to capture lessons learned as you draw. Update freely.
 ### Open notes
 
 - The Phase 2.1 batch lives in paper.design as `Plate 01 · Iconography · Phase 2.1`, with the exploration pass on `Plate 01b · Variants · Exploration`. Drafts exist; Svelte components and exports do not yet — that's the jump from `[~]` to `[x]`.
-- Candidate for the Skrive constant: the **40° chevron angle**. Draft only — confirm after 2–3 more icons use it and still feel right.
+- The first four universal-utility icons (`search`, `plus`, `x`, `check`) live on `Plate 02 · Universal Utility · Unphased`. Same `[~]` status — drafts only, no components yet.
+- Candidate for the Skrive constant: the **40° angle**. Now echoed on two icons (`chevron-down` and `check`). One more independent echo — likely `link`, `rename`, or `diff-moved` — and it graduates from candidate to law.
 
 ### Lessons from drawing the first batch
 
@@ -236,8 +237,21 @@ A place to capture lessons learned as you draw. Update freely.
 - **First instinct on `dot-unsaved` was a diamond (hallmark reference), but the pip won on restraint.** The diamond was interesting, but brought more personality than a save indicator should. The filled circle stays out of the way until it's needed, which is the whole job.
 - **Brass appears exactly once in the set** — on `dot-unsaved`. Resist the urge to add it anywhere else. Color-as-meaning only works if the color is rare.
 
+### Lessons from the universal utility batch
+
+- **The constant is a *candidate*, not a cage.** Draft rule after Plate 02: apply 40° to any icon with an expressive angle to choose (`chevron-down`, `check`, and whatever's next). Do not force it onto icons whose angles are *determined by the form itself*. `x` must be perpendicular or it reads as broken; `plus` has no angle to pick; `search`'s handle has to feel like a continuation of the ring and wants 45°. Document these exceptions in the row notes when they happen.
+- **`plus` is the hardest simple icon.** Two perpendicular strokes and nothing to hide behind — the arms are either exactly equal or the whole thing reads as sloppy. Expect to redraw it a few times, not once.
+- **Draw `x` custom.** Using the letter X from the UI font looks fine in isolation but wrong next to the custom set — the stroke weight and cap language won't match. One more line of SVG is worth it.
+- **A separate exception column earns its keep.** Plate 02's notes table pulled each icon's angle into its own row (`38.7° / 41.2°`, `45°`, `0° / 90°`). That turned out to be the piece that made the constant-under-test visible — you can see at a glance which icons honored the rule and which made a case for breaking it. Keep doing this for future plates.
+
 ### The Skrive constant
 
 The unifying detail that runs through every icon — see [`design-system.md`](design-system.md#the-skrive-constant).
 
-**Status:** *draft candidate.* **40°** — the angle of `chevron-down` (rise 5 over run 6). A shallow chevron feels deliberate, not aggressive. Confirm the constant once a few more angled-feature icons (notably `link`, `diff-moved`, `rename`) echo the same number. If they do, adopt it and document here with finality. If they fight it, pick a different unifier.
+**Status:** *draft candidate, one echo in.* **40°** — the angle of `chevron-down` (rise 5 over run 6, 24×24 grid).
+
+- **Echo 1** — `chevron-down`, 40° exactly.
+- **Echo 2** — `check`, 38.7° descent and 41.2° ascent. Close enough that the two segments read as one angle.
+- **Exceptions so far** — `x` (must be 45° perpendicular), `plus` (orthogonal by nature), `search` (handle at 45° to continue the ring).
+
+One more independent echo — likely on `link`, `rename`, or `diff-moved` — and the rule adopts with finality. If those icons fight the number, pick a different unifier (proportion, negative-space ratio, something else) rather than force the angle.
