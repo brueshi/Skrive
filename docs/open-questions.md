@@ -8,57 +8,6 @@ When a question is answered, move it to the **Resolved** section at the bottom w
 
 ## Architecture
 
-### A1. Where does the file-list sidebar live in the layout?
-
-**Context.** Phase 2.1 introduces a layout. The split view modes (raw / split / preview) don't say anything about a sidebar — they're about the editor surface itself. But the user has to navigate between files somehow.
-
-**Options.**
-- **Permanent left rail** (Obsidian-style). Always visible, takes up real estate. Familiar to power users.
-- **Hideable rail** (Bear-style, VS Code with `Ctrl+B`). Toggle with a keyboard shortcut. Maximizes writing surface.
-- **Command-palette only** (Sublime / Helix style). No persistent sidebar at all. Pure keyboard navigation.
-
-**Leaning.** Hideable rail. Default to *visible* on first launch so new users can find their way around, persist the user's choice across sessions.
-
-**Blocks.** Phase 2.1.
-
-**Status.** Open.
-
----
-
-### A2. What's the "open file" state model?
-
-**Context.** When a user clicks a file in the sidebar, what happens? Tabs? A single open file that replaces the previous one? Multiple windows?
-
-**Options.**
-- **Single open file** (Bear, Typora). Click another file → it replaces the current one. Simplest mental model. Forces focus.
-- **Tabs** (VS Code, Obsidian). Multiple files open simultaneously, switch via tab bar or keyboard.
-- **Multiple windows** (older Mac apps). Each file gets its own window. Heavy but clean.
-
-**Leaning.** Single open file with a session history (back/forward navigation). Matches the "write seriously" positioning — Skrive is for focused work, not tab-juggling. We can add tabs later if users demand them; we cannot easily remove tabs once added.
-
-**Blocks.** Phase 2.1.
-
-**Status.** Open.
-
----
-
-### A3. Where does per-file UI state get persisted?
-
-**Context.** The build outline (§2.1) says "layout state persists per file." So if the user puts a particular file in preview-only mode, reopening the project should restore that. Where does that state live?
-
-**Options.**
-- **`.skrive/state.json` inside the project.** Visible folder, follows the project to other machines, version-controllable. Users have to add `.skrive/` to their `.gitignore` if they don't want it tracked.
-- **Platform app data** (`~/Library/Application Support/Skrive/` on macOS, etc.). Invisible, doesn't follow the project, doesn't pollute the user's directory. Lost if they move the project.
-- **Both.** Per-file state in `.skrive/state.json`, app-wide preferences in platform app data.
-
-**Leaning.** Both. Per-file state in `.skrive/` so it follows the project. App-wide preferences (theme overrides, recent projects, license key) in platform app data so they don't pollute the user's directory.
-
-**Blocks.** Phase 2.1.
-
-**Status.** Open.
-
----
-
 ### A4. What's the schema for `.skrive.toml`?
 
 **Context.** The build outline references `.skrive.toml` in two places: lint config (§3.2) and custom render targets (§5.2). It's never specified. Both phases will read this file, so we should write the schema once before either phase ships.
@@ -226,4 +175,59 @@ output_dir = "./dist"
 
 ## Resolved
 
-*(Empty for now. As decisions land, move them here with a short resolution note.)*
+### A1. Where does the file-list sidebar live in the layout?
+
+**Resolved 2026-04-14:** Hideable rail. Default to visible on first launch, persist the user's choice per-project. Keyboard shortcut `⌘B` to toggle.
+
+**Original context.** Phase 2.1 needs a layout, and the user has to navigate files somehow. Options were permanent left rail, hideable rail, or command-palette-only. Hideable wins because it maximizes the writing surface without abandoning discoverability for new users.
+
+---
+
+### A2. What's the "open file" state model?
+
+**Resolved 2026-04-14:** Tabs. Multiple files open at once, switched via a tab bar and keyboard shortcuts.
+
+**Original context.** Options were single open file, tabs, or multiple windows. The initial lean was single-file with session history for focus, but the user chose tabs because serious writing sessions span multiple related files.
+
+**Implications we're signing up for:**
+- Tab bar UI (with close, dirty indicator, eventually reordering and overflow) — builds in Phase 2.1 Step 2, not Step 1
+- Save prompts when closing dirty tabs (Step 2)
+- Keyboard shortcut growth: `⌘W`, `⌘⇧T`, `⌘1`–`⌘9`, `⌘⌥←`, `⌘⌥→`
+- The watcher needs to surface changes for every open tab, not just the active one
+- Persistence restores the full tab set, not just one open file
+
+The project store shapes around tabs from Step 1 so the foundation is right before the UI lands.
+
+---
+
+### A3. Where does per-file UI state get persisted?
+
+**Resolved 2026-04-14:** Three-tier state model. No `.skrive/` folder inside the project.
+
+- **Shared project config** (lint rules, export targets, frontmatter schema declarations) — `.skrive.toml` in the project root, committed to git, hand-edited by the user. Phase 3.2 ships the first real consumer.
+- **Personal per-project state** (open tabs, cursor positions, scroll positions, layout mode per file, sidebar visibility and width) — platform app data, keyed by a hash of the canonicalized project path. File path: `{app_data_dir}/projects/{hash}.json`.
+- **App-wide state** (recent projects, license key, last-opened project, first-run timestamp) — platform app data, single global file: `{app_data_dir}/app.json`.
+
+**Rationale.** The more useful split is personal-vs-shared, not per-file-vs-app-wide. Two collaborators working on the same project (via git, Dropbox, etc.) get independent tab sets and cursor positions — no merge conflicts on cursor state. The user's project directory stays clean, with no tool-specific folder to add to `.gitignore`.
+
+**Implementation plan.** Rust owns all state reads and writes via four new commands, added in a follow-up commit before Step 2 needs them:
+
+```rust
+async fn load_project_state(project_path: String) -> Result<Option<ProjectUiState>, Error>
+async fn save_project_state(project_path: String, state: ProjectUiState) -> Result<(), Error>
+async fn load_app_state() -> Result<AppUiState, Error>
+async fn save_app_state(state: AppUiState) -> Result<(), Error>
+```
+
+Project path hashing: SHA-256 of the canonical absolute path, truncated to 16 hex chars. Stable across sessions. Raw path + name stored inside the JSON for debugging.
+
+**Save strategy — three classes:**
+- **Immediate** (fire-and-forget): tab opened/closed/reordered, layout mode changed, sidebar toggled
+- **Debounced 1s**: scroll position, sidebar width (during drag), split divider position
+- **Blur / quit**: cursor position (save on active-tab change and on app close — cursor precision isn't worth per-keystroke writes)
+
+**Schema versioning.** Both JSON files carry a `schemaVersion: 1` field. When we change shape, bump and write a migration. Cheap insurance.
+
+**Orphaned state cleanup.** Deferred. v0.1 accepts accumulation (files are tiny). Garbage collection on startup is a ~15-line follow-up if it becomes noticeable.
+
+---

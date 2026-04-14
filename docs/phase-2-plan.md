@@ -6,13 +6,13 @@ Phase 2 in the build outline has four sub-phases (2.1 split view, 2.2 inline pre
 
 ## Pre-flight checklist
 
-Before any Phase 2 code lands, the following [`open-questions.md`](open-questions.md) entries need to be resolved:
+All three blocking questions resolved — see [`open-questions.md`](open-questions.md#resolved).
 
-- [ ] **A1** — Sidebar layout (permanent / hideable / palette-only). *Default: hideable.*
-- [ ] **A2** — Open file model (single / tabs / windows). *Default: single with session history.*
-- [ ] **A3** — Where per-file UI state persists. *Default: `.skrive/state.json` in project + platform app data for global prefs.*
+- [x] **A1** — Hideable sidebar, default visible on first launch, `⌘B` toggle
+- [x] **A2** — **Tabs.** Multiple open files at once. Tab bar lands in Step 2; the project store shapes around tabs from Step 1.
+- [x] **A3** — Three-tier state model. `.skrive.toml` for shared config, platform app data for per-project personal state and app-wide state. No `.skrive/` folder inside the project.
 
-If you're happy with the defaults, mark these resolved in `open-questions.md` and we proceed. If you want to discuss any of them, that conversation happens before code.
+The tabs decision changes Step 1's shape slightly: the project store uses `tabs: Tab[]` + `activeTabIndex`, not `currentFile`. Step 1 does not build the tab-bar UI — the debug file list doubles as tab switcher for now. Step 2 builds the real tab bar with icons.
 
 ## Step 1 — File dialog plumbing
 

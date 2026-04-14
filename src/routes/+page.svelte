@@ -1,40 +1,51 @@
 <script lang="ts">
+  import { project } from "$lib/stores/project.svelte";
   import Editor from "$lib/editor/Editor.svelte";
+  import EmptyState from "$lib/components/EmptyState.svelte";
+  import DebugFileList from "$lib/components/DebugFileList.svelte";
 
-  // Hardcoded sample document for Phase 1.2. Phase 2 wires this up to
-  // `open_project` / `read_file` and the user gets to pick their own project.
-  let value = $state(`---
-title: Welcome to Skrive
-tags: [phase-1, scaffold]
----
+  function handleChange(body: string) {
+    project.updateActiveTabContent(body);
+  }
 
-# Skrive
-
-A Markdown IDE for people who write seriously and ship to the web.
-
-## Try it
-
-Type into this document. Every keystroke goes through CodeMirror's transaction
-system — there is no other path. The Rust core watches the project directory
-and emits events when files change on disk.
-
-- **Files are the source of truth.** Plain Markdown with YAML frontmatter.
-- **No network calls** beyond user-initiated exports.
-- **One default theme** done well before a theme system exists.
-
-> Write seriously.
-`);
+  // The current project's display name. Canonical root paths come back from
+  // the Rust core in OS-native form; we take the trailing component as the
+  // project name for the header.
+  let projectName = $derived.by(() => {
+    const root = project.manifest?.root;
+    if (!root) return "";
+    const parts = root.split(/[/\\]/).filter(Boolean);
+    return parts[parts.length - 1] ?? root;
+  });
 </script>
 
-<main>
-  <header>
-    <span class="brand">Skrive</span>
-    <span class="status">phase 1 — foundation</span>
-  </header>
-  <div class="editor">
-    <Editor bind:value />
-  </div>
-</main>
+{#if !project.hasProject}
+  <EmptyState />
+{:else}
+  <main>
+    <header class="app-header">
+      <span class="brand">Skrive</span>
+      <span class="project-name">{projectName}</span>
+    </header>
+    <div class="layout">
+      <DebugFileList />
+      <div class="editor-host">
+        {#if project.activeTab}
+          {#key project.activeTab.path}
+            <Editor
+              value={project.activeTab.content.body}
+              onChange={handleChange}
+            />
+          {/key}
+        {:else}
+          <div class="no-tab">
+            <p>Click a file on the left to open it.</p>
+          </div>
+        {/if}
+      </div>
+    </div>
+  </main>
+{/if}
 
 <style>
   main {
@@ -44,7 +55,7 @@ and emits events when files change on disk.
     width: 100vw;
   }
 
-  header {
+  .app-header {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
@@ -57,17 +68,39 @@ and emits events when files change on disk.
     font-weight: 600;
     letter-spacing: -0.01em;
     font-size: 0.95rem;
+    color: var(--skrive-fg);
   }
 
-  .status {
+  .project-name {
     font-size: 0.75rem;
     color: var(--skrive-muted);
     letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
 
-  .editor {
+  .layout {
+    display: flex;
     flex: 1;
     min-height: 0;
+  }
+
+  .editor-host {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--skrive-bg);
+  }
+
+  .no-tab {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .no-tab p {
+    color: var(--skrive-muted);
+    font-size: 0.875rem;
   }
 </style>
