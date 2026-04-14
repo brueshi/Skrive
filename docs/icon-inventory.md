@@ -70,17 +70,19 @@ These are the Phase 2 critical-path icons. The split view, sidebar, and header b
 
 | | Name | What it is | Notes |
 |---|---|---|---|
-| `[ ]` | `layout-raw` | Single rectangle | The "writing only" mode. Just the editor surface. Suggest a quiet fullscreen feeling. |
-| `[ ]` | `layout-split` | Two side-by-side rectangles | The split-view mode. Editor left, preview right. The divider is the same weight as the rectangles' outlines. |
-| `[ ]` | `layout-preview` | Single rectangle with text lines inside | The "reading only" mode. Three short horizontal lines suggest body text without being literal. |
-| `[ ]` | `sidebar-toggle` | Vertical panel with a thin marker | Show/hide the file list rail. Should communicate "navigation panel," not "menu." Avoid the hamburger. |
-| `[ ]` | `chevron-down` | Two strokes meeting at a point | Generic disclosure indicator. Used everywhere — frontmatter panel, dropdowns, collapsible sections. **The angle you choose here may end up being the Skrive constant.** |
-| `[ ]` | `dot-unsaved` | Small filled circle | The save indicator that appears in the header when the current file has unsaved changes. Could be CSS instead of an SVG, but worth drawing once and deciding. |
+| `[~]` | `layout-raw` | Single rectangle | The "writing only" mode. Editor bounds only — `rect x=3 y=5 w=18 h=14`, centered on the 24 grid. A quiet fullscreen feeling. |
+| `[~]` | `layout-split` | Two side-by-side rectangles | Editor + preview joined at a common seam. Divider carries the same 1.5px weight as the outer frame. |
+| `[~]` | `layout-preview` | Rectangle with text lines inside | Reading mode. Three short horizontal strokes inside the frame; the last one ragged (text block, not literal). |
+| `[~]` | `sidebar-toggle` | Frame + rail column, filled or hollow (state pair) | **Pair, not a single icon.** `shown` state fills the rail column with material; `hidden` state is the same frame and divider with the rail hollow. Implement as one Svelte component `IconSidebarToggle.svelte` taking a `shown: boolean` prop that conditionally renders the inner filled `<rect>` — cheaper than two files and lets the material transition animate as a single element. |
+| `[~]` | `chevron-down` | Two strokes meeting at 40° | Angle locked at **40°** (rise 5 over run 6 — points `6,10 → 12,15 → 18,10`). Generic disclosure indicator used everywhere. **Strong candidate for the Skrive constant** — if this angle feels right after a few more icons use it, document it below and adopt it. |
+| `[~]` | `dot-unsaved` | Small filled pip (circle, r=3) | Filled brass circle centered at `12,12`. The only place the accent color appears in the header — pressed brass on cream. CSS would also work; drawing it as an SVG keeps the sizing decision alongside every other icon. |
 
 **Drawing notes for the set:**
 - The three layout icons are a related set. Draw them together. They tell you whether your style is internally consistent.
 - `chevron-down` is reused everywhere — it's worth iterating on more than the others.
 - All six need to work at 16×16 *and* 24×24. Hand-draw both variants.
+- The 16×16 variants use a softer **1.25px stroke** (not the 1.5px of the 24×24 set). Tune by eye, not by ratio — what matters is that the small mark looks the same weight as the large one optically.
+- Fill-based features (the `dot-unsaved` pip, the `sidebar-toggle` rail fill) survive the scale-down intact. Stroke-based interior marks do not — a line with round caps needs ~1 unit of clearance on each end, which leaves almost nothing inside a 4-unit-wide rail at 16px. Prefer fills for interior indicators.
 
 ---
 
@@ -223,14 +225,19 @@ A place to capture lessons learned as you draw. Update freely.
 
 ### Open notes
 
-- *(Empty — fill in as you go)*
+- The Phase 2.1 batch lives in paper.design as `Plate 01 · Iconography · Phase 2.1`, with the exploration pass on `Plate 01b · Variants · Exploration`. Drafts exist; Svelte components and exports do not yet — that's the jump from `[~]` to `[x]`.
+- Candidate for the Skrive constant: the **40° chevron angle**. Draft only — confirm after 2–3 more icons use it and still feel right.
 
 ### Lessons from drawing the first batch
 
-- *(To be filled in after `layout-raw`, `layout-split`, `layout-preview` are done)*
+- **The three layout icons did work as a set.** Drawing them together (shared rect dimensions, shared 1.5px stroke, shared round caps) made it obvious when one was inconsistent. Do the same for every future batch.
+- **16px is not a scaled 24px.** It's a separate drawing with its own stroke, its own margins, and sometimes its own content. At 16px the `sidebar-toggle` rail can hold a filled block but cannot hold a stroked interior line — round caps alone eat the entire clearance. First draft of the 16 variant had a marker clipping the outer frame; the fix was to drop the marker, then to switch the whole mark system to fills.
+- **Sidebar-toggle needed to become a pair.** A single "toggle" icon can't represent both states honestly — the button needs to *show* that it changes something. Filling the rail for `shown` and hollowing it for `hidden` keeps both states in one component and lets the transition animate as a single fill change.
+- **First instinct on `dot-unsaved` was a diamond (hallmark reference), but the pip won on restraint.** The diamond was interesting, but brought more personality than a save indicator should. The filled circle stays out of the way until it's needed, which is the whole job.
+- **Brass appears exactly once in the set** — on `dot-unsaved`. Resist the urge to add it anywhere else. Color-as-meaning only works if the color is rare.
 
 ### The Skrive constant
 
-The unifying detail that runs through every icon — see [`design-system.md`](design-system.md#the-skrive-constant). Decide this once 3–5 icons exist, then document it here.
+The unifying detail that runs through every icon — see [`design-system.md`](design-system.md#the-skrive-constant).
 
-**Status:** undecided. Update when chosen.
+**Status:** *draft candidate.* **40°** — the angle of `chevron-down` (rise 5 over run 6). A shallow chevron feels deliberate, not aggressive. Confirm the constant once a few more angled-feature icons (notably `link`, `diff-moved`, `rename`) echo the same number. If they do, adopt it and document here with finality. If they fight it, pick a different unifier.
