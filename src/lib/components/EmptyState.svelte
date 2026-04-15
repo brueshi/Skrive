@@ -6,6 +6,7 @@
 
   import { project } from "$lib/stores/project.svelte";
   import { pickProjectDirectory } from "$lib/dialog";
+  import { formatError } from "$lib/errors";
   import NewProjectDialog from "./NewProjectDialog.svelte";
 
   let error = $state<string | null>(null);
@@ -21,7 +22,7 @@
         await project.openProject(path);
       }
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = formatError(e);
     } finally {
       busy = false;
     }

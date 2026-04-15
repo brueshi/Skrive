@@ -22,6 +22,7 @@ pub fn run() {
             commands::read_file,
             commands::write_file,
             commands::watch_project,
+            commands::try_extract_frontmatter,
             commands::create_directory,
             commands::create_file,
             commands::load_project_state,

@@ -44,7 +44,28 @@ const lastSavedMs = new Map<string, number>();
 export type AutoSaveHooks = {
   onSaved: (path: string) => void;
   onError: (path: string, err: unknown) => void;
+  /**
+   * Fired when the auto-save driver rewrote a tab's body on its way to
+   * disk — currently the only caller is the leading-frontmatter extraction
+   * path, which pulls a typed `---` block out of the body and into the
+   * frontmatter map. The store implements this to update the tab's body
+   * so the editor re-renders with the shrunken content.
+   */
+  onBodyRewritten?: (path: string, newBody: string) => void;
 };
+
+type ExtractedFrontmatter = {
+  frontmatter: Record<string, unknown>;
+  body: string;
+};
+
+function mightHaveLeadingFrontmatter(body: string): boolean {
+  // Rust's `frontmatter::parse` requires the `---` to be at byte zero
+  // followed by a newline (LF or CRLF). We mirror that prefix check here
+  // so we can skip the IPC round-trip for every body that obviously isn't
+  // a frontmatter candidate.
+  return body.startsWith("---\n") || body.startsWith("---\r\n");
+}
 
 async function writeNow(
   path: string,
@@ -52,6 +73,30 @@ async function writeNow(
   hooks: AutoSaveHooks,
 ): Promise<void> {
   try {
+    // If the tab has no frontmatter yet and the body appears to start
+    // with a `---` fence, ask the Rust core to peel a leading YAML block
+    // off the body and fold it into the frontmatter map. This absorbs
+    // frontmatter that the user typed or pasted directly into the editor
+    // (the natural authoring flow) so the structured subsystem takes
+    // ownership of it at save time. Bodies without a fence, invalid YAML,
+    // or tabs that already have frontmatter skip this path.
+    if (
+      Object.keys(payload.frontmatter).length === 0 &&
+      mightHaveLeadingFrontmatter(payload.body)
+    ) {
+      const extracted = await invoke<ExtractedFrontmatter | null>(
+        "try_extract_frontmatter",
+        { content: payload.body },
+      );
+      if (extracted) {
+        payload.body = extracted.body;
+        for (const [k, v] of Object.entries(extracted.frontmatter)) {
+          payload.frontmatter[k] = v;
+        }
+        hooks.onBodyRewritten?.(path, extracted.body);
+      }
+    }
+
     // Refresh last_modified / word_count / reading_time in place. The
     // mutation is by reference and flows through the tab store's proxy
     // so the frontmatter panel reflects the new values immediately.

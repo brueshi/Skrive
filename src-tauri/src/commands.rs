@@ -6,10 +6,12 @@
 //! path traversal outside the project root.
 
 use crate::error::{Error, Result};
+use crate::frontmatter;
 use crate::persistence::{self, AppUiState, ProjectUiState};
 use crate::project::{self, FileContent, ProjectManifest, ProjectState};
 use crate::watcher;
 use notify::RecommendedWatcher;
+use serde::Serialize;
 use serde_json::{Map, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -91,6 +93,41 @@ pub async fn watch_project(
     let mut watcher_slot = state.watcher.lock().await;
     *watcher_slot = Some(watcher);
     Ok(())
+}
+
+// =========================== Extraction helpers ===========================
+
+/// Payload returned by `try_extract_frontmatter`. Not used elsewhere in the
+/// IPC surface — the command is the only producer.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractedFrontmatter {
+    pub frontmatter: Map<String, Value>,
+    pub body: String,
+}
+
+/// Attempt to peel a leading YAML frontmatter block off a body string and
+/// return the parsed map plus the remaining body. Returns `None` when
+/// there is no fence, the fence is empty, or the YAML fails to parse —
+/// the autosave driver treats `None` as "leave the body alone and write
+/// it as-is". The caller guarantees we only see bodies that might have
+/// a fence (simple JS-side prefix check), so the cost of invoking this
+/// per save is a single IPC round-trip at most.
+#[tauri::command]
+pub async fn try_extract_frontmatter(
+    content: String,
+) -> Result<Option<ExtractedFrontmatter>> {
+    let parsed = match frontmatter::parse(&content) {
+        Ok(p) => p,
+        Err(_) => return Ok(None),
+    };
+    if parsed.frontmatter.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(ExtractedFrontmatter {
+        frontmatter: parsed.frontmatter,
+        body: parsed.body,
+    }))
 }
 
 // =========================== Creation commands ===========================

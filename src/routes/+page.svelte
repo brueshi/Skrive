@@ -17,6 +17,7 @@
 
   import { project } from "$lib/stores/project.svelte";
   import type { LayoutMode } from "$lib/types";
+  import { formatError } from "$lib/errors";
   import {
     scheduleSave,
     flushSave,
@@ -32,6 +33,7 @@
   import Sidebar from "$lib/components/Sidebar.svelte";
   import Header from "$lib/components/Header.svelte";
   import SplitView from "$lib/components/SplitView.svelte";
+  import FrontmatterPanel from "$lib/components/FrontmatterPanel.svelte";
 
   type WatcherPayload = {
     path: string;
@@ -48,7 +50,19 @@
     },
     onError: (path: string, err: unknown) => {
       console.error("Failed to save", path, err);
-      saveError = err instanceof Error ? err.message : String(err);
+      saveError = formatError(err);
+    },
+    /**
+     * Fired when the save driver pulled a leading frontmatter block out
+     * of the body. We update the tab's body in place so the CodeMirror
+     * view sees a new `value` prop and dispatches a replace transaction;
+     * the user's view of the document shrinks by exactly the length of
+     * the extracted fence. The frontmatter map was already updated by
+     * reference inside the save driver.
+     */
+    onBodyRewritten: (path: string, newBody: string) => {
+      const tab = project.tabs.find((t) => t.path === path);
+      if (tab) tab.content.body = newBody;
     },
   };
 
@@ -132,6 +146,16 @@
 
   function handleKeydown(e: KeyboardEvent) {
     if (!(e.metaKey || e.ctrlKey)) return;
+
+    // ⌘⇧F toggles the frontmatter panel. The shift gate means plain ⌘F
+    // stays available for a future find-in-file feature without collision.
+    if (e.shiftKey && e.key.toLowerCase() === "f") {
+      if (project.activeTab) {
+        e.preventDefault();
+        project.toggleFrontmatterPanel();
+      }
+      return;
+    }
 
     switch (e.key.toLowerCase()) {
       case "b":
@@ -221,6 +245,7 @@
 {:else}
   <main>
     <Header />
+    <FrontmatterPanel />
     <div class="layout">
       {#if project.sidebarVisible}
         <Sidebar />
@@ -281,6 +306,10 @@
     height: 100vh;
     width: 100vw;
     overflow: hidden;
+    /* Positioned so the floating frontmatter panel (position: absolute)
+       anchors to `main` rather than the viewport — matters if the outer
+       layout ever gains a margin or transform. */
+    position: relative;
   }
 
   .layout {

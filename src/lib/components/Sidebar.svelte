@@ -14,6 +14,7 @@
   // files, not thousands.
 
   import { project } from "$lib/stores/project.svelte";
+  import { formatError } from "$lib/errors";
   import IconPlus from "$lib/icons/IconPlus.svelte";
   import type { FileEntry } from "$lib/types";
 
@@ -81,7 +82,7 @@
       newFileName = "";
       createError = null;
     } catch (e) {
-      createError = e instanceof Error ? e.message : String(e);
+      createError = formatError(e);
     }
   }
 

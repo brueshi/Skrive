@@ -32,6 +32,12 @@ let activeTabIndex = $state(-1);
 let sidebarVisible = $state(true);
 let sidebarWidth = $state(260);
 
+// Frontmatter panel open/closed state. *Session only* — deliberately not
+// persisted in ProjectUiState because the panel is a transient tool, not
+// a layout preference. Every session starts with it closed; the user
+// opens it as needed via ⌘⇧F or the header indicator.
+let frontmatterPanelOpen = $state(false);
+
 const DEFAULT_LAYOUT_MODE: LayoutMode = "raw";
 const DEFAULT_SPLIT_RATIO = 0.5;
 
@@ -145,6 +151,69 @@ function toggleSidebarImpl(): void {
   sidebarVisible = !sidebarVisible;
 }
 
+// =========================== Frontmatter actions ===========================
+
+function openFrontmatterPanelImpl(): void {
+  frontmatterPanelOpen = true;
+}
+
+function closeFrontmatterPanelImpl(): void {
+  frontmatterPanelOpen = false;
+}
+
+function toggleFrontmatterPanelImpl(): void {
+  frontmatterPanelOpen = !frontmatterPanelOpen;
+}
+
+/**
+ * Set the value of a frontmatter field on the active tab, creating it if
+ * it doesn't exist. Called from the panel on every value commit. Mutates
+ * in place so the autosave path picks up the change by reference.
+ */
+function updateActiveTabFrontmatterImpl(key: string, value: unknown): void {
+  if (activeTabIndex < 0) return;
+  const tab = tabs[activeTabIndex];
+  if (!tab) return;
+  tab.content.frontmatter[key] = value;
+  tab.dirty = true;
+}
+
+/**
+ * Remove a frontmatter field from the active tab. No-op if the key is
+ * absent. The × button and empty-key-on-blur both route through here.
+ */
+function removeActiveTabFrontmatterImpl(key: string): void {
+  if (activeTabIndex < 0) return;
+  const tab = tabs[activeTabIndex];
+  if (!tab) return;
+  if (!(key in tab.content.frontmatter)) return;
+  delete tab.content.frontmatter[key];
+  tab.dirty = true;
+}
+
+/**
+ * Rename a frontmatter key while preserving its value. Silently no-ops
+ * when the rename would overwrite an existing different key, which is
+ * the "rename conflict → silently revert" rule from the plan. The panel
+ * re-reads the map after calling this, so a no-op naturally shows the
+ * old key again in the UI.
+ */
+function renameActiveTabFrontmatterKeyImpl(
+  oldKey: string,
+  newKey: string,
+): void {
+  if (activeTabIndex < 0) return;
+  const tab = tabs[activeTabIndex];
+  if (!tab) return;
+  if (oldKey === newKey) return;
+  if (!(oldKey in tab.content.frontmatter)) return;
+  if (newKey in tab.content.frontmatter) return; // conflict → revert
+  const value = tab.content.frontmatter[oldKey];
+  delete tab.content.frontmatter[oldKey];
+  tab.content.frontmatter[newKey] = value;
+  tab.dirty = true;
+}
+
 function closeProjectImpl(): void {
   manifest = null;
   tabs = [];
@@ -215,6 +284,9 @@ export const project = {
   get sidebarWidth() {
     return sidebarWidth;
   },
+  get frontmatterPanelOpen() {
+    return frontmatterPanelOpen;
+  },
 
   openProject: openProjectImpl,
   openTab: openTabImpl,
@@ -227,6 +299,12 @@ export const project = {
   setSplitDividerRatio: setSplitDividerRatioImpl,
   setSidebarVisible: setSidebarVisibleImpl,
   toggleSidebar: toggleSidebarImpl,
+  openFrontmatterPanel: openFrontmatterPanelImpl,
+  closeFrontmatterPanel: closeFrontmatterPanelImpl,
+  toggleFrontmatterPanel: toggleFrontmatterPanelImpl,
+  updateActiveTabFrontmatter: updateActiveTabFrontmatterImpl,
+  removeActiveTabFrontmatter: removeActiveTabFrontmatterImpl,
+  renameActiveTabFrontmatterKey: renameActiveTabFrontmatterKeyImpl,
   closeProject: closeProjectImpl,
   refreshManifest: refreshManifestImpl,
   createProject: createProjectImpl,

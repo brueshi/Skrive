@@ -23,6 +23,15 @@
     return parts[parts.length - 1] ?? root;
   });
 
+  // Field count for the FM · N indicator. Reads directly from the active
+  // tab's frontmatter map so it updates reactively as the user adds or
+  // removes fields through the panel.
+  let frontmatterFieldCount = $derived.by(() => {
+    const fm = project.activeTab?.content.frontmatter;
+    if (!fm) return 0;
+    return Object.keys(fm).length;
+  });
+
   function setMode(mode: LayoutMode) {
     project.setLayoutMode(mode);
   }
@@ -90,6 +99,24 @@
 
   <div class="right">
     {#if project.activeTab}
+      <button
+        type="button"
+        class="fm-indicator"
+        class:fm-indicator-empty={frontmatterFieldCount === 0}
+        class:fm-indicator-active={project.frontmatterPanelOpen}
+        aria-label={project.frontmatterPanelOpen
+          ? "Close frontmatter panel"
+          : "Open frontmatter panel"}
+        aria-pressed={project.frontmatterPanelOpen}
+        title="Frontmatter  ⌘⇧F"
+        onclick={() => project.toggleFrontmatterPanel()}
+      >
+        <span class="fm-label">FM</span>
+        <span class="fm-sep">·</span>
+        <span class="fm-count"
+          >{frontmatterFieldCount === 0 ? "+" : frontmatterFieldCount}</span
+        >
+      </button>
       <div class="mode-toggle" role="group" aria-label="Layout mode">
         <button
           type="button"
@@ -302,5 +329,56 @@
   .mode-button.active {
     color: var(--skrive-fg);
     background: var(--skrive-rule);
+  }
+
+  /* Frontmatter panel indicator. Lives to the left of the layout mode
+     toggle and acts as both an "N fields on this file" glance and the
+     click target for opening the panel. Monospace to match the project-
+     name style so it reads as metadata, not a primary action. */
+  .fm-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+    background: transparent;
+    border: 1px solid var(--skrive-rule);
+    border-radius: 4px;
+    height: 24px;
+    padding: 0 0.5rem;
+    color: var(--skrive-muted);
+    cursor: pointer;
+    font: inherit;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    transition:
+      color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+      background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+      border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .fm-indicator:hover {
+    color: var(--skrive-fg);
+    border-color: var(--skrive-fg);
+  }
+
+  .fm-indicator.fm-indicator-active {
+    color: var(--skrive-fg);
+    background: var(--skrive-rule);
+    border-color: var(--skrive-fg);
+  }
+
+  /* Subtle de-emphasis when the active file has no frontmatter yet —
+     the `FM · +` state is still clickable and discoverable, just quieter
+     than a populated file would be. */
+  .fm-indicator.fm-indicator-empty .fm-count {
+    opacity: 0.7;
+  }
+
+  .fm-label {
+    font-weight: 600;
+  }
+
+  .fm-sep {
+    opacity: 0.5;
   }
 </style>

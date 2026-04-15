@@ -60,8 +60,22 @@ pub struct ParsedDocument {
 
 /// Split a Markdown source into its frontmatter and body.
 ///
-/// Files without a frontmatter fence return an empty map and the original source
-/// as the body. Malformed YAML is reported as `Error::Frontmatter`.
+/// We try very hard *not* to error. Markdown in the wild uses `---` as a
+/// horizontal rule all the time, and every such file has a sequence of
+/// characters at its top that *structurally* looks like our fence pattern
+/// but isn't intended as YAML. If we fail loudly on any of those files the
+/// whole project scan fails and the user can't open the directory. So:
+///
+///   - No opening fence → whole source is body.
+///   - Opening fence but no closing fence → whole source is body.
+///   - Empty body between fences → empty frontmatter, body after the close.
+///   - Syntactically invalid YAML between fences → whole source is body.
+///   - Valid YAML that isn't a mapping (scalar or sequence) → whole source is body.
+///   - Valid YAML mapping → frontmatter map + body after the close.
+///
+/// The function still returns `Result` so callers can distinguish I/O
+/// failures from parse state, but in practice the lenient fallback means
+/// a real `Error::Frontmatter` rarely escapes this module.
 pub fn parse(source: &str) -> Result<ParsedDocument> {
     let Some(rest) = strip_opening_fence(source) else {
         return Ok(ParsedDocument {
@@ -71,34 +85,55 @@ pub fn parse(source: &str) -> Result<ParsedDocument> {
     };
 
     let Some((yaml, body)) = split_at_closing_fence(rest) else {
-        // Opening fence with no closing fence — treat as plain Markdown rather
-        // than throwing, since this is what most other Markdown tools do.
+        // Opening fence with no closing fence — most likely a `---` that's
+        // meant as a horizontal rule but happens to be at byte zero.
         return Ok(ParsedDocument {
             frontmatter: Map::new(),
             body: source.to_string(),
         });
     };
 
-    let frontmatter = if yaml.trim().is_empty() {
-        Map::new()
-    } else {
-        let value: Value = serde_yaml_ng::from_str(yaml)
-            .map_err(|e| Error::Frontmatter(e.to_string()))?;
-        match value {
-            Value::Object(map) => map,
-            Value::Null => Map::new(),
-            _ => {
-                return Err(Error::Frontmatter(
-                    "frontmatter must be a YAML mapping".to_string(),
-                ))
-            }
+    if yaml.trim().is_empty() {
+        return Ok(ParsedDocument {
+            frontmatter: Map::new(),
+            body: body.to_string(),
+        });
+    }
+
+    // Attempt the YAML parse. Any failure falls back to "treat the whole
+    // source as body" rather than bubbling up — the cost of being too
+    // lenient here is that a file with genuinely broken frontmatter loads
+    // with no frontmatter visible to the structured system (it's still
+    // in the body, the user sees it in the editor), which is strictly
+    // better than refusing to open the project at all.
+    let value: Value = match serde_yaml_ng::from_str(yaml) {
+        Ok(v) => v,
+        Err(_) => {
+            return Ok(ParsedDocument {
+                frontmatter: Map::new(),
+                body: source.to_string(),
+            });
         }
     };
 
-    Ok(ParsedDocument {
-        frontmatter,
-        body: body.to_string(),
-    })
+    match value {
+        Value::Object(map) => Ok(ParsedDocument {
+            frontmatter: map,
+            body: body.to_string(),
+        }),
+        // `null` frontmatter (`---\n\n---\n`) is equivalent to an empty map.
+        Value::Null => Ok(ParsedDocument {
+            frontmatter: Map::new(),
+            body: body.to_string(),
+        }),
+        // Scalar or sequence at the top level means the `---` was almost
+        // certainly a horizontal rule or a setext heading underline rather
+        // than a frontmatter fence. Fall back to whole-source-as-body.
+        _ => Ok(ParsedDocument {
+            frontmatter: Map::new(),
+            body: source.to_string(),
+        }),
+    }
 }
 
 /// Strip an opening `---\n` fence and return the remainder, or `None` if there
@@ -163,9 +198,37 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_mapping_frontmatter() {
-        let err = parse("---\n- one\n- two\n---\n").unwrap_err();
-        assert!(matches!(err, Error::Frontmatter(_)));
+    fn non_mapping_fence_falls_back_to_body() {
+        // A sequence-typed "fence" is almost certainly a horizontal rule
+        // that happens to look like a frontmatter block to our simple
+        // structural scanner. We return no frontmatter and the original
+        // source as the body rather than erroring.
+        let src = "---\n- one\n- two\n---\nreal body\n";
+        let parsed = parse(src).unwrap();
+        assert!(parsed.frontmatter.is_empty());
+        assert_eq!(parsed.body, src);
+    }
+
+    #[test]
+    fn malformed_yaml_fence_falls_back_to_body() {
+        // Invalid YAML between fences — same story: treat the whole source
+        // as body instead of failing the project scan.
+        let src = "---\nthis: is : not : yaml\n---\nbody\n";
+        let parsed = parse(src).unwrap();
+        assert!(parsed.frontmatter.is_empty());
+        assert_eq!(parsed.body, src);
+    }
+
+    #[test]
+    fn horizontal_rule_near_top_is_not_frontmatter() {
+        // A common real-world case: a document that starts with a horizontal
+        // rule separating an author note from the body. The first `---` looks
+        // like an opening fence, the second `---` looks like a closing fence,
+        // and the prose between them is obviously not YAML.
+        let src = "---\nA short note from the author.\n---\n\n# The Body\n";
+        let parsed = parse(src).unwrap();
+        assert!(parsed.frontmatter.is_empty());
+        assert_eq!(parsed.body, src);
     }
 
     #[test]

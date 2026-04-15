@@ -9,6 +9,7 @@
 
   import { pickProjectDirectory } from "$lib/dialog";
   import { project } from "$lib/stores/project.svelte";
+  import { formatError } from "$lib/errors";
 
   type Props = {
     onClose: () => void;
@@ -36,7 +37,7 @@
       await project.createProject(location, trimmed);
       onClose();
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = formatError(e);
     } finally {
       busy = false;
     }
