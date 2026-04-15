@@ -8,6 +8,44 @@
 use crate::error::{Error, Result};
 use serde_json::{Map, Value};
 
+/// Serialize a frontmatter map back into a YAML block suitable for
+/// prepending to a Markdown body. Returns the empty string for an empty
+/// map so callers can unconditionally concatenate the result with a body
+/// and get a clean file either way.
+///
+/// The output always ends with a newline after the closing `---` fence,
+/// which matches how `parse()` strips the opening fence and leading
+/// blank line. Round-tripping a file through `parse` → `serialize`
+/// produces a byte-equivalent frontmatter block for every input we care
+/// about (modulo YAML normalization — quote style, flow vs block, etc.
+/// are serde_yaml_ng's choice, not ours).
+///
+/// Key ordering is whatever `serde_json::Map` iterates in. With the
+/// default feature set that's alphabetical via `BTreeMap`; if we later
+/// enable `serde_json/preserve_order` to honor user-authored order, the
+/// output adapts with no signature change here.
+pub fn serialize(frontmatter: &Map<String, Value>) -> Result<String> {
+    if frontmatter.is_empty() {
+        return Ok(String::new());
+    }
+
+    let value = Value::Object(frontmatter.clone());
+    let yaml = serde_yaml_ng::to_string(&value)
+        .map_err(|e| Error::Frontmatter(e.to_string()))?;
+
+    // `serde_yaml_ng::to_string` already terminates each line with `\n`,
+    // so we wrap with `---\n` / `---\n` and rely on the trailing newline
+    // that serde produced to sit cleanly before the closing fence.
+    let mut out = String::with_capacity(yaml.len() + 8);
+    out.push_str("---\n");
+    out.push_str(&yaml);
+    if !yaml.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str("---\n");
+    Ok(out)
+}
+
 /// Result of splitting a Markdown file into its frontmatter block and body.
 #[derive(Debug, Clone)]
 pub struct ParsedDocument {
@@ -128,5 +166,63 @@ mod tests {
     fn rejects_non_mapping_frontmatter() {
         let err = parse("---\n- one\n- two\n---\n").unwrap_err();
         assert!(matches!(err, Error::Frontmatter(_)));
+    }
+
+    #[test]
+    fn serialize_empty_map_is_empty_string() {
+        let out = serialize(&Map::new()).unwrap();
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn serialize_scalar_values() {
+        let mut map = Map::new();
+        map.insert("title".into(), Value::String("Hello".into()));
+        map.insert("draft".into(), Value::Bool(true));
+        let out = serialize(&map).unwrap();
+        // serde_yaml_ng emits strings without quotes when unambiguous,
+        // and booleans as `true` / `false`.
+        assert!(out.starts_with("---\n"));
+        assert!(out.ends_with("---\n"));
+        assert!(out.contains("title: Hello"));
+        assert!(out.contains("draft: true"));
+    }
+
+    #[test]
+    fn serialize_array_values() {
+        let mut map = Map::new();
+        map.insert(
+            "tags".into(),
+            Value::Array(vec![
+                Value::String("a".into()),
+                Value::String("b".into()),
+            ]),
+        );
+        let out = serialize(&map).unwrap();
+        assert!(out.contains("tags:"));
+        // The exact flow vs block layout is serde_yaml_ng's choice — we
+        // just need the elements present in order.
+        assert!(out.contains("- a"));
+        assert!(out.contains("- b"));
+    }
+
+    #[test]
+    fn round_trip_preserves_logical_content() {
+        let original = "---\ntitle: Hello World\ntags:\n- a\n- b\n---\n# Body\n";
+        let parsed = parse(original).unwrap();
+        let reserialized = serialize(&parsed.frontmatter).unwrap();
+        // Parse the serialized block again and compare the maps — equivalence
+        // at the logical level is what we promise, not byte equivalence.
+        let reparsed = parse(&format!("{}{}", reserialized, parsed.body)).unwrap();
+        assert_eq!(reparsed.frontmatter, parsed.frontmatter);
+        assert_eq!(reparsed.body, parsed.body);
+    }
+
+    #[test]
+    fn round_trip_no_frontmatter_stays_empty() {
+        let original = "# Just a heading\n\nSome prose.\n";
+        let parsed = parse(original).unwrap();
+        let reserialized = serialize(&parsed.frontmatter).unwrap();
+        assert_eq!(reserialized, "");
     }
 }

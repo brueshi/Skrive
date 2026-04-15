@@ -16,15 +16,26 @@
 // coalesce or delay events a few hundred ms past the syscall return. Missing
 // a real external edit by less than two seconds is preferable to yanking
 // the user's text out from under them.
+//
+// Since Phase 2.3 Step 1, a save is `{ body, frontmatter }`, not raw text.
+// The body is owned by the editor (CodeMirror); the frontmatter map is
+// owned by the frontmatter panel. Both are captured at schedule time so
+// the debounced write always flushes a coherent pair.
 
 import { invoke } from "@tauri-apps/api/core";
+import { stampAutoFields } from "./autoFields";
 
 const DEBOUNCE_MS = 1000;
 const SELF_WRITE_WINDOW_MS = 1500;
 
+type SavePayload = {
+  body: string;
+  frontmatter: Record<string, unknown>;
+};
+
 type PendingSave = {
   timer: ReturnType<typeof setTimeout>;
-  content: string;
+  payload: SavePayload;
 };
 
 const pending = new Map<string, PendingSave>();
@@ -35,31 +46,50 @@ export type AutoSaveHooks = {
   onError: (path: string, err: unknown) => void;
 };
 
+async function writeNow(
+  path: string,
+  payload: SavePayload,
+  hooks: AutoSaveHooks,
+): Promise<void> {
+  try {
+    // Refresh last_modified / word_count / reading_time in place. The
+    // mutation is by reference and flows through the tab store's proxy
+    // so the frontmatter panel reflects the new values immediately.
+    stampAutoFields(payload.frontmatter, payload.body);
+    await invoke("write_file", {
+      path,
+      body: payload.body,
+      frontmatter: payload.frontmatter,
+    });
+    lastSavedMs.set(path, Date.now());
+    hooks.onSaved(path);
+  } catch (err) {
+    hooks.onError(path, err);
+  }
+}
+
 /**
- * Schedule a save for `path`. Called on every keystroke; only the most
- * recent call within a 1s window actually writes. Subsequent calls replace
- * the pending save with the newer content.
+ * Schedule a save for `path`. Called on every keystroke and every
+ * frontmatter mutation; only the most recent call within a 1s window
+ * actually writes. Subsequent calls replace the pending payload with
+ * the newer body/frontmatter pair.
  */
 export function scheduleSave(
   path: string,
-  content: string,
+  payload: SavePayload,
   hooks: AutoSaveHooks,
 ): void {
   const existing = pending.get(path);
   if (existing) clearTimeout(existing.timer);
 
   const timer = setTimeout(async () => {
+    const entry = pending.get(path);
+    if (!entry) return;
     pending.delete(path);
-    try {
-      await invoke("write_file", { path, content });
-      lastSavedMs.set(path, Date.now());
-      hooks.onSaved(path);
-    } catch (err) {
-      hooks.onError(path, err);
-    }
+    await writeNow(path, entry.payload, hooks);
   }, DEBOUNCE_MS);
 
-  pending.set(path, { timer, content });
+  pending.set(path, { timer, payload });
 }
 
 /**
@@ -74,13 +104,7 @@ export async function flushSave(
   if (!existing) return;
   clearTimeout(existing.timer);
   pending.delete(path);
-  try {
-    await invoke("write_file", { path, content: existing.content });
-    lastSavedMs.set(path, Date.now());
-    hooks.onSaved(path);
-  } catch (err) {
-    hooks.onError(path, err);
-  }
+  await writeNow(path, existing.payload, hooks);
 }
 
 /**

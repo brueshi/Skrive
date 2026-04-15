@@ -10,6 +10,7 @@ use crate::persistence::{self, AppUiState, ProjectUiState};
 use crate::project::{self, FileContent, ProjectManifest, ProjectState};
 use crate::watcher;
 use notify::RecommendedWatcher;
+use serde_json::{Map, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
@@ -64,12 +65,13 @@ pub async fn read_file(
 #[tauri::command]
 pub async fn write_file(
     path: String,
-    content: String,
+    body: String,
+    frontmatter: Map<String, Value>,
     state: State<'_, AppState>,
 ) -> Result<()> {
     let project = state.project.lock().await;
     let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
-    project::write(&project.root, &PathBuf::from(path), &content)
+    project::write(&project.root, &PathBuf::from(path), &body, &frontmatter)
 }
 
 #[tauri::command]

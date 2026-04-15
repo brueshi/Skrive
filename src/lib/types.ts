@@ -6,6 +6,32 @@
 export type ProjectManifest = {
   root: string;
   files: FileEntry[];
+  schema: ProjectSchema;
+};
+
+// Project-wide frontmatter schema, inferred by the Rust core during
+// `open_project`. Mirrors `src-tauri/src/project.rs::ProjectSchema`.
+// The frontend caches this on the project store so the frontmatter
+// panel and autocomplete layer read from memory rather than hitting
+// Rust on every keystroke.
+export type ProjectSchema = {
+  fileCount: number;
+  fields: Record<string, FieldInfo>;
+};
+
+export type FieldInfo = {
+  /** Number of files in the project that contain this field at all. */
+  presence: number;
+  /** Distinct value types seen across files, sorted alphabetically. */
+  types: string[];
+  /**
+   * Distinct scalar values seen across files, in insertion order.
+   * Populated only for fields whose values are all scalars (string,
+   * number, boolean, null) *and* whose distinct count is ≤ 20. Empty
+   * for large value sets and for any field that ever saw an array or
+   * object value. An empty array means "no suggestions to offer".
+   */
+  knownValues: unknown[];
 };
 
 export type FileEntry = {

@@ -55,7 +55,12 @@
   function handleChange(next: string) {
     project.updateActiveTabContent(next);
     const tab = project.activeTab;
-    if (tab) scheduleSave(tab.path, next, autoSaveHooks);
+    if (!tab) return;
+    scheduleSave(
+      tab.path,
+      { body: next, frontmatter: tab.content.frontmatter },
+      autoSaveHooks,
+    );
   }
 
   async function forceSaveActive() {

@@ -15,6 +15,7 @@ import type {
   FileContent,
   LayoutMode,
   ProjectManifest,
+  ProjectSchema,
   Tab,
 } from "$lib/types";
 
@@ -199,6 +200,14 @@ export const project = {
   },
   get hasProject() {
     return manifest !== null;
+  },
+  /**
+   * Project-wide frontmatter schema, inferred at `open_project` time.
+   * Returns `null` when no project is open. Read by the Phase 2.3
+   * frontmatter panel and autocomplete layer.
+   */
+  get schema(): ProjectSchema | null {
+    return manifest?.schema ?? null;
   },
   get sidebarVisible() {
     return sidebarVisible;
