@@ -32,7 +32,9 @@
   // `prefers-reduced-motion` reduces the transition to zero.
 
   import { project } from "$lib/stores/project.svelte";
+  import type { FieldInfo } from "$lib/types";
   import FrontmatterChipInput from "./FrontmatterChipInput.svelte";
+  import SuggestionList from "./SuggestionList.svelte";
 
   // ============================ Local state ============================
   //
@@ -81,6 +83,144 @@
     lastSyncedPath = path;
     rows = Object.keys(activeFrontmatter).map(makeRow);
   });
+
+  // ============================ Autocomplete state ============================
+  //
+  // At most one suggestion dropdown can be open at a time — only one input
+  // is focused. We track which row + which field (key vs. value) the
+  // dropdown is anchored to, the filtered candidate list, and the selected
+  // index. The dropdown is anchored inline below the focused input via
+  // CSS, so positioning needs nothing here — only state and keyboard wiring.
+
+  type SuggestionKind = "key" | "value";
+
+  type ActiveSuggestion = {
+    rowId: string;
+    kind: SuggestionKind;
+    suggestions: string[];
+    selectedIndex: number;
+  };
+
+  let activeSuggestion = $state<ActiveSuggestion | null>(null);
+
+  const SUGGESTION_LIMIT = 8;
+
+  function lowerStartsWith(haystack: string, needle: string): boolean {
+    if (needle.length === 0) return true;
+    return haystack.toLowerCase().startsWith(needle.toLowerCase());
+  }
+
+  /**
+   * Schema-driven candidates for a key input. Excludes field names already
+   * present on this file (except the row's own current key, since that's
+   * the field being edited and excluding it would prevent re-confirming
+   * it as a valid choice). Ranked by descending presence so the field a
+   * user is most likely to want appears first; alphabetical as tiebreaker.
+   */
+  function computeKeyCandidates(row: Row, prefix: string): string[] {
+    const schema = project.schema;
+    if (!schema) return [];
+    const usedKeys = new Set(rows.map((r) => r.key));
+    const candidates: { name: string; presence: number }[] = [];
+    for (const [name, info] of Object.entries(schema.fields)) {
+      if (usedKeys.has(name) && name !== row.key) continue;
+      if (!lowerStartsWith(name, prefix)) continue;
+      candidates.push({ name, presence: info.presence });
+    }
+    candidates.sort((a, b) => {
+      const diff = b.presence - a.presence;
+      if (diff !== 0) return diff;
+      return a.name.localeCompare(b.name);
+    });
+    return candidates.slice(0, SUGGESTION_LIMIT).map((c) => c.name);
+  }
+
+  /**
+   * Schema-driven candidates for a value input. Reads `knownValues` for
+   * the row's current key; only populated by the Rust schema inference
+   * for fields whose values across the project are scalars and number
+   * ≤ 20 distinct. Returns empty for arrays, objects, large value sets,
+   * or fields that don't exist in the schema.
+   */
+  function computeValueCandidates(row: Row, prefix: string): string[] {
+    const schema = project.schema;
+    if (!schema) return [];
+    const info: FieldInfo | undefined = schema.fields[row.key];
+    if (!info || info.knownValues.length === 0) return [];
+    const out: string[] = [];
+    for (const v of info.knownValues) {
+      if (
+        v !== null &&
+        typeof v !== "string" &&
+        typeof v !== "number" &&
+        typeof v !== "boolean"
+      ) {
+        continue;
+      }
+      const display = v === null ? "" : String(v);
+      if (!lowerStartsWith(display, prefix)) continue;
+      out.push(display);
+      if (out.length >= SUGGESTION_LIMIT) break;
+    }
+    return out;
+  }
+
+  function openKeySuggestions(row: Row, currentText: string) {
+    const suggestions = computeKeyCandidates(row, currentText);
+    if (suggestions.length === 0) {
+      activeSuggestion = null;
+      return;
+    }
+    activeSuggestion = {
+      rowId: row.id,
+      kind: "key",
+      suggestions,
+      selectedIndex: 0,
+    };
+  }
+
+  function openValueSuggestions(row: Row, currentText: string) {
+    const suggestions = computeValueCandidates(row, currentText);
+    if (suggestions.length === 0) {
+      activeSuggestion = null;
+      return;
+    }
+    activeSuggestion = {
+      rowId: row.id,
+      kind: "value",
+      suggestions,
+      selectedIndex: 0,
+    };
+  }
+
+  function dismissSuggestions() {
+    activeSuggestion = null;
+  }
+
+  function navigateSuggestion(delta: number) {
+    if (!activeSuggestion) return;
+    const max = activeSuggestion.suggestions.length - 1;
+    let next = activeSuggestion.selectedIndex + delta;
+    if (next < 0) next = max;
+    if (next > max) next = 0;
+    activeSuggestion.selectedIndex = next;
+  }
+
+  function highlightSuggestion(index: number) {
+    if (!activeSuggestion) return;
+    activeSuggestion.selectedIndex = index;
+  }
+
+  function selectedSuggestion(): string | null {
+    if (!activeSuggestion) return null;
+    return activeSuggestion.suggestions[activeSuggestion.selectedIndex] ?? null;
+  }
+
+  function suggestionActiveFor(rowId: string, kind: SuggestionKind): boolean {
+    return (
+      activeSuggestion?.rowId === rowId && activeSuggestion?.kind === kind
+    );
+  }
 
   // ============================ Helpers ============================
 
@@ -185,6 +325,76 @@
     row.key = trimmed;
   }
 
+  /**
+   * Apply a chosen suggestion to its anchored input. For keys we route
+   * through `commitKey` (which handles rename + conflict revert + empty-
+   * key removal) and then jump focus to the value input on the same row.
+   * For values we route through `commitValue` with the row's current
+   * value type as the coercion hint.
+   */
+  function pickSuggestion(row: Row, value: string, inputEl: HTMLInputElement) {
+    if (!activeSuggestion) return;
+    const kind = activeSuggestion.kind;
+    inputEl.value = value;
+    if (kind === "key") {
+      commitKey(row, value, inputEl);
+      dismissSuggestions();
+      const rowEl = inputEl.closest(".fm-row");
+      const valueInput = rowEl?.querySelector<HTMLElement>(
+        ".value-input, .chip-pending",
+      );
+      valueInput?.focus();
+    } else {
+      const currentValue = activeFrontmatter[row.key];
+      const type = valueTypeOf(currentValue);
+      commitValue(row, value, type);
+      dismissSuggestions();
+    }
+  }
+
+  /**
+   * Keyboard handler shared by key and value inputs when a suggestion
+   * dropdown is anchored to them. Returns `true` if the event was handled
+   * (so the caller can skip its own default behavior). The four handled
+   * keys map exactly to the spec: ↓/↑ navigate, Enter/Tab accept, Esc
+   * dismisses the dropdown only — *not* the panel.
+   */
+  function handleSuggestionKeydown(
+    e: KeyboardEvent,
+    row: Row,
+    kind: SuggestionKind,
+  ): boolean {
+    if (!suggestionActiveFor(row.id, kind)) return false;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      navigateSuggestion(1);
+      return true;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      navigateSuggestion(-1);
+      return true;
+    }
+    if (e.key === "Escape") {
+      // Stop propagation so the panel root's Escape handler doesn't also
+      // close the panel — Escape with a dropdown open should dismiss the
+      // dropdown only, leaving the panel and the user's focus intact.
+      e.preventDefault();
+      e.stopPropagation();
+      dismissSuggestions();
+      return true;
+    }
+    if (e.key === "Enter" || e.key === "Tab") {
+      const picked = selectedSuggestion();
+      if (picked !== null) {
+        e.preventDefault();
+        pickSuggestion(row, picked, e.currentTarget as HTMLInputElement);
+        return true;
+      }
+    }
+    return false;
+  }
+
   function addNewField() {
     // Find a non-conflicting temporary key. Users are expected to rename
     // it immediately; the temporary name just gives us a slot in the map.
@@ -282,30 +492,52 @@
         {@const value = activeFrontmatter[row.key]}
         {@const type = valueTypeOf(value)}
         <div class="fm-row" data-row-id={row.id}>
-          <input
-            class="key-input"
-            type="text"
-            value={row.key}
-            aria-label="Field key"
-            onblur={(e) =>
-              commitKey(row, e.currentTarget.value, e.currentTarget)}
-            onkeydown={(e) => {
-              if (e.key === "Enter") {
-                // Enter commits the rename (via blur) and hands focus to
-                // the value input inside the same row so the user can keep
-                // typing without reaching for the mouse.
-                e.preventDefault();
-                const rowEl = (e.currentTarget as HTMLInputElement).closest(
-                  ".fm-row",
-                );
-                const valueInput = rowEl?.querySelector<HTMLElement>(
-                  ".value-input, .chip-pending",
-                );
-                (e.currentTarget as HTMLInputElement).blur();
-                valueInput?.focus();
-              }
-            }}
-          />
+          <div class="input-with-suggestions">
+            <input
+              class="key-input"
+              type="text"
+              value={row.key}
+              aria-label="Field key"
+              aria-autocomplete="list"
+              onfocus={(e) =>
+                openKeySuggestions(row, e.currentTarget.value)}
+              oninput={(e) =>
+                openKeySuggestions(row, e.currentTarget.value)}
+              onblur={(e) => {
+                dismissSuggestions();
+                commitKey(row, e.currentTarget.value, e.currentTarget);
+              }}
+              onkeydown={(e) => {
+                if (handleSuggestionKeydown(e, row, "key")) return;
+                if (e.key === "Enter") {
+                  // Enter commits the rename (via blur) and hands focus
+                  // to the value input inside the same row.
+                  e.preventDefault();
+                  const rowEl = (e.currentTarget as HTMLInputElement).closest(
+                    ".fm-row",
+                  );
+                  const valueInput = rowEl?.querySelector<HTMLElement>(
+                    ".value-input, .chip-pending",
+                  );
+                  (e.currentTarget as HTMLInputElement).blur();
+                  valueInput?.focus();
+                }
+              }}
+            />
+            {#if suggestionActiveFor(row.id, "key")}
+              <SuggestionList
+                suggestions={activeSuggestion!.suggestions}
+                selectedIndex={activeSuggestion!.selectedIndex}
+                onPick={(picked) => {
+                  const input = panelRoot?.querySelector<HTMLInputElement>(
+                    `[data-row-id="${row.id}"] .key-input`,
+                  );
+                  if (input) pickSuggestion(row, picked, input);
+                }}
+                onHover={highlightSuggestion}
+              />
+            {/if}
+          </div>
 
           <div class="value-slot">
             {#if type === "array"}
@@ -318,20 +550,44 @@
                 &lt;object&gt;
               </span>
             {:else}
-              <input
-                class="value-input"
-                type="text"
-                value={stringifyValue(value)}
-                aria-label="Field value"
-                onblur={(e) =>
-                  commitValue(row, e.currentTarget.value, type)}
-                onkeydown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    (e.currentTarget as HTMLInputElement).blur();
-                  }
-                }}
-              />
+              <div class="input-with-suggestions">
+                <input
+                  class="value-input"
+                  type="text"
+                  value={stringifyValue(value)}
+                  aria-label="Field value"
+                  aria-autocomplete="list"
+                  onfocus={(e) =>
+                    openValueSuggestions(row, e.currentTarget.value)}
+                  oninput={(e) =>
+                    openValueSuggestions(row, e.currentTarget.value)}
+                  onblur={(e) => {
+                    dismissSuggestions();
+                    commitValue(row, e.currentTarget.value, type);
+                  }}
+                  onkeydown={(e) => {
+                    if (handleSuggestionKeydown(e, row, "value")) return;
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      (e.currentTarget as HTMLInputElement).blur();
+                    }
+                  }}
+                />
+                {#if suggestionActiveFor(row.id, "value")}
+                  <SuggestionList
+                    suggestions={activeSuggestion!.suggestions}
+                    selectedIndex={activeSuggestion!.selectedIndex}
+                    onPick={(picked) => {
+                      const input =
+                        panelRoot?.querySelector<HTMLInputElement>(
+                          `[data-row-id="${row.id}"] .value-input`,
+                        );
+                      if (input) pickSuggestion(row, picked, input);
+                    }}
+                    onHover={highlightSuggestion}
+                  />
+                {/if}
+              </div>
             {/if}
           </div>
 
@@ -496,6 +752,14 @@
 
   .value-slot {
     min-width: 0;
+  }
+
+  /* Wrapper for an input + its anchored autocomplete dropdown. Positioned
+     so the SuggestionList (which uses position: absolute) pins itself to
+     the wrapper's bottom edge regardless of the row's overall layout. */
+  .input-with-suggestions {
+    position: relative;
+    width: 100%;
   }
 
   .value-object {
