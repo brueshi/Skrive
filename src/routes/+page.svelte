@@ -16,6 +16,7 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
   import { project } from "$lib/stores/project.svelte";
+  import { preferences } from "$lib/stores/preferences.svelte";
   import type { LayoutMode } from "$lib/types";
   import { formatError } from "$lib/errors";
   import {
@@ -34,6 +35,7 @@
   import Header from "$lib/components/Header.svelte";
   import SplitView from "$lib/components/SplitView.svelte";
   import FrontmatterPanel from "$lib/components/FrontmatterPanel.svelte";
+  import PersonalDictionaryPanel from "$lib/components/PersonalDictionaryPanel.svelte";
 
   type WatcherPayload = {
     path: string;
@@ -63,6 +65,11 @@
     onBodyRewritten: (path: string, newBody: string) => {
       const tab = project.tabs.find((t) => t.path === path);
       if (tab) tab.content.body = newBody;
+      // Visual breadcrumb: the editor surface flashes briefly so the
+      // user knows the system just rewrote the body (e.g. autosave
+      // pulled a typed `---` block into the structured frontmatter
+      // store and the editor shrank as a result).
+      project.signalEditorPulse();
     },
   };
 
@@ -157,6 +164,15 @@
       return;
     }
 
+    // ⌘⇧D toggles the personal dictionary panel. App-wide tool, doesn't
+    // require an active tab to be useful (you can manage your dictionary
+    // even with no file open).
+    if (e.shiftKey && e.key.toLowerCase() === "d") {
+      e.preventDefault();
+      preferences.toggleDictionaryPanel();
+      return;
+    }
+
     switch (e.key.toLowerCase()) {
       case "b":
         e.preventDefault();
@@ -191,6 +207,12 @@
 
   let unlistenWatcher: UnlistenFn | null = null;
   onMount(() => {
+    // Hydrate app-wide preferences (personal dictionary, recent
+    // projects, etc.) from disk before the rest of the UI starts
+    // reading them. Failures are non-fatal — the store keeps its
+    // defaults and subsequent saves write a fresh file.
+    void preferences.loadOnce();
+
     (async () => {
       unlistenWatcher = await listen<WatcherPayload>(
         "project://file-changed",
@@ -246,6 +268,7 @@
   <main>
     <Header />
     <FrontmatterPanel />
+    <PersonalDictionaryPanel />
     <div class="layout">
       {#if project.sidebarVisible}
         <Sidebar />

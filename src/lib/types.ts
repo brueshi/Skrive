@@ -102,6 +102,12 @@ export type AppUiState = {
   recentProjects: RecentProject[];
   license: string | null;
   firstRunMs: number | null;
+  /**
+   * Skrive-managed personal dictionary. Words on this list get
+   * `spellcheck="false"` decorations on every occurrence in any open
+   * file, additive to the OS spellchecker's own personal dictionary.
+   */
+  personalDictionary: string[];
 };
 
 export type RecentProject = {

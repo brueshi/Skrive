@@ -31,6 +31,7 @@
   // opacity fade on the inner content, 180ms on the mechanical ease curve.
   // `prefers-reduced-motion` reduces the transition to zero.
 
+  import { untrack } from "svelte";
   import { project } from "$lib/stores/project.svelte";
   import type { FieldInfo } from "$lib/types";
   import FrontmatterChipInput from "./FrontmatterChipInput.svelte";
@@ -72,16 +73,44 @@
     return { id, key };
   }
 
-  // Sync `rows` from the store's active-tab frontmatter whenever the
-  // user switches to a different file. While the panel is focused on a
-  // single file, local `rows` is the source of truth for row identity —
-  // commits go both to the store and to `rows` so the two stay in sync
-  // without needing to re-derive from `Object.keys` on every change.
+  // Reconcile `rows` with the store's active-tab frontmatter on every
+  // change to the map. Two flavors:
+  //
+  //   - File switched (`path !== lastSyncedPath`) → start fresh from the
+  //     new file's keys. Row IDs reset.
+  //   - Same file, but the key set changed → preserve row IDs for keys
+  //     that still exist (so Tab navigation and the no-jumping behavior
+  //     stay intact), drop rows for keys that disappeared, and append
+  //     new rows for keys that showed up. The "showed up" path is what
+  //     surfaces auto-extracted frontmatter (autosave pulled a leading
+  //     `---...---` block into the structured store) without the user
+  //     having to close and reopen the panel.
+  //
+  // The mutation is wrapped in `untrack` so the effect's dependency set
+  // is only `activeFrontmatter` + `activeTab?.path` — assigning to `rows`
+  // inside the body would otherwise cause the effect to re-fire against
+  // its own write.
   $effect(() => {
     const path = activeTab?.path ?? null;
-    if (path === lastSyncedPath) return;
-    lastSyncedPath = path;
-    rows = Object.keys(activeFrontmatter).map(makeRow);
+    // Track the map's identity and key set.
+    const currentKeys = Object.keys(activeFrontmatter);
+
+    untrack(() => {
+      if (path !== lastSyncedPath) {
+        lastSyncedPath = path;
+        rows = currentKeys.map(makeRow);
+        return;
+      }
+      const currentKeySet = new Set(currentKeys);
+      const knownKeys = new Set(rows.map((r) => r.key));
+      const kept = rows.filter((r) => currentKeySet.has(r.key));
+      const added = currentKeys
+        .filter((k) => !knownKeys.has(k))
+        .map(makeRow);
+      if (kept.length !== rows.length || added.length > 0) {
+        rows = [...kept, ...added];
+      }
+    });
   });
 
   // ============================ Autocomplete state ============================

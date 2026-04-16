@@ -8,6 +8,7 @@
   // editor owns the entire lower region.
 
   import { project } from "$lib/stores/project.svelte";
+  import { preferences } from "$lib/stores/preferences.svelte";
   import type { LayoutMode } from "$lib/types";
   import IconLayoutRaw from "$lib/icons/IconLayoutRaw.svelte";
   import IconLayoutSplit from "$lib/icons/IconLayoutSplit.svelte";
@@ -115,6 +116,26 @@
         <span class="fm-sep">·</span>
         <span class="fm-count"
           >{frontmatterFieldCount === 0 ? "+" : frontmatterFieldCount}</span
+        >
+      </button>
+      <button
+        type="button"
+        class="aa-indicator"
+        class:aa-indicator-empty={preferences.personalDictionary.length === 0}
+        class:aa-indicator-active={preferences.dictionaryPanelOpen}
+        aria-label={preferences.dictionaryPanelOpen
+          ? "Close personal dictionary"
+          : "Open personal dictionary"}
+        aria-pressed={preferences.dictionaryPanelOpen}
+        title="Personal dictionary  ⌘⇧D"
+        onclick={() => preferences.toggleDictionaryPanel()}
+      >
+        <span class="aa-label">Aa</span>
+        <span class="aa-sep">·</span>
+        <span class="aa-count"
+          >{preferences.personalDictionary.length === 0
+            ? "+"
+            : preferences.personalDictionary.length}</span
         >
       </button>
       <div class="mode-toggle" role="group" aria-label="Layout mode">
@@ -379,6 +400,53 @@
   }
 
   .fm-sep {
+    opacity: 0.5;
+  }
+
+  /* Personal dictionary indicator. Visually parallel to the FM indicator
+     so the two read as a coherent pair of "tools you can invoke from
+     here" — same sizing, same hover behavior, same active treatment. */
+  .aa-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+    background: transparent;
+    border: 1px solid var(--skrive-rule);
+    border-radius: 4px;
+    height: 24px;
+    padding: 0 0.5rem;
+    color: var(--skrive-muted);
+    cursor: pointer;
+    font: inherit;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    transition:
+      color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+      background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+      border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .aa-indicator:hover {
+    color: var(--skrive-fg);
+    border-color: var(--skrive-fg);
+  }
+
+  .aa-indicator.aa-indicator-active {
+    color: var(--skrive-fg);
+    background: var(--skrive-rule);
+    border-color: var(--skrive-fg);
+  }
+
+  .aa-indicator.aa-indicator-empty .aa-count {
+    opacity: 0.7;
+  }
+
+  .aa-label {
+    font-weight: 600;
+  }
+
+  .aa-sep {
     opacity: 0.5;
   }
 </style>

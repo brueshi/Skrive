@@ -34,6 +34,36 @@
 
   let dragBounds: { left: number; width: number } | null = null;
 
+  // Editor pulse: a brief background-tint flash on the editor pane
+  // whenever the system rewrites the active tab's body (currently the
+  // autosave's frontmatter auto-extract path). Watching the store's
+  // monotonic counter and applying a class for 400ms is enough — the
+  // CSS handles the rest. We compare against a remembered value so the
+  // initial render doesn't trigger a phantom pulse.
+  let editorFlashing = $state(false);
+  let lastSeenPulse = -1;
+  let pulseTimer: ReturnType<typeof setTimeout> | null = null;
+
+  $effect(() => {
+    const signal = project.editorPulseSignal;
+    if (signal === lastSeenPulse) return;
+    const isInitial = lastSeenPulse === -1;
+    lastSeenPulse = signal;
+    if (isInitial) return;
+    if (pulseTimer) clearTimeout(pulseTimer);
+    editorFlashing = true;
+    pulseTimer = setTimeout(() => {
+      editorFlashing = false;
+      pulseTimer = null;
+    }, 400);
+    return () => {
+      if (pulseTimer) {
+        clearTimeout(pulseTimer);
+        pulseTimer = null;
+      }
+    };
+  });
+
   function handlePointerDown(e: PointerEvent) {
     if (!container) return;
     const rect = container.getBoundingClientRect();
@@ -72,6 +102,7 @@
   {#if mode !== "preview"}
     <div
       class="pane editor-pane"
+      class:flashing={editorFlashing}
       style:flex-grow={mode === "split" ? editorFlex : 1}
     >
       <Editor value={body} {onChange} />
@@ -121,6 +152,39 @@
 
   .editor-pane {
     background: var(--skrive-bg);
+    position: relative;
+  }
+
+  /* Brief tinted overlay that fires when the system rewrites the body
+     out from under the user. The pseudo-element overlays the whole
+     editor surface, animates from transparent → selection-color →
+     transparent over 400ms on the mechanical ease curve, then is
+     dropped from the DOM when the `flashing` class clears. */
+  .editor-pane.flashing::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--skrive-selection);
+    pointer-events: none;
+    animation: skrive-editor-pulse 400ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  @keyframes skrive-editor-pulse {
+    0% {
+      opacity: 0;
+    }
+    20% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .editor-pane.flashing::after {
+      animation: none;
+    }
   }
 
   .preview-pane {

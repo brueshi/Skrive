@@ -71,6 +71,14 @@ pub struct AppUiState {
     pub recent_projects: Vec<RecentProject>,
     pub license: Option<String>,
     pub first_run_ms: Option<i64>,
+    /// Skrive-managed personal dictionary. Words on this list get
+    /// `spellcheck="false"` decorations on every occurrence in any open
+    /// file, layered on top of (and additive to) the OS spellchecker's
+    /// own personal dictionary. Default empty for fresh installs;
+    /// `#[serde(default)]` so app.json files written before this field
+    /// existed still load cleanly.
+    #[serde(default)]
+    pub personal_dictionary: Vec<String>,
 }
 
 impl Default for AppUiState {
@@ -81,6 +89,7 @@ impl Default for AppUiState {
             recent_projects: Vec::new(),
             license: None,
             first_run_ms: None,
+            personal_dictionary: Vec::new(),
         }
     }
 }

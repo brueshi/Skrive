@@ -15,6 +15,7 @@
 
   import { onMount, untrack } from "svelte";
   import { EditorState } from "@codemirror/state";
+  import type { Command } from "@codemirror/view";
   import {
     EditorView,
     keymap,
@@ -30,6 +31,8 @@
   import { GFM } from "@lezer/markdown";
   import { skriveTheme } from "./skrive-theme";
   import { inlinePreview } from "./decorations";
+  import { setPersonalDictionary } from "./decorations/spellcheck";
+  import { preferences } from "$lib/stores/preferences.svelte";
 
   type Props = {
     value?: string;
@@ -40,6 +43,20 @@
 
   let container: HTMLDivElement;
   let view: EditorView | null = null;
+
+  // ⌘' adds the word at the cursor to the personal dictionary. Lives
+  // here (rather than in +page.svelte's global keydown handler) because
+  // CodeMirror gives us `state.wordAt(pos)` which knows about word
+  // boundaries, and the keymap fires *before* the document keydown so
+  // it preempts any browser default.
+  const addWordAtCursorCommand: Command = (v) => {
+    const range = v.state.wordAt(v.state.selection.main.head);
+    if (!range) return false;
+    const word = v.state.doc.sliceString(range.from, range.to).trim();
+    if (word.length === 0) return false;
+    preferences.addPersonalWord(word);
+    return true;
+  };
 
   onMount(() => {
     const initialDoc = untrack(() => value);
@@ -65,7 +82,20 @@
           highlightActiveLine(),
           markdown({ extensions: GFM }),
           ...inlinePreview(),
-          keymap.of([...defaultKeymap, ...historyKeymap]),
+          // Hand spellcheck off to the OS / webview. WKWebView, WebView2,
+          // and WebKitGTK all run a system-grade spellchecker on
+          // contenteditable surfaces; CodeMirror's content surface is
+          // exactly that. We get the user's preferred language, the OS
+          // personal dictionary ("Learn Spelling"), and right-click
+          // suggestions for free. Phase 2.4 Step 2 will layer
+          // markdown-aware `spellcheck="false"` decorations on top so
+          // the OS doesn't try to correct code spans, URLs, or YAML.
+          EditorView.contentAttributes.of({ spellcheck: "true" }),
+          keymap.of([
+            { key: "Mod-'", run: addWordAtCursorCommand },
+            ...defaultKeymap,
+            ...historyKeymap,
+          ]),
           skriveTheme,
           updateListener,
           EditorView.lineWrapping,
@@ -91,6 +121,19 @@
         changes: { from: 0, to: current.length, insert: value },
       });
     }
+  });
+
+  // Bridge the Svelte rune for the personal dictionary into the
+  // CodeMirror state via a `setPersonalDictionary` StateEffect. The
+  // spellcheck plugin's StateField listens for this effect and rebuilds
+  // its decoration set whenever the list changes — adding or removing
+  // a word in the dictionary panel updates the editor instantly across
+  // all open files without us having to subscribe each plugin to the
+  // store individually.
+  $effect(() => {
+    if (!view) return;
+    const dict = preferences.personalDictionary;
+    view.dispatch({ effects: setPersonalDictionary.of(dict) });
   });
 </script>
 

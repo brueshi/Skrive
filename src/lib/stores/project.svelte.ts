@@ -38,6 +38,13 @@ let sidebarWidth = $state(260);
 // opens it as needed via ⌘⇧F or the header indicator.
 let frontmatterPanelOpen = $state(false);
 
+// Monotonically-increasing counter that the editor surface watches to
+// trigger a brief visual pulse whenever the system rewrites the body
+// out from under the user (e.g. autosave's frontmatter auto-extract).
+// The counter value is meaningless beyond "did it change since last time
+// I looked"; consumers compare against their own remembered value.
+let editorPulseSignal = $state(0);
+
 const DEFAULT_LAYOUT_MODE: LayoutMode = "raw";
 const DEFAULT_SPLIT_RATIO = 0.5;
 
@@ -166,6 +173,16 @@ function toggleFrontmatterPanelImpl(): void {
 }
 
 /**
+ * Bump `editorPulseSignal` so any subscriber (currently `SplitView`)
+ * runs a brief visual flash on the editor surface. Call this whenever
+ * the system rewrites the active tab's body out from under the user
+ * — the pulse is the breadcrumb that tells them "we touched this".
+ */
+function signalEditorPulseImpl(): void {
+  editorPulseSignal = editorPulseSignal + 1;
+}
+
+/**
  * Set the value of a frontmatter field on the active tab, creating it if
  * it doesn't exist. Called from the panel on every value commit. Mutates
  * in place so the autosave path picks up the change by reference.
@@ -287,6 +304,9 @@ export const project = {
   get frontmatterPanelOpen() {
     return frontmatterPanelOpen;
   },
+  get editorPulseSignal() {
+    return editorPulseSignal;
+  },
 
   openProject: openProjectImpl,
   openTab: openTabImpl,
@@ -302,6 +322,7 @@ export const project = {
   openFrontmatterPanel: openFrontmatterPanelImpl,
   closeFrontmatterPanel: closeFrontmatterPanelImpl,
   toggleFrontmatterPanel: toggleFrontmatterPanelImpl,
+  signalEditorPulse: signalEditorPulseImpl,
   updateActiveTabFrontmatter: updateActiveTabFrontmatterImpl,
   removeActiveTabFrontmatter: removeActiveTabFrontmatterImpl,
   renameActiveTabFrontmatterKey: renameActiveTabFrontmatterKeyImpl,

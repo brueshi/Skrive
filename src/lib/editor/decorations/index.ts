@@ -19,6 +19,11 @@ import { emphasisHandlers } from "./emphasis";
 import { headingHandlers } from "./headings";
 import { imageHandlers } from "./images";
 import { linkHandlers } from "./links";
+import {
+  personalDictionaryField,
+  spellcheckFrontmatterPlugin,
+  spellcheckHandlers,
+} from "./spellcheck";
 import { stableEmphasisField } from "./stable";
 
 const HANDLERS: HandlerMap = {
@@ -27,13 +32,33 @@ const HANDLERS: HandlerMap = {
   ...linkHandlers,
   ...codeHandlers,
   ...imageHandlers,
+  // Spellcheck handlers operate on node types that none of the other
+  // handlers register, so the merge is conflict-free. Inline code's
+  // spellcheck disable lives inside `codeHandlers` instead because that
+  // handler already mark-decorates the inner range and just adds the
+  // attribute alongside its existing class.
+  ...spellcheckHandlers,
 };
 
 export function inlinePreview() {
-  // Three pieces:
-  //   - The view plugin that folds markup on *non-cursor* lines.
+  // Five pieces:
+  //   - The view plugin that folds markup on *non-cursor* lines and
+  //     stamps `spellcheck="false"` on structural markdown regions.
   //   - The stable-emphasis state field that keeps bold/italic/strikethrough
   //     styling steady on the cursor line even when the parser briefly
   //     loses the span (e.g. trailing whitespace before the closing mark).
-  return [createInlinePlugin(HANDLERS), stableEmphasisField];
+  //   - The frontmatter spellcheck plugin, separate from the tree-walker
+  //     plugin because the markdown grammar doesn't expose frontmatter
+  //     as a node — we scan the document prefix ourselves.
+  //   - The personal dictionary state field, which tracks a list of
+  //     user-supplied words and stamps `spellcheck="false"` on every
+  //     occurrence of any listed word. The list is fed in via a
+  //     `setPersonalDictionary` StateEffect that Editor.svelte dispatches
+  //     whenever the corresponding Svelte rune changes.
+  return [
+    createInlinePlugin(HANDLERS),
+    stableEmphasisField,
+    spellcheckFrontmatterPlugin,
+    personalDictionaryField,
+  ];
 }

@@ -43,9 +43,16 @@ const inlineCodeHandler: NodeHandler = (node, ctx) => {
   if (!first || !last || first === last) return;
 
   // Style the inner text as code whether or not the cursor is on the line.
+  // Also disable the OS spellchecker on the same range — code identifiers
+  // are not English prose. We piggy-back on the same Decoration.mark to
+  // avoid an extra decoration; the wrapping span ends up with both a
+  // class and a `spellcheck="false"` attribute.
   if (last.from > first.to) {
     ctx.decorations.push(
-      Decoration.mark({ class: "cm-md-code" }).range(first.to, last.from),
+      Decoration.mark({
+        class: "cm-md-code",
+        attributes: { spellcheck: "false" },
+      }).range(first.to, last.from),
     );
   }
 
