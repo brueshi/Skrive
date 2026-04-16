@@ -151,6 +151,8 @@ Round-trip preservation is therefore Step 1. Nothing else in Phase 2.3 can land 
 
 ## Step 4 — Frontmatter panel UI
 
+**Status.** Done. `FrontmatterPanel.svelte`, `FrontmatterChipInput.svelte`, and the `FM · N` header indicator are wired through `+page.svelte`. Stable per-row IDs underpin the `#each` so renames update `row.key` in place rather than remounting the row — Tab navigation between key and value inputs works, and rows don't jump position on commit. The panel mounts as a direct child of `<main>` so it overlays the workspace from the top-right with the 180ms grid-row + opacity-fade animation. Auto-extract on save, preview-strip in the markdown pipeline, and lenient Rust parsing all landed alongside this step to support the typed-frontmatter authoring path. `formatError()` replaces every `String(err)` site so Rust error objects no longer surface as `[object Object]`.
+
 **Goal.** A header indicator plus a floating, invokable panel that shows and edits the current file's frontmatter. The panel is an *orthogonal tool*, not pinned chrome — no vertical space is spent when the user isn't actively editing frontmatter.
 
 **Deliverables.**
@@ -214,6 +216,8 @@ Round-trip preservation is therefore Step 1. Nothing else in Phase 2.3 can land 
 ---
 
 ## Step 5 — Autocomplete
+
+**Status.** Done. `SuggestionList.svelte` is the dumb dropdown component (suggestions array + selected index in, pick / hover events out). `FrontmatterPanel.svelte` owns the suggestion state and computes candidates from `project.schema`: key suggestions exclude already-used field names and rank by descending presence; value suggestions read from `FieldInfo.knownValues`. Keyboard handling matches the plan exactly — ↓/↑ navigate, Enter or Tab accept, Escape dismisses the dropdown only (event propagation stopped so the panel root's Escape handler doesn't also close the panel). Click-to-pick works alongside, with `mousedown` `preventDefault` so the input doesn't blur before the pick registers.
 
 **Goal.** Typing into a field key suggests known field names from the project schema. Typing into a field value suggests known values when the schema has a small enum-like set for that field.
 
