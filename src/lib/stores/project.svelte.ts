@@ -268,6 +268,47 @@ async function createFileImpl(relativePath: string): Promise<void> {
   await openTabImpl(relativePath);
 }
 
+/**
+ * Create a new subdirectory inside the currently open project. The sidebar
+ * picks it up after manifest refresh; empty dirs only show as a group once
+ * a file lives inside them, which matches the sidebar's directory-grouping
+ * model.
+ */
+async function createDirectoryImpl(relativePath: string): Promise<void> {
+  await invoke<void>("create_subdirectory", { path: relativePath });
+  await refreshManifestImpl();
+}
+
+/**
+ * Move a file in the project to the OS trash, close any tab that was
+ * editing it, and refresh the manifest. Dirty edits are dropped silently
+ * — OS trash is the safety net per the pre-dogfood plan's decision 4.
+ */
+async function deleteFileImpl(relativePath: string): Promise<void> {
+  await invoke<void>("delete_path", { path: relativePath });
+  const idx = tabs.findIndex((t) => t.path === relativePath);
+  if (idx !== -1) closeTabImpl(idx);
+  await refreshManifestImpl();
+}
+
+/**
+ * Move a directory (and its contents) to the OS trash. Closes every tab
+ * whose file lived under the directory; same dirty-drop policy as
+ * `deleteFile`.
+ */
+async function deleteDirectoryImpl(relativePath: string): Promise<void> {
+  await invoke<void>("delete_path", { path: relativePath });
+  const prefix = relativePath.endsWith("/") ? relativePath : relativePath + "/";
+  // Walk from the end so splice indexes stay valid during iteration.
+  for (let i = tabs.length - 1; i >= 0; i--) {
+    const path = tabs[i]?.path;
+    if (path && (path === relativePath || path.startsWith(prefix))) {
+      closeTabImpl(i);
+    }
+  }
+  await refreshManifestImpl();
+}
+
 // =========================== Public API ===========================
 
 export const project = {
@@ -330,4 +371,7 @@ export const project = {
   refreshManifest: refreshManifestImpl,
   createProject: createProjectImpl,
   createFile: createFileImpl,
+  createDirectory: createDirectoryImpl,
+  deleteFile: deleteFileImpl,
+  deleteDirectory: deleteDirectoryImpl,
 };

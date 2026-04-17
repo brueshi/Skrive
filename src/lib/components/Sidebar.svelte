@@ -1,6 +1,7 @@
 <script lang="ts">
   // The sidebar. Alphabetical, directory-grouped file list with an inline
-  // "new file" row and a currently-open highlight.
+  // "new file" / "new folder" row, a currently-open highlight, and right-
+  // click (or Delete-key) deletion via the OS trash.
   //
   // Grouping rule: files at the project root sit at the top of the list;
   // files inside directories are nested one level per directory. We do not
@@ -14,13 +15,32 @@
   // files, not thousands.
 
   import { project } from "$lib/stores/project.svelte";
+  import { preferences } from "$lib/stores/preferences.svelte";
   import { formatError } from "$lib/errors";
   import IconPlus from "$lib/icons/IconPlus.svelte";
+  import ContextMenu, {
+    type ContextMenuItem,
+  } from "$lib/components/ContextMenu.svelte";
+  import DeleteConfirmModal from "$lib/components/DeleteConfirmModal.svelte";
   import type { FileEntry } from "$lib/types";
 
-  let creatingFile = $state(false);
-  let newFileName = $state("");
+  // Creating state is a tri-state rather than two booleans so the "new file"
+  // and "new folder" flows can't both be open at once.
+  let creating = $state<"file" | "folder" | null>(null);
+  let newName = $state("");
   let createError = $state<string | null>(null);
+
+  // Pending delete target. When non-null, DeleteConfirmModal is mounted.
+  type DeleteTarget = { kind: "file" | "directory"; path: string; name: string };
+  let pendingDelete = $state<DeleteTarget | null>(null);
+
+  // Right-click context menu. Null when hidden.
+  type ContextMenuState = { x: number; y: number; items: ContextMenuItem[] };
+  let contextMenu = $state<ContextMenuState | null>(null);
+
+  // The "+" toolbar button opens a menu of create actions — it's anchored
+  // to the button position rather than mouse coords.
+  let plusButtonEl: HTMLButtonElement | null = $state(null);
 
   type Group = {
     dir: string; // "" for project root
@@ -63,42 +83,166 @@
     }
   }
 
-  function startCreateFile() {
-    creatingFile = true;
-    newFileName = "";
+  // ---------- Creation flow (file / folder) ----------
+
+  function startCreate(kind: "file" | "folder") {
+    creating = kind;
+    newName = "";
     createError = null;
   }
 
-  async function confirmCreateFile() {
-    const trimmed = newFileName.trim();
+  async function confirmCreate() {
+    const trimmed = newName.trim();
     if (!trimmed) {
-      cancelCreateFile();
+      cancelCreate();
       return;
     }
-    const fullName = trimmed.endsWith(".md") ? trimmed : `${trimmed}.md`;
     try {
-      await project.createFile(fullName);
-      creatingFile = false;
-      newFileName = "";
+      if (creating === "file") {
+        const fullName = trimmed.endsWith(".md") ? trimmed : `${trimmed}.md`;
+        await project.createFile(fullName);
+      } else if (creating === "folder") {
+        await project.createDirectory(trimmed);
+      }
+      creating = null;
+      newName = "";
       createError = null;
     } catch (e) {
       createError = formatError(e);
     }
   }
 
-  function cancelCreateFile() {
-    creatingFile = false;
-    newFileName = "";
+  function cancelCreate() {
+    creating = null;
+    newName = "";
     createError = null;
   }
 
-  function handleNewFileKey(e: KeyboardEvent) {
+  function handleNewKey(e: KeyboardEvent) {
     if (e.key === "Enter") {
       e.preventDefault();
-      confirmCreateFile();
+      confirmCreate();
     } else if (e.key === "Escape") {
       e.preventDefault();
-      cancelCreateFile();
+      cancelCreate();
+    }
+  }
+
+  function openPlusMenu() {
+    if (!plusButtonEl || creating) return;
+    const rect = plusButtonEl.getBoundingClientRect();
+    contextMenu = {
+      x: rect.left,
+      y: rect.bottom + 2,
+      items: [
+        { label: "New file", onClick: () => startCreate("file") },
+        { label: "New folder", onClick: () => startCreate("folder") },
+      ],
+    };
+  }
+
+  // ---------- Delete flow ----------
+
+  function requestDeleteFile(file: FileEntry) {
+    const target: DeleteTarget = {
+      kind: "file",
+      path: file.path,
+      name: file.name,
+    };
+    if (preferences.skipDeleteConfirmation) {
+      void runDelete(target);
+    } else {
+      pendingDelete = target;
+    }
+  }
+
+  function requestDeleteDirectory(dir: string) {
+    // The visible name is the last segment of the relative path.
+    const lastSep = dir.lastIndexOf("/");
+    const name = lastSep === -1 ? dir : dir.slice(lastSep + 1);
+    const target: DeleteTarget = { kind: "directory", path: dir, name };
+    if (preferences.skipDeleteConfirmation) {
+      void runDelete(target);
+    } else {
+      pendingDelete = target;
+    }
+  }
+
+  async function runDelete(target: DeleteTarget) {
+    try {
+      if (target.kind === "file") {
+        await project.deleteFile(target.path);
+      } else {
+        await project.deleteDirectory(target.path);
+      }
+    } catch (e) {
+      // Swallow-and-log the silent path; the modal path surfaces errors
+      // inline via DeleteConfirmModal's own try/catch.
+      console.error("Failed to delete", target.path, e);
+    }
+  }
+
+  async function confirmPendingDelete() {
+    if (!pendingDelete) return;
+    const target = pendingDelete;
+    if (target.kind === "file") {
+      await project.deleteFile(target.path);
+    } else {
+      await project.deleteDirectory(target.path);
+    }
+  }
+
+  // ---------- Context-menu triggers ----------
+
+  function openFileContextMenu(e: MouseEvent, file: FileEntry) {
+    e.preventDefault();
+    contextMenu = {
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        {
+          label: "Delete…",
+          shortcut: "⌫",
+          variant: "destructive",
+          onClick: () => requestDeleteFile(file),
+        },
+      ],
+    };
+  }
+
+  function openDirectoryContextMenu(e: MouseEvent, dir: string) {
+    e.preventDefault();
+    contextMenu = {
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        {
+          label: "Delete folder…",
+          shortcut: "⌫",
+          variant: "destructive",
+          onClick: () => requestDeleteDirectory(dir),
+        },
+      ],
+    };
+  }
+
+  // ---------- Keyboard delete on focused row ----------
+
+  function handleFileKey(e: KeyboardEvent, file: FileEntry) {
+    // Delete / Backspace (plus Mac's Cmd-Backspace) triggers the delete
+    // flow. We deliberately don't gate on metaKey — a bare Backspace on
+    // a focused sidebar row matches VS Code / Finder behavior and the
+    // confirmation modal is the safety net.
+    if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault();
+      requestDeleteFile(file);
+    }
+  }
+
+  function handleDirectoryKey(e: KeyboardEvent, dir: string) {
+    if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault();
+      requestDeleteDirectory(dir);
     }
   }
 </script>
@@ -107,26 +251,27 @@
   <header class="section-header">
     <span class="title">Files</span>
     <button
+      bind:this={plusButtonEl}
       type="button"
       class="icon-button"
-      aria-label="New file"
-      title="New file"
-      onclick={startCreateFile}
-      disabled={creatingFile}
+      aria-label="New file or folder"
+      title="New file or folder"
+      onclick={openPlusMenu}
+      disabled={creating !== null}
     >
       <IconPlus size={16} />
     </button>
   </header>
 
-  {#if creatingFile}
+  {#if creating !== null}
     <div class="new-file-row">
       <!-- svelte-ignore a11y_autofocus -->
       <input
         type="text"
-        bind:value={newFileName}
-        onkeydown={handleNewFileKey}
-        onblur={confirmCreateFile}
-        placeholder="filename.md"
+        bind:value={newName}
+        onkeydown={handleNewKey}
+        onblur={confirmCreate}
+        placeholder={creating === "file" ? "filename.md" : "folder-name"}
         autofocus
       />
       {#if createError}
@@ -135,7 +280,7 @@
     </div>
   {/if}
 
-  {#if (project.manifest?.files.length ?? 0) === 0 && !creatingFile}
+  {#if (project.manifest?.files.length ?? 0) === 0 && creating === null}
     <p class="empty-hint">
       This project has no markdown files yet. Click <strong>+</strong> to create
       one.
@@ -145,7 +290,17 @@
   <div class="file-groups">
     {#each groups as group (group.dir)}
       {#if group.dir !== ""}
-        <div class="dir-label" title={group.dir}>{group.dir}</div>
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <div
+          class="dir-label"
+          title={group.dir}
+          tabindex="0"
+          role="button"
+          oncontextmenu={(e) => openDirectoryContextMenu(e, group.dir)}
+          onkeydown={(e) => handleDirectoryKey(e, group.dir)}
+        >
+          {group.dir}
+        </div>
       {/if}
       <ul class="files" class:nested={group.dir !== ""}>
         {#each group.files as file (file.path)}
@@ -155,6 +310,8 @@
               class="file"
               class:active={project.activeTab?.path === file.path}
               onclick={() => handleOpenFile(file.path)}
+              oncontextmenu={(e) => openFileContextMenu(e, file)}
+              onkeydown={(e) => handleFileKey(e, file)}
               title={file.path}
             >
               {file.name}
@@ -165,6 +322,28 @@
     {/each}
   </div>
 </aside>
+
+{#if contextMenu}
+  <ContextMenu
+    x={contextMenu.x}
+    y={contextMenu.y}
+    items={contextMenu.items}
+    onDismiss={() => {
+      contextMenu = null;
+    }}
+  />
+{/if}
+
+{#if pendingDelete}
+  <DeleteConfirmModal
+    name={pendingDelete.name}
+    isDirectory={pendingDelete.kind === "directory"}
+    onConfirm={confirmPendingDelete}
+    onClose={() => {
+      pendingDelete = null;
+    }}
+  />
+{/if}
 
 <style>
   .sidebar {
@@ -282,6 +461,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    cursor: default;
+  }
+
+  .dir-label:focus {
+    outline: none;
+    color: var(--skrive-fg);
+    background: var(--skrive-rule);
   }
 
   ul {
@@ -311,6 +497,11 @@
   }
 
   .file:hover {
+    background: var(--skrive-rule);
+  }
+
+  .file:focus {
+    outline: none;
     background: var(--skrive-rule);
   }
 

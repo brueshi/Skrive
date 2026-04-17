@@ -79,6 +79,12 @@ pub struct AppUiState {
     /// existed still load cleanly.
     #[serde(default)]
     pub personal_dictionary: Vec<String>,
+    /// When true, the sidebar's delete flow skips the confirmation modal
+    /// and goes straight to the OS trash. Flipped by the "Don't ask again"
+    /// checkbox in `DeleteConfirmModal`. `#[serde(default)]` so app.json
+    /// files written before this field existed still load cleanly.
+    #[serde(default)]
+    pub skip_delete_confirmation: bool,
 }
 
 impl Default for AppUiState {
@@ -90,6 +96,7 @@ impl Default for AppUiState {
             license: None,
             first_run_ms: None,
             personal_dictionary: Vec::new(),
+            skip_delete_confirmation: false,
         }
     }
 }

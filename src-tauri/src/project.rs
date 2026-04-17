@@ -328,6 +328,55 @@ pub fn create_new_file(root: &Path, rel: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Confine an existing path (file or directory) to `root`. Unlike
+/// `resolve_within`, this accepts non-Markdown paths because the caller —
+/// the sidebar's delete flow — needs to trash folders and (eventually)
+/// other file types. Refuses to return the project root itself so a
+/// stray "delete this row" on the sidebar's implicit root can't wipe
+/// the project.
+pub fn resolve_existing_within(root: &Path, rel: &Path) -> Result<PathBuf> {
+    for component in rel.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                return Err(Error::PathOutsideProject);
+            }
+            _ => {}
+        }
+    }
+    let canonical_root = root.canonicalize()?;
+    let absolute = canonical_root.join(rel).canonicalize()?;
+    if !absolute.starts_with(&canonical_root) {
+        return Err(Error::PathOutsideProject);
+    }
+    if absolute == canonical_root {
+        return Err(Error::PathOutsideProject);
+    }
+    Ok(absolute)
+}
+
+/// Create a new directory at the given project-relative path. Parent
+/// directories are created as needed. Refuses if the path already exists.
+/// Path confinement uses the same rules as `create_new_file`.
+pub fn create_new_directory(root: &Path, rel: &Path) -> Result<()> {
+    for component in rel.components() {
+        match component {
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => {
+                return Err(Error::PathOutsideProject);
+            }
+            _ => {}
+        }
+    }
+    let canonical_root = root.canonicalize()?;
+    let absolute = canonical_root.join(rel);
+    if absolute.exists() {
+        return Err(Error::Io(format!("{} already exists", rel.display())));
+    }
+    std::fs::create_dir_all(&absolute)?;
+    Ok(())
+}
+
 /// Confine `rel` to `root`. Symlinks and `..` traversal that would escape the
 /// project are rejected. The returned path is absolute.
 pub fn resolve_within(root: &Path, rel: &Path) -> Result<PathBuf> {

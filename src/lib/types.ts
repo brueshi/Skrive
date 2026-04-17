@@ -108,6 +108,12 @@ export type AppUiState = {
    * file, additive to the OS spellchecker's own personal dictionary.
    */
   personalDictionary: string[];
+  /**
+   * When true, the sidebar's delete flow skips the confirmation modal
+   * and trashes the target immediately. Flipped by the "Don't ask again"
+   * checkbox in the delete modal.
+   */
+  skipDeleteConfirmation: boolean;
 };
 
 export type RecentProject = {

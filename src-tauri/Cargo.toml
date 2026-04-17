@@ -28,4 +28,5 @@ pulldown-cmark = "0.12"
 serde_yaml_ng = "0.10"
 sha2 = "0.10"
 hex = "0.4"
+trash = "5"
 

@@ -25,6 +25,7 @@ let lastOpenedProject = $state<string | null>(null);
 let recentProjects = $state<RecentProject[]>([]);
 let firstRunMs = $state<number | null>(null);
 let license = $state<string | null>(null);
+let skipDeleteConfirmation = $state(false);
 
 // Panel open/closed state. *Session only* — the dictionary panel is a
 // transient tool, not a layout preference, so it doesn't get persisted
@@ -54,6 +55,7 @@ async function loadOnceImpl(): Promise<void> {
       : [];
     firstRunMs = state.firstRunMs ?? null;
     license = state.license ?? null;
+    skipDeleteConfirmation = Boolean(state.skipDeleteConfirmation);
   } catch (err) {
     // A read failure (corrupt JSON, missing file the Rust side
     // didn't recreate, permission denied) is non-fatal. We keep the
@@ -79,6 +81,7 @@ async function flushSave(): Promise<void> {
     license,
     firstRunMs,
     personalDictionary,
+    skipDeleteConfirmation,
   };
   try {
     await invoke("save_app_state", { uiState });
@@ -136,6 +139,19 @@ function toggleDictionaryPanelImpl(): void {
   dictionaryPanelOpen = !dictionaryPanelOpen;
 }
 
+// =========================== Delete-confirm preference ===========================
+
+/**
+ * Persist the "Don't ask again" choice from the delete confirmation modal.
+ * Kept as a setter rather than a toggle so callers can only opt *in* from
+ * the checkbox path — resetting it back to false is a future Settings
+ * surface concern, not a per-delete one.
+ */
+function setSkipDeleteConfirmationImpl(value: boolean): void {
+  skipDeleteConfirmation = value;
+  scheduleSave();
+}
+
 // =========================== Public API ===========================
 
 export const preferences = {
@@ -157,6 +173,9 @@ export const preferences = {
   get dictionaryPanelOpen() {
     return dictionaryPanelOpen;
   },
+  get skipDeleteConfirmation() {
+    return skipDeleteConfirmation;
+  },
 
   loadOnce: loadOnceImpl,
   addPersonalWord: addPersonalWordImpl,
@@ -164,4 +183,5 @@ export const preferences = {
   openDictionaryPanel: openDictionaryPanelImpl,
   closeDictionaryPanel: closeDictionaryPanelImpl,
   toggleDictionaryPanel: toggleDictionaryPanelImpl,
+  setSkipDeleteConfirmation: setSkipDeleteConfirmationImpl,
 };

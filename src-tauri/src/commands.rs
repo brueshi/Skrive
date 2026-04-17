@@ -183,6 +183,44 @@ pub async fn create_file(
     project::create_new_file(&root, &PathBuf::from(&path))
 }
 
+/// Create a new subdirectory inside the currently open project at the given
+/// project-relative path. Parent directories are created as needed. Distinct
+/// from `create_directory` (which is the bootstrap "make a new project folder"
+/// command); this one requires an open project and enforces path confinement.
+#[tauri::command]
+pub async fn create_subdirectory(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    let root = {
+        let project = state.project.lock().await;
+        let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
+        project.root.clone()
+    };
+    project::create_new_directory(&root, &PathBuf::from(&path))
+}
+
+// =========================== Deletion commands ===========================
+
+/// Move a project-relative file or directory to the OS trash. Works for both
+/// because `trash::delete` does. Path confinement is enforced by
+/// `project::resolve_existing_within`, which also refuses the project root
+/// itself.
+#[tauri::command]
+pub async fn delete_path(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    let root = {
+        let project = state.project.lock().await;
+        let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
+        project.root.clone()
+    };
+    let absolute = project::resolve_existing_within(&root, &PathBuf::from(&path))?;
+    trash::delete(&absolute).map_err(|e| Error::Io(format!("failed to move to trash: {}", e)))?;
+    Ok(())
+}
+
 // =========================== Persistence commands ===========================
 
 #[tauri::command]
