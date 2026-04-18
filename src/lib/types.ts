@@ -57,6 +57,28 @@ export type Tab = {
   dirty: boolean;
   layoutMode: LayoutMode;
   splitDividerRatio: number;
+  /**
+   * A one-shot request for the editor to position its selection at a
+   * specific line/column after mount. Set by `openTabAtLine` when search
+   * results are clicked, then left in place — the editor honors the
+   * `nonce` each time it changes, which lets repeated jumps to the same
+   * location still fire.
+   */
+  pendingSelection: PendingSelection | null;
+};
+
+export type PendingSelection = {
+  /** 1-indexed line (what CodeMirror and humans want). */
+  line: number;
+  /** 0-indexed character column into the line. */
+  column: number;
+  /** Characters to select starting at column. 0 places a cursor. */
+  length: number;
+  /**
+   * Monotonic stamp that changes on every jump. Consumers subscribe
+   * to this so repeated jumps to the same line still fire.
+   */
+  nonce: number;
 };
 
 export type LayoutMode = "raw" | "split" | "preview";
@@ -128,6 +150,26 @@ export type RecentFile = {
   /** Project-relative file path. Forward-slash separated. */
   filePath: string;
   openedMs: number;
+};
+
+// =========================== Search types ===========================
+// Mirror `src-tauri/src/project.rs::{SearchOptions, SearchHit}`.
+
+export type SearchOptions = {
+  caseSensitive: boolean;
+};
+
+export type SearchHit = {
+  /** Project-relative file path, forward-slash separated. */
+  path: string;
+  /** 1-indexed line number, what CodeMirror wants. */
+  lineNumber: number;
+  /** 0-indexed character offset into `snippet` where the match begins. */
+  column: number;
+  /** Character length of the match (equals the query for case-sensitive). */
+  matchLength: number;
+  /** Full line content that contains the match. */
+  snippet: string;
 };
 
 export type RecentProject = {

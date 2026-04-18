@@ -37,6 +37,7 @@
   import FrontmatterPanel from "$lib/components/FrontmatterPanel.svelte";
   import PersonalDictionaryPanel from "$lib/components/PersonalDictionaryPanel.svelte";
   import CommandPalette from "$lib/components/CommandPalette.svelte";
+  import SearchModal from "$lib/components/SearchModal.svelte";
 
   type WatcherPayload = {
     path: string;
@@ -46,6 +47,7 @@
   let reloadPrompt = $state<string | null>(null);
   let saveError = $state<string | null>(null);
   let commandPaletteOpen = $state(false);
+  let searchModalOpen = $state(false);
 
   const autoSaveHooks = {
     onSaved: (path: string) => {
@@ -156,9 +158,23 @@
   function handleKeydown(e: KeyboardEvent) {
     if (!(e.metaKey || e.ctrlKey)) return;
 
-    // ⌘⇧F toggles the frontmatter panel. The shift gate means plain ⌘F
-    // stays available for a future find-in-file feature without collision.
-    if (e.shiftKey && e.key.toLowerCase() === "f") {
+    // ⌘F opens project-wide search. We depart from the VS Code
+    // convention (where ⌘F is find-in-file) because Skrive targets
+    // writers more than code power-users, project search is the most
+    // frequent "find" action here, and find-in-file is deliberately
+    // unshipped. If we add it later, ⌘E is the slot.
+    if (!e.shiftKey && !e.altKey && e.key.toLowerCase() === "f") {
+      if (project.hasProject) {
+        e.preventDefault();
+        searchModalOpen = !searchModalOpen;
+      }
+      return;
+    }
+
+    // ⌘⇧F toggles the frontmatter panel. Requires an active tab —
+    // frontmatter is per-file and the panel has nothing to show
+    // otherwise.
+    if (e.shiftKey && !e.altKey && e.key.toLowerCase() === "f") {
       if (project.activeTab) {
         e.preventDefault();
         project.toggleFrontmatterPanel();
@@ -295,6 +311,7 @@
               ratio={project.activeTab.splitDividerRatio}
               body={activeBody}
               onChange={handleChange}
+              selection={project.activeTab.pendingSelection}
             />
           {/key}
         {:else}
@@ -338,6 +355,10 @@
 
 {#if commandPaletteOpen}
   <CommandPalette onClose={() => (commandPaletteOpen = false)} />
+{/if}
+
+{#if searchModalOpen}
+  <SearchModal onClose={() => (searchModalOpen = false)} />
 {/if}
 
 <style>

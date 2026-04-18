@@ -27,6 +27,7 @@ pub fn run() {
             commands::create_subdirectory,
             commands::create_file,
             commands::delete_path,
+            commands::search_project,
             commands::load_project_state,
             commands::save_project_state,
             commands::load_app_state,

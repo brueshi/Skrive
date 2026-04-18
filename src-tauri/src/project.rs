@@ -198,7 +198,10 @@ pub fn scan(root: &Path) -> Result<(ProjectManifest, LinkGraph)> {
     for entry in WalkDir::new(&canonical_root)
         .follow_links(false)
         .into_iter()
-        .filter_entry(|e| !is_hidden(e.file_name()))
+        // depth==0 is the root itself — let it pass even when its file
+        // name starts with `.` (e.g. tempdirs on macOS). The hidden-dir
+        // filter only applies to descendants.
+        .filter_entry(|e| e.depth() == 0 || !is_hidden(e.file_name()))
     {
         let entry = match entry {
             Ok(e) => e,
@@ -326,6 +329,151 @@ pub fn create_new_file(root: &Path, rel: &Path) -> Result<()> {
     }
     std::fs::write(absolute, "")?;
     Ok(())
+}
+
+// =========================== Project-wide search ===========================
+
+/// Options accepted by `search`. `case_sensitive: false` is plain ASCII case
+/// folding — enough for the dogfood content that drives this feature.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchOptions {
+    #[serde(default)]
+    pub case_sensitive: bool,
+}
+
+impl Default for SearchOptions {
+    fn default() -> Self {
+        Self {
+            case_sensitive: false,
+        }
+    }
+}
+
+/// A single hit inside a file. `line_number` is 1-indexed (what humans and
+/// CodeMirror both want); `column` is the 0-indexed character offset into
+/// `snippet` where the match begins.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    pub path: String,
+    pub line_number: u32,
+    pub column: u32,
+    pub match_length: u32,
+    pub snippet: String,
+}
+
+/// Cap on total hits a single search returns. A pathological query (e.g.
+/// searching for `.`) can otherwise fill the frontend's result list with
+/// more rows than are useful. The cap is deliberately generous — the
+/// command palette's 20-row cap is about attention, this one is about
+/// IPC payload size.
+const SEARCH_HIT_CAP: usize = 500;
+
+/// Walk the project and collect matches across every Markdown file.
+///
+/// Reuses the same walker filter as `scan` — hidden files and directories
+/// are skipped; non-Markdown files are skipped because the manifest only
+/// knows about Markdown and search results that can't be opened are noise.
+/// Naive line-by-line scan is fine for dogfood-scale projects; TODO: swap
+/// in `grep-searcher` if it becomes the bottleneck.
+pub fn search(
+    root: &Path,
+    query: &str,
+    options: SearchOptions,
+) -> Result<Vec<SearchHit>> {
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let canonical_root = root.canonicalize()?;
+    let needle_owned: String;
+    let needle: &str = if options.case_sensitive {
+        query
+    } else {
+        needle_owned = query.to_lowercase();
+        &needle_owned
+    };
+
+    let mut hits: Vec<SearchHit> = Vec::new();
+
+    'walker: for entry in WalkDir::new(&canonical_root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| e.depth() == 0 || !is_hidden(e.file_name()))
+    {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if !entry.file_type().is_file() || !is_markdown(entry.path()) {
+            continue;
+        }
+
+        let rel = match entry.path().strip_prefix(&canonical_root) {
+            Ok(p) => p.to_path_buf(),
+            Err(_) => continue,
+        };
+        let rel_str = relpath_to_string(&rel);
+
+        let source = match std::fs::read_to_string(entry.path()) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+
+        for (line_idx, line) in source.lines().enumerate() {
+            // Build a search-space copy of the line. For case-insensitive
+            // matches we lowercase; for ASCII content (our dogfood case)
+            // this preserves byte offsets so we can reuse them against
+            // the original line when emitting snippets.
+            let lowered_line: String;
+            let search_line: &str = if options.case_sensitive {
+                line
+            } else {
+                lowered_line = line.to_lowercase();
+                &lowered_line
+            };
+
+            let mut cursor = 0usize;
+            while cursor <= search_line.len() {
+                let slice = match search_line.get(cursor..) {
+                    Some(s) => s,
+                    None => break,
+                };
+                let pos = match slice.find(needle) {
+                    Some(p) => p,
+                    None => break,
+                };
+                let abs = cursor + pos;
+                let column_chars =
+                    search_line.get(..abs).map(|s| s.chars().count()).unwrap_or(0);
+                let match_char_len = needle.chars().count();
+                hits.push(SearchHit {
+                    path: rel_str.clone(),
+                    line_number: (line_idx as u32) + 1,
+                    column: column_chars as u32,
+                    match_length: match_char_len as u32,
+                    snippet: line.to_string(),
+                });
+                if hits.len() >= SEARCH_HIT_CAP {
+                    break 'walker;
+                }
+                let advance = needle.len().max(1);
+                cursor = abs + advance;
+            }
+        }
+    }
+
+    // Stable sort: by path, then by line, then by column. The frontend
+    // groups by path so a stable order makes scanning easier.
+    hits.sort_by(|a, b| {
+        a.path
+            .cmp(&b.path)
+            .then(a.line_number.cmp(&b.line_number))
+            .then(a.column.cmp(&b.column))
+    });
+
+    Ok(hits)
 }
 
 /// Confine an existing path (file or directory) to `root`. Unlike
@@ -594,5 +742,90 @@ mod tests {
         let schema = infer_schema(&[]);
         assert_eq!(schema.file_count, 0);
         assert!(schema.fields.is_empty());
+    }
+
+    // ================== search tests ==================
+
+    fn write_temp_project(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for (name, body) in files {
+            let path = dir.path().join(name);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(path, body).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn search_finds_case_insensitive_match_across_files() {
+        let dir = write_temp_project(&[
+            ("a.md", "hello world\nsome other line\n"),
+            ("b.md", "Hello again\nand another\n"),
+            ("ignored.txt", "hello from txt"),
+        ]);
+        let hits = search(
+            dir.path(),
+            "hello",
+            SearchOptions {
+                case_sensitive: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 2, "one hit per md file, none in .txt");
+        assert_eq!(hits[0].path, "a.md");
+        assert_eq!(hits[0].line_number, 1);
+        assert_eq!(hits[0].column, 0);
+        assert_eq!(hits[1].path, "b.md");
+        assert_eq!(hits[1].line_number, 1);
+    }
+
+    #[test]
+    fn search_case_sensitive_flag_respects_case() {
+        let dir = write_temp_project(&[("a.md", "hello\nHello\nHELLO\n")]);
+        let hits = search(
+            dir.path(),
+            "Hello",
+            SearchOptions {
+                case_sensitive: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].line_number, 2);
+    }
+
+    #[test]
+    fn search_reports_multiple_hits_on_same_line() {
+        let dir = write_temp_project(&[("a.md", "foo bar foo\n")]);
+        let hits = search(
+            dir.path(),
+            "foo",
+            SearchOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].column, 0);
+        assert_eq!(hits[1].column, 8);
+    }
+
+    #[test]
+    fn search_empty_query_returns_no_hits() {
+        let dir = write_temp_project(&[("a.md", "content\n")]);
+        let hits = search(dir.path(), "", SearchOptions::default()).unwrap();
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn search_skips_hidden_directories() {
+        let dir = write_temp_project(&[
+            ("a.md", "visible\n"),
+            (".hidden/b.md", "hidden\n"),
+        ]);
+        let hits = search(dir.path(), "hidden", SearchOptions::default()).unwrap();
+        // ".hidden/b.md" contains the substring "hidden" in its body but
+        // the walker filters it out; "visible" line in a.md doesn't match.
+        assert!(hits.is_empty());
     }
 }

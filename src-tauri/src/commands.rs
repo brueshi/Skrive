@@ -8,7 +8,9 @@
 use crate::error::{Error, Result};
 use crate::frontmatter;
 use crate::persistence::{self, AppUiState, ProjectUiState};
-use crate::project::{self, FileContent, ProjectManifest, ProjectState};
+use crate::project::{
+    self, FileContent, ProjectManifest, ProjectState, SearchHit, SearchOptions,
+};
 use crate::watcher;
 use notify::RecommendedWatcher;
 use serde::Serialize;
@@ -219,6 +221,27 @@ pub async fn delete_path(
     let absolute = project::resolve_existing_within(&root, &PathBuf::from(&path))?;
     trash::delete(&absolute).map_err(|e| Error::Io(format!("failed to move to trash: {}", e)))?;
     Ok(())
+}
+
+// =========================== Search command ===========================
+
+/// Project-wide plain-text search. Case-insensitive by default; toggled
+/// per call. Returns at most `SEARCH_HIT_CAP` hits sorted by path and
+/// line. Empty query returns an empty list — the frontend debounces its
+/// own calls, so this is just a guardrail.
+#[tauri::command]
+pub async fn search_project(
+    query: String,
+    options: Option<SearchOptions>,
+    state: State<'_, AppState>,
+) -> Result<Vec<SearchHit>> {
+    let root = {
+        let project = state.project.lock().await;
+        let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
+        project.root.clone()
+    };
+    let opts = options.unwrap_or_default();
+    project::search(&root, &query, opts)
 }
 
 // =========================== Persistence commands ===========================

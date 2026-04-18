@@ -15,6 +15,7 @@ import { preferences } from "$lib/stores/preferences.svelte";
 import type {
   FileContent,
   LayoutMode,
+  PendingSelection,
   ProjectManifest,
   ProjectSchema,
   Tab,
@@ -75,9 +76,39 @@ async function openTabImpl(path: string): Promise<void> {
     dirty: false,
     layoutMode: DEFAULT_LAYOUT_MODE,
     splitDividerRatio: DEFAULT_SPLIT_RATIO,
+    pendingSelection: null,
   });
   activeTabIndex = tabs.length - 1;
   bumpRecentFile(path);
+}
+
+/**
+ * Open a tab (switching to it if already open) and request that the
+ * editor position its selection at the given line/column on mount.
+ * Used by the search modal when a result is clicked.
+ */
+async function openTabAtLineImpl(
+  path: string,
+  line: number,
+  column: number,
+  length: number,
+): Promise<void> {
+  await openTabImpl(path);
+  const tab = tabs[activeTabIndex];
+  if (!tab) return;
+  tab.pendingSelection = nextPendingSelection(line, column, length);
+}
+
+// Monotonic counter so repeated jumps produce distinct nonces even if
+// two clicks land in the same millisecond.
+let pendingSelectionCounter = 0;
+function nextPendingSelection(
+  line: number,
+  column: number,
+  length: number,
+): PendingSelection {
+  pendingSelectionCounter += 1;
+  return { line, column, length, nonce: pendingSelectionCounter };
 }
 
 // Keep the cross-project recent-files LRU in sync with tab opens. Split
@@ -386,4 +417,5 @@ export const project = {
   createDirectory: createDirectoryImpl,
   deleteFile: deleteFileImpl,
   deleteDirectory: deleteDirectoryImpl,
+  openTabAtLine: openTabAtLineImpl,
 };

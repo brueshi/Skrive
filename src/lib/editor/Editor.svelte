@@ -13,7 +13,7 @@
   // for any document change — even programmatic ones from the parent — so we
   // never have two sources of truth fighting each other.
 
-  import { onMount, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { EditorState } from "@codemirror/state";
   import type { Command } from "@codemirror/view";
   import {
@@ -22,6 +22,7 @@
     highlightActiveLine,
     drawSelection,
   } from "@codemirror/view";
+  import type { PendingSelection } from "$lib/types";
   import {
     history,
     defaultKeymap,
@@ -37,9 +38,20 @@
   type Props = {
     value?: string;
     onChange?: (next: string) => void;
+    /**
+     * One-shot selection request: when `nonce` changes, move the
+     * cursor (and optionally select a span) to the given line/column.
+     * The parent never needs to clear it — a fresh nonce replays the
+     * effect.
+     */
+    selection?: PendingSelection | null;
   };
 
-  let { value = $bindable(""), onChange }: Props = $props();
+  let {
+    value = $bindable(""),
+    onChange,
+    selection = null,
+  }: Props = $props();
 
   let container: HTMLDivElement;
   let view: EditorView | null = null;
@@ -121,6 +133,40 @@
         changes: { from: 0, to: current.length, insert: value },
       });
     }
+  });
+
+  // Apply a pending selection request from the parent (e.g. a search-
+  // result jump). The nonce is what we track so repeated jumps to the
+  // same line still fire. Wrapped in `tick()` because on first mount the
+  // effect may run before `view` is set; yielding to the microtask queue
+  // lets onMount complete first.
+  function applyPendingSelection(sel: PendingSelection) {
+    if (!view) return;
+    const doc = view.state.doc;
+    const line = Math.min(Math.max(sel.line, 1), doc.lines);
+    const lineInfo = doc.line(line);
+    const anchor = Math.min(lineInfo.from + sel.column, lineInfo.to);
+    const head = Math.min(anchor + sel.length, lineInfo.to);
+    view.dispatch({
+      selection: { anchor, head },
+      effects: EditorView.scrollIntoView(anchor, { y: "center" }),
+    });
+    view.focus();
+  }
+
+  let lastAppliedNonce = -1;
+  $effect(() => {
+    const sel = selection;
+    if (!sel) return;
+    if (sel.nonce === lastAppliedNonce) return;
+    (async () => {
+      await tick();
+      if (!view) return;
+      const current = selection;
+      if (!current || current.nonce === lastAppliedNonce) return;
+      lastAppliedNonce = current.nonce;
+      applyPendingSelection(current);
+    })();
   });
 
   // Bridge the Svelte rune for the personal dictionary into the

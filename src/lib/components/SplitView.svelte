@@ -18,16 +18,21 @@
   import Editor from "$lib/editor/Editor.svelte";
   import Preview from "$lib/preview/Preview.svelte";
   import { project } from "$lib/stores/project.svelte";
-  import type { LayoutMode } from "$lib/types";
+  import type { LayoutMode, PendingSelection } from "$lib/types";
 
   type Props = {
     mode: LayoutMode;
     ratio: number;
     body: string;
     onChange: (next: string) => void;
+    /**
+     * One-shot request from the project store to move the editor's
+     * selection. Consumed by Editor.svelte via nonce.
+     */
+    selection?: PendingSelection | null;
   };
 
-  let { mode, ratio, body, onChange }: Props = $props();
+  let { mode, ratio, body, onChange, selection = null }: Props = $props();
 
   let container: HTMLDivElement;
   let dragging = $state(false);
@@ -105,7 +110,7 @@
       class:flashing={editorFlashing}
       style:flex-grow={mode === "split" ? editorFlex : 1}
     >
-      <Editor value={body} {onChange} />
+      <Editor value={body} {onChange} {selection} />
     </div>
   {/if}
 
