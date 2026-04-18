@@ -502,6 +502,48 @@ pub fn resolve_existing_within(root: &Path, rel: &Path) -> Result<PathBuf> {
     Ok(absolute)
 }
 
+/// Resolve the project root for a file that Skrive was asked to open from
+/// outside (Finder, Explorer, Linux file manager, CLI). Walks up from the
+/// file's parent directory, checking each ancestor for `.skrive.toml` or
+/// `.git`. The first ancestor that has either becomes the project root.
+/// If the walk hits the filesystem root, the file's parent dir becomes an
+/// ad-hoc project root — a folder full of Markdown gets to act like a
+/// project even without the marker files.
+///
+/// Returns `(project_root, relative_file_path)`. The caller then opens
+/// the project via the normal flow and focuses the given file.
+pub fn resolve_project_for_file(file_path: &Path) -> Result<(PathBuf, PathBuf)> {
+    let absolute = file_path.canonicalize()?;
+    if !absolute.is_file() {
+        return Err(Error::Io(format!(
+            "{} is not a file",
+            absolute.display()
+        )));
+    }
+    let parent = absolute.parent().ok_or(Error::PathOutsideProject)?;
+
+    // Walk up looking for project markers.
+    let mut candidate = parent.to_path_buf();
+    let mut found_root: Option<PathBuf> = None;
+    loop {
+        if candidate.join(".skrive.toml").exists() || candidate.join(".git").exists() {
+            found_root = Some(candidate.clone());
+            break;
+        }
+        match candidate.parent() {
+            Some(p) if p != candidate => candidate = p.to_path_buf(),
+            _ => break,
+        }
+    }
+
+    let root = found_root.unwrap_or_else(|| parent.to_path_buf());
+    let rel = absolute
+        .strip_prefix(&root)
+        .map_err(|_| Error::PathOutsideProject)?
+        .to_path_buf();
+    Ok((root, rel))
+}
+
 /// Create a new directory at the given project-relative path. Parent
 /// directories are created as needed. Refuses if the path already exists.
 /// Path confinement uses the same rules as `create_new_file`.
@@ -827,5 +869,65 @@ mod tests {
         // ".hidden/b.md" contains the substring "hidden" in its body but
         // the walker filters it out; "visible" line in a.md doesn't match.
         assert!(hits.is_empty());
+    }
+
+    // ================== resolve_project_for_file tests ==================
+
+    #[test]
+    fn resolve_finds_skrive_toml_marker() {
+        let dir = write_temp_project(&[
+            (".skrive.toml", "[project]\nname = \"t\"\n"),
+            ("notes/a.md", "body\n"),
+        ]);
+        let file = dir.path().join("notes/a.md");
+        let (root, rel) = resolve_project_for_file(&file).unwrap();
+        assert_eq!(root.canonicalize().unwrap(), dir.path().canonicalize().unwrap());
+        assert_eq!(rel, PathBuf::from("notes/a.md"));
+    }
+
+    #[test]
+    fn resolve_finds_git_marker() {
+        // A .git directory is enough — mirrors how editors treat any git
+        // repo as a project.
+        let dir = write_temp_project(&[
+            (".git/HEAD", "ref: refs/heads/main\n"),
+            ("a.md", "body\n"),
+        ]);
+        let file = dir.path().join("a.md");
+        let (root, _rel) = resolve_project_for_file(&file).unwrap();
+        assert_eq!(root.canonicalize().unwrap(), dir.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn resolve_falls_back_to_file_parent() {
+        // No .skrive.toml or .git anywhere in the ancestry — the file's
+        // immediate parent becomes the ad-hoc project root.
+        let dir = write_temp_project(&[("lonely/solo.md", "body\n")]);
+        let file = dir.path().join("lonely/solo.md");
+        let (root, rel) = resolve_project_for_file(&file).unwrap();
+        assert_eq!(
+            root.canonicalize().unwrap(),
+            dir.path().join("lonely").canonicalize().unwrap()
+        );
+        assert_eq!(rel, PathBuf::from("solo.md"));
+    }
+
+    #[test]
+    fn resolve_nested_marker_is_preferred_over_ancestor() {
+        // When nested markers exist, we pick the *nearest* ancestor —
+        // matches the "a git repo inside a git repo" case where the
+        // inner repo is what the user cares about.
+        let dir = write_temp_project(&[
+            (".git/HEAD", "ref: refs/heads/main\n"),
+            ("inner/.skrive.toml", "[project]\nname = \"i\"\n"),
+            ("inner/nested.md", "body\n"),
+        ]);
+        let file = dir.path().join("inner/nested.md");
+        let (root, rel) = resolve_project_for_file(&file).unwrap();
+        assert_eq!(
+            root.canonicalize().unwrap(),
+            dir.path().join("inner").canonicalize().unwrap()
+        );
+        assert_eq!(rel, PathBuf::from("nested.md"));
     }
 }

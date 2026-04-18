@@ -120,23 +120,6 @@ output_dir = "./dist"
 
 ---
 
-### P2. What does Skrive look like with no project open?
-
-**Context.** Edge case the build outline doesn't address. A user just installed Skrive, hasn't opened a project yet. What do they see?
-
-**Options.**
-- Empty editor with a centered "Open project" button.
-- A welcome document that's actually a real Markdown file shipped with the app.
-- A scratchpad mode — a single ephemeral document the user can write in without opening a project.
-
-**Leaning.** Welcome document. Doubles as onboarding. Could use this very repo's `README.md` as a sample.
-
-**Blocks.** Phase 6.2 — not blocking earlier work.
-
-**Status.** Open.
-
----
-
 ## Monetization
 
 ### M1. How do we trace leaked license keys without a server?
@@ -229,5 +212,15 @@ Project path hashing: SHA-256 of the canonical absolute path, truncated to 16 he
 **Schema versioning.** Both JSON files carry a `schemaVersion: 1` field. When we change shape, bump and write a migration. Cheap insurance.
 
 **Orphaned state cleanup.** Deferred. v0.1 accepts accumulation (files are tiny). Garbage collection on startup is a ~15-line follow-up if it becomes noticeable.
+
+---
+
+### P2. What does Skrive look like with no project open?
+
+**Resolved 2026-04-18:** No project = no editor. The empty state shows the project picker; the primary way to "arrive at a project" is by opening a Markdown file from outside (Finder, Explorer, `open -a Skrive x.md`, CLI). Skrive walks up from the file for `.skrive.toml` or `.git` — the first marker wins. No marker? The file's parent directory becomes an ad-hoc project. Welcome-document and scratchpad modes were both cut: onboarding is just "open a file and it works."
+
+**Original context.** Edge case the build outline didn't address. A user just installed Skrive, hasn't opened a project yet. What do they see? Options considered were an empty-editor-with-button, a bundled welcome document, and a scratchpad mode.
+
+**Why this route.** The welcome-document idea lost because a doc shipped inside the app can't be edited in place, and the "copy it somewhere first" step is exactly the friction we're trying to remove. Scratchpad mode introduces a second persistence regime for a single buffer that never grows into anything. The auto-detect-project path (Step 4 of [`pre-dogfood-plan.md`](pre-dogfood-plan.md#step-4--open-with-skrive--p2-resolution)) gives us the onboarding moment for free: double-click a .md, you're writing.
 
 ---

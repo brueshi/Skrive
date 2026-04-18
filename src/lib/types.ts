@@ -172,6 +172,21 @@ export type SearchHit = {
   snippet: string;
 };
 
+// =========================== Open-with-Skrive ===========================
+
+/**
+ * Request emitted (and queued at startup) when the OS asks Skrive to open
+ * a file — Finder double-click, `open -a Skrive x.md`, Explorer
+ * double-click, `skrive file.md` on the CLI. Mirrors
+ * `src-tauri/src/commands.rs::OpenFileRequest`.
+ */
+export type OpenFileRequest = {
+  /** Canonical project root path, suitable for passing to openProject. */
+  projectRoot: string;
+  /** Project-relative file path. Forward-slash separated. */
+  filePath: string;
+};
+
 export type RecentProject = {
   path: string;
   name: string;

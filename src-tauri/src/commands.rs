@@ -15,9 +15,9 @@ use crate::watcher;
 use notify::RecommendedWatcher;
 use serde::Serialize;
 use serde_json::{Map, Value};
-use std::path::PathBuf;
-use std::sync::Arc;
-use tauri::{AppHandle, State};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex as StdMutex};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
 
 /// Top-level state shared across all commands.
@@ -25,6 +25,24 @@ use tokio::sync::Mutex;
 pub struct AppState {
     pub project: Arc<Mutex<Option<ProjectState>>>,
     pub watcher: Arc<Mutex<Option<RecommendedWatcher>>>,
+    /// File-open request received from the OS before the frontend has
+    /// finished booting. The frontend drains this on mount via
+    /// `take_pending_open_file`; any subsequent opens are delivered as
+    /// `skrive://open-file-request` events. Uses a std Mutex because
+    /// the accessors never need to cross an await point.
+    pub pending_open_file: Arc<StdMutex<Option<OpenFileRequest>>>,
+}
+
+/// Payload the frontend receives when the OS asks Skrive to open a file.
+/// Both fields are absolute-ish as far as the frontend is concerned —
+/// `project_root` is a canonical OS path suitable for passing back to
+/// `open_project`; `file_path` is project-relative, forward-slash
+/// separated like the rest of the manifest surface.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenFileRequest {
+    pub project_root: String,
+    pub file_path: String,
 }
 
 #[tauri::command]
@@ -274,4 +292,58 @@ pub async fn save_app_state(
     ui_state: AppUiState,
 ) -> Result<()> {
     persistence::write_app_state(&app, &ui_state)
+}
+
+// =========================== Open-with-Skrive plumbing ===========================
+
+/// Drained by the frontend on mount — covers the case where the OS told
+/// us to open a file before the webview was ready to listen for events.
+/// Returns `None` after the slot has been read; subsequent OS open-file
+/// requests arrive as live `skrive://open-file-request` events.
+#[tauri::command]
+pub async fn take_pending_open_file(
+    state: State<'_, AppState>,
+) -> Result<Option<OpenFileRequest>> {
+    let slot = state.pending_open_file.lock();
+    match slot {
+        Ok(mut s) => Ok(s.take()),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Resolve a filesystem path into an `OpenFileRequest`, stash it in the
+/// pending slot, and emit a live event so any already-booted webview
+/// reacts immediately. Callers are the macOS `RunEvent::Opened` hook,
+/// the single-instance plugin callback, and the initial-argv walk in
+/// `setup()`. Non-existent paths and non-Markdown files are silently
+/// ignored — file-association filtering is the OS's job, this helper
+/// is just defensive.
+pub fn queue_file_open(app: &AppHandle, path: &Path) {
+    if !path.exists() || !is_markdown_path(path) {
+        return;
+    }
+    let request = match build_open_request(path) {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    let state: State<'_, AppState> = app.state();
+    if let Ok(mut slot) = state.pending_open_file.lock() {
+        *slot = Some(request.clone());
+    }
+    let _ = app.emit("skrive://open-file-request", request);
+}
+
+fn build_open_request(path: &Path) -> Result<OpenFileRequest> {
+    let (root, rel) = project::resolve_project_for_file(path)?;
+    Ok(OpenFileRequest {
+        project_root: root.to_string_lossy().into_owned(),
+        file_path: rel.to_string_lossy().replace('\\', "/"),
+    })
+}
+
+fn is_markdown_path(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some("md") | Some("markdown")
+    )
 }

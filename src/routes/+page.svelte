@@ -17,7 +17,7 @@
 
   import { project } from "$lib/stores/project.svelte";
   import { preferences } from "$lib/stores/preferences.svelte";
-  import type { LayoutMode } from "$lib/types";
+  import type { LayoutMode, OpenFileRequest } from "$lib/types";
   import { formatError } from "$lib/errors";
   import {
     scheduleSave,
@@ -111,6 +111,14 @@
 
   // ======================== Project-open side effects ========================
 
+  // File requested from outside (Finder double-click, single-instance CLI
+  // launch, etc.) but whose project isn't the one currently open. We
+  // remember the relative path here and the project-switch effect below
+  // picks it up once the new project's restore + watcher are in place.
+  // Kept as a plain `let` (not `$state`) so reading it inside the effect
+  // doesn't create a reactive dependency that would re-trigger the run.
+  let pendingFileAfterRestore: string | null = null;
+
   // When a project opens for the first time (or switches), kick off the
   // watcher and restore persisted UI state. Tracked by project.manifest?.root
   // so changing projects triggers the effect cleanly.
@@ -132,6 +140,18 @@
         await invoke("watch_project");
       } catch (err) {
         console.warn("Failed to start file watcher:", err);
+      }
+      // If this project-switch was driven by an open-with request, the
+      // target file waits here until restore finishes so it lands as the
+      // active tab rather than being buried under the restored set.
+      if (pendingFileAfterRestore) {
+        const target = pendingFileAfterRestore;
+        pendingFileAfterRestore = null;
+        try {
+          await project.openTab(target);
+        } catch (err) {
+          console.error("Failed to focus requested file:", target, err);
+        }
       }
     })();
   });
@@ -236,6 +256,7 @@
   // ======================== Watcher listener ========================
 
   let unlistenWatcher: UnlistenFn | null = null;
+  let unlistenOpenFile: UnlistenFn | null = null;
   onMount(() => {
     // Hydrate app-wide preferences (personal dictionary, recent
     // projects, etc.) from disk before the rest of the UI starts
@@ -250,13 +271,60 @@
           handleWatcherEvent(event.payload);
         },
       );
+      unlistenOpenFile = await listen<OpenFileRequest>(
+        "skrive://open-file-request",
+        (event) => {
+          void handleOpenFileRequest(event.payload);
+        },
+      );
+
+      // Drain any file request that landed before the webview was ready
+      // to listen — e.g. launching Skrive by double-clicking a .md in
+      // Finder. If nothing is pending the command returns null and we
+      // fall through to the normal empty-state.
+      try {
+        const pending = await invoke<OpenFileRequest | null>(
+          "take_pending_open_file",
+        );
+        if (pending) void handleOpenFileRequest(pending);
+      } catch (err) {
+        console.warn("Failed to drain pending open-file request:", err);
+      }
     })();
 
     return () => {
       unlistenWatcher?.();
+      unlistenOpenFile?.();
       resetProjectStateTarget();
     };
   });
+
+  async function handleOpenFileRequest(req: OpenFileRequest) {
+    if (project.manifest?.root === req.projectRoot) {
+      // Same project already open — straight to the file.
+      try {
+        await project.openTab(req.filePath);
+      } catch (err) {
+        console.error("Failed to open requested file:", req.filePath, err);
+      }
+      return;
+    }
+
+    // Different (or no) project open. Queue the file and trigger the
+    // switch; the project-open effect picks up the pending target after
+    // restore completes so the requested file ends as the active tab.
+    pendingFileAfterRestore = req.filePath;
+    try {
+      await project.openProject(req.projectRoot);
+    } catch (err) {
+      pendingFileAfterRestore = null;
+      console.error(
+        "Failed to open requested project:",
+        req.projectRoot,
+        err,
+      );
+    }
+  }
 
   function handleWatcherEvent(payload: WatcherPayload) {
     const { path, kind } = payload;
