@@ -12,7 +12,7 @@
 // keystroke when the user is editing the personal dictionary panel.
 
 import { invoke } from "@tauri-apps/api/core";
-import type { AppUiState, RecentProject } from "$lib/types";
+import type { AppUiState, RecentFile, RecentProject } from "$lib/types";
 
 const DEBOUNCE_MS = 400;
 const SCHEMA_VERSION = 1;
@@ -26,6 +26,12 @@ let recentProjects = $state<RecentProject[]>([]);
 let firstRunMs = $state<number | null>(null);
 let license = $state<string | null>(null);
 let skipDeleteConfirmation = $state(false);
+let recentFiles = $state<RecentFile[]>([]);
+
+// Cap the persisted list so app.json stays small. A writer who opens
+// 50 distinct files across all projects is well-served; anything past
+// that is cold history and not worth the storage cost.
+const RECENT_FILES_CAP = 50;
 
 // Panel open/closed state. *Session only* — the dictionary panel is a
 // transient tool, not a layout preference, so it doesn't get persisted
@@ -56,6 +62,7 @@ async function loadOnceImpl(): Promise<void> {
     firstRunMs = state.firstRunMs ?? null;
     license = state.license ?? null;
     skipDeleteConfirmation = Boolean(state.skipDeleteConfirmation);
+    recentFiles = Array.isArray(state.recentFiles) ? state.recentFiles : [];
   } catch (err) {
     // A read failure (corrupt JSON, missing file the Rust side
     // didn't recreate, permission denied) is non-fatal. We keep the
@@ -82,6 +89,7 @@ async function flushSave(): Promise<void> {
     firstRunMs,
     personalDictionary,
     skipDeleteConfirmation,
+    recentFiles,
   };
   try {
     await invoke("save_app_state", { uiState });
@@ -152,6 +160,41 @@ function setSkipDeleteConfirmationImpl(value: boolean): void {
   scheduleSave();
 }
 
+// =========================== Recent files ===========================
+
+/**
+ * Record a file-open in the recent list. Idempotent for repeated opens
+ * of the same file — the existing entry is removed and re-pushed with
+ * a fresh timestamp so recency sort is trivial. Capped so the persisted
+ * list stays small.
+ */
+function pushRecentFileImpl(projectPath: string, filePath: string): void {
+  if (!projectPath || !filePath) return;
+  const next = recentFiles.filter(
+    (r) => !(r.projectPath === projectPath && r.filePath === filePath),
+  );
+  next.unshift({ projectPath, filePath, openedMs: Date.now() });
+  if (next.length > RECENT_FILES_CAP) next.length = RECENT_FILES_CAP;
+  recentFiles = next;
+  scheduleSave();
+}
+
+/**
+ * Drop any recent-file entry whose path is gone from disk. The command
+ * palette calls this when it notices a stale entry so the next render
+ * is clean. Returns `true` if anything changed, to let callers skip
+ * redundant re-renders.
+ */
+function removeRecentFileImpl(projectPath: string, filePath: string): boolean {
+  const next = recentFiles.filter(
+    (r) => !(r.projectPath === projectPath && r.filePath === filePath),
+  );
+  if (next.length === recentFiles.length) return false;
+  recentFiles = next;
+  scheduleSave();
+  return true;
+}
+
 // =========================== Public API ===========================
 
 export const preferences = {
@@ -176,6 +219,9 @@ export const preferences = {
   get skipDeleteConfirmation() {
     return skipDeleteConfirmation;
   },
+  get recentFiles() {
+    return recentFiles;
+  },
 
   loadOnce: loadOnceImpl,
   addPersonalWord: addPersonalWordImpl,
@@ -184,4 +230,6 @@ export const preferences = {
   closeDictionaryPanel: closeDictionaryPanelImpl,
   toggleDictionaryPanel: toggleDictionaryPanelImpl,
   setSkipDeleteConfirmation: setSkipDeleteConfirmationImpl,
+  pushRecentFile: pushRecentFileImpl,
+  removeRecentFile: removeRecentFileImpl,
 };

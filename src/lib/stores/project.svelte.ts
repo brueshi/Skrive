@@ -11,6 +11,7 @@
 // other without `this` binding or circular reference issues.
 
 import { invoke } from "@tauri-apps/api/core";
+import { preferences } from "$lib/stores/preferences.svelte";
 import type {
   FileContent,
   LayoutMode,
@@ -63,6 +64,7 @@ async function openTabImpl(path: string): Promise<void> {
   const existing = tabs.findIndex((t) => t.path === path);
   if (existing !== -1) {
     activeTabIndex = existing;
+    bumpRecentFile(path);
     return;
   }
 
@@ -75,6 +77,16 @@ async function openTabImpl(path: string): Promise<void> {
     splitDividerRatio: DEFAULT_SPLIT_RATIO,
   });
   activeTabIndex = tabs.length - 1;
+  bumpRecentFile(path);
+}
+
+// Keep the cross-project recent-files LRU in sync with tab opens. Split
+// out so both the "already open, switching to it" and "opened fresh"
+// branches stay one-liners.
+function bumpRecentFile(path: string): void {
+  const root = manifest?.root;
+  if (!root) return;
+  preferences.pushRecentFile(root, path);
 }
 
 function closeTabImpl(index: number): void {

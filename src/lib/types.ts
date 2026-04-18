@@ -114,6 +114,20 @@ export type AppUiState = {
    * checkbox in the delete modal.
    */
   skipDeleteConfirmation: boolean;
+  /**
+   * Flat LRU of recently opened files across projects. The command
+   * palette filters to the currently open project and renders the top
+   * matches as the empty-query default.
+   */
+  recentFiles: RecentFile[];
+};
+
+export type RecentFile = {
+  /** Canonical project root path. Matches `ProjectManifest.root`. */
+  projectPath: string;
+  /** Project-relative file path. Forward-slash separated. */
+  filePath: string;
+  openedMs: number;
 };
 
 export type RecentProject = {

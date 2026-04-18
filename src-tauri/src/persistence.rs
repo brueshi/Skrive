@@ -85,6 +85,22 @@ pub struct AppUiState {
     /// files written before this field existed still load cleanly.
     #[serde(default)]
     pub skip_delete_confirmation: bool,
+    /// Flat LRU of recently opened files across all projects. The
+    /// command palette filters to the currently open project and
+    /// renders the top N as the empty-query default. Capped to a
+    /// small cap on the write side to keep app.json bounded.
+    #[serde(default)]
+    pub recent_files: Vec<RecentFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentFile {
+    /// Canonical project root path. Matches `ProjectManifest.root`.
+    pub project_path: String,
+    /// Project-relative file path, forward-slash separated.
+    pub file_path: String,
+    pub opened_ms: i64,
 }
 
 impl Default for AppUiState {
@@ -97,6 +113,7 @@ impl Default for AppUiState {
             first_run_ms: None,
             personal_dictionary: Vec::new(),
             skip_delete_confirmation: false,
+            recent_files: Vec::new(),
         }
     }
 }

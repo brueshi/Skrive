@@ -36,6 +36,7 @@
   import SplitView from "$lib/components/SplitView.svelte";
   import FrontmatterPanel from "$lib/components/FrontmatterPanel.svelte";
   import PersonalDictionaryPanel from "$lib/components/PersonalDictionaryPanel.svelte";
+  import CommandPalette from "$lib/components/CommandPalette.svelte";
 
   type WatcherPayload = {
     path: string;
@@ -44,6 +45,7 @@
 
   let reloadPrompt = $state<string | null>(null);
   let saveError = $state<string | null>(null);
+  let commandPaletteOpen = $state(false);
 
   const autoSaveHooks = {
     onSaved: (path: string) => {
@@ -170,6 +172,18 @@
     if (e.shiftKey && e.key.toLowerCase() === "d") {
       e.preventDefault();
       preferences.toggleDictionaryPanel();
+      return;
+    }
+
+    // ⌘P opens the file switcher; only meaningful when a project is open.
+    // ⌘⇧P is reserved for a future command-runner palette — left
+    // deliberately unbound so hitting it today no-ops cleanly rather than
+    // stealing focus for something else.
+    if (!e.shiftKey && e.key.toLowerCase() === "p") {
+      if (project.hasProject) {
+        e.preventDefault();
+        commandPaletteOpen = !commandPaletteOpen;
+      }
       return;
     }
 
@@ -320,6 +334,10 @@
       </div>
     </div>
   </main>
+{/if}
+
+{#if commandPaletteOpen}
+  <CommandPalette onClose={() => (commandPaletteOpen = false)} />
 {/if}
 
 <style>
