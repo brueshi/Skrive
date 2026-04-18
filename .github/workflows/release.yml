@@ -1,0 +1,105 @@
+# Build and release Skrive on every `v*` tag push.
+#
+# macOS: universal .dmg (aarch64 + x86_64), signed with a Developer ID
+# Application cert and notarized with Apple. End users get a no-warning
+# install as long as the cert + notarization secrets are present.
+#
+# Windows: .msi, unsigned. SmartScreen will warn on first run; users
+# click "More info → Run anyway". Proper Windows code-signing is
+# deferred until a public launch (EV cert cost + hardware token).
+#
+# The release is created as a draft + prerelease so we can review and
+# publish manually once the action finishes.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Manual dispatch for testing the build without cutting a tag. No
+  # release is created for these runs — artifacts land in the job
+  # summary only.
+  workflow_dispatch:
+
+jobs:
+  build:
+    permissions:
+      # tauri-action creates the GitHub Release and uploads the bundles.
+      contents: write
+
+    strategy:
+      # Keep failures isolated so a Windows hiccup doesn't abort an
+      # already-working macOS build.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target universal-apple-darwin
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # The universal macOS target requires both Apple Silicon and
+          # Intel toolchains; Windows only needs the default.
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build, sign, notarize, and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          # macOS Developer ID signing. Ignored on Windows (the env
+          # vars just don't match anything on that runner). See
+          # docs/release-process.md for how to populate these.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+
+          # Notarization — requires an app-specific password, not the
+          # regular Apple ID password.
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+          # Tauri updater signing. Separate from Apple code signing —
+          # this is the keypair Tauri uses to verify update bundles on
+          # the client side, independent of OS-level signing. When
+          # these are set, tauri-action generates `latest.json` next
+          # to the platform artifacts and uploads it to the release,
+          # which the app then polls.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+        with:
+          # Only create a release when a tag actually pushed. Manual
+          # workflow_dispatch runs pass an empty tagName which tells
+          # tauri-action to skip the release step.
+          tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
+          releaseName: "Skrive v__VERSION__"
+          releaseBody: |
+            Pre-alpha build. See [install instructions](https://github.com/${{ github.repository }}/blob/main/docs/install.md) for each platform.
+          releaseDraft: true
+          prerelease: true
+          args: ${{ matrix.args }}

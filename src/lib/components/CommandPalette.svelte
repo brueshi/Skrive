@@ -16,7 +16,9 @@
   import { tick } from "svelte";
   import { project } from "$lib/stores/project.svelte";
   import { preferences } from "$lib/stores/preferences.svelte";
+  import { notify } from "$lib/stores/notifications.svelte";
   import { rankItems, type ScoredEntry } from "$lib/editor/fuzzy";
+  import { formatError } from "$lib/errors";
   import type { FileEntry } from "$lib/types";
 
   type Props = {
@@ -118,7 +120,10 @@
     try {
       await project.openTab(selected.item.path);
     } catch (err) {
-      console.error("Failed to open file:", selected.item.path, err);
+      notify.error(
+        `Couldn't open ${selected.item.path}: ${formatError(err)}`,
+        err,
+      );
     }
   }
 

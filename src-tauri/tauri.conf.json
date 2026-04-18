@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Skrive",
+        "title": "",
         "width": 1200,
         "height": 800,
         "minWidth": 800,
@@ -26,6 +26,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -42,5 +43,13 @@
         "mimeType": "text/markdown"
       }
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk1NEM5MjY0REZBMjYzQTAKUldTZ1k2TGZaSkpNbGFHWG9uam0yeHg2cUFjL3B2eXdLeVVDU050QVZha3JmYUpOTWpndkFEOXkK",
+      "endpoints": [
+        "https://github.com/brueshi/Skrive/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

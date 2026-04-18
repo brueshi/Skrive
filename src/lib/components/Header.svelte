@@ -16,6 +16,27 @@
   import IconSidebarToggle from "$lib/icons/IconSidebarToggle.svelte";
   import IconDotUnsaved from "$lib/icons/IconDotUnsaved.svelte";
   import IconX from "$lib/icons/IconX.svelte";
+  import ContextMenu, {
+    type ContextMenuItem,
+  } from "$lib/components/ContextMenu.svelte";
+  import {
+    openProjectFromPicker,
+    closeCurrentProject,
+    openRecentProject,
+  } from "$lib/project-actions";
+  import { checkForUpdatesManual } from "$lib/updater";
+
+  type Props = {
+    // +page.svelte owns the autosave hooks; we pass them through so the
+    // close-project flush uses the same error-surfacing path as
+    // everything else.
+    autoSaveHooks: {
+      onSaved: (path: string) => void;
+      onError: (path: string, err: unknown) => void;
+    };
+  };
+
+  let { autoSaveHooks }: Props = $props();
 
   let projectName = $derived.by(() => {
     const root = project.manifest?.root;
@@ -45,6 +66,48 @@
     e.stopPropagation();
     project.closeTab(index);
   }
+
+  // Project menu: anchored below the project-name button. Shows Open /
+  // Close plus up to a handful of recent-project entries. We deliberately
+  // skip separators (the ContextMenu component doesn't support them) and
+  // let the label shape carry the grouping.
+  let projectMenuEl: HTMLButtonElement | null = $state(null);
+  let projectMenu = $state<{
+    x: number;
+    y: number;
+    items: ContextMenuItem[];
+  } | null>(null);
+
+  function openProjectMenu() {
+    if (!projectMenuEl) return;
+    const rect = projectMenuEl.getBoundingClientRect();
+    const items: ContextMenuItem[] = [
+      {
+        label: "Open project…",
+        shortcut: "⌘O",
+        onClick: () => void openProjectFromPicker(),
+      },
+      {
+        label: "Close project",
+        shortcut: "⌘⇧W",
+        onClick: () => void closeCurrentProject(autoSaveHooks),
+      },
+      {
+        label: "Check for updates…",
+        onClick: () => void checkForUpdatesManual(),
+      },
+    ];
+    const recent = preferences.recentProjects
+      .filter((r) => r.path !== project.manifest?.root)
+      .slice(0, 5);
+    for (const r of recent) {
+      items.push({
+        label: r.name,
+        onClick: () => void openRecentProject(r.path),
+      });
+    }
+    projectMenu = { x: rect.left, y: rect.bottom + 4, items };
+  }
 </script>
 
 <header class="header">
@@ -59,10 +122,18 @@
     >
       <IconSidebarToggle size={16} shown={project.sidebarVisible} />
     </button>
-    <span class="brand">Skrive</span>
-    <span class="project-name" title={project.manifest?.root ?? ""}
-      >{projectName}</span
+    <button
+      bind:this={projectMenuEl}
+      type="button"
+      class="project-name"
+      title={project.manifest?.root ?? ""}
+      aria-haspopup="menu"
+      aria-expanded={projectMenu !== null}
+      onclick={openProjectMenu}
     >
+      <span class="project-name-text">{projectName}</span>
+      <span class="project-name-caret" aria-hidden="true">▾</span>
+    </button>
   </div>
 
   <div class="tabs" role="tablist">
@@ -174,6 +245,17 @@
   </div>
 </header>
 
+{#if projectMenu}
+  <ContextMenu
+    x={projectMenu.x}
+    y={projectMenu.y}
+    items={projectMenu.items}
+    onDismiss={() => {
+      projectMenu = null;
+    }}
+  />
+{/if}
+
 <style>
   .header {
     display: flex;
@@ -195,21 +277,41 @@
     min-width: 0;
   }
 
-  .brand {
-    font-weight: 600;
-    font-size: 0.8125rem;
-    letter-spacing: -0.01em;
-    color: var(--skrive-fg);
-  }
-
   .project-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    background: transparent;
+    border: none;
+    padding: 0.125rem 0.375rem;
+    border-radius: 3px;
+    font: inherit;
     font-size: 0.6875rem;
     color: var(--skrive-muted);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
     max-width: 14rem;
+    cursor: pointer;
+    transition:
+      color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+      background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .project-name:hover,
+  .project-name[aria-expanded="true"] {
+    color: var(--skrive-fg);
+    background: var(--skrive-rule);
+  }
+
+  .project-name-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .project-name-caret {
+    font-size: 0.625rem;
+    opacity: 0.6;
   }
 
   .tabs {

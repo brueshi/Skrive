@@ -32,6 +32,9 @@ let recentFiles = $state<RecentFile[]>([]);
 // 50 distinct files across all projects is well-served; anything past
 // that is cold history and not worth the storage cost.
 const RECENT_FILES_CAP = 50;
+// Recent projects are a far smaller set — the EmptyState list is the
+// main consumer and showing more than ~10 becomes noise.
+const RECENT_PROJECTS_CAP = 10;
 
 // Panel open/closed state. *Session only* — the dictionary panel is a
 // transient tool, not a layout preference, so it doesn't get persisted
@@ -195,6 +198,36 @@ function removeRecentFileImpl(projectPath: string, filePath: string): boolean {
   return true;
 }
 
+// =========================== Recent projects ===========================
+
+/**
+ * Record a project-open in the recent-projects LRU. Same pattern as
+ * `pushRecentFile`: existing entries move to the front with a refreshed
+ * timestamp, so recency sort stays simple. The EmptyState and the
+ * (eventual) project menu read straight off this list.
+ */
+function pushRecentProjectImpl(path: string, name: string): void {
+  if (!path || !name) return;
+  const next = recentProjects.filter((r) => r.path !== path);
+  next.unshift({ path, name, lastOpenedMs: Date.now() });
+  if (next.length > RECENT_PROJECTS_CAP) next.length = RECENT_PROJECTS_CAP;
+  recentProjects = next;
+  scheduleSave();
+}
+
+/**
+ * Remove a recent-projects entry. Used by the EmptyState × button so
+ * the user can prune projects they've moved, renamed, or are done with,
+ * and by cleanup paths when a path is confirmed gone from disk.
+ */
+function removeRecentProjectImpl(path: string): boolean {
+  const next = recentProjects.filter((r) => r.path !== path);
+  if (next.length === recentProjects.length) return false;
+  recentProjects = next;
+  scheduleSave();
+  return true;
+}
+
 // =========================== Public API ===========================
 
 export const preferences = {
@@ -232,4 +265,6 @@ export const preferences = {
   setSkipDeleteConfirmation: setSkipDeleteConfirmationImpl,
   pushRecentFile: pushRecentFileImpl,
   removeRecentFile: removeRecentFileImpl,
+  pushRecentProject: pushRecentProjectImpl,
+  removeRecentProject: removeRecentProjectImpl,
 };

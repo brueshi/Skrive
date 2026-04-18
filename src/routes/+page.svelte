@@ -17,13 +17,16 @@
 
   import { project } from "$lib/stores/project.svelte";
   import { preferences } from "$lib/stores/preferences.svelte";
+  import { notify } from "$lib/stores/notifications.svelte";
   import type { LayoutMode, OpenFileRequest } from "$lib/types";
   import { formatError } from "$lib/errors";
   import {
     scheduleSave,
     flushSave,
+    flushAllPendingSaves,
     isRecentSelfWrite,
   } from "$lib/persistence/autosave";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import {
     restoreProjectState,
     queueSaveProjectState,
@@ -38,6 +41,12 @@
   import PersonalDictionaryPanel from "$lib/components/PersonalDictionaryPanel.svelte";
   import CommandPalette from "$lib/components/CommandPalette.svelte";
   import SearchModal from "$lib/components/SearchModal.svelte";
+  import Toasts from "$lib/components/Toasts.svelte";
+  import {
+    openProjectFromPicker,
+    closeCurrentProject,
+  } from "$lib/project-actions";
+  import { checkForUpdatesOnStartup } from "$lib/updater";
 
   type WatcherPayload = {
     path: string;
@@ -45,18 +54,15 @@
   };
 
   let reloadPrompt = $state<string | null>(null);
-  let saveError = $state<string | null>(null);
   let commandPaletteOpen = $state(false);
   let searchModalOpen = $state(false);
 
   const autoSaveHooks = {
     onSaved: (path: string) => {
       project.markTabSaved(path);
-      saveError = null;
     },
     onError: (path: string, err: unknown) => {
-      console.error("Failed to save", path, err);
-      saveError = formatError(err);
+      notify.error(`Couldn't save ${path}: ${formatError(err)}`, err);
     },
     /**
      * Fired when the save driver pulled a leading frontmatter block out
@@ -101,7 +107,7 @@
     try {
       await project.reloadTab(path);
     } catch (err) {
-      console.error("Failed to reload", path, err);
+      notify.error(`Couldn't reload ${path}: ${formatError(err)}`, err);
     }
   }
 
@@ -134,12 +140,18 @@
       try {
         await restoreProjectState(root);
       } catch (err) {
-        console.warn("Failed to restore project state:", err);
+        notify.error(
+          `Couldn't restore tabs for this project: ${formatError(err)}`,
+          err,
+        );
       }
       try {
         await invoke("watch_project");
       } catch (err) {
-        console.warn("Failed to start file watcher:", err);
+        notify.error(
+          `File watcher failed to start — external changes won't update: ${formatError(err)}`,
+          err,
+        );
       }
       // If this project-switch was driven by an open-with request, the
       // target file waits here until restore finishes so it lands as the
@@ -150,7 +162,10 @@
         try {
           await project.openTab(target);
         } catch (err) {
-          console.error("Failed to focus requested file:", target, err);
+          notify.error(
+            `Couldn't focus ${target}: ${formatError(err)}`,
+            err,
+          );
         }
       }
     })();
@@ -198,6 +213,23 @@
       if (project.activeTab) {
         e.preventDefault();
         project.toggleFrontmatterPanel();
+      }
+      return;
+    }
+
+    // ⌘O opens the project picker from anywhere (including inside an
+    // already-open project — switching). ⌘⇧W closes the current project
+    // and returns to EmptyState. The project-menu in the header shows
+    // both shortcuts alongside the menu items.
+    if (!e.shiftKey && !e.altKey && e.key.toLowerCase() === "o") {
+      e.preventDefault();
+      void openProjectFromPicker();
+      return;
+    }
+    if (e.shiftKey && !e.altKey && e.key.toLowerCase() === "w") {
+      if (project.hasProject) {
+        e.preventDefault();
+        void closeCurrentProject(autoSaveHooks);
       }
       return;
     }
@@ -257,12 +289,19 @@
 
   let unlistenWatcher: UnlistenFn | null = null;
   let unlistenOpenFile: UnlistenFn | null = null;
+  let unlistenClose: UnlistenFn | null = null;
   onMount(() => {
     // Hydrate app-wide preferences (personal dictionary, recent
     // projects, etc.) from disk before the rest of the UI starts
     // reading them. Failures are non-fatal — the store keeps its
     // defaults and subsequent saves write a fresh file.
     void preferences.loadOnce();
+
+    // Silent update check. If a newer version is available, a
+    // persistent call-to-action toast appears in the corner; the user
+    // can install on their schedule. Errors (offline, unconfigured
+    // endpoint) stay quiet — see docs on `checkForUpdatesOnStartup`.
+    void checkForUpdatesOnStartup();
 
     (async () => {
       unlistenWatcher = await listen<WatcherPayload>(
@@ -290,11 +329,31 @@
       } catch (err) {
         console.warn("Failed to drain pending open-file request:", err);
       }
+
+      // Flush any in-flight autosave before the window actually closes.
+      // The 1-second debounce in the autosave driver is the data-loss
+      // window — a keystroke within that second that beats the user to
+      // the red dot would disappear. Intercepting the close event,
+      // flushing, and then explicitly destroying the window closes that
+      // gap. No confirmation prompt because autosave + flush covers it.
+      const appWindow = getCurrentWindow();
+      unlistenClose = await appWindow.onCloseRequested(async (event) => {
+        if (project.tabs.some((t) => t.dirty)) {
+          event.preventDefault();
+          try {
+            await flushAllPendingSaves(autoSaveHooks);
+          } catch (err) {
+            console.warn("Flush on close failed:", err);
+          }
+          await appWindow.destroy();
+        }
+      });
     })();
 
     return () => {
       unlistenWatcher?.();
       unlistenOpenFile?.();
+      unlistenClose?.();
       resetProjectStateTarget();
     };
   });
@@ -305,7 +364,10 @@
       try {
         await project.openTab(req.filePath);
       } catch (err) {
-        console.error("Failed to open requested file:", req.filePath, err);
+        notify.error(
+          `Couldn't open ${req.filePath}: ${formatError(err)}`,
+          err,
+        );
       }
       return;
     }
@@ -318,12 +380,30 @@
       await project.openProject(req.projectRoot);
     } catch (err) {
       pendingFileAfterRestore = null;
-      console.error(
-        "Failed to open requested project:",
-        req.projectRoot,
+      notify.error(
+        `Couldn't open project ${req.projectRoot}: ${formatError(err)}`,
         err,
       );
     }
+  }
+
+  // Coalesce rapid manifest-refresh requests so a git pull (dozens of
+  // created/removed events in a few hundred ms) triggers one rescan, not
+  // dozens. Trailing-edge debounce — we wait for the burst to end before
+  // refreshing, which is the behavior that minimizes sidebar flicker.
+  const MANIFEST_REFRESH_DEBOUNCE_MS = 400;
+  let manifestRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  function scheduleManifestRefresh() {
+    if (manifestRefreshTimer) clearTimeout(manifestRefreshTimer);
+    manifestRefreshTimer = setTimeout(() => {
+      manifestRefreshTimer = null;
+      project.refreshManifest().catch((err) => {
+        notify.error(
+          `Couldn't refresh file list: ${formatError(err)}`,
+          err,
+        );
+      });
+    }, MANIFEST_REFRESH_DEBOUNCE_MS);
   }
 
   function handleWatcherEvent(payload: WatcherPayload) {
@@ -332,9 +412,15 @@
     // Step 1: suppress echoes of our own write_file calls.
     if (isRecentSelfWrite(path)) return;
 
-    // Step 2: figure out if this file is open in any tab. If not, Phase 2.2
-    // will eventually refresh the manifest and sidebar in-place; for now we
-    // only react to changes that affect the active tab.
+    // Step 2: keep the sidebar manifest in sync with external file-tree
+    // changes (Finder, git pull, other editors). Our own create/delete
+    // paths in the store also call refreshManifest eagerly, but they use
+    // the same coalescing path so the double-trigger just no-ops.
+    if (kind === "created" || kind === "removed") {
+      scheduleManifestRefresh();
+    }
+
+    // Step 3: react for any open tab that points at this path.
     const tab = project.tabs.find((t) => t.path === path);
     if (!tab) return;
 
@@ -342,7 +428,7 @@
       // The file vanished out from under us. Leave the content in memory so
       // the user can still save it back, but flag them.
       reloadPrompt = null;
-      saveError = `${path} was removed from disk`;
+      notify.error(`${path} was removed from disk`);
       return;
     }
 
@@ -364,13 +450,11 @@
   <EmptyState />
 {:else}
   <main>
-    <Header />
+    <Header {autoSaveHooks} />
     <FrontmatterPanel />
     <PersonalDictionaryPanel />
     <div class="layout">
-      {#if project.sidebarVisible}
-        <Sidebar />
-      {/if}
+      <Sidebar />
       <div class="workspace">
         {#if project.activeTab}
           {#key project.activeTab.path}
@@ -406,16 +490,6 @@
           </div>
         {/if}
 
-        {#if saveError}
-          <div class="banner error" role="alert">
-            <span class="banner-text">Save failed: {saveError}</span>
-            <button
-              type="button"
-              class="banner-btn muted"
-              onclick={() => (saveError = null)}>Dismiss</button
-            >
-          </div>
-        {/if}
       </div>
     </div>
   </main>
@@ -428,6 +502,8 @@
 {#if searchModalOpen}
   <SearchModal onClose={() => (searchModalOpen = false)} />
 {/if}
+
+<Toasts />
 
 <style>
   main {
@@ -485,11 +561,6 @@
     font-size: 12px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
     max-width: calc(100% - 2rem);
-  }
-
-  .banner.error {
-    background: #a84030;
-    color: #fff;
   }
 
   .banner-text {

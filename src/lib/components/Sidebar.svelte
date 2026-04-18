@@ -16,6 +16,7 @@
 
   import { project } from "$lib/stores/project.svelte";
   import { preferences } from "$lib/stores/preferences.svelte";
+  import { notify } from "$lib/stores/notifications.svelte";
   import { formatError } from "$lib/errors";
   import IconPlus from "$lib/icons/IconPlus.svelte";
   import ContextMenu, {
@@ -79,7 +80,7 @@
     try {
       await project.openTab(path);
     } catch (e) {
-      console.error("Failed to open file:", path, e);
+      notify.error(`Couldn't open ${path}: ${formatError(e)}`, e);
     }
   }
 
@@ -176,9 +177,10 @@
         await project.deleteDirectory(target.path);
       }
     } catch (e) {
-      // Swallow-and-log the silent path; the modal path surfaces errors
-      // inline via DeleteConfirmModal's own try/catch.
-      console.error("Failed to delete", target.path, e);
+      // The modal path surfaces errors inline via DeleteConfirmModal's
+      // own try/catch. The silent path (skip-confirmation preference)
+      // has nowhere to render inline, so toast it.
+      notify.error(`Couldn't delete ${target.name}: ${formatError(e)}`, e);
     }
   }
 
@@ -247,7 +249,13 @@
   }
 </script>
 
-<aside class="sidebar" aria-label="Files">
+<aside
+  class="sidebar"
+  class:collapsed={!project.sidebarVisible}
+  aria-label="Files"
+  aria-hidden={!project.sidebarVisible}
+  inert={!project.sidebarVisible}
+>
   <header class="section-header">
     <span class="title">Files</span>
     <button
@@ -350,7 +358,7 @@
     width: 260px;
     flex-shrink: 0;
     border-right: 1px solid var(--skrive-rule);
-    overflow-y: auto;
+    overflow: hidden auto;
     background: var(--skrive-bg);
     font-family:
       -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
@@ -358,6 +366,27 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+    transition:
+      width 180ms cubic-bezier(0.4, 0, 0.2, 1),
+      border-right-width 180ms cubic-bezier(0.4, 0, 0.2, 1),
+      opacity 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Collapsed state: slide closed by animating width to 0. Sibling flex
+     content (the workspace) grows smoothly in the freed space. The
+     border collapses too so the 1px rule doesn't linger as a stub, and
+     opacity fades the contents in the final frames to keep the close
+     from looking like content was cut off mid-animation. */
+  .sidebar.collapsed {
+    width: 0;
+    border-right-width: 0;
+    opacity: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar {
+      transition: none;
+    }
   }
 
   .section-header {

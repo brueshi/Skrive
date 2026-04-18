@@ -57,6 +57,16 @@ async function openProjectImpl(path: string): Promise<void> {
   manifest = next;
   tabs = [];
   activeTabIndex = -1;
+  // Bump the recent-projects LRU so EmptyState + the project menu pick
+  // up this open. `next.root` is the canonicalized path from Rust; the
+  // project name is its last path segment.
+  const name = extractProjectName(next.root);
+  preferences.pushRecentProject(next.root, name);
+}
+
+function extractProjectName(root: string): string {
+  const parts = root.split(/[/\\]/).filter(Boolean);
+  return parts[parts.length - 1] ?? root;
 }
 
 async function openTabImpl(path: string): Promise<void> {

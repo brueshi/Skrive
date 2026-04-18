@@ -6,7 +6,11 @@ Tauri 2.0 + Svelte 5 + Rust core. Offline-first. Local. Private.
 
 ## Status
 
-Pre-alpha. Phase 1 (foundation) in progress. See [`docs/skrive-build-outline.md`](docs/skrive-build-outline.md) for the full build plan.
+Pre-alpha — usable for real writing, but rough. Phase 2 (core editor) shipped; Phase 3 (project intelligence) in progress. See [`docs/skrive-build-outline.md`](docs/skrive-build-outline.md) for the full build plan.
+
+## Download
+
+Grab the latest macOS or Windows build from [Releases](https://github.com/brueshi/Skrive/releases). See [`docs/install.md`](docs/install.md) for platform-specific install notes. macOS is signed + notarized and opens cleanly; Windows is unsigned and will show a SmartScreen warning on first run (dismissable — see the install doc).
 
 ## Principles
 

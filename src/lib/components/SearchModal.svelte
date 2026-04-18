@@ -11,6 +11,7 @@
 
   import { invoke } from "@tauri-apps/api/core";
   import { project } from "$lib/stores/project.svelte";
+  import { notify } from "$lib/stores/notifications.svelte";
   import type { SearchHit } from "$lib/types";
   import { formatError } from "$lib/errors";
 
@@ -121,7 +122,10 @@
         hit.matchLength,
       );
     } catch (err) {
-      console.error("Failed to open file at line:", hit, err);
+      notify.error(
+        `Couldn't open ${hit.path} at line ${hit.lineNumber}: ${formatError(err)}`,
+        err,
+      );
     }
   }
 

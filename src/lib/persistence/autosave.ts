@@ -153,6 +153,18 @@ export async function flushSave(
 }
 
 /**
+ * Drain every pending save. Called from the window-close handler so a
+ * keystroke hit within the 1-second debounce window still makes it to
+ * disk before the app exits.
+ */
+export async function flushAllPendingSaves(
+  hooks: AutoSaveHooks,
+): Promise<void> {
+  const paths = Array.from(pending.keys());
+  await Promise.all(paths.map((p) => flushSave(p, hooks)));
+}
+
+/**
  * True if a watcher event for `path` arriving right now is almost certainly
  * the echo of our own recent `write_file` call. Callers use this to filter
  * the "file changed on disk, reload?" prompt so it only fires for real
