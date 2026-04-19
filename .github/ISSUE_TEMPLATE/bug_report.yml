@@ -1,0 +1,62 @@
+name: Bug report
+description: Something in Skrive isn't working the way you expected.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug — what you were doing, what went wrong.
+      placeholder: I opened a Markdown file and the editor froze when…
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps that let someone else hit the same bug.
+      placeholder: |
+        1. Open Skrive
+        2. Create a new project at ~/notes
+        3. Type a `> ` blockquote
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen instead?
+      placeholder: The blockquote should render with a left border…
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Skrive version
+      description: From the project-name dropdown in the header, or the filename of the installer you used.
+      placeholder: e.g. 0.0.2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+        - Linux (built from source)
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, console output, sample files — whatever helps.
+    validations:
+      required: false

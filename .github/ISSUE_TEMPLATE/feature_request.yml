@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest something Skrive should do that it doesn't yet.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like Skrive to do?
+      description: One or two sentences describing the feature.
+      placeholder: Add a word count to the status bar that updates as I type.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why? What problem does this solve?
+      description: |
+        The "what" is easy; the "why" is what helps prioritize. What were you trying to accomplish when
+        you noticed Skrive couldn't help? Who else would benefit?
+      placeholder: I'm writing to a target length and currently have to copy into another tool to count.
+    validations:
+      required: true
+
+  - type: textarea
+    id: workarounds
+    attributes:
+      label: What are you doing today to work around it?
+      description: Optional, but useful — sometimes the workaround reveals a better solution than the literal feature.
+    validations:
+      required: false
