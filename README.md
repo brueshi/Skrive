@@ -6,7 +6,7 @@ Tauri 2.0 + Svelte 5 + Rust core. Offline-first. Local. Private.
 
 ## Status
 
-Pre-alpha — usable for real writing, but rough. Phase 2 (core editor) shipped; Phase 3 (project intelligence) in progress. See [`docs/skrive-build-outline.md`](docs/skrive-build-outline.md) for the full build plan.
+Pre-alpha — usable for real writing, but rough. Phase 2 (core editor) shipped; Phase 3 (project intelligence) in progress.
 
 ## Download
 
