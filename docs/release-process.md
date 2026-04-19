@@ -66,14 +66,14 @@ The command prompts for a password (used to encrypt the private key file) and wr
 
 Then:
 
-1. Copy the contents of `skrive.key.pub` into `src-tauri/tauri.conf.json` → `plugins.updater.pubkey` (it's a single line of base64). Commit.
-2. Base64 the private key file and copy it for the secret:
+1. Copy the contents of `skrive.key.pub` into `src-tauri/tauri.conf.json` → `plugins.updater.pubkey`. The `.pub` file is *already* a single line of base64 — paste it as-is. Do **not** run `base64` on it again; double-encoding produces a value the updater rejects with `Missing encoded key in public key`. Commit.
+2. Copy the contents of the private key file as the secret value:
 
    ```bash
-   base64 -i ~/.tauri/skrive.key | pbcopy
+   cat ~/.tauri/skrive.key | pbcopy
    ```
 
-   Paste as `TAURI_SIGNING_PRIVATE_KEY`.
+   Paste as `TAURI_SIGNING_PRIVATE_KEY`. The Tauri CLI parses this as the minisign-format text directly (two lines: an `untrusted comment:` header and the base64 payload). Don't `base64` the file — that produces `Missing encoded key in secret key` at build time.
 3. Paste the password you chose as `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 
 **Back up the key file.** If you lose it, all installed clients are stranded on their current version — there's no way to re-sign with a different key without re-shipping a build with a new public key embedded, which requires a manual reinstall. A copy in a password manager or encrypted backup is sufficient.
