@@ -37,3 +37,7 @@ npm run tauri dev
 ├── src-tauri/           # Rust core (Tauri 2 commands, file system, project intelligence)
 └── static/              # Static assets served by SvelteKit
 ```
+
+## License
+
+Source-available under [PolyForm Noncommercial 1.0.0](LICENSE). Read it, run it for personal use. Commercial use is reserved.
