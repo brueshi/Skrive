@@ -36,7 +36,10 @@
     ],
     "fileAssociations": [
       {
-        "ext": ["md", "markdown"],
+        "ext": [
+          "md",
+          "markdown"
+        ],
         "name": "Markdown Document",
         "description": "Markdown file editable in Skrive",
         "role": "Editor",
@@ -46,7 +49,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk1NEM5MjY0REZBMjYzQTAKUldTZ1k2TGZaSkpNbGFHWG9uam0yeHg2cUFjL3B2eXdLeVVDU050QVZha3JmYUpOTWpndkFEOXkK",
+      "pubkey": "ZFc1MGNuVnpkR1ZrSUdOdmJXMWxiblE2SUcxcGJtbHphV2R1SUhCMVlteHBZeUJyWlhrNklESXlNMFZDUVVRM05qWXhOVUU1TkRJS1VsZFNRM0ZTVm0weE4yOHJTVzFESzBWb1l6Sm5lbm96Y1ZKQlZUQmtObVZ3ZUdSSlRUTlRiREZNU25WeVNTOVFaa2x3SzBjNU1Ua0s=",
       "endpoints": [
         "https://github.com/brueshi/Skrive/releases/latest/download/latest.json"
       ]
