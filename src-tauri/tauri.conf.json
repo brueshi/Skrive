@@ -49,7 +49,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "ZFc1MGNuVnpkR1ZrSUdOdmJXMWxiblE2SUcxcGJtbHphV2R1SUhCMVlteHBZeUJyWlhrNklESXlNMFZDUVVRM05qWXhOVUU1TkRJS1VsZFNRM0ZTVm0weE4yOHJTVzFESzBWb1l6Sm5lbm96Y1ZKQlZUQmtObVZ3ZUdSSlRUTlRiREZNU25WeVNTOVFaa2x3SzBjNU1Ua0s=",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIyM0VCQUQ3NjYxNUE5NDIKUldSQ3FSVm0xN28rSW1DK0VoYzJnenozcVJBVTBkNmVweGRJTTNTbDFMSnVySS9QZklwK0c5MTkK",
       "endpoints": [
         "https://github.com/brueshi/Skrive/releases/latest/download/latest.json"
       ]
