@@ -172,6 +172,116 @@ export type SearchHit = {
   snippet: string;
 };
 
+// =========================== Link graph types ===========================
+// Mirror `src-tauri/src/project.rs::{Backlink, OutgoingLink}`. Same shape,
+// different semantics for `path`: in `Backlink` it's the source that
+// links to the queried file; in `OutgoingLink` it's the target the
+// queried file points at.
+
+export type Backlink = {
+  /** Project-relative path of the file that links here. */
+  path: string;
+  /** 1-indexed line number of the link inside `path`. */
+  line: number;
+  /** 0-indexed UTF-16 column of the link's start inside the source line. */
+  column: number;
+  /** Trimmed source line containing the reference, truncated to a readable width. */
+  snippet: string;
+};
+
+export type OutgoingLink = {
+  /** Project-relative path of the file being linked to. */
+  path: string;
+  /** 1-indexed line number of the link inside the source. */
+  line: number;
+  /** 0-indexed UTF-16 column of the link's start inside the source line. */
+  column: number;
+  /** Trimmed source line containing the reference, truncated to a readable width. */
+  snippet: string;
+};
+
+/**
+ * Shape of one row in the Phase 3.2 lint engine's dead-link surface.
+ * Mirrors `src-tauri/src/project.rs::DeadLink`. Produced by the
+ * `get_dead_links` command; the Phase 3.2 UI is the only real consumer.
+ */
+export type DeadLink = {
+  /** Project-relative path of the source file that contains the dead link. */
+  sourcePath: string;
+  /**
+   * Unresolved target as the link wrote it — `"[[Other Note]]"` for
+   * wiki-flavored dead links, the project-relative path for inline and
+   * reference-style dead links. Lets the lint row render the original
+   * form without reconstruction.
+   */
+  target: string;
+  /** 1-indexed line number inside the source. */
+  line: number;
+  /** 0-indexed UTF-16 column inside the source line. */
+  column: number;
+  /** Trimmed source line, truncated to a readable width. */
+  snippet: string;
+  /** Which markdown construct produced the link. */
+  kind: LinkKind;
+};
+
+/** Mirror of `src-tauri/src/link_graph.rs::LinkKind`. */
+export type LinkKind =
+  | "inline"
+  | "wiki"
+  | "referenceUse"
+  | "referenceDefinition";
+
+/**
+ * One reference to the file being renamed. Used in both arrays on
+ * `RenamePreview`. Mirrors `src-tauri/src/project.rs::Reference`.
+ */
+export type Reference = {
+  /** Project-relative path of the file that contains the reference. */
+  path: string;
+  /** 1-indexed line number. */
+  line: number;
+  /** 0-indexed UTF-16 column inside the source line. */
+  column: number;
+  /** Trimmed source line, truncated to a readable width. */
+  snippet: string;
+  /** Which markdown construct holds the reference. */
+  kind: LinkKind;
+};
+
+/**
+ * Report returned by `rename_with_references` after a successful commit.
+ * Mirrors `src-tauri/src/project.rs::RenameReport`. Consumed by the
+ * store's `renameFile` method to know which tabs need a content refresh
+ * and which paths to stamp as recent self-writes.
+ */
+export type RenameReport = {
+  /** Project-relative paths whose contents were rewritten on disk. */
+  filesWritten: string[];
+  /** Total number of individual references replaced across all sources. */
+  referencesUpdated: number;
+};
+
+/**
+ * Response from the `preview_rename` command. Mirrors
+ * `src-tauri/src/project.rs::RenamePreview`.
+ */
+export type RenamePreview = {
+  /**
+   * True when the proposed new path already exists in the project, or
+   * when the user typed the same name back. Disables the Rename button.
+   */
+  targetExists: boolean;
+  /** Edges from files OTHER than the one being renamed. */
+  references: Reference[];
+  /**
+   * Self-references inside the renamed file. Rewritten as part of the
+   * same operation, shown separately so the "N references across M
+   * files" count stays cross-file-accurate.
+   */
+  definitionUpdates: Reference[];
+};
+
 // =========================== Open-with-Skrive ===========================
 
 /**

@@ -175,3 +175,18 @@ export function isRecentSelfWrite(path: string): boolean {
   if (stamp === undefined) return false;
   return Date.now() - stamp < SELF_WRITE_WINDOW_MS;
 }
+
+/**
+ * Stamp `path` as having been written by us just now. Feeds the same
+ * `isRecentSelfWrite` table autosave uses, but exposed so non-save code
+ * paths (Phase 3.1's rename-with-references, future batch writes) can
+ * keep the watcher's echo filter honest without pretending to be a save.
+ *
+ * Callers should stamp *both* the path they're about to touch and any
+ * path that will transiently be affected — for rename, that's the old
+ * path (which fires a Remove event on most platforms) and the new path
+ * (Create), plus every rewritten file (Modify).
+ */
+export function markRecentSelfWrite(path: string): void {
+  lastSavedMs.set(path, Date.now());
+}

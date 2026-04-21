@@ -14,15 +14,98 @@
   // space inside `**bold **`, which CommonMark treats as not-bold until the
   // text is typed further). A 150ms debounce coalesces keystroke bursts into
   // a single render, so those transient states never reach the DOM.
+  //
+  // Link click handling: rendered markdown links are `<a href="...">` in the
+  // DOM. A bare click would navigate the webview — SvelteKit treats any
+  // same-origin click as a route change and fires a 404 for anything that
+  // isn't `/`. We intercept at the container level: relative markdown links
+  // route through `project.openTab`; external schemes open in the user's
+  // browser via the opener plugin.
 
   import { onDestroy } from "svelte";
   import { renderMarkdown } from "./markdown";
+  import { project } from "$lib/stores/project.svelte";
+  import { notify } from "$lib/stores/notifications.svelte";
+  import { formatError } from "$lib/errors";
+  import { openUrl } from "@tauri-apps/plugin-opener";
 
   type Props = {
     body: string;
   };
 
   let { body }: Props = $props();
+
+  function isExternalHref(href: string): boolean {
+    return (
+      /^[a-z][a-z0-9+.-]*:/i.test(href) ||
+      href.startsWith("//") ||
+      href.startsWith("#")
+    );
+  }
+
+  function resolveRelativeHref(
+    sourcePath: string,
+    href: string,
+  ): string | null {
+    // Build the source file's parent segments.
+    const sourceSegments = sourcePath.split("/").filter(Boolean);
+    sourceSegments.pop(); // drop the file name
+    const linkSegments = href.split("/").filter(Boolean);
+    const combined = [...sourceSegments];
+    for (const seg of linkSegments) {
+      if (seg === ".") continue;
+      if (seg === "..") {
+        if (combined.length === 0) return null; // would escape project root
+        combined.pop();
+        continue;
+      }
+      combined.push(seg);
+    }
+    return combined.join("/");
+  }
+
+  function handleClick(e: MouseEvent) {
+    // Modifier-clicks (open in new window etc.) aren't meaningful in a
+    // single-window Tauri app but leave them to the browser anyway.
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+
+    const target = e.target as Element | null;
+    const anchor = target?.closest?.("a") as HTMLAnchorElement | null;
+    if (!anchor) return;
+
+    const href = anchor.getAttribute("href");
+    if (!href) return;
+
+    if (isExternalHref(href)) {
+      // Open externals (http://, mailto:, etc.) in the system default
+      // handler rather than the webview, which can't nav-navigate
+      // cross-origin cleanly in SPA mode anyway.
+      e.preventDefault();
+      void openUrl(href).catch((err) => {
+        notify.error(`Couldn't open ${href}: ${formatError(err)}`, err);
+      });
+      return;
+    }
+
+    // Internal relative link — must resolve against the active tab's
+    // path or we don't know where we are.
+    const sourcePath = project.activeTab?.path;
+    if (!sourcePath) return;
+    const resolved = resolveRelativeHref(sourcePath, href);
+    if (!resolved) return;
+    // Only .md / .markdown files are openable in Skrive today. Non-
+    // markdown targets (images, pdfs, etc.) fall through — the default
+    // navigation would 404 too, but that's a broader follow-up.
+    if (!/\.(md|markdown)$/i.test(resolved)) return;
+
+    e.preventDefault();
+    void project.openTab(resolved).catch((err) => {
+      notify.error(
+        `Couldn't open ${resolved}: ${formatError(err)}`,
+        err,
+      );
+    });
+  }
 
   const DEBOUNCE_MS = 150;
   let debouncedBody = $state("");
@@ -53,7 +136,9 @@
   let html = $derived(renderMarkdown(debouncedBody));
 </script>
 
-<div class="preview" role="document">
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<div class="preview" role="document" onclick={handleClick}>
   <div class="preview-inner">
     {@html html}
   </div>

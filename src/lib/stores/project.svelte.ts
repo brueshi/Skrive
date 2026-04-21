@@ -12,12 +12,15 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { preferences } from "$lib/stores/preferences.svelte";
+import { markRecentSelfWrite } from "$lib/persistence/autosave";
 import type {
+  Backlink,
   FileContent,
   LayoutMode,
   PendingSelection,
   ProjectManifest,
   ProjectSchema,
+  RenameReport,
   Tab,
 } from "$lib/types";
 
@@ -39,6 +42,22 @@ let sidebarWidth = $state(260);
 // a layout preference. Every session starts with it closed; the user
 // opens it as needed via ⌘⇧F or the header indicator.
 let frontmatterPanelOpen = $state(false);
+
+// Backlinks panel. Same session-only ethos as frontmatter and
+// personal-dictionary: a floating tool anchored to the header's top-right
+// zone, opened via `⌘⇧B` or the BL indicator. `backlinksOfActive` holds
+// the most recent result for the active tab so both the indicator count
+// and the panel render the same thing without two round-trips. Refreshed
+// by +page.svelte on tab changes and watcher events — this store doesn't
+// listen to filesystem activity itself.
+let backlinksPanelOpen = $state(false);
+let backlinksOfActive = $state<Backlink[]>([]);
+
+// Rename-with-references modal. `renameModalPath` is the project-relative
+// path being renamed (or null when the modal is closed). Both the F2
+// shortcut and the sidebar "Rename…" context-menu item flow through
+// `openRenameModal` so the modal has a single point of entry.
+let renameModalPath = $state<string | null>(null);
 
 // Monotonically-increasing counter that the editor surface watches to
 // trigger a brief visual pulse whenever the system rewrites the body
@@ -225,6 +244,133 @@ function toggleFrontmatterPanelImpl(): void {
   frontmatterPanelOpen = !frontmatterPanelOpen;
 }
 
+// =========================== Backlinks actions ===========================
+
+function openBacklinksPanelImpl(): void {
+  backlinksPanelOpen = true;
+}
+
+function closeBacklinksPanelImpl(): void {
+  backlinksPanelOpen = false;
+}
+
+function toggleBacklinksPanelImpl(): void {
+  backlinksPanelOpen = !backlinksPanelOpen;
+}
+
+/**
+ * Re-query `get_backlinks` for the currently active tab and update the
+ * shared `backlinksOfActive` state. No-ops when no tab is active so the
+ * header badge falls back to the prior result. Safe to call on rapid
+ * tab switches — the command is cheap relative to typical tab-change
+ * cadence and the last call wins.
+ */
+// =========================== Rename modal actions ===========================
+
+function openRenameModalImpl(path: string): void {
+  renameModalPath = path;
+}
+
+function closeRenameModalImpl(): void {
+  renameModalPath = null;
+}
+
+/**
+ * Commit a rename via the Rust `rename_with_references` command, then
+ * reconcile the frontend state with what changed on disk:
+ *
+ * 1. Pre-stamp the old and new paths as recent self-writes so the
+ *    watcher's Remove/Create echo events don't prompt the user.
+ * 2. Invoke the Rust command. Returns the list of files it rewrote.
+ * 3. Stamp every rewritten file's path too (their Modify events would
+ *    otherwise race the tab reloads below).
+ * 4. Swap any tab whose path is `oldPath` over to `newPath` — identity
+ *    changes, dirty state is preserved because the file's *content*
+ *    at the new path is the same content it had at the old path (the
+ *    self-reference rewrites aside, which are applied to disk and need
+ *    a reload for the open tab).
+ * 5. For every rewritten path with an open tab:
+ *    - Clean tabs silently reload so the updated references appear.
+ *    - Dirty tabs are left as-is with a warning; the buffer already
+ *      has the user's unsaved edits and we don't want to overwrite
+ *      them silently. The user can review and save or discard.
+ * 6. Refresh the manifest so the sidebar reflects the new path.
+ *
+ * Returns the report so callers (the modal's onCommit) can show a
+ * summary toast.
+ */
+async function renameFileImpl(
+  oldPath: string,
+  newPath: string,
+): Promise<{ report: RenameReport; dirtyConflicts: string[] }> {
+  // Pre-stamp the two guaranteed paths. The filesystem watcher is the
+  // race here — on macOS FSEvents a rename typically fires Remove on
+  // old + Create on new within milliseconds of `fs::rename`.
+  markRecentSelfWrite(oldPath);
+  markRecentSelfWrite(newPath);
+
+  const report = await invoke<RenameReport>("rename_with_references", {
+    oldPath,
+    newPath,
+  });
+
+  // Stamp the rewritten paths too. Doing this right after the command
+  // returns keeps us inside the 1500ms self-write window for Modify
+  // events that arrive later.
+  for (const p of report.filesWritten) markRecentSelfWrite(p);
+
+  // Swap tab identity for any tab pointing at the old path.
+  for (const tab of tabs) {
+    if (tab.path === oldPath) {
+      tab.path = newPath;
+    }
+  }
+
+  const dirtyConflicts: string[] = [];
+  for (const writtenPath of report.filesWritten) {
+    const tab = tabs.find((t) => t.path === writtenPath);
+    if (!tab) continue;
+    if (tab.dirty) {
+      dirtyConflicts.push(writtenPath);
+      continue;
+    }
+    try {
+      await reloadTabImpl(writtenPath);
+    } catch (err) {
+      console.warn(`Failed to reload tab after rename: ${writtenPath}`, err);
+    }
+  }
+
+  try {
+    await refreshManifestImpl();
+  } catch (err) {
+    console.warn("Failed to refresh manifest after rename:", err);
+  }
+
+  return { report, dirtyConflicts };
+}
+
+async function refreshBacklinksForActiveImpl(): Promise<void> {
+  const tab = tabs[activeTabIndex];
+  if (!tab) {
+    backlinksOfActive = [];
+    return;
+  }
+  try {
+    const result = await invoke<Backlink[]>("get_backlinks", {
+      path: tab.path,
+    });
+    // Guard against a stale result — if the user tab-switched mid-flight,
+    // drop the response rather than overwrite a newer fetch.
+    const current = tabs[activeTabIndex];
+    if (current?.path !== tab.path) return;
+    backlinksOfActive = result;
+  } catch (err) {
+    console.warn("Failed to refresh backlinks:", err);
+    backlinksOfActive = [];
+  }
+}
+
 /**
  * Bump `editorPulseSignal` so any subscriber (currently `SplitView`)
  * runs a brief visual flash on the editor surface. Call this whenever
@@ -398,6 +544,15 @@ export const project = {
   get frontmatterPanelOpen() {
     return frontmatterPanelOpen;
   },
+  get backlinksPanelOpen() {
+    return backlinksPanelOpen;
+  },
+  get backlinksOfActive(): Backlink[] {
+    return backlinksOfActive;
+  },
+  get renameModalPath(): string | null {
+    return renameModalPath;
+  },
   get editorPulseSignal() {
     return editorPulseSignal;
   },
@@ -416,6 +571,13 @@ export const project = {
   openFrontmatterPanel: openFrontmatterPanelImpl,
   closeFrontmatterPanel: closeFrontmatterPanelImpl,
   toggleFrontmatterPanel: toggleFrontmatterPanelImpl,
+  openBacklinksPanel: openBacklinksPanelImpl,
+  closeBacklinksPanel: closeBacklinksPanelImpl,
+  toggleBacklinksPanel: toggleBacklinksPanelImpl,
+  refreshBacklinksForActive: refreshBacklinksForActiveImpl,
+  openRenameModal: openRenameModalImpl,
+  closeRenameModal: closeRenameModalImpl,
+  renameFile: renameFileImpl,
   signalEditorPulse: signalEditorPulseImpl,
   updateActiveTabFrontmatter: updateActiveTabFrontmatterImpl,
   removeActiveTabFrontmatter: removeActiveTabFrontmatterImpl,

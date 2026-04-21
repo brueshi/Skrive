@@ -10,7 +10,7 @@ Pre-alpha — usable for real writing, but rough. Phase 2 (core editor) shipped;
 
 ## Download
 
-Grab the latest macOS or Windows build from [Releases](https://github.com/brueshi/Skrive/releases). See [`docs/install.md`](docs/install.md) for platform-specific install notes. macOS is signed + notarized and opens cleanly; Windows is unsigned and will show a SmartScreen warning on first run (dismissable — see the install doc).
+Grab the latest macOS or Windows build from [Releases](https://github.com/brueshi/Skrive/releases). See [`docs/install.md`](docs/skrive-install.md) for platform-specific install notes. macOS is signed + notarized and opens cleanly; Windows is unsigned and will show a SmartScreen warning on first run (dismissable — see the install doc).
 
 ## Principles
 

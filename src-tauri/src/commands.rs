@@ -9,7 +9,8 @@ use crate::error::{Error, Result};
 use crate::frontmatter;
 use crate::persistence::{self, AppUiState, ProjectUiState};
 use crate::project::{
-    self, FileContent, ProjectManifest, ProjectState, SearchHit, SearchOptions,
+    self, Backlink, DeadLink, FileContent, OutgoingLink, ProjectManifest, ProjectState,
+    RenamePreview, RenameReport, SearchHit, SearchOptions,
 };
 use crate::watcher;
 use notify::RecommendedWatcher;
@@ -79,9 +80,17 @@ pub async fn read_file(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<FileContent> {
-    let project = state.project.lock().await;
-    let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
-    project::read(&project.root, &PathBuf::from(path))
+    let mut project = state.project.lock().await;
+    let project = project.as_mut().ok_or(Error::NoProjectOpen)?;
+    let rel = PathBuf::from(&path);
+    let content = project::read(&project.root, &rel)?;
+    // A fresh read is also the moment the graph's view of this file is
+    // cheapest to refresh — we already have a parsed body in hand. This
+    // covers the watcher-driven external-edit reload path: the frontend
+    // calls read_file after receiving a `project://file-changed` event,
+    // and the graph catches up without a second parse.
+    project.note_file_written(&rel, &content.body, &content.frontmatter);
+    Ok(content)
 }
 
 #[tauri::command]
@@ -91,9 +100,12 @@ pub async fn write_file(
     frontmatter: Map<String, Value>,
     state: State<'_, AppState>,
 ) -> Result<()> {
-    let project = state.project.lock().await;
-    let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
-    project::write(&project.root, &PathBuf::from(path), &body, &frontmatter)
+    let mut project = state.project.lock().await;
+    let project = project.as_mut().ok_or(Error::NoProjectOpen)?;
+    let rel = PathBuf::from(&path);
+    project::write(&project.root, &rel, &body, &frontmatter)?;
+    project.note_file_written(&rel, &body, &frontmatter);
+    Ok(())
 }
 
 #[tauri::command]
@@ -195,12 +207,12 @@ pub async fn create_file(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<()> {
-    let root = {
-        let project = state.project.lock().await;
-        let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
-        project.root.clone()
-    };
-    project::create_new_file(&root, &PathBuf::from(&path))
+    let mut project = state.project.lock().await;
+    let project = project.as_mut().ok_or(Error::NoProjectOpen)?;
+    let rel = PathBuf::from(&path);
+    project::create_new_file(&project.root, &rel)?;
+    project.note_file_created(&rel);
+    Ok(())
 }
 
 /// Create a new subdirectory inside the currently open project at the given
@@ -231,13 +243,19 @@ pub async fn delete_path(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<()> {
-    let root = {
-        let project = state.project.lock().await;
-        let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
-        project.root.clone()
-    };
-    let absolute = project::resolve_existing_within(&root, &PathBuf::from(&path))?;
+    let mut project = state.project.lock().await;
+    let project = project.as_mut().ok_or(Error::NoProjectOpen)?;
+    let rel = PathBuf::from(&path);
+    let absolute = project::resolve_existing_within(&project.root, &rel)?;
+    // Capture directory-ness before the trash call — after the move the
+    // path is gone and the metadata call would fail.
+    let is_dir = absolute.is_dir();
     trash::delete(&absolute).map_err(|e| Error::Io(format!("failed to move to trash: {}", e)))?;
+    if is_dir {
+        project.note_directory_deleted(&rel);
+    } else {
+        project.note_file_deleted(&rel);
+    }
     Ok(())
 }
 
@@ -260,6 +278,80 @@ pub async fn search_project(
     };
     let opts = options.unwrap_or_default();
     project::search(&root, &query, opts)
+}
+
+// =========================== Link graph commands ===========================
+
+/// Return every link that points at `path`. Reads the source body for
+/// each referencing file to produce the snippet, so a call on a busy
+/// project does O(backlinks) disk reads — fine for dogfood scale, and
+/// rare relative to keystrokes.
+///
+/// An unknown path returns `[]`, not an error. The backlinks panel
+/// treats "no backlinks" and "file doesn't exist" as the same UI state,
+/// so there's nothing to recover from here.
+#[tauri::command]
+pub async fn get_backlinks(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<Backlink>> {
+    let project = state.project.lock().await;
+    let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
+    project::collect_backlinks(project, &path)
+}
+
+/// Return every outbound link from `path`, with position info and a
+/// snippet of the source line. Consumed by Step 4's dead-link command
+/// and any future "outgoing links for this file" affordance.
+#[tauri::command]
+pub async fn get_outgoing_links(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<OutgoingLink>> {
+    let project = state.project.lock().await;
+    let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
+    project::collect_outgoing_links(project, &path)
+}
+
+/// Return every link in the project whose target doesn't resolve. The
+/// Phase 3.2 lint engine is the primary consumer; each returned row
+/// corresponds to one lint-panel entry. Empty when nothing is broken.
+#[tauri::command]
+pub async fn get_dead_links(
+    state: State<'_, AppState>,
+) -> Result<Vec<DeadLink>> {
+    let project = state.project.lock().await;
+    let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
+    project::collect_dead_links(project)
+}
+
+/// Compute the preview payload for renaming `oldPath` to `newPath`.
+/// Read-only — the modal calls this on every keystroke (debounced) so
+/// the user sees which files will be rewritten before they commit.
+#[tauri::command]
+pub async fn preview_rename(
+    old_path: String,
+    new_path: String,
+    state: State<'_, AppState>,
+) -> Result<RenamePreview> {
+    let project = state.project.lock().await;
+    let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
+    project::preview_rename(project, &old_path, &new_path)
+}
+
+/// Commit a rename. Renames the file on disk, rewrites every inbound
+/// reference, and returns the list of files the frontend needs to
+/// refresh. See `project::rename_with_references` for the full
+/// invariants.
+#[tauri::command]
+pub async fn rename_with_references(
+    old_path: String,
+    new_path: String,
+    state: State<'_, AppState>,
+) -> Result<RenameReport> {
+    let mut project = state.project.lock().await;
+    let project = project.as_mut().ok_or(Error::NoProjectOpen)?;
+    project::rename_with_references(project, &old_path, &new_path)
 }
 
 // =========================== Persistence commands ===========================

@@ -1,6 +1,6 @@
 [package]
 name = "skrive"
-version = "0.0.3"
+version = "0.0.6"
 description = "A Markdown IDE for people who write seriously and ship to the web."
 authors = ["Skrive contributors"]
 edition = "2021"

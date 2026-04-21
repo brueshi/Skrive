@@ -39,6 +39,8 @@
   import SplitView from "$lib/components/SplitView.svelte";
   import FrontmatterPanel from "$lib/components/FrontmatterPanel.svelte";
   import PersonalDictionaryPanel from "$lib/components/PersonalDictionaryPanel.svelte";
+  import BacklinksPanel from "$lib/components/BacklinksPanel.svelte";
+  import RenameModal from "$lib/components/RenameModal.svelte";
   import CommandPalette from "$lib/components/CommandPalette.svelte";
   import SearchModal from "$lib/components/SearchModal.svelte";
   import Toasts from "$lib/components/Toasts.svelte";
@@ -188,9 +190,32 @@
     untrack(() => queueSaveProjectState());
   });
 
+  // Refresh the backlinks list whenever the active tab changes. Reads
+  // `activeTab?.path` so the effect re-fires on tab switches and on
+  // path renames (Phase 3.1 Step 6). The fetch is cheap and lets the
+  // `BL · N` indicator stay honest.
+  $effect(() => {
+    const _path = project.activeTab?.path ?? null;
+    void _path;
+    untrack(() => void project.refreshBacklinksForActive());
+  });
+
   // ======================== Keyboard shortcuts ========================
 
   function handleKeydown(e: KeyboardEvent) {
+    // F2 — rename the active tab. Bare key, Windows/Linux rename
+    // convention. macOS users get the same binding plus the
+    // "Rename…" entry in the sidebar's right-click menu for discovery.
+    // Handled before the meta-gate below because F2 isn't modified.
+    if (e.key === "F2") {
+      const tab = project.activeTab;
+      if (tab && !project.renameModalPath) {
+        e.preventDefault();
+        project.openRenameModal(tab.path);
+      }
+      return;
+    }
+
     if (!(e.metaKey || e.ctrlKey)) return;
 
     // ⌘F opens project-wide search. We depart from the VS Code
@@ -240,6 +265,17 @@
     if (e.shiftKey && e.key.toLowerCase() === "d") {
       e.preventDefault();
       preferences.toggleDictionaryPanel();
+      return;
+    }
+
+    // ⌘⇧B toggles the backlinks panel. Requires an active tab — backlinks
+    // are contextual to the file being viewed. Handled before the switch
+    // below so it doesn't collide with the ⌘B sidebar toggle.
+    if (e.shiftKey && !e.altKey && e.key.toLowerCase() === "b") {
+      if (project.activeTab) {
+        e.preventDefault();
+        project.toggleBacklinksPanel();
+      }
       return;
     }
 
@@ -420,6 +456,13 @@
       scheduleManifestRefresh();
     }
 
+    // Backlinks for the active file may have changed regardless of
+    // which file was touched — any source's links can gain or drop a
+    // reference to us. Cheap refresh; skip when there's no active tab.
+    if (project.activeTab) {
+      void project.refreshBacklinksForActive();
+    }
+
     // Step 3: react for any open tab that points at this path.
     const tab = project.tabs.find((t) => t.path === path);
     if (!tab) return;
@@ -453,6 +496,47 @@
     <Header {autoSaveHooks} />
     <FrontmatterPanel />
     <PersonalDictionaryPanel />
+    <BacklinksPanel />
+    {#if project.renameModalPath}
+      <RenameModal
+        oldPath={project.renameModalPath}
+        onClose={() => project.closeRenameModal()}
+        onCommit={async (newPath) => {
+          const oldPath = project.renameModalPath;
+          if (!oldPath) return;
+          // Close the modal up front so the user sees the editor return
+          // immediately; the rename itself is asynchronous but the UI
+          // doesn't have anything useful to show while it waits.
+          project.closeRenameModal();
+          try {
+            const { report, dirtyConflicts } = await project.renameFile(
+              oldPath,
+              newPath,
+            );
+            if (dirtyConflicts.length === 0) {
+              const n = report.referencesUpdated;
+              const m = report.filesWritten.length;
+              notify.success(
+                `Renamed. ${n} ${n === 1 ? "reference" : "references"} updated across ${m} ${m === 1 ? "file" : "files"}.`,
+              );
+            } else {
+              // Dirty tabs whose on-disk content changed under them:
+              // we kept the buffer intact so the user can save or
+              // discard on their own terms. Name the files so they
+              // can find them.
+              notify.error(
+                `Renamed ${oldPath} → ${newPath}, but ${dirtyConflicts.length} open tab${dirtyConflicts.length === 1 ? " has" : "s have"} unsaved edits and weren't reloaded: ${dirtyConflicts.join(", ")}`,
+              );
+            }
+          } catch (err) {
+            notify.error(
+              `Couldn't rename ${oldPath} → ${newPath}: ${formatError(err)}`,
+              err,
+            );
+          }
+        }}
+      />
+    {/if}
     <div class="layout">
       <Sidebar />
       <div class="workspace">

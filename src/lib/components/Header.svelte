@@ -191,6 +191,22 @@
       </button>
       <button
         type="button"
+        class="bl-indicator"
+        class:bl-indicator-empty={project.backlinksOfActive.length === 0}
+        class:bl-indicator-active={project.backlinksPanelOpen}
+        aria-label={project.backlinksPanelOpen
+          ? "Close backlinks panel"
+          : "Open backlinks panel"}
+        aria-pressed={project.backlinksPanelOpen}
+        title="Backlinks  ⌘⇧B"
+        onclick={() => project.toggleBacklinksPanel()}
+      >
+        <span class="bl-label">BL</span>
+        <span class="bl-sep">·</span>
+        <span class="bl-count">{project.backlinksOfActive.length}</span>
+      </button>
+      <button
+        type="button"
         class="aa-indicator"
         class:aa-indicator-empty={preferences.personalDictionary.length === 0}
         class:aa-indicator-active={preferences.dictionaryPanelOpen}
@@ -549,6 +565,53 @@
   }
 
   .aa-sep {
+    opacity: 0.5;
+  }
+
+  /* Backlinks indicator. Same visual language as the FM and Aa
+     indicators — the three should read as a coherent cluster of
+     "tools you can reach from here" and share the top-right zone. */
+  .bl-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+    background: transparent;
+    border: 1px solid var(--skrive-rule);
+    border-radius: 4px;
+    height: 24px;
+    padding: 0 0.5rem;
+    color: var(--skrive-muted);
+    cursor: pointer;
+    font: inherit;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    transition:
+      color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+      background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+      border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .bl-indicator:hover {
+    color: var(--skrive-fg);
+    border-color: var(--skrive-fg);
+  }
+
+  .bl-indicator.bl-indicator-active {
+    color: var(--skrive-fg);
+    background: var(--skrive-rule);
+    border-color: var(--skrive-fg);
+  }
+
+  .bl-indicator.bl-indicator-empty .bl-count {
+    opacity: 0.7;
+  }
+
+  .bl-label {
+    font-weight: 600;
+  }
+
+  .bl-sep {
     opacity: 0.5;
   }
 </style>

@@ -203,6 +203,11 @@
       y: e.clientY,
       items: [
         {
+          label: "Rename…",
+          shortcut: "F2",
+          onClick: () => project.openRenameModal(file.path),
+        },
+        {
           label: "Delete…",
           shortcut: "⌫",
           variant: "destructive",
