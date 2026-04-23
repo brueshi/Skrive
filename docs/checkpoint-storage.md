@@ -50,7 +50,7 @@ Two independent caps per file:
 - **`auto_cap`** — the maximum number of auto checkpoints kept. Default `50`. Pruned oldest-first after each new auto write. At a 5-minute interval, 50 auto checkpoints cover about four hours of active editing — long enough to step back through a writing session, short enough to keep the per-file footprint bounded.
 - **`manual_cap`** — the maximum number of manual checkpoints kept. Default *unbounded*. Users who manually checkpoint are deliberately marking milestones; pruning those behind their back would be surprise behavior.
 
-Both caps become `.skrive.toml` keys under `[checkpoints]` when Phase 3.2 ships the parser. Until then, the defaults are hardcoded. Users who want different caps can tune at the command-line by setting environment variables (documented later) or wait for 3.2.
+Both caps are `.skrive.toml` keys under `[checkpoints]`, parsed on `open_project`. The defaults above apply when the file (or section) is absent. Reopen the project to pick up edits to `.skrive.toml` (live reload via the watcher is tracked as a follow-up).
 
 **Pruning is best-effort.** A write that succeeds but a prune that fails logs a warning; the next write retries. Losing one stale checkpoint is worse than losing a new one because a delete failed.
 
@@ -97,7 +97,7 @@ The file-relative path used for `{file_hash}` is the project-relative path with 
 - Raw source bytes, no wrapper format.
 - Auto writes on idle (5-minute threshold), manual writes on command.
 - Dedup against the most recent checkpoint's content hash.
-- Two independent caps: `auto_cap = 50` default, `manual_cap = ∞` default. Tunable via `.skrive.toml` once Phase 3.2 parses it.
+- Two independent caps: `auto_cap = 50` default, `manual_cap = 0` (unbounded) default. Tunable via `.skrive.toml`'s `[checkpoints]` section.
 - Retention pruning is best-effort; failures don't block writes.
 
 Implementation in 3.3a inherits this. Deviation without amending this doc is a bug.

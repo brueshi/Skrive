@@ -205,16 +205,11 @@ fn posix_relpath(relpath: &Path) -> PathBuf {
 /// recent auto for the same file is younger than this. Autosave fires
 /// roughly once a second; the threshold keeps us from emitting a
 /// checkpoint per edit burst without losing the granularity the
-/// history panel needs across a writing session. Tunable via
-/// `.skrive.toml` once Phase 3.2 parses it.
+/// history panel needs across a writing session. Not currently
+/// exposed in `.skrive.toml` — only `auto_cap` and `manual_cap` live
+/// in the schema; make it a key under `[checkpoints]` if dogfooding
+/// asks for shorter / longer windows.
 const AUTO_CHECKPOINT_INTERVAL_MS: i64 = 5 * 60 * 1000;
-
-/// Default cap on how many `auto` checkpoints we keep per file.
-/// Manual checkpoints are never auto-pruned (see retention docs).
-/// At the 5-minute auto cadence this covers ~4 hours of active work,
-/// enough to step back through a session without ballooning the
-/// per-file footprint.
-const AUTO_CHECKPOINT_CAP: usize = 50;
 
 /// Maximum byte length for a filename slug. Names longer than this get
 /// truncated before the slug-building pass so the on-disk filename
@@ -299,7 +294,10 @@ struct CheckpointFile {
 /// - If the most-recent checkpoint (any kind) shares the new content
 ///   hash, skip.
 /// - Otherwise write `{now_ms}_auto.md` and prune old autos beyond
-///   `AUTO_CHECKPOINT_CAP`.
+///   `auto_cap`.
+///
+/// `auto_cap` comes from `.skrive.toml`'s `[checkpoints].auto_cap`
+/// (default 50), threaded through from `ProjectState.config`.
 ///
 /// All filesystem failures degrade to a logged warning rather than
 /// bubbling up — an unreachable app-data dir, a full disk, or a lock
@@ -311,6 +309,7 @@ pub fn maybe_write_auto_checkpoint(
     canonical_project_path: &Path,
     relpath: &Path,
     content: &[u8],
+    auto_cap: usize,
 ) {
     let dir = match persistence::checkpoint_dir(app, canonical_project_path, relpath) {
         Ok(d) => d,
@@ -323,7 +322,9 @@ pub fn maybe_write_auto_checkpoint(
             return;
         }
     };
-    if let Err(e) = maybe_write_auto_checkpoint_at(&dir, content, current_time_ms()) {
+    if let Err(e) =
+        maybe_write_auto_checkpoint_at(&dir, content, current_time_ms(), auto_cap)
+    {
         eprintln!(
             "skrive: auto-checkpoint write failed for {}: {}",
             relpath.display(),
@@ -335,11 +336,14 @@ pub fn maybe_write_auto_checkpoint(
 /// Core of the auto-checkpoint write, factored to take the resolved
 /// directory and a caller-supplied `now_ms` so tests can exercise
 /// every branch without standing up a Tauri `AppHandle` or relying on
-/// the real wall clock.
+/// the real wall clock. `auto_cap` is threaded through from the
+/// caller so the retention limit matches whatever `.skrive.toml`
+/// dictates at write time.
 fn maybe_write_auto_checkpoint_at(
     dir: &Path,
     content: &[u8],
     now_ms: i64,
+    auto_cap: usize,
 ) -> Result<()> {
     let existing = list_checkpoint_files(dir)?;
 
@@ -365,7 +369,7 @@ fn maybe_write_auto_checkpoint_at(
     let target = dir.join(&filename);
     std::fs::write(&target, content)?;
 
-    prune_auto_checkpoints(dir, AUTO_CHECKPOINT_CAP);
+    prune_auto_checkpoints(dir, auto_cap);
     Ok(())
 }
 
@@ -381,16 +385,18 @@ fn io_message(e: Error) -> String {
 /// act even when the content is unchanged from the prior pin. Filename
 /// collisions (same timestamp + same slug, unusual but possible when
 /// pinning very fast or after a clock skew) get a `_2`, `_3`, ...
-/// disambiguator.
+/// disambiguator. After writing, prunes old manual checkpoints beyond
+/// `manual_cap`; `manual_cap == 0` means unbounded (the default).
 pub fn create_manual_checkpoint(
     app: &AppHandle,
     canonical_project_path: &Path,
     relpath: &Path,
     name: &str,
     content: &[u8],
+    manual_cap: usize,
 ) -> Result<()> {
     let dir = persistence::checkpoint_dir(app, canonical_project_path, relpath)?;
-    create_manual_checkpoint_at(&dir, name, content, current_time_ms())
+    create_manual_checkpoint_at(&dir, name, content, current_time_ms(), manual_cap)
 }
 
 /// Core of the manual-checkpoint write, factored the same way as the
@@ -401,6 +407,7 @@ fn create_manual_checkpoint_at(
     name: &str,
     content: &[u8],
     now_ms: i64,
+    manual_cap: usize,
 ) -> Result<()> {
     let slug = slugify(name);
     let mut target = dir.join(format_manual_filename(now_ms, &slug, 0));
@@ -422,6 +429,7 @@ fn create_manual_checkpoint_at(
             io_message(e),
         );
     }
+    prune_manual_checkpoints(dir, manual_cap);
     Ok(())
 }
 
@@ -558,6 +566,40 @@ fn prune_auto_checkpoints(dir: &Path, cap: usize) {
         if let Err(e) = std::fs::remove_file(&stale.path) {
             eprintln!(
                 "skrive: auto-checkpoint prune failed for {}: {}",
+                stale.path.display(),
+                e,
+            );
+        }
+    }
+}
+
+/// Keep the most recent `cap` manual checkpoints; delete the rest,
+/// along with their `.name` sidecars. `cap == 0` means unbounded —
+/// the default and the historical behavior before `.skrive.toml`
+/// could tune it. Best-effort like the auto prune.
+fn prune_manual_checkpoints(dir: &Path, cap: usize) {
+    if cap == 0 {
+        return;
+    }
+    let files = match list_checkpoint_files(dir) {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+    let mut manuals: Vec<CheckpointFile> = files
+        .into_iter()
+        .filter(|c| c.kind == CheckpointKind::Manual)
+        .collect();
+    if manuals.len() <= cap {
+        return;
+    }
+    manuals.sort_by_key(|c| std::cmp::Reverse(c.timestamp_ms));
+    for stale in manuals.into_iter().skip(cap) {
+        // Sidecar delete is best-effort — a leftover `.name` file next
+        // to a deleted checkpoint is harmless; the reader ignores it.
+        let _ = std::fs::remove_file(name_sidecar_path(&stale.path));
+        if let Err(e) = std::fs::remove_file(&stale.path) {
+            eprintln!(
+                "skrive: manual-checkpoint prune failed for {}: {}",
                 stale.path.display(),
                 e,
             );
@@ -879,7 +921,7 @@ mod tests {
     fn auto_write_creates_first_checkpoint() {
         let dir = tempfile::tempdir().unwrap();
         let now_ms = 1_000_000_000_000;
-        maybe_write_auto_checkpoint_at(dir.path(), b"hello\n", now_ms).unwrap();
+        maybe_write_auto_checkpoint_at(dir.path(), b"hello\n", now_ms, 50).unwrap();
         let files = list_checkpoint_files(dir.path()).unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].kind, CheckpointKind::Auto);
@@ -890,10 +932,10 @@ mod tests {
     fn auto_write_skips_when_interval_has_not_elapsed() {
         let dir = tempfile::tempdir().unwrap();
         let t0 = 1_000_000_000_000;
-        maybe_write_auto_checkpoint_at(dir.path(), b"one\n", t0).unwrap();
+        maybe_write_auto_checkpoint_at(dir.path(), b"one\n", t0, 50).unwrap();
         // Well under 5 minutes later, different content.
         let t1 = t0 + 60 * 1000;
-        maybe_write_auto_checkpoint_at(dir.path(), b"two\n", t1).unwrap();
+        maybe_write_auto_checkpoint_at(dir.path(), b"two\n", t1, 50).unwrap();
         let files = list_checkpoint_files(dir.path()).unwrap();
         assert_eq!(files.len(), 1, "second write should be skipped: {:?}", files);
     }
@@ -902,10 +944,10 @@ mod tests {
     fn auto_write_dedups_against_most_recent_when_content_matches() {
         let dir = tempfile::tempdir().unwrap();
         let t0 = 1_000_000_000_000;
-        maybe_write_auto_checkpoint_at(dir.path(), b"same\n", t0).unwrap();
+        maybe_write_auto_checkpoint_at(dir.path(), b"same\n", t0, 50).unwrap();
         // Past the 5-minute interval but content is identical — skip.
         let t1 = t0 + AUTO_CHECKPOINT_INTERVAL_MS + 1000;
-        maybe_write_auto_checkpoint_at(dir.path(), b"same\n", t1).unwrap();
+        maybe_write_auto_checkpoint_at(dir.path(), b"same\n", t1, 50).unwrap();
         let files = list_checkpoint_files(dir.path()).unwrap();
         assert_eq!(files.len(), 1);
     }
@@ -914,9 +956,9 @@ mod tests {
     fn auto_write_succeeds_past_interval_with_new_content() {
         let dir = tempfile::tempdir().unwrap();
         let t0 = 1_000_000_000_000;
-        maybe_write_auto_checkpoint_at(dir.path(), b"one\n", t0).unwrap();
+        maybe_write_auto_checkpoint_at(dir.path(), b"one\n", t0, 50).unwrap();
         let t1 = t0 + AUTO_CHECKPOINT_INTERVAL_MS + 1;
-        maybe_write_auto_checkpoint_at(dir.path(), b"two\n", t1).unwrap();
+        maybe_write_auto_checkpoint_at(dir.path(), b"two\n", t1, 50).unwrap();
         let files = list_checkpoint_files(dir.path()).unwrap();
         assert_eq!(files.len(), 2);
     }
@@ -966,9 +1008,9 @@ mod tests {
     fn manual_write_renames_on_filename_collision() {
         let dir = tempfile::tempdir().unwrap();
         let now_ms = 1_000_000_000_000;
-        create_manual_checkpoint_at(dir.path(), "pinned", b"one\n", now_ms).unwrap();
+        create_manual_checkpoint_at(dir.path(), "pinned", b"one\n", now_ms, 0).unwrap();
         // Same timestamp + same slug — the manual writer appends `_2`.
-        create_manual_checkpoint_at(dir.path(), "pinned", b"two\n", now_ms).unwrap();
+        create_manual_checkpoint_at(dir.path(), "pinned", b"two\n", now_ms, 0).unwrap();
         let files = list_checkpoint_files(dir.path()).unwrap();
         assert_eq!(files.len(), 2);
         // Both manual, same slug prefix, disambiguator differs.
@@ -987,11 +1029,65 @@ mod tests {
         // an explicit act even when content hasn't changed.
         let dir = tempfile::tempdir().unwrap();
         let t0 = 1_000_000_000_000;
-        create_manual_checkpoint_at(dir.path(), "first pin", b"same\n", t0).unwrap();
+        create_manual_checkpoint_at(dir.path(), "first pin", b"same\n", t0, 0).unwrap();
         let t1 = t0 + 10_000;
-        create_manual_checkpoint_at(dir.path(), "second pin", b"same\n", t1).unwrap();
+        create_manual_checkpoint_at(dir.path(), "second pin", b"same\n", t1, 0).unwrap();
         let files = list_checkpoint_files(dir.path()).unwrap();
         assert_eq!(files.len(), 2);
+    }
+
+    #[test]
+    fn manual_write_prunes_beyond_cap_when_set() {
+        // manual_cap > 0 caps the manual-pin stack; the oldest fall
+        // off the tail. Sidecars go with them.
+        let dir = tempfile::tempdir().unwrap();
+        let base = 1_000_000_000_000i64;
+        for (i, name) in ["one", "two", "three", "four"].iter().enumerate() {
+            create_manual_checkpoint_at(
+                dir.path(),
+                name,
+                b"body\n",
+                base + (i as i64) * 1000,
+                2,
+            )
+            .unwrap();
+        }
+        let files = list_checkpoint_files(dir.path()).unwrap();
+        assert_eq!(files.len(), 2, "cap=2 should keep only the two newest");
+        // Sidecar for the oldest pins should be gone too — the reader
+        // otherwise would show "name: None" for a file that doesn't
+        // exist, which is harmless but wasteful.
+        let leftover_sidecars: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .map(|x| x == "name")
+                    .unwrap_or(false)
+            })
+            .collect();
+        assert_eq!(leftover_sidecars.len(), 2);
+    }
+
+    #[test]
+    fn manual_write_unbounded_when_cap_is_zero() {
+        // `manual_cap = 0` is the default and means "never auto-prune
+        // the pinned stack" — users asked for an explicit action.
+        let dir = tempfile::tempdir().unwrap();
+        let base = 1_000_000_000_000i64;
+        for i in 0..5 {
+            create_manual_checkpoint_at(
+                dir.path(),
+                &format!("pin-{i}"),
+                b"body\n",
+                base + (i as i64) * 1000,
+                0,
+            )
+            .unwrap();
+        }
+        let files = list_checkpoint_files(dir.path()).unwrap();
+        assert_eq!(files.len(), 5);
     }
 
     // ================== Reader tests ==================
@@ -1000,9 +1096,9 @@ mod tests {
     fn list_checkpoints_is_newest_first_with_content_hash() {
         let dir = tempfile::tempdir().unwrap();
         let t0 = 1_000_000_000_000;
-        maybe_write_auto_checkpoint_at(dir.path(), b"first\n", t0).unwrap();
+        maybe_write_auto_checkpoint_at(dir.path(), b"first\n", t0, 50).unwrap();
         let t1 = t0 + AUTO_CHECKPOINT_INTERVAL_MS + 1;
-        maybe_write_auto_checkpoint_at(dir.path(), b"second\n", t1).unwrap();
+        maybe_write_auto_checkpoint_at(dir.path(), b"second\n", t1, 50).unwrap();
 
         let versions = list_checkpoints_in(dir.path()).unwrap();
         assert_eq!(versions.len(), 2);
@@ -1016,7 +1112,7 @@ mod tests {
     #[test]
     fn list_checkpoints_auto_has_no_name() {
         let dir = tempfile::tempdir().unwrap();
-        maybe_write_auto_checkpoint_at(dir.path(), b"body\n", 1_000_000_000_000).unwrap();
+        maybe_write_auto_checkpoint_at(dir.path(), b"body\n", 1_000_000_000_000, 50).unwrap();
         let versions = list_checkpoints_in(dir.path()).unwrap();
         assert_eq!(versions.len(), 1);
         assert_eq!(versions[0].kind, CheckpointKind::Auto);
@@ -1031,6 +1127,7 @@ mod tests {
             "End of Draft 1",
             b"body\n",
             1_000_000_000_000,
+            0,
         )
         .unwrap();
         let versions = list_checkpoints_in(dir.path()).unwrap();
@@ -1065,6 +1162,7 @@ mod tests {
             "pinned",
             b"the body\n",
             1_000_000_000_000,
+            0,
         )
         .unwrap();
         let versions = list_checkpoints_in(dir.path()).unwrap();

@@ -64,12 +64,14 @@ pub async fn open_project(
     let (manifest, graph) = project::scan(&root)?;
     let canonical_root = root.canonicalize()?;
     let history_mode = project::detect_history_mode(&canonical_root);
+    let config = crate::config::SkriveConfig::load(&canonical_root);
 
     let mut project_slot = state.project.lock().await;
     *project_slot = Some(ProjectState {
         root: canonical_root,
         link_graph: graph,
         history_mode,
+        config,
     });
 
     // Drop any prior watcher before installing a new one.
@@ -123,6 +125,7 @@ pub async fn write_file(
             &project.root,
             &rel,
             composed.as_bytes(),
+            project.config.checkpoints.auto_cap,
         );
     }
 
@@ -335,7 +338,7 @@ pub async fn get_outgoing_links(
 }
 
 /// Return every link in the project whose target doesn't resolve. The
-/// Phase 3.2 lint engine is the primary consumer; each returned row
+/// Phase 3.4 lint engine is the primary consumer; each returned row
 /// corresponds to one lint-panel entry. Empty when nothing is broken.
 #[tauri::command]
 pub async fn get_dead_links(
@@ -494,10 +497,14 @@ pub async fn create_checkpoint(
     name: String,
     state: State<'_, AppState>,
 ) -> Result<()> {
-    let (root, mode) = {
+    let (root, mode, manual_cap) = {
         let project = state.project.lock().await;
         let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
-        (project.root.clone(), project.history_mode)
+        (
+            project.root.clone(),
+            project.history_mode,
+            project.config.checkpoints.manual_cap,
+        )
     };
     if mode != HistoryMode::Checkpoints {
         return Err(Error::Io(
@@ -507,7 +514,7 @@ pub async fn create_checkpoint(
     let rel = PathBuf::from(&path);
     let absolute = project::resolve_existing_within(&root, &rel)?;
     let bytes = std::fs::read(&absolute)?;
-    history::create_manual_checkpoint(&app, &root, &rel, &name, &bytes)
+    history::create_manual_checkpoint(&app, &root, &rel, &name, &bytes, manual_cap)
 }
 
 // =========================== Diff commands ===========================

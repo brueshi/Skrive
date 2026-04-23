@@ -129,6 +129,14 @@ pub struct ProjectState {
     /// `git init` mid-session closes and reopens the project to switch
     /// modes, which is rare enough not to need live re-detection.
     pub history_mode: HistoryMode,
+    /// Parsed `.skrive.toml` for this project, or
+    /// `SkriveConfig::default()` when the file is absent or malformed.
+    /// Read by the checkpoint writer (retention caps) today; the
+    /// Phase 3.4 lint engine and the Phase 5 exporters will consume
+    /// the `[lint]` / `[export.*]` sections when they land. Refreshed
+    /// only on project open for now — live reload via the watcher is
+    /// a tracked follow-up.
+    pub config: crate::config::SkriveConfig,
 }
 
 impl ProjectState {
@@ -162,7 +170,7 @@ impl ProjectState {
     /// Drop a deleted file from the graph. Backward edges pointing *at*
     /// this path are preserved — they represent other files that still
     /// link to the now-missing target, which is exactly the dead-link
-    /// data Phase 3.2 will surface.
+    /// data Phase 3.4 will surface.
     pub fn note_file_deleted(&mut self, rel: &Path) {
         self.link_graph.forget(&relpath_to_string(rel));
     }
@@ -456,8 +464,11 @@ impl Default for SearchOptions {
 }
 
 /// A single hit inside a file. `line_number` is 1-indexed (what humans and
-/// CodeMirror both want); `column` is the 0-indexed character offset into
-/// `snippet` where the match begins.
+/// CodeMirror both want); `column` is the 0-indexed UTF-16 code-unit
+/// offset into `snippet` where the match begins, matching the backlinks /
+/// outgoing-link convention so the frontend's `String#slice` math works
+/// consistently across all positional IPC results. `match_length` is the
+/// match's length in UTF-16 code units for the same reason.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchHit {
@@ -556,7 +567,7 @@ pub struct RenameReport {
 }
 
 /// A link whose target doesn't resolve to a file in the project. Emitted
-/// by `get_dead_links` and consumed in Phase 3.2 by the lint engine.
+/// by `get_dead_links` and consumed in Phase 3.4 by the lint engine.
 ///
 /// `target` is the *unresolved* display form — for relative targets it's
 /// the project-relative path as the link wrote it; for wiki targets it's
@@ -1141,8 +1152,8 @@ fn truncate_snippet(line: &str, cap: usize) -> String {
 /// Reuses the same walker filter as `scan` — hidden files and directories
 /// are skipped; non-Markdown files are skipped because the manifest only
 /// knows about Markdown and search results that can't be opened are noise.
-/// Naive line-by-line scan is fine for dogfood-scale projects; TODO: swap
-/// in `grep-searcher` if it becomes the bottleneck.
+/// Naive line-by-line scan is fine for dogfood-scale projects; revisit
+/// the search implementation if and when profiling shows it's hot.
 pub fn search(
     root: &Path,
     query: &str,
@@ -1214,14 +1225,21 @@ pub fn search(
                     None => break,
                 };
                 let abs = cursor + pos;
-                let column_chars =
-                    search_line.get(..abs).map(|s| s.chars().count()).unwrap_or(0);
-                let match_char_len = needle.chars().count();
+                // UTF-16 code units rather than chars so the frontend's
+                // `String#slice` math stays correct on astral-plane input
+                // (emoji, some math symbols). Each char's `len_utf16`
+                // returns 1 for BMP code points and 2 for surrogate pairs.
+                let column_utf16 = search_line
+                    .get(..abs)
+                    .map(|s| s.chars().map(char::len_utf16).sum::<usize>())
+                    .unwrap_or(0);
+                let match_utf16: usize =
+                    needle.chars().map(char::len_utf16).sum();
                 hits.push(SearchHit {
                     path: rel_str.clone(),
                     line_number: (line_idx as u32) + 1,
-                    column: column_chars as u32,
-                    match_length: match_char_len as u32,
+                    column: column_utf16 as u32,
+                    match_length: match_utf16 as u32,
                     snippet: line.to_string(),
                 });
                 if hits.len() >= SEARCH_HIT_CAP {
@@ -1656,6 +1674,20 @@ mod tests {
     }
 
     #[test]
+    fn search_reports_utf16_column_and_match_length_for_astral_prefix() {
+        // A prefix containing an astral-plane character (😀, U+1F600) —
+        // 1 Unicode code point but 2 UTF-16 code units. The column
+        // needs to count UTF-16 code units so the frontend's
+        // `String#slice` lands on the right spot.
+        let dir = write_temp_project(&[("a.md", "😀 target here\n")]);
+        let hits = search(dir.path(), "target", SearchOptions::default()).unwrap();
+        assert_eq!(hits.len(), 1);
+        // `"😀 "` = 2 code units + 1 space = 3 UTF-16 code units before "target".
+        assert_eq!(hits[0].column, 3);
+        assert_eq!(hits[0].match_length, 6);
+    }
+
+    #[test]
     fn scan_skips_noise_directories() {
         // A realistic dogfood accident: the user points Skrive at a
         // code repo that happens to contain Markdown in its dependency
@@ -1800,6 +1832,7 @@ mod tests {
             root: PathBuf::from("/tmp/skrive-test"),
             link_graph: LinkGraph::new(),
             history_mode: HistoryMode::Checkpoints,
+            config: crate::config::SkriveConfig::default(),
         }
     }
 
@@ -1864,10 +1897,12 @@ mod tests {
         let (_, graph) = scan(dir.path()).expect("scan temp project");
         let root = dir.path().canonicalize().unwrap();
         let history_mode = detect_history_mode(&root);
+        let config = crate::config::SkriveConfig::load(&root);
         ProjectState {
             root,
             link_graph: graph,
             history_mode,
+            config,
         }
     }
 
@@ -1974,10 +2009,12 @@ mod tests {
         let (_, graph) = scan(dir.path()).expect("scan temp project");
         let root = dir.path().canonicalize().unwrap();
         let history_mode = detect_history_mode(&root);
+        let config = crate::config::SkriveConfig::load(&root);
         ProjectState {
             root,
             link_graph: graph,
             history_mode,
+            config,
         }
     }
 

@@ -157,10 +157,9 @@
 
   // Split a snippet around the match into before / match / after runs so
   // the row can highlight the matched span without re-implementing the
-  // index math in template land. `column` is a char offset into the
-  // snippet, which maps cleanly to JS String#slice for ASCII content
-  // (the dogfood case). TODO: switch to UTF-16 offsets for accurate
-  // highlighting on non-ASCII content.
+  // index math in template land. `column` and `matchLength` are UTF-16
+  // code-unit offsets (same convention as the backlinks panel), so
+  // JS `String#slice` works correctly on astral-plane input too.
   function splitSnippet(hit: SearchHit): {
     before: string;
     matched: string;

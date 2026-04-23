@@ -2,6 +2,7 @@
 //! that can be unit-tested in isolation.
 
 mod commands;
+mod config;
 mod diff;
 #[cfg(test)]
 mod diff_memo;

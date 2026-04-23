@@ -15,7 +15,7 @@ my-project/
 └── ...
 ```
 
-Skrive reads `.skrive.toml` when a project opens and re-reads it when the file changes on disk. There's no reload command — save the file, changes apply immediately.
+Skrive reads `.skrive.toml` when a project opens. Live reload on file change is a tracked follow-up — until it ships, reopen the project (close + open) to apply edits.
 
 ## Parse behavior
 
@@ -120,7 +120,7 @@ The `[export.custom.*]` namespace is for user-defined render targets. Each subta
 
 ## `[checkpoints]`
 
-Tunes the lightweight version-history store Skrive writes when a project isn't a git repo. Shape landed in [`docs/checkpoint-storage.md`](checkpoint-storage.md); lives here in the schema once Phase 3.2 ships the `.skrive.toml` parser. Until then, the defaults below are hardcoded.
+Tunes the lightweight version-history store Skrive writes when a project isn't a git repo. Shape is documented in [`docs/checkpoint-storage.md`](checkpoint-storage.md); the parser consumes these keys on `open_project`. Edit and reopen the project to apply changes (live reload via the watcher is a tracked follow-up).
 
 ```toml
 [checkpoints]
@@ -157,5 +157,5 @@ project_words = ["Skrive", "frontmatter", "pulldown"]
 ## Related
 
 - [Open question A4](../planning/open-questions.md) — the design conversation that settled this schema.
-- `phase-3.2-plan.md` — the lint engine that will be the first real consumer of `[lint]`.
+- `phase-3.4-plan.md` — the lint engine that will be the first real consumer of `[lint]`.
 - Phase 5.2 (outline) — the exporters that will consume `[export.*]`.

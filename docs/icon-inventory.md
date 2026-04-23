@@ -104,7 +104,7 @@ These are the Phase 2 critical-path icons. The split view, sidebar, and header b
 
 ---
 
-## Phase 3.2 — Lint engine
+## Phase 3.4 — Lint engine
 
 **3 icons (16×16 only — gutter markers).**
 

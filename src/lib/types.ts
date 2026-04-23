@@ -295,9 +295,13 @@ export type SearchHit = {
   path: string;
   /** 1-indexed line number, what CodeMirror wants. */
   lineNumber: number;
-  /** 0-indexed character offset into `snippet` where the match begins. */
+  /**
+   * 0-indexed UTF-16 code-unit offset into `snippet` where the match
+   * begins. Same convention as backlinks / outgoing links, so `String#slice`
+   * and CodeMirror positions consume it directly.
+   */
   column: number;
-  /** Character length of the match (equals the query for case-sensitive). */
+  /** Length of the match in UTF-16 code units. */
   matchLength: number;
   /** Full line content that contains the match. */
   snippet: string;
@@ -332,9 +336,9 @@ export type OutgoingLink = {
 };
 
 /**
- * Shape of one row in the Phase 3.2 lint engine's dead-link surface.
+ * Shape of one row in the Phase 3.4 lint engine's dead-link surface.
  * Mirrors `src-tauri/src/project.rs::DeadLink`. Produced by the
- * `get_dead_links` command; the Phase 3.2 UI is the only real consumer.
+ * `get_dead_links` command; the Phase 3.4 UI is the only real consumer.
  */
 export type DeadLink = {
   /** Project-relative path of the source file that contains the dead link. */
