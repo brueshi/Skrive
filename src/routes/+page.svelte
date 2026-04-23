@@ -1,7 +1,7 @@
 <script lang="ts">
   // The workspace page. Composes the sidebar + header + split view and owns
   // the cross-cutting concerns that don't fit inside any one component:
-  //   - global keyboard shortcuts (⌘B, ⌘1/2/3, ⌘S)
+  //   - global keyboard shortcuts (⌘[, ⌘1/2/3, ⌘S)
   //   - auto-save debouncing
   //   - watcher event handling with self-write suppression
   //   - project UI state persistence
@@ -180,6 +180,7 @@
     if (!project.hasProject) return;
     // Touch each piece of persisted state so the effect re-runs on change.
     void project.sidebarVisible;
+    void project.sidebarWidth;
     void project.activeTabIndex;
     void project.tabs.length;
     for (const t of project.tabs) {
@@ -269,8 +270,7 @@
     }
 
     // ⌘⇧B toggles the backlinks panel. Requires an active tab — backlinks
-    // are contextual to the file being viewed. Handled before the switch
-    // below so it doesn't collide with the ⌘B sidebar toggle.
+    // are contextual to the file being viewed.
     if (e.shiftKey && !e.altKey && e.key.toLowerCase() === "b") {
       if (project.activeTab) {
         e.preventDefault();
@@ -291,11 +291,33 @@
       return;
     }
 
+    // Bracket family:
+    //   ⌘[     toggles the sidebar
+    //   ⌘⇧[   cycles to the previous open tab
+    //   ⌘⇧]   cycles to the next open tab
+    //
+    // We avoid ⌘B (the VS Code sidebar convention) because ⌘B is the
+    // universal "bold" shortcut in writer apps — leaving that slot open
+    // keeps it free for when editor formatting shortcuts land. The tab
+    // cycle matches Safari / Chrome / Terminal so it's already in
+    // writers' muscle memory.
+    //
+    // Matched by `e.code` rather than `e.key` because shift turns `[` and
+    // `]` into `{` and `}` on US keyboards, which would break the binding
+    // if we compared against `e.key`.
+    if (!e.altKey && e.code === "BracketLeft") {
+      e.preventDefault();
+      if (e.shiftKey) project.cycleActiveTab(-1);
+      else project.toggleSidebar();
+      return;
+    }
+    if (!e.altKey && e.shiftKey && e.code === "BracketRight") {
+      e.preventDefault();
+      project.cycleActiveTab(1);
+      return;
+    }
+
     switch (e.key.toLowerCase()) {
-      case "b":
-        e.preventDefault();
-        project.toggleSidebar();
-        return;
       case "s":
         e.preventDefault();
         void forceSaveActive();

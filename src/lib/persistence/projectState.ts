@@ -32,6 +32,7 @@ export async function restoreProjectState(projectPath: string): Promise<void> {
   if (!state) return;
 
   project.setSidebarVisible(state.sidebar.visible);
+  project.setSidebarWidth(state.sidebar.width);
 
   // Reopen tabs one at a time so the store's openTab does its deduping and
   // read_file error handling. We re-apply the layout mode and divider ratio

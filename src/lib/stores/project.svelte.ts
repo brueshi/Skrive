@@ -32,10 +32,19 @@ let tabs = $state<Tab[]>([]);
 let activeTabIndex = $state(-1);
 
 // Sidebar visibility and width live at the project level, not per tab —
-// toggling it affects the whole workspace. Width is reserved for when we
-// make the sidebar drag-resizable; for Step 2 it's just persisted.
+// toggling it affects the whole workspace. Width is driven by the
+// drag-to-resize handle on the sidebar's right edge and persisted through
+// ProjectUiState, so each project remembers its own width.
 let sidebarVisible = $state(true);
 let sidebarWidth = $state(260);
+
+// Clamp bounds for the drag-to-resize handle. Min keeps the filename
+// column readable; max keeps the sidebar from eating the editor. Exported
+// so the handle can advertise them to assistive tech via aria-valuemin
+// / aria-valuemax.
+export const SIDEBAR_MIN_WIDTH = 180;
+export const SIDEBAR_MAX_WIDTH = 500;
+export const SIDEBAR_DEFAULT_WIDTH = 260;
 
 // Frontmatter panel open/closed state. *Session only* — deliberately not
 // persisted in ProjectUiState because the panel is a transient tool, not
@@ -172,6 +181,17 @@ function switchTabImpl(index: number): void {
 }
 
 /**
+ * Cycle the active tab by `direction` (+1 for next, -1 for previous),
+ * wrapping at the ends. No-op when no tabs are open — the binding in
+ * +page.svelte still fires but there is nothing to switch to.
+ */
+function cycleActiveTabImpl(direction: 1 | -1): void {
+  if (tabs.length === 0) return;
+  const count = tabs.length;
+  activeTabIndex = ((activeTabIndex + direction) % count + count) % count;
+}
+
+/**
  * Called by the editor's onChange when the user types. Updates the active
  * tab's body in place and flags it dirty. The disk write is driven by the
  * auto-save effect in +page.svelte, not here.
@@ -228,6 +248,14 @@ function setSidebarVisibleImpl(visible: boolean): void {
 
 function toggleSidebarImpl(): void {
   sidebarVisible = !sidebarVisible;
+}
+
+function setSidebarWidthImpl(width: number): void {
+  const clamped = Math.max(
+    SIDEBAR_MIN_WIDTH,
+    Math.min(SIDEBAR_MAX_WIDTH, Math.round(width)),
+  );
+  sidebarWidth = clamped;
 }
 
 // =========================== Frontmatter actions ===========================
@@ -561,6 +589,7 @@ export const project = {
   openTab: openTabImpl,
   closeTab: closeTabImpl,
   switchTab: switchTabImpl,
+  cycleActiveTab: cycleActiveTabImpl,
   updateActiveTabContent: updateActiveTabContentImpl,
   markTabSaved: markTabSavedImpl,
   reloadTab: reloadTabImpl,
@@ -568,6 +597,7 @@ export const project = {
   setSplitDividerRatio: setSplitDividerRatioImpl,
   setSidebarVisible: setSidebarVisibleImpl,
   toggleSidebar: toggleSidebarImpl,
+  setSidebarWidth: setSidebarWidthImpl,
   openFrontmatterPanel: openFrontmatterPanelImpl,
   closeFrontmatterPanel: closeFrontmatterPanelImpl,
   toggleFrontmatterPanel: toggleFrontmatterPanelImpl,

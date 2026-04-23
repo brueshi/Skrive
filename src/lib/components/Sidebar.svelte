@@ -14,7 +14,13 @@
   // current design assumes projects on the order of tens-to-low-hundreds of
   // files, not thousands.
 
-  import { project } from "$lib/stores/project.svelte";
+  import { onDestroy } from "svelte";
+  import {
+    project,
+    SIDEBAR_MIN_WIDTH,
+    SIDEBAR_MAX_WIDTH,
+    SIDEBAR_DEFAULT_WIDTH,
+  } from "$lib/stores/project.svelte";
   import { preferences } from "$lib/stores/preferences.svelte";
   import { notify } from "$lib/stores/notifications.svelte";
   import { formatError } from "$lib/errors";
@@ -252,11 +258,62 @@
       requestDeleteDirectory(dir);
     }
   }
+
+  // ---------- Drag-to-resize ----------
+  //
+  // Pointerdown on the handle captures the starting mouse x and the
+  // current sidebar width, then document-level pointermove/pointerup
+  // drive the resize until the button lifts. We park the cursor and
+  // `user-select` overrides on <body> during drag so the pointer stays
+  // `col-resize` even when it wanders off the narrow hit zone, and so
+  // selecting text in the editor mid-drag doesn't hijack the gesture.
+  //
+  // Double-click on the handle resets to the default width — common
+  // divider idiom and a quick escape hatch if the user drags too wide.
+
+  let isDragging = $state(false);
+  let dragStartX = 0;
+  let dragStartWidth = 0;
+
+  function startDrag(e: PointerEvent) {
+    if (e.button !== 0) return; // primary button only
+    e.preventDefault();
+    isDragging = true;
+    dragStartX = e.clientX;
+    dragStartWidth = project.sidebarWidth;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", onDragMove);
+    window.addEventListener("pointerup", endDrag, { once: true });
+  }
+
+  function onDragMove(e: PointerEvent) {
+    project.setSidebarWidth(dragStartWidth + (e.clientX - dragStartX));
+  }
+
+  function endDrag() {
+    isDragging = false;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    window.removeEventListener("pointermove", onDragMove);
+  }
+
+  onDestroy(() => {
+    // If the component is torn down mid-drag (project closed, etc.),
+    // leave the document in a clean state.
+    if (isDragging) endDrag();
+  });
+
+  function resetWidth() {
+    project.setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
+  }
 </script>
 
 <aside
   class="sidebar"
   class:collapsed={!project.sidebarVisible}
+  class:dragging={isDragging}
+  style="--skrive-sidebar-width: {project.sidebarWidth}px"
   aria-label="Files"
   aria-hidden={!project.sidebarVisible}
   inert={!project.sidebarVisible}
@@ -336,6 +393,22 @@
   </div>
 </aside>
 
+{#if project.sidebarVisible}
+  <!-- svelte-ignore a11y_no_static_element_interactions a11y_no_noninteractive_element_interactions -->
+  <div
+    class="resize-handle"
+    class:dragging={isDragging}
+    role="separator"
+    aria-orientation="vertical"
+    aria-label="Resize sidebar"
+    aria-valuenow={project.sidebarWidth}
+    aria-valuemin={SIDEBAR_MIN_WIDTH}
+    aria-valuemax={SIDEBAR_MAX_WIDTH}
+    onpointerdown={startDrag}
+    ondblclick={resetWidth}
+  ></div>
+{/if}
+
 {#if contextMenu}
   <ContextMenu
     x={contextMenu.x}
@@ -360,9 +433,8 @@
 
 <style>
   .sidebar {
-    width: 260px;
+    width: var(--skrive-sidebar-width, 260px);
     flex-shrink: 0;
-    border-right: 1px solid var(--skrive-rule);
     overflow: hidden auto;
     background: var(--skrive-bg);
     font-family:
@@ -373,25 +445,58 @@
     min-height: 0;
     transition:
       width 180ms cubic-bezier(0.4, 0, 0.2, 1),
-      border-right-width 180ms cubic-bezier(0.4, 0, 0.2, 1),
       opacity 180ms cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   /* Collapsed state: slide closed by animating width to 0. Sibling flex
-     content (the workspace) grows smoothly in the freed space. The
-     border collapses too so the 1px rule doesn't linger as a stub, and
-     opacity fades the contents in the final frames to keep the close
-     from looking like content was cut off mid-animation. */
+     content (the workspace) grows smoothly in the freed space. Opacity
+     fades the contents in the final frames to keep the close from
+     looking like content was cut off mid-animation. */
   .sidebar.collapsed {
     width: 0;
-    border-right-width: 0;
     opacity: 0;
+  }
+
+  /* During a drag, suppress the width transition so the sidebar tracks
+     the pointer frame-by-frame instead of easing toward each new width. */
+  .sidebar.dragging {
+    transition: opacity 180ms cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   @media (prefers-reduced-motion: reduce) {
     .sidebar {
       transition: none;
     }
+  }
+
+  /* The drag handle lives as a sibling flex-item between the sidebar and
+     the workspace. A 4px-wide transparent strip gives the pointer a
+     generous hit zone, while the 1px inner line (rendered via ::before)
+     acts as the visible rule that the old `border-right` used to draw. */
+  .resize-handle {
+    width: 4px;
+    flex-shrink: 0;
+    cursor: col-resize;
+    position: relative;
+    background: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .resize-handle::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 1px;
+    background: var(--skrive-rule);
+    transition: background 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .resize-handle:hover::before,
+  .resize-handle.dragging::before {
+    background: var(--skrive-fg);
   }
 
   .section-header {

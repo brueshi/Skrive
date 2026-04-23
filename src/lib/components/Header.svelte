@@ -117,7 +117,7 @@
       class="icon-button sidebar-toggle"
       aria-label={project.sidebarVisible ? "Hide sidebar" : "Show sidebar"}
       aria-pressed={project.sidebarVisible}
-      title="Toggle sidebar  ⌘B"
+      title="Toggle sidebar  ⌘["
       onclick={() => project.toggleSidebar()}
     >
       <IconSidebarToggle size={16} shown={project.sidebarVisible} />
