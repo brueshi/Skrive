@@ -65,6 +65,14 @@ export type Tab = {
    * location still fire.
    */
   pendingSelection: PendingSelection | null;
+  /**
+   * Diff-mode state for this tab. `null` when the tab is in any non-
+   * diff layout mode. Populated by the history panel's row-click flow
+   * (`project.openDiffForEntry`) and cleared on `project.exitDiffMode`.
+   * Session-only — never persisted to `TabState` because diff is a
+   * transient viewing mode, not a saved layout preference.
+   */
+  diff: DiffState | null;
 };
 
 export type PendingSelection = {
@@ -81,7 +89,130 @@ export type PendingSelection = {
   nonce: number;
 };
 
-export type LayoutMode = "raw" | "split" | "preview";
+/**
+ * Layout mode for a tab. `"raw"` / `"split"` / `"preview"` are the
+ * three editor modes; `"diff-raw"` / `"diff-preview"` are the diff
+ * viewer's two modes, mutually exclusive with `split` because both
+ * compete for the same two-pane surface (see
+ * `docs/3.3-diff-ui-design.md`). Diff variants live in runtime state
+ * only — `TabState` persists the three editor modes, and diff mode
+ * evaporates on project close or app restart.
+ */
+export type LayoutMode =
+  | "raw"
+  | "split"
+  | "preview"
+  | "diff-raw"
+  | "diff-preview";
+
+/**
+ * One pane's worth of diff content. `label` is the primary identifier
+ * shown in the pane header (commit subject, manual pin name, `"auto"`,
+ * or `"Current"`); the component composes that with a humanized
+ * `timestampMs` for the full "Before — 2 days ago" rendering.
+ * `source` is a discriminator for any source-specific styling the
+ * diff renderer wants to apply later.
+ */
+export type DiffSide = {
+  content: string;
+  timestampMs: number;
+  label: string;
+  source: "git" | "checkpoint" | "current";
+};
+
+/**
+ * Session-only diff state hanging off a `Tab`. `restoreMode` is the
+ * layout mode the tab was in when diff was entered — the close button
+ * and the Escape key both route through it to undo the transition
+ * cleanly. `dividerRatio` is independent of `splitDividerRatio`: a
+ * user may prefer 50/50 for diffs and 60/40 for editor splits. `rows`
+ * is the precomputed side-by-side diff; lives on state so the
+ * renderer doesn't have to re-diff on every rerender.
+ */
+export type DiffState = {
+  before: DiffSide;
+  after: DiffSide;
+  dividerRatio: number;
+  restoreMode: "raw" | "preview";
+  rows: import("$lib/diff/line-diff").LineDiffRow[];
+};
+
+/**
+ * Which history source drives the version-history panel for the active
+ * project. Mirrors `src-tauri/src/project.rs::HistoryMode`. Decided once
+ * at `open_project` and read back by the frontend via `get_history_mode`
+ * to route history-panel queries through git or through Skrive's
+ * checkpoint store. See `docs/checkpoint-storage.md` for the storage
+ * contract when this is `"checkpoints"`.
+ */
+export type HistoryMode = "git" | "checkpoints";
+
+/**
+ * One commit that touched the file whose history the panel is showing.
+ * Mirrors `src-tauri/src/history.rs::GitVersion`. Returned by the
+ * `get_git_history` command, newest-first. The history panel renders
+ * each row with `shortSha` + a humanized `timestampMs` + `subject`;
+ * clicking a row routes `sha` + the active file path to
+ * `read_git_version` to populate one pane of the diff view.
+ */
+export type GitVersion = {
+  /** Full hexadecimal commit sha. */
+  sha: string;
+  /** First 8 characters of `sha`, pre-sliced for compact display. */
+  shortSha: string;
+  /** Parent commit sha. `null` for the initial commit. */
+  parentSha: string | null;
+  authorName: string;
+  authorEmail: string;
+  /** Commit time in Unix milliseconds, same units as `modifiedMs`. */
+  timestampMs: number;
+  /** First line of the commit message. */
+  subject: string;
+  /**
+   * Commit message minus the subject and the blank line that follows
+   * it. Empty string when the message is a subject-only one-liner.
+   */
+  body: string;
+};
+
+/**
+ * Which trigger wrote a checkpoint — the autosave path (`"auto"`) or
+ * an explicit user action (`"manual"`). Mirrors
+ * `src-tauri/src/history.rs::CheckpointKind`.
+ */
+export type CheckpointKind = "auto" | "manual";
+
+/**
+ * One checkpoint on disk for the file whose history the panel is
+ * showing. Mirrors `src-tauri/src/history.rs::CheckpointVersion`.
+ * Returned by `get_checkpoint_history`, newest-first. `id` is the
+ * opaque key to pass back to `read_checkpoint_version` when the user
+ * picks a row. `name` is the user-typed pin name for manual
+ * checkpoints; `null` for auto and for sidecar-less manuals.
+ */
+export type CheckpointVersion = {
+  id: string;
+  timestampMs: number;
+  kind: CheckpointKind;
+  name: string | null;
+  /**
+   * Hex-encoded SHA-256 of the checkpoint's bytes. Drives the writer's
+   * dedup check; the UI can use it to collapse visible duplicates.
+   */
+  contentHash: string;
+};
+
+/**
+ * Unified row shape the history panel feeds to the diff view. A
+ * discriminated union over `source` so the UI renders both git
+ * commits and checkpoints with one pass of template code while
+ * keeping the per-source data intact. Built on the frontend from
+ * either `get_git_history` or `get_checkpoint_history` output — not
+ * sent over the IPC wire, so a stale mode doesn't poison the list.
+ */
+export type HistoryEntry =
+  | ({ source: "git" } & GitVersion)
+  | ({ source: "checkpoint" } & CheckpointVersion);
 
 // =========================== Persistence types ===========================
 // These mirror the Rust `persistence::ProjectUiState` / `AppUiState` shapes.

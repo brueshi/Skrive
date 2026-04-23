@@ -37,9 +37,11 @@
   import Sidebar from "$lib/components/Sidebar.svelte";
   import Header from "$lib/components/Header.svelte";
   import SplitView from "$lib/components/SplitView.svelte";
+  import DiffView from "$lib/components/DiffView.svelte";
   import FrontmatterPanel from "$lib/components/FrontmatterPanel.svelte";
   import PersonalDictionaryPanel from "$lib/components/PersonalDictionaryPanel.svelte";
   import BacklinksPanel from "$lib/components/BacklinksPanel.svelte";
+  import HistoryPanel from "$lib/components/HistoryPanel.svelte";
   import RenameModal from "$lib/components/RenameModal.svelte";
   import CommandPalette from "$lib/components/CommandPalette.svelte";
   import SearchModal from "$lib/components/SearchModal.svelte";
@@ -201,9 +203,38 @@
     untrack(() => void project.refreshBacklinksForActive());
   });
 
+  // Same pattern for version history. Re-fires when the active tab
+  // changes and when the history mode swaps (project close → open).
+  // The indicator stays honest whether the file has 0, 5, or 500
+  // historical versions behind it.
+  $effect(() => {
+    const _path = project.activeTab?.path ?? null;
+    const _mode = project.historyMode;
+    void _path;
+    void _mode;
+    untrack(() => void project.refreshHistoryForActive());
+  });
+
   // ======================== Keyboard shortcuts ========================
 
   function handleKeydown(e: KeyboardEvent) {
+    // Escape exits diff mode when the active tab is inside it. Handled
+    // first so the gesture feels native — "I'm done looking, take me
+    // back" — without fighting modal or panel Esc handlers. Their own
+    // handlers run first because they're attached to inner DOM nodes
+    // and bubble here last.
+    if (e.key === "Escape") {
+      const tab = project.activeTab;
+      if (
+        tab &&
+        (tab.layoutMode === "diff-raw" || tab.layoutMode === "diff-preview")
+      ) {
+        e.preventDefault();
+        project.exitDiffMode();
+        return;
+      }
+    }
+
     // F2 — rename the active tab. Bare key, Windows/Linux rename
     // convention. macOS users get the same binding plus the
     // "Rename…" entry in the sidebar's right-click menu for discovery.
@@ -275,6 +306,17 @@
       if (project.activeTab) {
         e.preventDefault();
         project.toggleBacklinksPanel();
+      }
+      return;
+    }
+
+    // ⌘⇧H toggles the version-history panel. Requires an active tab —
+    // history is contextual to the file being viewed, same as
+    // backlinks and frontmatter.
+    if (e.shiftKey && !e.altKey && e.key.toLowerCase() === "h") {
+      if (project.activeTab) {
+        e.preventDefault();
+        project.toggleHistoryPanel();
       }
       return;
     }
@@ -485,6 +527,13 @@
       void project.refreshBacklinksForActive();
     }
 
+    // History for the active file is a per-file stream, but an
+    // external git commit or checkpoint write could land while we're
+    // here. Same active-tab guard as backlinks.
+    if (project.activeTab) {
+      void project.refreshHistoryForActive();
+    }
+
     // Step 3: react for any open tab that points at this path.
     const tab = project.tabs.find((t) => t.path === path);
     if (!tab) return;
@@ -519,6 +568,7 @@
     <FrontmatterPanel />
     <PersonalDictionaryPanel />
     <BacklinksPanel />
+    <HistoryPanel />
     {#if project.renameModalPath}
       <RenameModal
         oldPath={project.renameModalPath}
@@ -564,13 +614,23 @@
       <div class="workspace">
         {#if project.activeTab}
           {#key project.activeTab.path}
-            <SplitView
-              mode={project.activeTab.layoutMode}
-              ratio={project.activeTab.splitDividerRatio}
-              body={activeBody}
-              onChange={handleChange}
-              selection={project.activeTab.pendingSelection}
-            />
+            {#if (project.activeTab.layoutMode === "diff-raw" || project.activeTab.layoutMode === "diff-preview") && project.activeTab.diff}
+              <DiffView
+                mode={project.activeTab.layoutMode}
+                before={project.activeTab.diff.before}
+                after={project.activeTab.diff.after}
+                dividerRatio={project.activeTab.diff.dividerRatio}
+                rows={project.activeTab.diff.rows}
+              />
+            {:else}
+              <SplitView
+                mode={project.activeTab.layoutMode}
+                ratio={project.activeTab.splitDividerRatio}
+                body={activeBody}
+                onChange={handleChange}
+                selection={project.activeTab.pendingSelection}
+              />
+            {/if}
           {/key}
         {:else}
           <div class="no-tab">

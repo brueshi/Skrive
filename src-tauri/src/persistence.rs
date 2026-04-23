@@ -138,6 +138,19 @@ pub fn hash_project_path(project_path: &str) -> String {
     hex::encode(&hash[..8])
 }
 
+/// First 16 hex chars of SHA-256 of a project-relative file path. Input
+/// is normalized to forward slashes before hashing so Windows and Unix
+/// agree on the hash for the same logical file. See
+/// `docs/checkpoint-storage.md` for the rename-migration caveat — a
+/// relpath change orphans the old file's checkpoint history.
+pub fn hash_file_relpath(relpath: &Path) -> String {
+    let normalized = relpath.to_string_lossy().replace('\\', "/");
+    let mut hasher = Sha256::new();
+    hasher.update(normalized.as_bytes());
+    let hash = hasher.finalize();
+    hex::encode(&hash[..8])
+}
+
 fn app_data_dir(app: &AppHandle) -> Result<PathBuf> {
     app.path()
         .app_data_dir()
@@ -146,6 +159,27 @@ fn app_data_dir(app: &AppHandle) -> Result<PathBuf> {
 
 fn projects_dir(app: &AppHandle) -> Result<PathBuf> {
     let dir = app_data_dir(app)?.join("projects");
+    fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+/// Resolve the on-disk directory that holds every checkpoint for
+/// `relpath` inside the project rooted at `canonical_project_path`.
+/// Layout: `{app_data_dir}/projects/{project_hash}/checkpoints/{file_hash}/`.
+/// Creates the full chain on first call. See `docs/checkpoint-storage.md`
+/// for the filename shape the caller writes inside this directory.
+pub fn checkpoint_dir(
+    app: &AppHandle,
+    canonical_project_path: &Path,
+    relpath: &Path,
+) -> Result<PathBuf> {
+    let project_hash = hash_project_path(&canonical_project_path.to_string_lossy());
+    let file_hash = hash_file_relpath(relpath);
+    let dir = app_data_dir(app)?
+        .join("projects")
+        .join(project_hash)
+        .join("checkpoints")
+        .join(file_hash);
     fs::create_dir_all(&dir)?;
     Ok(dir)
 }
@@ -237,6 +271,27 @@ mod tests {
     fn hash_differs_per_path() {
         let a = hash_project_path("/Users/joe/Documents/notes");
         let b = hash_project_path("/Users/joe/Documents/journal");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn file_hash_is_stable_and_normalizes_separators() {
+        use std::path::PathBuf;
+        let a = hash_file_relpath(&PathBuf::from("posts/intro.md"));
+        let b = hash_file_relpath(&PathBuf::from("posts/intro.md"));
+        assert_eq!(a, b);
+        assert_eq!(a.len(), 16);
+        // Windows-style separators hash to the same value so a project
+        // opened on Windows doesn't double up its checkpoint histories.
+        let c = hash_file_relpath(&PathBuf::from("posts\\intro.md"));
+        assert_eq!(a, c);
+    }
+
+    #[test]
+    fn file_hash_differs_per_relpath() {
+        use std::path::PathBuf;
+        let a = hash_file_relpath(&PathBuf::from("a.md"));
+        let b = hash_file_relpath(&PathBuf::from("b.md"));
         assert_ne!(a, b);
     }
 

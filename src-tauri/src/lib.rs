@@ -2,8 +2,12 @@
 //! that can be unit-tested in isolation.
 
 mod commands;
+mod diff;
+#[cfg(test)]
+mod diff_memo;
 mod error;
 mod frontmatter;
+mod history;
 mod link_graph;
 mod persistence;
 mod project;
@@ -51,6 +55,13 @@ pub fn run() {
             commands::get_backlinks,
             commands::get_outgoing_links,
             commands::get_dead_links,
+            commands::get_history_mode,
+            commands::get_git_history,
+            commands::read_git_version,
+            commands::get_checkpoint_history,
+            commands::read_checkpoint_version,
+            commands::create_checkpoint,
+            commands::compute_line_diff,
             commands::preview_rename,
             commands::rename_with_references,
             commands::load_project_state,

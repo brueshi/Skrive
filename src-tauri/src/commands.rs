@@ -8,9 +8,11 @@
 use crate::error::{Error, Result};
 use crate::frontmatter;
 use crate::persistence::{self, AppUiState, ProjectUiState};
+use crate::diff::{self, LineDiffRow};
+use crate::history::{self, CheckpointVersion, GitVersion};
 use crate::project::{
-    self, Backlink, DeadLink, FileContent, OutgoingLink, ProjectManifest, ProjectState,
-    RenamePreview, RenameReport, SearchHit, SearchOptions,
+    self, Backlink, DeadLink, FileContent, HistoryMode, OutgoingLink, ProjectManifest,
+    ProjectState, RenamePreview, RenameReport, SearchHit, SearchOptions,
 };
 use crate::watcher;
 use notify::RecommendedWatcher;
@@ -61,11 +63,13 @@ pub async fn open_project(
 
     let (manifest, graph) = project::scan(&root)?;
     let canonical_root = root.canonicalize()?;
+    let history_mode = project::detect_history_mode(&canonical_root);
 
     let mut project_slot = state.project.lock().await;
     *project_slot = Some(ProjectState {
         root: canonical_root,
         link_graph: graph,
+        history_mode,
     });
 
     // Drop any prior watcher before installing a new one.
@@ -95,6 +99,7 @@ pub async fn read_file(
 
 #[tauri::command]
 pub async fn write_file(
+    app: AppHandle,
     path: String,
     body: String,
     frontmatter: Map<String, Value>,
@@ -105,6 +110,22 @@ pub async fn write_file(
     let rel = PathBuf::from(&path);
     project::write(&project.root, &rel, &body, &frontmatter)?;
     project.note_file_written(&rel, &body, &frontmatter);
+
+    // In checkpoint-mode projects, the post-save tick is the auto
+    // checkpoint's only trigger. The write is already durable on disk
+    // by the time we get here; a checkpoint failure must not surface
+    // as a save error (see docs/checkpoint-storage.md "App-data
+    // directory unavailable"), so this call swallows its own errors.
+    if project.history_mode == HistoryMode::Checkpoints {
+        let composed = project::compose_file(&body, &frontmatter)?;
+        history::maybe_write_auto_checkpoint(
+            &app,
+            &project.root,
+            &rel,
+            composed.as_bytes(),
+        );
+    }
+
     Ok(())
 }
 
@@ -352,6 +373,157 @@ pub async fn rename_with_references(
     let mut project = state.project.lock().await;
     let project = project.as_mut().ok_or(Error::NoProjectOpen)?;
     project::rename_with_references(project, &old_path, &new_path)
+}
+
+// =========================== History commands ===========================
+
+/// Which history source is active for the currently open project. Read
+/// once by the frontend after `open_project` so the history panel knows
+/// whether to route its list-queries through git or through checkpoints.
+/// See `project::detect_history_mode` for the decision rule.
+#[tauri::command]
+pub async fn get_history_mode(state: State<'_, AppState>) -> Result<HistoryMode> {
+    let project = state.project.lock().await;
+    let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
+    Ok(project.history_mode)
+}
+
+/// Every git commit that touched `path`, newest-first. Only valid when
+/// the active project is in `HistoryMode::Git`; checkpoint-mode callers
+/// get an explicit error rather than a confusing "no git repo" message
+/// bubbling up from `git2`. See `history::list_git_commits_for_file`
+/// for the traversal rules (tree-vs-parent diff, path-exact matching).
+#[tauri::command]
+pub async fn get_git_history(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<GitVersion>> {
+    let (root, mode) = {
+        let project = state.project.lock().await;
+        let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
+        (project.root.clone(), project.history_mode)
+    };
+    if mode != HistoryMode::Git {
+        return Err(Error::Io(
+            "git history is only available in git-mode projects".into(),
+        ));
+    }
+    history::list_git_commits_for_file(&root, &PathBuf::from(&path))
+}
+
+/// Read the file's contents at a specific commit sha. Paired with the
+/// output of `get_git_history` to populate one pane of the diff view.
+/// Same git-mode precondition as `get_git_history`.
+#[tauri::command]
+pub async fn read_git_version(
+    path: String,
+    sha: String,
+    state: State<'_, AppState>,
+) -> Result<String> {
+    let (root, mode) = {
+        let project = state.project.lock().await;
+        let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
+        (project.root.clone(), project.history_mode)
+    };
+    if mode != HistoryMode::Git {
+        return Err(Error::Io(
+            "git blob reads are only available in git-mode projects".into(),
+        ));
+    }
+    history::read_git_blob_at(&root, &PathBuf::from(&path), &sha)
+}
+
+/// Every checkpoint on disk for `path`, newest-first. Only valid in
+/// checkpoint-mode projects; git-mode callers get an explicit error.
+/// Paired with `read_checkpoint_version` the same way the git reader
+/// pairs `get_git_history` with `read_git_version`.
+#[tauri::command]
+pub async fn get_checkpoint_history(
+    app: AppHandle,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<CheckpointVersion>> {
+    let (root, mode) = {
+        let project = state.project.lock().await;
+        let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
+        (project.root.clone(), project.history_mode)
+    };
+    if mode != HistoryMode::Checkpoints {
+        return Err(Error::Io(
+            "checkpoint history is only available in checkpoint-mode projects".into(),
+        ));
+    }
+    history::list_checkpoints_for_file(&app, &root, &PathBuf::from(&path))
+}
+
+/// Read the checkpoint identified by `id` (the opaque key from
+/// `get_checkpoint_history`). Same checkpoint-mode precondition as
+/// `get_checkpoint_history`.
+#[tauri::command]
+pub async fn read_checkpoint_version(
+    app: AppHandle,
+    path: String,
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<String> {
+    let (root, mode) = {
+        let project = state.project.lock().await;
+        let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
+        (project.root.clone(), project.history_mode)
+    };
+    if mode != HistoryMode::Checkpoints {
+        return Err(Error::Io(
+            "checkpoint reads are only available in checkpoint-mode projects".into(),
+        ));
+    }
+    history::read_checkpoint_at(&app, &root, &PathBuf::from(&path), &id)
+}
+
+/// Write a manually-named checkpoint for `path`. Invoked by the
+/// history panel's "Pin version…" action. Only valid in checkpoint
+/// mode; git-mode users pin by committing.
+///
+/// The on-disk payload is the file's current bytes read fresh from the
+/// working tree (not the last write-file payload), so pinning after an
+/// external edit still captures what's actually there. Empty names
+/// fall back to the `"pinned"` slug — see `history::slugify`.
+#[tauri::command]
+pub async fn create_checkpoint(
+    app: AppHandle,
+    path: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    let (root, mode) = {
+        let project = state.project.lock().await;
+        let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
+        (project.root.clone(), project.history_mode)
+    };
+    if mode != HistoryMode::Checkpoints {
+        return Err(Error::Io(
+            "checkpoints are only available in checkpoint-mode projects".into(),
+        ));
+    }
+    let rel = PathBuf::from(&path);
+    let absolute = project::resolve_existing_within(&root, &rel)?;
+    let bytes = std::fs::read(&absolute)?;
+    history::create_manual_checkpoint(&app, &root, &rel, &name, &bytes)
+}
+
+// =========================== Diff commands ===========================
+
+/// Line-level side-by-side diff of two source strings. Computed in
+/// Rust with `similar::TextDiff` so Phase 3.3b's richer structural
+/// diff can extend the same module rather than diverge. Pure
+/// computation — no project state touched, no filesystem access —
+/// so it's safe to call from any context, including outside an
+/// open project.
+#[tauri::command]
+pub async fn compute_line_diff(
+    before: String,
+    after: String,
+) -> Result<Vec<LineDiffRow>> {
+    Ok(diff::compute_line_diff(&before, &after))
 }
 
 // =========================== Persistence commands ===========================

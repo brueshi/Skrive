@@ -118,6 +118,18 @@ output_dir   = "./dist"
 
 The `[export.custom.*]` namespace is for user-defined render targets. Each subtable is named by the user (`my_renderer` above) and points at a template directory. Schema for `[export.custom.*]` locks in with Phase 5.2e.
 
+## `[checkpoints]`
+
+Tunes the lightweight version-history store Skrive writes when a project isn't a git repo. Shape landed in [`docs/checkpoint-storage.md`](checkpoint-storage.md); lives here in the schema once Phase 3.2 ships the `.skrive.toml` parser. Until then, the defaults below are hardcoded.
+
+```toml
+[checkpoints]
+auto_cap   = 50         # max auto checkpoints kept per file; oldest pruned first
+manual_cap = 0          # 0 = unbounded; manually-pinned checkpoints are never auto-pruned
+```
+
+Git-mode projects (anything with a `.git/` ancestor) ignore this section — git is their history source.
+
 ## Versioning
 
 No explicit version field. The schema is additive — new keys and sections may appear in future Skrive versions, but existing keys keep their meaning. Unknown keys are ignored with a warning, so older files keep working with newer Skrive and vice versa.

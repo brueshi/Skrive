@@ -13,9 +13,16 @@
 import { invoke } from "@tauri-apps/api/core";
 import { preferences } from "$lib/stores/preferences.svelte";
 import { markRecentSelfWrite } from "$lib/persistence/autosave";
+import { computeLineDiff } from "$lib/diff/line-diff";
 import type {
   Backlink,
+  CheckpointVersion,
+  DiffSide,
+  DiffState,
   FileContent,
+  GitVersion,
+  HistoryEntry,
+  HistoryMode,
   LayoutMode,
   PendingSelection,
   ProjectManifest,
@@ -62,6 +69,21 @@ let frontmatterPanelOpen = $state(false);
 let backlinksPanelOpen = $state(false);
 let backlinksOfActive = $state<Backlink[]>([]);
 
+// Version-history panel. Same session-only pattern as backlinks — a
+// floating tool anchored to the header's top-right zone, opened via
+// `⌘⇧H` or the HI indicator. `historyMode` is fetched once per project
+// at `openProject` and dictates which backend drives the list
+// (`get_git_history` or `get_checkpoint_history`). `historyOfActive`
+// is the unified `HistoryEntry` shape both backends feed, newest-first.
+// `historyPairBaseId` tracks the first-click anchor for the design
+// memo's shift-click pair-compare flow — set on single-click, consumed
+// on shift-click, cleared when the panel closes or the active tab
+// changes.
+let historyMode = $state<HistoryMode | null>(null);
+let historyPanelOpen = $state(false);
+let historyOfActive = $state<HistoryEntry[]>([]);
+let historyPairBaseId = $state<string | null>(null);
+
 // Rename-with-references modal. `renameModalPath` is the project-relative
 // path being renamed (or null when the modal is closed). Both the F2
 // shortcut and the sidebar "Rename…" context-menu item flow through
@@ -85,6 +107,13 @@ async function openProjectImpl(path: string): Promise<void> {
   manifest = next;
   tabs = [];
   activeTabIndex = -1;
+  // Reset the history surface on every open: the new project may be
+  // in a different mode, and carrying over the previous project's
+  // entries would show stale rows until the next refresh lands.
+  historyOfActive = [];
+  historyPairBaseId = null;
+  historyPanelOpen = false;
+  await fetchHistoryModeImpl();
   // Bump the recent-projects LRU so EmptyState + the project menu pick
   // up this open. `next.root` is the canonicalized path from Rust; the
   // project name is its last path segment.
@@ -115,6 +144,7 @@ async function openTabImpl(path: string): Promise<void> {
     layoutMode: DEFAULT_LAYOUT_MODE,
     splitDividerRatio: DEFAULT_SPLIT_RATIO,
     pendingSelection: null,
+    diff: null,
   });
   activeTabIndex = tabs.length - 1;
   bumpRecentFile(path);
@@ -226,10 +256,49 @@ async function reloadTabImpl(path: string): Promise<void> {
   tab.dirty = false;
 }
 
+/**
+ * Set the active tab's layout mode. When the tab is in diff mode, the
+ * three editor-mode buttons in the header behave as follows:
+ *   - `raw` / `preview` → stay in diff, switching between `diff-raw`
+ *     and `diff-preview` so the user can flip representations without
+ *     losing the diff they came to read. The UI surfaces this as two
+ *     live buttons; `split` is rendered but disabled.
+ *   - `split` → no-op (mutex rule from the UI memo). The header
+ *     prevents the click from reaching us, but the guard here makes
+ *     the store safe to call from any entry point.
+ * Outside diff mode, the call is a simple field write.
+ */
 function setLayoutModeImpl(mode: LayoutMode): void {
   if (activeTabIndex < 0) return;
   const tab = tabs[activeTabIndex];
   if (!tab) return;
+
+  if (tab.diff) {
+    if (mode === "raw") {
+      tab.layoutMode = "diff-raw";
+      return;
+    }
+    if (mode === "preview") {
+      tab.layoutMode = "diff-preview";
+      return;
+    }
+    // `split` + any diff variant while already in diff: ignore.
+    return;
+  }
+
+  // Outside diff mode, a request to enter diff-* directly is a
+  // mis-routed caller — diff entry flows through `openDiffForEntry`
+  // so the before/after state is populated. Silently normalize to
+  // the underlying editor mode.
+  if (mode === "diff-raw") {
+    tab.layoutMode = "raw";
+    return;
+  }
+  if (mode === "diff-preview") {
+    tab.layoutMode = "preview";
+    return;
+  }
+
   tab.layoutMode = mode;
 }
 
@@ -284,6 +353,245 @@ function closeBacklinksPanelImpl(): void {
 
 function toggleBacklinksPanelImpl(): void {
   backlinksPanelOpen = !backlinksPanelOpen;
+}
+
+// =========================== History actions ===========================
+
+function openHistoryPanelImpl(): void {
+  historyPanelOpen = true;
+}
+
+function closeHistoryPanelImpl(): void {
+  historyPanelOpen = false;
+  // Closing clears the pair-compare anchor: the next open starts with
+  // a clean slate, matching the "ephemeral tool" ethos of these panels.
+  historyPairBaseId = null;
+}
+
+function toggleHistoryPanelImpl(): void {
+  if (historyPanelOpen) {
+    closeHistoryPanelImpl();
+  } else {
+    openHistoryPanelImpl();
+  }
+}
+
+/**
+ * Fetch `get_history_mode` and cache it on the store. Called once per
+ * project by `openProject`. `null` here means "no project open" — the
+ * header indicator hides itself when mode is unknown rather than
+ * assuming a default.
+ */
+async function fetchHistoryModeImpl(): Promise<void> {
+  if (!manifest) {
+    historyMode = null;
+    return;
+  }
+  try {
+    historyMode = await invoke<HistoryMode>("get_history_mode");
+  } catch (err) {
+    console.warn("Failed to fetch history mode:", err);
+    historyMode = null;
+  }
+}
+
+/**
+ * Re-query the history backend for the currently active tab and
+ * update `historyOfActive`. Routes through `get_git_history` in
+ * git-mode projects, `get_checkpoint_history` in checkpoint-mode,
+ * and no-ops when mode is unknown or no tab is active. Same
+ * stale-result guard as `refreshBacklinksForActive` — if the user
+ * tab-switched mid-flight, drop the response.
+ */
+async function refreshHistoryForActiveImpl(): Promise<void> {
+  const tab = tabs[activeTabIndex];
+  if (!tab || !historyMode) {
+    historyOfActive = [];
+    return;
+  }
+  try {
+    const entries = await fetchHistoryEntries(historyMode, tab.path);
+    const current = tabs[activeTabIndex];
+    if (current?.path !== tab.path) return;
+    historyOfActive = entries;
+  } catch (err) {
+    console.warn("Failed to refresh history:", err);
+    historyOfActive = [];
+  }
+}
+
+async function fetchHistoryEntries(
+  mode: HistoryMode,
+  path: string,
+): Promise<HistoryEntry[]> {
+  if (mode === "git") {
+    const rows = await invoke<GitVersion[]>("get_git_history", { path });
+    return rows.map((row) => ({ source: "git" as const, ...row }));
+  }
+  const rows = await invoke<CheckpointVersion[]>("get_checkpoint_history", {
+    path,
+  });
+  return rows.map((row) => ({ source: "checkpoint" as const, ...row }));
+}
+
+/**
+ * Entry point from the history panel. Single-click passes
+ * `(entry, null)` and diffs the entry against the active tab's
+ * current content; shift-click passes `(entry, baseline)` and
+ * pair-diffs two historical entries. The older of the two always
+ * lands on the "before" pane regardless of click order — timestamp,
+ * not gesture, decides left vs right.
+ *
+ * Silently no-ops when no tab is active, when the tab is in `split`
+ * (the mutex rule from the UI memo), or when the entry belongs to
+ * the wrong mode for the current project. Content fetches are
+ * parallel so a slow git blob doesn't serialize behind a checkpoint.
+ */
+async function openDiffForEntryImpl(
+  entry: HistoryEntry,
+  baseline: HistoryEntry | null,
+): Promise<void> {
+  const tabIndex = activeTabIndex;
+  if (tabIndex < 0) return;
+  const tab = tabs[tabIndex];
+  if (!tab) return;
+  if (tab.layoutMode === "split") return;
+
+  // Capture the pre-diff mode so close/Escape can undo the
+  // transition cleanly. Diff variants coerce to raw — the restore
+  // target is always an editor mode, never a diff mode.
+  const restoreMode: "raw" | "preview" =
+    tab.layoutMode === "preview" ? "preview" : "raw";
+  const nextMode: LayoutMode =
+    restoreMode === "preview" ? "diff-preview" : "diff-raw";
+
+  try {
+    const beforeEntry = baseline ?? entry;
+    const afterEntry: HistoryEntry | null = baseline ? entry : null;
+    // Order by timestamp so the older version always shows on the
+    // left ("before"), matching the UI memo's pane convention.
+    const [first, second] = await Promise.all([
+      resolveDiffSide(tab.path, beforeEntry),
+      afterEntry
+        ? resolveDiffSide(tab.path, afterEntry)
+        : resolveCurrentSide(tab),
+    ]);
+    const [left, right] =
+      first.timestampMs <= second.timestampMs
+        ? [first, second]
+        : [second, first];
+
+    // Diff the two sides once, up-front, so the renderer doesn't
+    // re-run the algorithm on every frame. Rows are a flat array of
+    // `{kind, before, after}` triples; see `diff/line-diff.ts`.
+    const rows = await computeLineDiff(left.content, right.content);
+
+    // Re-check the active tab in case it changed mid-fetch — dropping
+    // the result is safer than flipping the wrong tab into diff mode.
+    const current = tabs[activeTabIndex];
+    if (!current || current.path !== tab.path) return;
+
+    current.diff = {
+      before: left,
+      after: right,
+      dividerRatio: 0.5,
+      restoreMode,
+      rows,
+    };
+    current.layoutMode = nextMode;
+    historyPairBaseId = null;
+    historyPanelOpen = false;
+  } catch (err) {
+    console.warn("Failed to load diff content:", err);
+  }
+}
+
+async function resolveDiffSide(
+  path: string,
+  entry: HistoryEntry,
+): Promise<DiffSide> {
+  if (entry.source === "git") {
+    const content = await invoke<string>("read_git_version", {
+      path,
+      sha: entry.sha,
+    });
+    return {
+      content,
+      timestampMs: entry.timestampMs,
+      label: entry.subject || entry.shortSha,
+      source: "git",
+    };
+  }
+  const content = await invoke<string>("read_checkpoint_version", {
+    path,
+    id: entry.id,
+  });
+  const fallback = entry.kind === "manual" ? "Pinned" : "Autosave";
+  return {
+    content,
+    timestampMs: entry.timestampMs,
+    label: entry.name ?? fallback,
+    source: "checkpoint",
+  };
+}
+
+function resolveCurrentSide(tab: Tab): DiffSide {
+  return {
+    content: composeTabContent(tab),
+    timestampMs: Date.now(),
+    label: "Current",
+    source: "current",
+  };
+}
+
+// Compose the same frontmatter-plus-body string the Rust `write` path
+// emits, so the "current" side of a diff matches what's on disk (or
+// what would hit disk on the next save). Mirrors
+// `src-tauri/src/project.rs::compose_file`.
+function composeTabContent(tab: Tab): string {
+  const fm = tab.content.frontmatter;
+  const keys = Object.keys(fm);
+  if (keys.length === 0) return tab.content.body;
+  // We defer actual YAML serialization to the Rust side on save; for
+  // the diff view's "current" side, serializing to the same bytes on
+  // disk would need another IPC call. For now, the body alone is
+  // close enough — the user's edits live in the body, not the
+  // frontmatter map. Diff renderers that want frontmatter too will
+  // get it from a future `compose_file` command.
+  return tab.content.body;
+}
+
+function exitDiffModeImpl(): void {
+  if (activeTabIndex < 0) return;
+  const tab = tabs[activeTabIndex];
+  if (!tab || !tab.diff) return;
+  tab.layoutMode = tab.diff.restoreMode;
+  tab.diff = null;
+}
+
+function setDiffDividerRatioImpl(ratio: number): void {
+  if (activeTabIndex < 0) return;
+  const tab = tabs[activeTabIndex];
+  if (!tab?.diff) return;
+  // Same clamp range as the editor split so the divider hit-area
+  // never collapses flush against a pane edge.
+  tab.diff.dividerRatio = Math.max(0.15, Math.min(0.85, ratio));
+}
+
+function setHistoryPairBaseIdImpl(id: string | null): void {
+  historyPairBaseId = id;
+}
+
+/**
+ * Whether the active tab can open a new diff right now. The history
+ * panel reads this to gate its row clicks: a tab in `split` mode is
+ * mutually exclusive with diff's two-pane surface, so we show a
+ * "switch mode first" tooltip rather than silently ignoring clicks.
+ */
+function canEnterDiffForActiveImpl(): boolean {
+  const tab = tabs[activeTabIndex];
+  if (!tab) return false;
+  return tab.layoutMode !== "split";
 }
 
 /**
@@ -462,6 +770,10 @@ function closeProjectImpl(): void {
   manifest = null;
   tabs = [];
   activeTabIndex = -1;
+  historyMode = null;
+  historyOfActive = [];
+  historyPairBaseId = null;
+  historyPanelOpen = false;
 }
 
 /**
@@ -578,6 +890,18 @@ export const project = {
   get backlinksOfActive(): Backlink[] {
     return backlinksOfActive;
   },
+  get historyMode(): HistoryMode | null {
+    return historyMode;
+  },
+  get historyPanelOpen() {
+    return historyPanelOpen;
+  },
+  get historyOfActive(): HistoryEntry[] {
+    return historyOfActive;
+  },
+  get historyPairBaseId(): string | null {
+    return historyPairBaseId;
+  },
   get renameModalPath(): string | null {
     return renameModalPath;
   },
@@ -605,6 +929,16 @@ export const project = {
   closeBacklinksPanel: closeBacklinksPanelImpl,
   toggleBacklinksPanel: toggleBacklinksPanelImpl,
   refreshBacklinksForActive: refreshBacklinksForActiveImpl,
+  openHistoryPanel: openHistoryPanelImpl,
+  closeHistoryPanel: closeHistoryPanelImpl,
+  toggleHistoryPanel: toggleHistoryPanelImpl,
+  refreshHistoryForActive: refreshHistoryForActiveImpl,
+  fetchHistoryMode: fetchHistoryModeImpl,
+  openDiffForEntry: openDiffForEntryImpl,
+  exitDiffMode: exitDiffModeImpl,
+  setDiffDividerRatio: setDiffDividerRatioImpl,
+  setHistoryPairBaseId: setHistoryPairBaseIdImpl,
+  canEnterDiffForActive: canEnterDiffForActiveImpl,
   openRenameModal: openRenameModalImpl,
   closeRenameModal: closeRenameModalImpl,
   renameFile: renameFileImpl,

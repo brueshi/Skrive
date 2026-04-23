@@ -58,9 +58,26 @@
     project.setLayoutMode(mode);
   }
 
+  // Which of the three editor buttons (raw / split / preview) is
+  // highlighted. In normal mode this tracks the tab's layoutMode; in
+  // diff mode we highlight `raw` for `diff-raw` and `preview` for
+  // `diff-preview` so the same button that owns a representation in
+  // the editor also owns it inside the diff. Split is never
+  // highlighted in diff mode because it's disabled there.
   function isMode(mode: LayoutMode): boolean {
-    return project.activeTab?.layoutMode === mode;
+    const current = project.activeTab?.layoutMode;
+    if (!current) return false;
+    if (current === "diff-raw") return mode === "raw";
+    if (current === "diff-preview") return mode === "preview";
+    return current === mode;
   }
+
+  // Split is disabled while any diff mode is active — the two-pane
+  // surface is already in use. Tooltip explains why.
+  const inDiffMode = $derived(
+    project.activeTab?.layoutMode === "diff-raw" ||
+      project.activeTab?.layoutMode === "diff-preview",
+  );
 
   function handleCloseTab(e: Event, index: number) {
     e.stopPropagation();
@@ -225,6 +242,26 @@
             : preferences.personalDictionary.length}</span
         >
       </button>
+      <button
+        type="button"
+        class="hi-indicator"
+        class:hi-indicator-empty={project.historyOfActive.length === 0}
+        class:hi-indicator-active={project.historyPanelOpen}
+        aria-label={project.historyPanelOpen
+          ? "Close history panel"
+          : "Open history panel"}
+        aria-pressed={project.historyPanelOpen}
+        title={`History  ⌘⇧H${project.historyMode ? `  (${project.historyMode})` : ""}`}
+        onclick={() => project.toggleHistoryPanel()}
+      >
+        <span class="hi-label">HI</span>
+        <span class="hi-sep">·</span>
+        <span class="hi-count"
+          >{project.historyOfActive.length === 0
+            ? "+"
+            : project.historyOfActive.length}</span
+        >
+      </button>
       <div class="mode-toggle" role="group" aria-label="Layout mode">
         <button
           type="button"
@@ -240,9 +277,16 @@
           type="button"
           class="mode-button"
           class:active={isMode("split")}
+          class:disabled={inDiffMode}
           aria-pressed={isMode("split")}
-          title="Split  ⌘2"
-          onclick={() => setMode("split")}
+          aria-disabled={inDiffMode}
+          title={inDiffMode
+            ? "Exit diff to split — the two-pane surface is in use"
+            : "Split  ⌘2"}
+          onclick={() => {
+            if (inDiffMode) return;
+            setMode("split");
+          }}
         >
           <IconLayoutSplit size={16} />
         </button>
@@ -470,6 +514,17 @@
     background: var(--skrive-rule);
   }
 
+  /* Greyed-out state for the disabled `split` button during diff mode.
+     Tooltip (set in the template) explains why the button is dead. */
+  .mode-button.disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  .mode-button.disabled:hover {
+    color: var(--skrive-muted);
+  }
+
   /* Frontmatter panel indicator. Lives to the left of the layout mode
      toggle and acts as both an "N fields on this file" glance and the
      click target for opening the panel. Monospace to match the project-
@@ -612,6 +667,54 @@
   }
 
   .bl-sep {
+    opacity: 0.5;
+  }
+
+  /* History indicator. Same visual language as the FM / Aa / BL
+     cluster — four peers, same height, same hover/active treatment.
+     Sits at the right end of the indicator cluster because history is
+     a slightly heavier tool than the others (it opens a diff view). */
+  .hi-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+    background: transparent;
+    border: 1px solid var(--skrive-rule);
+    border-radius: 4px;
+    height: 24px;
+    padding: 0 0.5rem;
+    color: var(--skrive-muted);
+    cursor: pointer;
+    font: inherit;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    transition:
+      color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+      background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+      border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .hi-indicator:hover {
+    color: var(--skrive-fg);
+    border-color: var(--skrive-fg);
+  }
+
+  .hi-indicator.hi-indicator-active {
+    color: var(--skrive-fg);
+    background: var(--skrive-rule);
+    border-color: var(--skrive-fg);
+  }
+
+  .hi-indicator.hi-indicator-empty .hi-count {
+    opacity: 0.7;
+  }
+
+  .hi-label {
+    font-weight: 600;
+  }
+
+  .hi-sep {
     opacity: 0.5;
   }
 </style>

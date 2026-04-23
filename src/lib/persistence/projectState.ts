@@ -88,13 +88,24 @@ async function flushSaveProjectState(): Promise<void> {
   if (!manifest) return;
 
   const projectName = extractProjectName(manifest.root);
-  const tabStates: TabState[] = project.tabs.map((t) => ({
-    path: t.path,
-    layoutMode: t.layoutMode,
-    cursor: { line: 0, column: 0 },
-    scrollTop: 0,
-    splitDividerRatio: t.splitDividerRatio,
-  }));
+  const tabStates: TabState[] = project.tabs.map((t) => {
+    // Diff mode is session-only — it evaporates on project close, so
+    // persistence records the editor mode the tab would return to on
+    // exit (`t.diff.restoreMode`) instead of the diff variant itself.
+    const layoutMode: "raw" | "split" | "preview" =
+      t.layoutMode === "diff-raw"
+        ? "raw"
+        : t.layoutMode === "diff-preview"
+          ? "preview"
+          : t.layoutMode;
+    return {
+      path: t.path,
+      layoutMode,
+      cursor: { line: 0, column: 0 },
+      scrollTop: 0,
+      splitDividerRatio: t.splitDividerRatio,
+    };
+  });
 
   const state: ProjectUiState = {
     schemaVersion: 1,

@@ -86,6 +86,32 @@ pub struct FileContent {
     pub modified_ms: Option<i64>,
 }
 
+/// Which history source drives the version-history panel for this
+/// project. Mode is decided at `open_project` and is mutually exclusive:
+/// a project with `.git/` at its root delegates to git; everything else
+/// falls back to Skrive-managed checkpoints on disk.
+///
+/// Phase 3.3a plan §1.1; storage contract in
+/// [`docs/checkpoint-storage.md`](../../docs/checkpoint-storage.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HistoryMode {
+    Git,
+    Checkpoints,
+}
+
+/// Decide the history mode for a freshly opened project. `.git/` as a
+/// directory is the normal repo case; `.git` as a *file* covers git
+/// worktrees and submodules (the file points at the real gitdir).
+/// Everything else is a Skrive-managed checkpoint project.
+pub fn detect_history_mode(root: &Path) -> HistoryMode {
+    if root.join(".git").exists() {
+        HistoryMode::Git
+    } else {
+        HistoryMode::Checkpoints
+    }
+}
+
 /// State for the currently open project. Held inside a `tokio::sync::Mutex`
 /// behind `tauri::State` so commands can mutate it across `await` points.
 #[derive(Debug)]
@@ -97,6 +123,12 @@ pub struct ProjectState {
     /// are how filesystem-mutating commands report their changes back
     /// into the graph — never let the graph drift from what's on disk.
     pub link_graph: LinkGraph,
+    /// History source — git if the project root is a repo, checkpoints
+    /// otherwise. Decided once at `open_project` and then treated as
+    /// immutable for the lifetime of the session: a user who runs
+    /// `git init` mid-session closes and reopens the project to switch
+    /// modes, which is rare enough not to need live re-detection.
+    pub history_mode: HistoryMode,
 }
 
 impl ProjectState {
@@ -350,12 +382,24 @@ pub fn write(
     if let Some(parent) = absolute.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    let contents = compose_file(body, frontmatter)?;
+    std::fs::write(absolute, contents)?;
+    Ok(())
+}
+
+/// Compose the exact bytes `write` would put on disk for the given
+/// body + frontmatter pair. Exposed so the checkpoint writer (which
+/// snapshots a post-save file) can obtain those same bytes without
+/// re-reading the freshly-written file from disk.
+pub fn compose_file(
+    body: &str,
+    frontmatter: &Map<String, Value>,
+) -> Result<String> {
     let fm_block = frontmatter::serialize(frontmatter)?;
     let mut contents = String::with_capacity(fm_block.len() + body.len());
     contents.push_str(&fm_block);
     contents.push_str(body);
-    std::fs::write(absolute, contents)?;
-    Ok(())
+    Ok(contents)
 }
 
 /// Create a new empty Markdown file at the given project-relative path.
@@ -1701,6 +1745,52 @@ mod tests {
         assert_eq!(rel, PathBuf::from("nested.md"));
     }
 
+    // ================== detect_history_mode tests ==================
+
+    #[test]
+    fn detect_history_mode_git_when_dot_git_directory_present() {
+        let dir = write_temp_project(&[
+            (".git/HEAD", "ref: refs/heads/main\n"),
+            ("a.md", "body\n"),
+        ]);
+        assert_eq!(detect_history_mode(dir.path()), HistoryMode::Git);
+    }
+
+    #[test]
+    fn detect_history_mode_git_when_dot_git_is_a_file() {
+        // Worktrees and submodules use `.git` as a regular file that
+        // points at the real gitdir. Still git-mode as far as Skrive's
+        // history panel is concerned.
+        let dir = write_temp_project(&[
+            (".git", "gitdir: /some/other/path\n"),
+            ("a.md", "body\n"),
+        ]);
+        assert_eq!(detect_history_mode(dir.path()), HistoryMode::Git);
+    }
+
+    #[test]
+    fn detect_history_mode_checkpoints_when_no_git() {
+        // Plain markdown folder — no .git at the root. Checkpoint mode.
+        let dir = write_temp_project(&[("a.md", "body\n")]);
+        assert_eq!(detect_history_mode(dir.path()), HistoryMode::Checkpoints);
+    }
+
+    #[test]
+    fn detect_history_mode_checkpoints_when_dot_git_only_in_ancestor() {
+        // A Skrive project opened as a subdirectory of a git repo does
+        // NOT inherit git-mode — the check is "`.git/` at *this* root",
+        // not "anywhere above." If the user wants the parent repo as the
+        // history source, they open the parent directory as the project.
+        let dir = write_temp_project(&[
+            (".git/HEAD", "ref: refs/heads/main\n"),
+            ("inner/a.md", "body\n"),
+        ]);
+        assert_eq!(
+            detect_history_mode(&dir.path().join("inner")),
+            HistoryMode::Checkpoints,
+        );
+    }
+
     // ================== Incremental graph update tests ==================
 
     fn fresh_state() -> ProjectState {
@@ -1709,6 +1799,7 @@ mod tests {
             // only update the in-memory graph — so any dummy path works.
             root: PathBuf::from("/tmp/skrive-test"),
             link_graph: LinkGraph::new(),
+            history_mode: HistoryMode::Checkpoints,
         }
     }
 
@@ -1771,9 +1862,12 @@ mod tests {
 
     fn state_from_temp(dir: &tempfile::TempDir) -> ProjectState {
         let (_, graph) = scan(dir.path()).expect("scan temp project");
+        let root = dir.path().canonicalize().unwrap();
+        let history_mode = detect_history_mode(&root);
         ProjectState {
-            root: dir.path().canonicalize().unwrap(),
+            root,
             link_graph: graph,
+            history_mode,
         }
     }
 
@@ -1878,9 +1972,12 @@ mod tests {
 
     fn mutable_state_from_temp(dir: &tempfile::TempDir) -> ProjectState {
         let (_, graph) = scan(dir.path()).expect("scan temp project");
+        let root = dir.path().canonicalize().unwrap();
+        let history_mode = detect_history_mode(&root);
         ProjectState {
-            root: dir.path().canonicalize().unwrap(),
+            root,
             link_graph: graph,
+            history_mode,
         }
     }
 
