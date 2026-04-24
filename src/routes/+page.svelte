@@ -18,6 +18,7 @@
   import { project } from "$lib/stores/project.svelte";
   import { preferences } from "$lib/stores/preferences.svelte";
   import { notify } from "$lib/stores/notifications.svelte";
+  import { resolveEditorFontStack } from "$lib/editor/fonts";
   import type { LayoutMode, OpenFileRequest } from "$lib/types";
   import { formatError } from "$lib/errors";
   import {
@@ -44,7 +45,9 @@
   import HistoryPanel from "$lib/components/HistoryPanel.svelte";
   import RenameModal from "$lib/components/RenameModal.svelte";
   import CommandPalette from "$lib/components/CommandPalette.svelte";
+  import FileSwitcher from "$lib/components/FileSwitcher.svelte";
   import SearchModal from "$lib/components/SearchModal.svelte";
+  import SettingsView from "$lib/components/SettingsView.svelte";
   import Toasts from "$lib/components/Toasts.svelte";
   import {
     openProjectFromPicker,
@@ -58,6 +61,7 @@
   };
 
   let reloadPrompt = $state<string | null>(null);
+  let fileSwitcherOpen = $state(false);
   let commandPaletteOpen = $state(false);
   let searchModalOpen = $state(false);
 
@@ -173,6 +177,24 @@
         }
       }
     })();
+  });
+
+  // Drive editor typography from preferences. The CSS vars in
+  // `app.html` carry the defaults so the editor renders correctly on
+  // first paint; this effect overwrites them once preferences hydrate
+  // and keeps them in sync as the user picks new options in Settings.
+  // Living on :root keeps both CodeMirror's theme and the preview
+  // pane reading from the same source.
+  $effect(() => {
+    const id = preferences.editorFont;
+    const custom = preferences.editorCustomFontFamily;
+    const family = resolveEditorFontStack(id, custom);
+    const size = preferences.editorFontSize;
+    const lineHeight = preferences.editorLineHeightX100 / 100;
+    const root = document.documentElement;
+    root.style.setProperty("--skrive-editor-font", family);
+    root.style.setProperty("--skrive-editor-font-size", `${size}px`);
+    root.style.setProperty("--skrive-editor-line-height", String(lineHeight));
   });
 
   // Persist UI state whenever any persisted field changes. We read the
@@ -300,6 +322,18 @@
       return;
     }
 
+    // ⌘, opens the Settings tab. Matches the macOS/VS Code convention.
+    // Settings lives inside the workspace tab strip, so the gesture
+    // requires a project to be open — opening Settings without a
+    // project would orphan the tab in the EmptyState shell.
+    if (!e.shiftKey && !e.altKey && e.key === ",") {
+      if (project.hasProject) {
+        e.preventDefault();
+        project.toggleSettings();
+      }
+      return;
+    }
+
     // ⌘⇧B toggles the backlinks panel. Requires an active tab — backlinks
     // are contextual to the file being viewed.
     if (e.shiftKey && !e.altKey && e.key.toLowerCase() === "b") {
@@ -321,11 +355,18 @@
       return;
     }
 
-    // ⌘P opens the file switcher; only meaningful when a project is open.
-    // ⌘⇧P is reserved for a future command-runner palette — left
-    // deliberately unbound so hitting it today no-ops cleanly rather than
-    // stealing focus for something else.
+    // ⌘P opens the file switcher; ⌘⇧P opens the command palette. Both
+    // require a project — the switcher's haystack is the manifest and
+    // most commands act on the active project, so we keep them gated
+    // identically.
     if (!e.shiftKey && e.key.toLowerCase() === "p") {
+      if (project.hasProject) {
+        e.preventDefault();
+        fileSwitcherOpen = !fileSwitcherOpen;
+      }
+      return;
+    }
+    if (e.shiftKey && e.key.toLowerCase() === "p") {
       if (project.hasProject) {
         e.preventDefault();
         commandPaletteOpen = !commandPaletteOpen;
@@ -394,14 +435,20 @@
     // Hydrate app-wide preferences (personal dictionary, recent
     // projects, etc.) from disk before the rest of the UI starts
     // reading them. Failures are non-fatal — the store keeps its
-    // defaults and subsequent saves write a fresh file.
-    void preferences.loadOnce();
-
-    // Silent update check. If a newer version is available, a
-    // persistent call-to-action toast appears in the corner; the user
-    // can install on their schedule. Errors (offline, unconfigured
-    // endpoint) stay quiet — see docs on `checkForUpdatesOnStartup`.
-    void checkForUpdatesOnStartup();
+    // defaults and subsequent saves write a fresh file. The startup
+    // update check is awaited *after* hydration so users who turned
+    // auto-update off don't get a check fired before their pref loads.
+    void (async () => {
+      await preferences.loadOnce();
+      if (preferences.autoUpdateOnLaunch) {
+        // Silent update check. If a newer version is available, a
+        // persistent call-to-action toast appears in the corner; the
+        // user can install on their schedule. Errors (offline,
+        // unconfigured endpoint) stay quiet — see docs on
+        // `checkForUpdatesOnStartup`.
+        void checkForUpdatesOnStartup();
+      }
+    })();
 
     (async () => {
       unlistenWatcher = await listen<WatcherPayload>(
@@ -450,10 +497,32 @@
       });
     })();
 
+    // Bridges from the project-menu and the command-palette registry
+    // so they can drive UI state (search modal, command palette) that
+    // lives only in this component. Window events keep that state from
+    // having to leak into a global store. Both are no-ops when a
+    // project isn't open.
+    const handleOpenSearch = () => {
+      if (project.hasProject) searchModalOpen = true;
+    };
+    const handleOpenCommandPalette = () => {
+      if (project.hasProject) commandPaletteOpen = true;
+    };
+    window.addEventListener("skrive:open-search", handleOpenSearch);
+    window.addEventListener(
+      "skrive:open-command-palette",
+      handleOpenCommandPalette,
+    );
+
     return () => {
       unlistenWatcher?.();
       unlistenOpenFile?.();
       unlistenClose?.();
+      window.removeEventListener("skrive:open-search", handleOpenSearch);
+      window.removeEventListener(
+        "skrive:open-command-palette",
+        handleOpenCommandPalette,
+      );
       resetProjectStateTarget();
     };
   });
@@ -612,7 +681,9 @@
     <div class="layout">
       <Sidebar />
       <div class="workspace">
-        {#if project.activeTab}
+        {#if project.activeView === "settings"}
+          <SettingsView />
+        {:else if project.activeTab}
           {#key project.activeTab.path}
             {#if (project.activeTab.layoutMode === "diff-raw" || project.activeTab.layoutMode === "diff-preview") && project.activeTab.diff}
               <DiffView
@@ -661,8 +732,20 @@
   </main>
 {/if}
 
+{#if fileSwitcherOpen}
+  <FileSwitcher onClose={() => (fileSwitcherOpen = false)} />
+{/if}
+
 {#if commandPaletteOpen}
-  <CommandPalette onClose={() => (commandPaletteOpen = false)} />
+  <CommandPalette
+    onClose={() => (commandPaletteOpen = false)}
+    deps={{
+      autoSaveHooks,
+      openFileSwitcher: () => {
+        fileSwitcherOpen = true;
+      },
+    }}
+  />
 {/if}
 
 {#if searchModalOpen}

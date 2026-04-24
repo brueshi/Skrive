@@ -157,9 +157,12 @@
     max-width: 42rem;
     margin: 0 auto;
     padding: 2.5rem 2rem 6rem;
-    font-family:
-      "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia,
-      serif;
+    /* Track the editor's font choice so split view stays coherent.
+       Size + line-height stay as relative defaults — the preview's
+       heading scale cascades from `font-size: 1rem` and changing it
+       would resize every heading too. The Settings sliders only
+       affect the raw editor surface today. */
+    font-family: var(--skrive-editor-font);
     font-size: 1rem;
     line-height: 1.65;
   }

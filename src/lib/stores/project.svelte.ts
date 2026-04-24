@@ -97,6 +97,16 @@ let renameModalPath = $state<string | null>(null);
 // I looked"; consumers compare against their own remembered value.
 let editorPulseSignal = $state(0);
 
+// Settings tab. `settingsOpen` is whether a Settings pill exists in the
+// tab bar; `activeView` decides what the workspace area renders. Both
+// are session-only — opening Settings is a transient gesture, not a
+// layout preference, so they never hit ProjectUiState. Settings is
+// modeled outside the file `tabs` array to keep autosave, watcher
+// path-matching, and rename plumbing untouched: those layers all
+// assume `tab.path` is a real project-relative file.
+let settingsOpen = $state(false);
+let activeView = $state<"file" | "settings">("file");
+
 const DEFAULT_LAYOUT_MODE: LayoutMode = "raw";
 const DEFAULT_SPLIT_RATIO = 0.5;
 
@@ -132,6 +142,7 @@ async function openTabImpl(path: string): Promise<void> {
   const existing = tabs.findIndex((t) => t.path === path);
   if (existing !== -1) {
     activeTabIndex = existing;
+    activeView = "file";
     bumpRecentFile(path);
     return;
   }
@@ -147,6 +158,7 @@ async function openTabImpl(path: string): Promise<void> {
     diff: null,
   });
   activeTabIndex = tabs.length - 1;
+  activeView = "file";
   bumpRecentFile(path);
 }
 
@@ -208,6 +220,7 @@ function closeTabImpl(index: number): void {
 function switchTabImpl(index: number): void {
   if (index < 0 || index >= tabs.length) return;
   activeTabIndex = index;
+  activeView = "file";
 }
 
 /**
@@ -219,6 +232,43 @@ function cycleActiveTabImpl(direction: 1 | -1): void {
   if (tabs.length === 0) return;
   const count = tabs.length;
   activeTabIndex = ((activeTabIndex + direction) % count + count) % count;
+  activeView = "file";
+}
+
+// =========================== Settings tab actions ===========================
+
+/**
+ * Open the Settings tab and activate it. Idempotent — calling while
+ * Settings is already open just refocuses the view. Used by the ⌘,
+ * shortcut, the project menu, and the command palette.
+ */
+function openSettingsImpl(): void {
+  settingsOpen = true;
+  activeView = "settings";
+}
+
+/**
+ * Close the Settings tab and fall back to whichever file tab was last
+ * active (or none, if there are no file tabs). The × on the Settings
+ * pill and the close-from-command-palette path both flow through here.
+ */
+function closeSettingsImpl(): void {
+  settingsOpen = false;
+  activeView = "file";
+}
+
+/**
+ * Toggle Settings. Mirrors the panel-toggle pattern used elsewhere —
+ * the same shortcut opens and closes. If Settings is open but the
+ * active view is a file tab, this *focuses* Settings rather than
+ * closing it; only a re-toggle from the Settings view itself closes.
+ */
+function toggleSettingsImpl(): void {
+  if (settingsOpen && activeView === "settings") {
+    closeSettingsImpl();
+    return;
+  }
+  openSettingsImpl();
 }
 
 /**
@@ -774,6 +824,12 @@ function closeProjectImpl(): void {
   historyOfActive = [];
   historyPairBaseId = null;
   historyPanelOpen = false;
+  // Settings is gated behind hasProject in the workspace shell, so a
+  // lingering `settingsOpen=true` would resurface the moment the next
+  // project loads. Reset it explicitly so closing a project always
+  // returns to a clean state.
+  settingsOpen = false;
+  activeView = "file";
 }
 
 /**
@@ -908,6 +964,12 @@ export const project = {
   get editorPulseSignal() {
     return editorPulseSignal;
   },
+  get settingsOpen() {
+    return settingsOpen;
+  },
+  get activeView() {
+    return activeView;
+  },
 
   openProject: openProjectImpl,
   openTab: openTabImpl,
@@ -954,4 +1016,7 @@ export const project = {
   deleteFile: deleteFileImpl,
   deleteDirectory: deleteDirectoryImpl,
   openTabAtLine: openTabAtLineImpl,
+  openSettings: openSettingsImpl,
+  closeSettings: closeSettingsImpl,
+  toggleSettings: toggleSettingsImpl,
 };

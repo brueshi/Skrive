@@ -1,127 +1,146 @@
 <script lang="ts">
-  // ⌘P file switcher.
+  // ⌘⇧P command palette. Sibling of FileSwitcher (⌘P) — same modal
+  // shell, same fuzzy ranker, same gesture vocabulary. The haystack
+  // here is the command registry rather than the file manifest.
   //
   // Behavior:
-  //   - Empty query: show recent files for the current project, most
-  //     recent first. Stale entries (file gone from disk) are filtered
-  //     and silently cleaned from the persisted list on render.
-  //   - Typed query: fuzzy-score every file in the manifest by full
-  //     project-relative path; show best-N.
-  //   - ↑/↓ move the selection, Enter opens, Esc dismisses.
+  //   - Empty query: show every available command (those whose `when`
+  //     predicate currently passes), grouped by `group`. Group order
+  //     follows the registry's declaration order.
+  //   - Typed query: fuzzy-score commands by label and show best-N
+  //     flat (no group headers in filtered mode — the matched chars
+  //     are the visual organizer).
+  //   - ↑/↓ move the selection, Enter runs, Esc dismisses.
   //
-  // The palette is stateless about which file is selected after Enter —
-  // that's the project store's business. We just call `openTab` and the
-  // store updates recent files as a side effect.
+  // The palette closes immediately on Enter and then awaits the
+  // command's run promise, so long-running actions don't block the
+  // dismiss animation. Errors surface through the existing toast
+  // system; the palette stays out of the error path.
 
   import { tick } from "svelte";
-  import { project } from "$lib/stores/project.svelte";
-  import { preferences } from "$lib/stores/preferences.svelte";
-  import { notify } from "$lib/stores/notifications.svelte";
   import { rankItems, type ScoredEntry } from "$lib/editor/fuzzy";
+  import {
+    buildCommands,
+    type Command,
+    type CommandDeps,
+    type CommandGroup,
+  } from "$lib/commands/registry";
+  import { notify } from "$lib/stores/notifications.svelte";
   import { formatError } from "$lib/errors";
-  import type { FileEntry } from "$lib/types";
 
   type Props = {
     onClose: () => void;
+    deps: CommandDeps;
   };
 
-  let { onClose }: Props = $props();
+  let { onClose, deps }: Props = $props();
 
   let query = $state("");
   let selectedIndex = $state(0);
-  let inputEl: HTMLInputElement | null = $state(null);
   let listEl: HTMLDivElement | null = $state(null);
 
-  // Cap on rendered result rows. Even on a 1k-file project, this keeps
-  // the DOM small and scanning the top few is what writers actually do.
-  const MAX_RESULTS = 20;
+  const MAX_FILTERED_RESULTS = 30;
 
-  // Index files by path so recent-file entries can hydrate into full
-  // FileEntry objects and we can drop entries that no longer exist.
-  const fileByPath = $derived.by<Map<string, FileEntry>>(() => {
-    const map = new Map<string, FileEntry>();
-    for (const f of project.manifest?.files ?? []) {
-      map.set(f.path, f);
+  // Build the registry through `$derived` so Svelte tracks `deps`
+  // properly (it's a prop, and a top-level `let cmds = buildCommands(deps)`
+  // would only capture the mount-time value). `deps` is stable in
+  // practice so this only fires once per palette open in real use —
+  // the indirection is just for compiler hygiene.
+  const allCommands = $derived<Command[]>(buildCommands(deps));
+
+  const availableCommands = $derived.by<Command[]>(() =>
+    allCommands.filter((c) => (c.when ? c.when() : true)),
+  );
+
+  type Row =
+    | { kind: "header"; group: CommandGroup }
+    | {
+        kind: "command";
+        command: Command;
+        indices: number[];
+      };
+
+  // What the list renders. Empty query: grouped, with a header row per
+  // group. Filtered: flat ranked list with no headers.
+  const rows = $derived.by<Row[]>(() => {
+    const trimmed = query.trim();
+    if (trimmed.length === 0) {
+      const out: Row[] = [];
+      let lastGroup: CommandGroup | null = null;
+      for (const cmd of availableCommands) {
+        if (cmd.group !== lastGroup) {
+          out.push({ kind: "header", group: cmd.group });
+          lastGroup = cmd.group;
+        }
+        out.push({ kind: "command", command: cmd, indices: [] });
+      }
+      return out;
     }
-    return map;
+    const scored: ScoredEntry<Command>[] = rankItems(
+      trimmed,
+      availableCommands,
+      (c) => c.label,
+    );
+    return scored
+      .slice(0, MAX_FILTERED_RESULTS)
+      .map((s) => ({
+        kind: "command" as const,
+        command: s.item,
+        indices: s.indices,
+      }));
   });
 
-  // Default (empty-query) list: recent files for the current project that
-  // still exist on disk. Side-effect: clean stale entries out of the
-  // persisted recent-files list so the next session isn't cluttered.
-  const defaultEntries = $derived.by<FileEntry[]>(() => {
-    const root = project.manifest?.root;
-    if (!root) return [];
-    const out: FileEntry[] = [];
-    for (const r of preferences.recentFiles) {
-      if (r.projectPath !== root) continue;
-      const entry = fileByPath.get(r.filePath);
-      if (entry) {
-        out.push(entry);
-      } else {
-        // File listed in the LRU no longer exists — drop it.
-        // removeRecentFile schedules a debounced save, so repeated
-        // calls here are safe.
-        preferences.removeRecentFile(r.projectPath, r.filePath);
-      }
-      if (out.length >= MAX_RESULTS) break;
+  // Indexes of just the command rows. Selection moves over command
+  // rows only, so headers don't catch the cursor.
+  const commandRowIndexes = $derived.by<number[]>(() => {
+    const out: number[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i]?.kind === "command") out.push(i);
     }
     return out;
   });
 
-  const allFiles = $derived.by<FileEntry[]>(
-    () => project.manifest?.files ?? [],
-  );
-
-  // Results displayed in the list. Empty query uses the recent-files
-  // default; non-empty fuzzy-ranks every file in the project.
-  const results = $derived.by<ScoredEntry<FileEntry>[]>(() => {
-    const trimmed = query.trim();
-    if (trimmed.length === 0) {
-      return defaultEntries.map((item) => ({ item, score: 0, indices: [] }));
-    }
-    const scored = rankItems(trimmed, allFiles, (f) => f.path);
-    return scored.slice(0, MAX_RESULTS);
-  });
-
-  // When results change, keep the selection in bounds. Reset to the top
-  // whenever the query changes so the cursor always points at the best
-  // match after a keystroke.
   $effect(() => {
     void query;
     selectedIndex = 0;
   });
 
   $effect(() => {
-    if (selectedIndex >= results.length) {
-      selectedIndex = Math.max(0, results.length - 1);
+    if (selectedIndex >= commandRowIndexes.length) {
+      selectedIndex = Math.max(0, commandRowIndexes.length - 1);
     }
   });
 
   async function scrollSelectedIntoView() {
     await tick();
+    const rowIndex = commandRowIndexes[selectedIndex];
+    if (rowIndex == null) return;
     const el = listEl?.querySelector<HTMLElement>(
-      `[data-index="${selectedIndex}"]`,
+      `[data-row-index="${rowIndex}"]`,
     );
     el?.scrollIntoView({ block: "nearest" });
   }
 
   function moveSelection(delta: number) {
-    if (results.length === 0) return;
+    if (commandRowIndexes.length === 0) return;
     selectedIndex =
-      (selectedIndex + delta + results.length) % results.length;
+      (selectedIndex + delta + commandRowIndexes.length) %
+      commandRowIndexes.length;
     void scrollSelectedIntoView();
   }
 
-  async function openSelected() {
-    const selected = results[selectedIndex];
-    if (!selected) return;
+  async function runSelected() {
+    const rowIndex = commandRowIndexes[selectedIndex];
+    if (rowIndex == null) return;
+    const row = rows[rowIndex];
+    if (!row || row.kind !== "command") return;
+    const cmd = row.command;
     onClose();
     try {
-      await project.openTab(selected.item.path);
+      await cmd.run();
     } catch (err) {
       notify.error(
-        `Couldn't open ${selected.item.path}: ${formatError(err)}`,
+        `Couldn't run "${cmd.label}": ${formatError(err)}`,
         err,
       );
     }
@@ -145,7 +164,7 @@
     }
     if (e.key === "Enter") {
       e.preventDefault();
-      void openSelected();
+      void runSelected();
     }
   }
 
@@ -153,10 +172,8 @@
     if (e.target === e.currentTarget) onClose();
   }
 
-  // Split a display string into alternating plain / highlighted runs
-  // driven by the fuzzy scorer's matched indices. Used so matched chars
-  // render boldly in the list. `indices` must be strictly increasing,
-  // which the scorer guarantees.
+  // Highlight the matched chars in a command label, mirroring the
+  // FileSwitcher's renderRow but for plain (non-path) strings.
   function splitHighlight(
     text: string,
     indices: number[],
@@ -176,81 +193,61 @@
     }
     return parts;
   }
-
-  // Split a full file path into its dirname (grey) and basename (fg)
-  // halves so the UI can render them with different weights while
-  // preserving the matched-char highlights across the split.
-  function renderRow(path: string, indices: number[]) {
-    const lastSep = path.lastIndexOf("/");
-    if (lastSep === -1) {
-      return {
-        dir: [] as { text: string; hit: boolean }[],
-        name: splitHighlight(path, indices),
-      };
-    }
-    const dirIndices = indices.filter((i) => i < lastSep);
-    const nameIndices = indices
-      .filter((i) => i > lastSep)
-      .map((i) => i - lastSep - 1);
-    return {
-      dir: splitHighlight(path.slice(0, lastSep) + "/", dirIndices),
-      name: splitHighlight(path.slice(lastSep + 1), nameIndices),
-    };
-  }
 </script>
 
 <div class="backdrop" onmousedown={handleBackdrop} role="presentation">
   <div
     class="palette"
     role="dialog"
-    aria-label="Open file"
+    aria-label="Run command"
     aria-modal="true"
   >
     <!-- svelte-ignore a11y_autofocus -->
     <input
-      bind:this={inputEl}
       type="text"
       class="query"
-      placeholder="Open file by name…"
+      placeholder="Type a command…"
       bind:value={query}
       onkeydown={handleKey}
       autofocus
     />
     <div bind:this={listEl} class="results" role="listbox">
-      {#if results.length === 0}
-        <p class="empty">
-          {query.trim().length === 0
-            ? "No recent files yet — start typing to search."
-            : "No matches."}
-        </p>
+      {#if rows.length === 0}
+        <p class="empty">No commands match.</p>
       {:else}
-        {#each results as entry, i (entry.item.path)}
-          {@const row = renderRow(entry.item.path, entry.indices)}
-          <button
-            type="button"
-            class="row"
-            class:selected={i === selectedIndex}
-            data-index={i}
-            role="option"
-            aria-selected={i === selectedIndex}
-            onmouseenter={() => {
-              selectedIndex = i;
-            }}
-            onclick={() => openSelected()}
-          >
-            <span class="row-name">
-              {#each row.name as part}
-                {#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}
-              {/each}
-            </span>
-            {#if row.dir.length > 0}
-              <span class="row-dir">
-                {#each row.dir as part}
+        {#each rows as row, i (row.kind === "header" ? `h:${row.group}` : `c:${row.command.id}`)}
+          {#if row.kind === "header"}
+            <div class="group-header">{row.group}</div>
+          {:else}
+            {@const isSelected =
+              commandRowIndexes[selectedIndex] === i}
+            {@const labelParts = splitHighlight(
+              row.command.label,
+              row.indices,
+            )}
+            <button
+              type="button"
+              class="row"
+              class:selected={isSelected}
+              data-row-index={i}
+              role="option"
+              aria-selected={isSelected}
+              onmouseenter={() => {
+                const idx = commandRowIndexes.indexOf(i);
+                if (idx !== -1) selectedIndex = idx;
+              }}
+              onclick={() => runSelected()}
+            >
+              <span class="row-label">
+                {#each labelParts as part}
                   {#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}
                 {/each}
               </span>
-            {/if}
-          </button>
+              {#if row.command.shortcut}
+                <span class="row-shortcut">{row.command.shortcut}</span>
+              {/if}
+            </button>
+          {/if}
         {/each}
       {/if}
     </div>
@@ -316,12 +313,26 @@
     text-align: center;
   }
 
+  .group-header {
+    padding: 0.5rem 1rem 0.25rem;
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--skrive-muted);
+    font-weight: 600;
+  }
+
+  .group-header:first-child {
+    padding-top: 0.25rem;
+  }
+
   .row {
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
     width: 100%;
-    padding: 0.375rem 1rem;
+    padding: 0.4rem 1rem;
     background: transparent;
     border: none;
     color: var(--skrive-fg);
@@ -329,28 +340,25 @@
     font-size: 0.8125rem;
     text-align: left;
     cursor: pointer;
-    gap: 0.125rem;
   }
 
   .row.selected {
     background: var(--skrive-rule);
   }
 
-  .row-name {
+  .row-label {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 100%;
+    flex: 1;
+    min-width: 0;
   }
 
-  .row-dir {
+  .row-shortcut {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.6875rem;
     color: var(--skrive-muted);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
+    flex-shrink: 0;
   }
 
   mark {

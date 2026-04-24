@@ -1,7 +1,9 @@
 // The one default theme. No theme system at launch — this file is the entire
-// visual identity of the editor surface. Colors come from CSS variables defined
-// in `app.html` so the theme follows the OS color-scheme preference without
-// having to swap extensions at runtime.
+// visual identity of the editor surface. Colors and typography come from CSS
+// variables defined in `app.html` and rewritten by `+page.svelte` from the
+// `preferences` store, so the theme follows both the OS color-scheme
+// preference *and* the user's font/size/line-height picks without having
+// to swap CodeMirror extensions at runtime.
 
 import { EditorView } from "@codemirror/view";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
@@ -12,16 +14,15 @@ const baseTheme = EditorView.theme({
     backgroundColor: "var(--skrive-bg)",
     color: "var(--skrive-fg)",
     height: "100%",
-    fontSize: "17px",
-    fontFamily:
-      '"Iowan Old Style", "Palatino Linotype", "Palatino", "Georgia", ui-serif, serif',
+    fontSize: "var(--skrive-editor-font-size, 17px)",
+    fontFamily: "var(--skrive-editor-font)",
   },
   "&.cm-editor.cm-focused": {
     outline: "none",
   },
   ".cm-scroller": {
     fontFamily: "inherit",
-    lineHeight: "1.7",
+    lineHeight: "var(--skrive-editor-line-height, 1.7)",
     overflow: "auto",
   },
   ".cm-content": {

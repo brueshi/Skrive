@@ -91,6 +91,50 @@ pub struct AppUiState {
     /// small cap on the write side to keep app.json bounded.
     #[serde(default)]
     pub recent_files: Vec<RecentFile>,
+    /// Editor font preset. One of "editorial" (default — Iowan Old
+    /// Style), "classic" (Palatino Linotype), "screen" (Charter),
+    /// "sans" (system sans), "mono" (system mono), or "custom" (uses
+    /// `editor_custom_font_family`). The frontend maps the id to a
+    /// concrete CSS font-family stack — we keep the raw id here so
+    /// the wire format is stable across font-stack tweaks.
+    #[serde(default = "default_editor_font")]
+    pub editor_font: String,
+    /// User-supplied family name used when `editor_font == "custom"`.
+    /// Empty string means "fall back to the editorial stack" — the
+    /// CSS layer treats it as a no-op.
+    #[serde(default)]
+    pub editor_custom_font_family: String,
+    /// Editor font size in pixels. Defaults to 17 (matches the
+    /// pre-Settings editor theme).
+    #[serde(default = "default_editor_font_size")]
+    pub editor_font_size: u32,
+    /// Editor line height as a unitless multiplier. Stored as a
+    /// fixed-point u32 (×100) so the JSON stays integer-valued and
+    /// JS->Rust round-trips don't drift on common values like 1.7.
+    /// 170 == 1.7 (default).
+    #[serde(default = "default_editor_line_height_x100")]
+    pub editor_line_height_x100: u32,
+    /// When true (default), the app silently checks for updates on
+    /// launch via `checkForUpdatesOnStartup`. Users opt out from the
+    /// Updates section in Settings.
+    #[serde(default = "default_auto_update_on_launch")]
+    pub auto_update_on_launch: bool,
+}
+
+fn default_editor_font() -> String {
+    "editorial".to_string()
+}
+
+fn default_editor_font_size() -> u32 {
+    17
+}
+
+fn default_editor_line_height_x100() -> u32 {
+    170
+}
+
+fn default_auto_update_on_launch() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +158,11 @@ impl Default for AppUiState {
             personal_dictionary: Vec::new(),
             skip_delete_confirmation: false,
             recent_files: Vec::new(),
+            editor_font: default_editor_font(),
+            editor_custom_font_family: String::new(),
+            editor_font_size: default_editor_font_size(),
+            editor_line_height_x100: default_editor_line_height_x100(),
+            auto_update_on_launch: default_auto_update_on_launch(),
         }
     }
 }

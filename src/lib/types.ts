@@ -273,7 +273,39 @@ export type AppUiState = {
    * matches as the empty-query default.
    */
   recentFiles: RecentFile[];
+  /**
+   * Editor font preset id. The frontend maps this to a concrete CSS
+   * font-family stack — the wire format keeps the id stable across
+   * stack tweaks. Defaults to "editorial".
+   */
+  editorFont: EditorFontId;
+  /**
+   * Free-form family name used when `editorFont === "custom"`. Empty
+   * string = no override (CSS falls through to the default stack).
+   */
+  editorCustomFontFamily: string;
+  /** Editor font size in pixels. Defaults to 17. */
+  editorFontSize: number;
+  /**
+   * Editor line height as a unitless multiplier × 100. Persisted as
+   * an integer so JSON round-trips don't drift on common values like
+   * 1.7 (stored as 170). Defaults to 170.
+   */
+  editorLineHeightX100: number;
+  /**
+   * When true (default), Skrive silently checks for updates on launch.
+   * Toggled from the Updates section in Settings.
+   */
+  autoUpdateOnLaunch: boolean;
 };
+
+export type EditorFontId =
+  | "editorial"
+  | "classic"
+  | "screen"
+  | "sans"
+  | "mono"
+  | "custom";
 
 export type RecentFile = {
   /** Canonical project root path. Matches `ProjectManifest.root`. */

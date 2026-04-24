@@ -13,6 +13,16 @@
         --skrive-link: #1a1a1a;
         --skrive-selection: rgba(26, 26, 26, 0.14);
         --skrive-rule: rgba(26, 26, 26, 0.08);
+
+        /* Editor typography. Defaults match the pre-Settings theme;
+           +page.svelte rewrites these from `preferences` once app
+           state hydrates so the editor surface only shows the user's
+           pick after one frame, not the bare default first. */
+        --skrive-editor-font:
+          "Iowan Old Style", "Palatino Linotype", "Palatino", "Georgia",
+          ui-serif, serif;
+        --skrive-editor-font-size: 17px;
+        --skrive-editor-line-height: 1.7;
       }
       @media (prefers-color-scheme: dark) {
         :root {

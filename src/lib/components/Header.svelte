@@ -110,6 +110,21 @@
         onClick: () => void closeCurrentProject(autoSaveHooks),
       },
       {
+        label: "Settings…",
+        shortcut: "⌘,",
+        onClick: () => project.openSettings(),
+      },
+      {
+        label: "Command palette…",
+        shortcut: "⌘⇧P",
+        onClick: () => {
+          // Dispatch a window-level event so +page.svelte's
+          // shortcut handler can reuse the same open path it
+          // uses for the keybinding.
+          window.dispatchEvent(new CustomEvent("skrive:open-command-palette"));
+        },
+      },
+      {
         label: "Check for updates…",
         onClick: () => void checkForUpdatesManual(),
       },
@@ -159,8 +174,10 @@
         type="button"
         role="tab"
         class="tab"
-        class:active={i === project.activeTabIndex}
-        aria-selected={i === project.activeTabIndex}
+        class:active={i === project.activeTabIndex &&
+          project.activeView === "file"}
+        aria-selected={i === project.activeTabIndex &&
+          project.activeView === "file"}
         onclick={() => project.switchTab(i)}
         title={tab.path}
       >
@@ -184,10 +201,41 @@
         </span>
       </button>
     {/each}
+    {#if project.settingsOpen}
+      <button
+        type="button"
+        role="tab"
+        class="tab settings-tab"
+        class:active={project.activeView === "settings"}
+        aria-selected={project.activeView === "settings"}
+        onclick={() => project.openSettings()}
+        title="Settings"
+      >
+        <span class="tab-name">Settings</span>
+        <span
+          class="tab-close"
+          role="button"
+          tabindex="-1"
+          aria-label="Close Settings"
+          onclick={(e) => {
+            e.stopPropagation();
+            project.closeSettings();
+          }}
+          onkeydown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.stopPropagation();
+              project.closeSettings();
+            }
+          }}
+        >
+          <IconX size={16} />
+        </span>
+      </button>
+    {/if}
   </div>
 
   <div class="right">
-    {#if project.activeTab}
+    {#if project.activeTab && project.activeView === "file"}
       <button
         type="button"
         class="fm-indicator"

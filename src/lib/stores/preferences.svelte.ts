@@ -12,7 +12,12 @@
 // keystroke when the user is editing the personal dictionary panel.
 
 import { invoke } from "@tauri-apps/api/core";
-import type { AppUiState, RecentFile, RecentProject } from "$lib/types";
+import type {
+  AppUiState,
+  EditorFontId,
+  RecentFile,
+  RecentProject,
+} from "$lib/types";
 
 const DEBOUNCE_MS = 400;
 const SCHEMA_VERSION = 1;
@@ -27,6 +32,18 @@ let firstRunMs = $state<number | null>(null);
 let license = $state<string | null>(null);
 let skipDeleteConfirmation = $state(false);
 let recentFiles = $state<RecentFile[]>([]);
+let editorFont = $state<EditorFontId>("editorial");
+let editorCustomFontFamily = $state("");
+let editorFontSize = $state(17);
+let editorLineHeightX100 = $state(170);
+let autoUpdateOnLaunch = $state(true);
+
+// Defaults exported so the Settings "Reset to defaults" button uses the
+// same values as the Rust-side `Default for AppUiState`. Single source
+// of truth lives on the Rust side; these are mirrors.
+export const DEFAULT_EDITOR_FONT: EditorFontId = "editorial";
+export const DEFAULT_EDITOR_FONT_SIZE = 17;
+export const DEFAULT_EDITOR_LINE_HEIGHT_X100 = 170;
 
 // Cap the persisted list so app.json stays small. A writer who opens
 // 50 distinct files across all projects is well-served; anything past
@@ -66,6 +83,17 @@ async function loadOnceImpl(): Promise<void> {
     license = state.license ?? null;
     skipDeleteConfirmation = Boolean(state.skipDeleteConfirmation);
     recentFiles = Array.isArray(state.recentFiles) ? state.recentFiles : [];
+    editorFont = sanitizeFontId(state.editorFont);
+    editorCustomFontFamily =
+      typeof state.editorCustomFontFamily === "string"
+        ? state.editorCustomFontFamily
+        : "";
+    editorFontSize = sanitizeFontSize(state.editorFontSize);
+    editorLineHeightX100 = sanitizeLineHeightX100(state.editorLineHeightX100);
+    autoUpdateOnLaunch =
+      typeof state.autoUpdateOnLaunch === "boolean"
+        ? state.autoUpdateOnLaunch
+        : true;
   } catch (err) {
     // A read failure (corrupt JSON, missing file the Rust side
     // didn't recreate, permission denied) is non-fatal. We keep the
@@ -93,12 +121,56 @@ async function flushSave(): Promise<void> {
     personalDictionary,
     skipDeleteConfirmation,
     recentFiles,
+    editorFont,
+    editorCustomFontFamily,
+    editorFontSize,
+    editorLineHeightX100,
+    autoUpdateOnLaunch,
   };
   try {
     await invoke("save_app_state", { uiState });
   } catch (err) {
     console.warn("Failed to save app preferences:", err);
   }
+}
+
+// =========================== Typography sanitizers ===========================
+
+const VALID_FONT_IDS: readonly EditorFontId[] = [
+  "editorial",
+  "classic",
+  "screen",
+  "sans",
+  "mono",
+  "custom",
+];
+
+const FONT_SIZE_MIN = 12;
+const FONT_SIZE_MAX = 28;
+const LINE_HEIGHT_X100_MIN = 100;
+const LINE_HEIGHT_X100_MAX = 250;
+
+function sanitizeFontId(value: unknown): EditorFontId {
+  return typeof value === "string" &&
+    (VALID_FONT_IDS as readonly string[]).includes(value)
+    ? (value as EditorFontId)
+    : DEFAULT_EDITOR_FONT;
+}
+
+function sanitizeFontSize(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_EDITOR_FONT_SIZE;
+  }
+  const rounded = Math.round(value);
+  return Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, rounded));
+}
+
+function sanitizeLineHeightX100(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_EDITOR_LINE_HEIGHT_X100;
+  }
+  const rounded = Math.round(value);
+  return Math.max(LINE_HEIGHT_X100_MIN, Math.min(LINE_HEIGHT_X100_MAX, rounded));
 }
 
 // =========================== Personal dictionary actions ===========================
@@ -228,6 +300,67 @@ function removeRecentProjectImpl(path: string): boolean {
   return true;
 }
 
+// =========================== Typography setters ===========================
+
+function setEditorFontImpl(id: EditorFontId): void {
+  if (!(VALID_FONT_IDS as readonly string[]).includes(id)) return;
+  if (editorFont === id) return;
+  editorFont = id;
+  scheduleSave();
+}
+
+function setEditorCustomFontFamilyImpl(family: string): void {
+  // Trim leading/trailing whitespace but preserve internal — font
+  // names can legitimately contain spaces ("Iowan Old Style").
+  const trimmed = family.trim();
+  if (editorCustomFontFamily === trimmed) return;
+  editorCustomFontFamily = trimmed;
+  scheduleSave();
+}
+
+function setEditorFontSizeImpl(size: number): void {
+  const next = sanitizeFontSize(size);
+  if (editorFontSize === next) return;
+  editorFontSize = next;
+  scheduleSave();
+}
+
+function setEditorLineHeightX100Impl(value: number): void {
+  const next = sanitizeLineHeightX100(value);
+  if (editorLineHeightX100 === next) return;
+  editorLineHeightX100 = next;
+  scheduleSave();
+}
+
+function resetEditorTypographyImpl(): void {
+  let changed = false;
+  if (editorFont !== DEFAULT_EDITOR_FONT) {
+    editorFont = DEFAULT_EDITOR_FONT;
+    changed = true;
+  }
+  if (editorCustomFontFamily !== "") {
+    editorCustomFontFamily = "";
+    changed = true;
+  }
+  if (editorFontSize !== DEFAULT_EDITOR_FONT_SIZE) {
+    editorFontSize = DEFAULT_EDITOR_FONT_SIZE;
+    changed = true;
+  }
+  if (editorLineHeightX100 !== DEFAULT_EDITOR_LINE_HEIGHT_X100) {
+    editorLineHeightX100 = DEFAULT_EDITOR_LINE_HEIGHT_X100;
+    changed = true;
+  }
+  if (changed) scheduleSave();
+}
+
+// =========================== Auto-update setter ===========================
+
+function setAutoUpdateOnLaunchImpl(value: boolean): void {
+  if (autoUpdateOnLaunch === value) return;
+  autoUpdateOnLaunch = value;
+  scheduleSave();
+}
+
 // =========================== Public API ===========================
 
 export const preferences = {
@@ -255,6 +388,21 @@ export const preferences = {
   get recentFiles() {
     return recentFiles;
   },
+  get editorFont(): EditorFontId {
+    return editorFont;
+  },
+  get editorCustomFontFamily() {
+    return editorCustomFontFamily;
+  },
+  get editorFontSize() {
+    return editorFontSize;
+  },
+  get editorLineHeightX100() {
+    return editorLineHeightX100;
+  },
+  get autoUpdateOnLaunch() {
+    return autoUpdateOnLaunch;
+  },
 
   loadOnce: loadOnceImpl,
   addPersonalWord: addPersonalWordImpl,
@@ -267,4 +415,10 @@ export const preferences = {
   removeRecentFile: removeRecentFileImpl,
   pushRecentProject: pushRecentProjectImpl,
   removeRecentProject: removeRecentProjectImpl,
+  setEditorFont: setEditorFontImpl,
+  setEditorCustomFontFamily: setEditorCustomFontFamilyImpl,
+  setEditorFontSize: setEditorFontSizeImpl,
+  setEditorLineHeightX100: setEditorLineHeightX100Impl,
+  resetEditorTypography: resetEditorTypographyImpl,
+  setAutoUpdateOnLaunch: setAutoUpdateOnLaunchImpl,
 };
