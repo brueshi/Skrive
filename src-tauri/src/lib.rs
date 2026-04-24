@@ -63,6 +63,7 @@ pub fn run() {
             commands::read_checkpoint_version,
             commands::create_checkpoint,
             commands::compute_line_diff,
+            commands::compute_diff,
             commands::preview_rename,
             commands::rename_with_references,
             commands::load_project_state,
