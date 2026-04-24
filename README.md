@@ -8,7 +8,7 @@ Built on Tauri 2, Svelte 5, and a Rust core.
 
 ## Status
 
-Pre-alpha — usable for real writing, but rough. Phase 2 (core editor) shipped. Phase 3.1 (link graph, backlinks, rename-with-references) shipped. Phase 3.3 (structural lint, diff memo) is in progress.
+**Alpha — v0.1.0.** Usable for real writing today; some rough edges remain. The four critical-path features (split view, inline preview, link graph + rename, structural diff) all shipped behind earlier versions; v0.1.0 closes out settings, typography, and the command runner. See the [v0.1.0 release notes](https://github.com/brueshi/Skrive/releases/tag/v0.1.0) for the alpha-launch summary.
 
 ## Download
 
@@ -19,9 +19,9 @@ Grab the latest macOS or Windows build from [Releases](https://github.com/bruesh
 ### Editor
 - CodeMirror 6 editor with a tailored Skrive theme
 - Live decoration for headings, emphasis, code, images, and links
+- Three layout modes — raw, split, preview — toggleable with `⌘1` / `⌘2` / `⌘3`, remembered per file
 - Inline spell check with a per-project personal dictionary
-- Split view — editor alongside a Markdown preview
-- Command palette for fast navigation and actions
+- File switcher (`⌘P`) and a separate command palette (`⌘⇧P`) for actions
 - OS file associations: open `.md` files straight from Finder or Explorer
 
 ### Project intelligence
@@ -29,12 +29,19 @@ Grab the latest macOS or Windows build from [Releases](https://github.com/bruesh
 - Wiki-link and Markdown-link backlinks, with a dedicated panel
 - Outgoing-link and dead-link detection
 - Rename a file and every reference to it updates across the project
+- Version history (Git or local checkpoint) with a structural diff that reads paragraph-by-paragraph instead of line-by-line
 
 ### Files & frontmatter
 - Folder-based — open any directory of Markdown; no vault setup, no import
 - File tree sidebar: create, rename, delete, nest folders
 - YAML frontmatter editing via a dedicated panel
 - Filesystem watcher keeps the tree in sync with edits made outside the app
+
+### Settings (`⌘,`)
+- Editor typography: five curated presets (Editorial / Classic / Screen / Sans / Mono) plus a Custom field that uses any system-installed font
+- Stepped size and line-height controls
+- Personal dictionary management
+- Auto-update toggle and on-demand "Check for updates"
 
 ### Configuration
 - Per-project [`.skrive.toml`](docs/skrive-toml-reference.md) for dictionary, lint, and (forthcoming) export targets
