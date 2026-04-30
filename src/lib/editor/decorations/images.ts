@@ -19,6 +19,14 @@
 // the shape isn't yet what we expect (e.g. the user has typed `![alt`
 // with no closing bracket), we bail out and let the raw characters show.
 //
+// Path resolution: Markdown image URLs are relative to the source file,
+// not the project root. We resolve `dirname(currentFile)` + url, fold
+// `.`/`..`, prefix the project root, then run the absolute path through
+// `convertFileSrc` so the asset protocol can serve it. Without that
+// pipeline the webview can't load arbitrary disk paths — the spec works
+// in any markdown reader, but only after the runtime has translated the
+// path into something the webview is allowed to fetch.
+//
 // Trust model: image URLs come from files the user owns. We do not
 // validate or restrict them — if Phase 4 importers start pulling content
 // from the network, that caller is responsible for sanitization before
@@ -26,7 +34,23 @@
 
 import { Decoration, WidgetType } from "@codemirror/view";
 import type { EditorView } from "@codemirror/view";
+import { StateEffect, StateField } from "@codemirror/state";
+import { resolveImageSrc, type ImageContext } from "$lib/imageSrc";
 import type { HandlerMap, NodeHandler } from "./shared";
+
+export type { ImageContext };
+
+export const setImageContext = StateEffect.define<ImageContext>();
+
+export const imageContextField = StateField.define<ImageContext>({
+  create: () => ({ projectRoot: "", filePath: null }),
+  update(value, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setImageContext)) return e.value;
+    }
+    return value;
+  },
+});
 
 class ImageWidget extends WidgetType {
   constructor(
@@ -45,10 +69,11 @@ class ImageWidget extends WidgetType {
     img.src = this.src;
     img.alt = this.alt;
     img.className = "cm-md-image";
-    // Images that fail to load would otherwise collapse to a broken-image
-    // glyph that drags the line baseline around. Hide failed loads and
-    // fall back to showing the alt text so the document still reads.
+    // Hide failed loads (avoids the broken-image glyph dragging the
+    // line baseline) and log the URL so anything that doesn't render
+    // points the developer at the exact path that 404'd.
     img.addEventListener("error", () => {
+      console.warn("[skrive] image failed to load:", img.src);
       img.style.display = "none";
     });
     return img;
@@ -97,16 +122,22 @@ const imageHandler: NodeHandler = (node, ctx) => {
   if (ctx.isOnCursorLine(node.from, node.to)) return;
 
   const container = node.node;
-  const src = sliceUrl(ctx.view, container);
-  if (!src) return;
+  const rawUrl = sliceUrl(ctx.view, container);
+  if (!rawUrl) return;
   const altRange = findAltRange(container);
   const alt = altRange
     ? ctx.view.state.doc.sliceString(altRange.from, altRange.to)
     : "";
 
+  const imageCtx = ctx.view.state.field(imageContextField, false) ?? {
+    projectRoot: "",
+    filePath: null,
+  };
+  const resolvedSrc = resolveImageSrc(rawUrl, imageCtx);
+
   ctx.decorations.push(
     Decoration.replace({
-      widget: new ImageWidget(src, alt),
+      widget: new ImageWidget(resolvedSrc, alt),
     }).range(container.from, container.to),
   );
 

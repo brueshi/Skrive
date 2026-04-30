@@ -256,6 +256,27 @@ pub async fn create_subdirectory(
     project::create_new_directory(&root, &PathBuf::from(&path))
 }
 
+// =========================== Attachment commands ===========================
+
+/// Copy a dragged image into the project's attachments folder and return
+/// the project-relative path the editor should put inside `![alt](…)`.
+/// `src_path` is an absolute path from the Tauri drag-drop event payload;
+/// `subdir` is usually `"attachments"`. Collisions are resolved with a
+/// `-1`/`-2`/… suffix on the stem.
+#[tauri::command]
+pub async fn copy_attachment(
+    src_path: String,
+    subdir: String,
+    state: State<'_, AppState>,
+) -> Result<String> {
+    let root = {
+        let project = state.project.lock().await;
+        let project = project.as_ref().ok_or(Error::NoProjectOpen)?;
+        project.root.clone()
+    };
+    project::copy_attachment(&root, &PathBuf::from(&src_path), &subdir)
+}
+
 // =========================== Deletion commands ===========================
 
 /// Move a project-relative file or directory to the OS trash. Works for both

@@ -23,11 +23,42 @@
 // content to this module.
 
 import { marked } from "marked";
+import type { Tokens } from "marked";
+import { resolveImageSrc, type ImageContext } from "$lib/imageSrc";
 
 marked.setOptions({
   gfm: true,
   breaks: false,
 });
+
+// Per-call context for the image renderer below. Marked is synchronous
+// in our config, so this module-level variable is safe — there's no
+// concurrent parse to clobber it. We set before each call and clear
+// after, which keeps `currentContext` from leaking across renders if a
+// caller forgets to pass one.
+let currentContext: ImageContext = { projectRoot: "", filePath: null };
+
+// Override only the image renderer; everything else falls through to
+// marked's default. The asset-URL conversion is what makes the rendered
+// `<img>` actually load — without it, the browser can't fetch arbitrary
+// disk paths from a Tauri webview. See `$lib/imageSrc.ts`.
+marked.use({
+  renderer: {
+    image({ href, title, text }: Tokens.Image): string {
+      const resolved = resolveImageSrc(href, currentContext);
+      const titleAttr = title ? ` title="${escapeAttr(title)}"` : "";
+      return `<img src="${escapeAttr(resolved)}" alt="${escapeAttr(text)}"${titleAttr}>`;
+    },
+  },
+});
+
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
 
 /**
  * Strip a leading YAML frontmatter block from a body string, matching the
@@ -66,10 +97,15 @@ export function stripLeadingFrontmatter(source: string): string {
   return source;
 }
 
-export function renderMarkdown(body: string): string {
+export function renderMarkdown(body: string, ctx?: ImageContext): string {
   // `marked.parse` returns a string synchronously when no async extensions
   // are registered, which is our case. The overload returns `string | Promise`,
   // so we cast.
-  const stripped = stripLeadingFrontmatter(body);
-  return marked.parse(stripped) as string;
+  currentContext = ctx ?? { projectRoot: "", filePath: null };
+  try {
+    const stripped = stripLeadingFrontmatter(body);
+    return marked.parse(stripped) as string;
+  } finally {
+    currentContext = { projectRoot: "", filePath: null };
+  }
 }

@@ -133,7 +133,12 @@
     if (pending) clearTimeout(pending);
   });
 
-  let html = $derived(renderMarkdown(debouncedBody));
+  let html = $derived(
+    renderMarkdown(debouncedBody, {
+      projectRoot: project.manifest?.root ?? "",
+      filePath: project.activeTab?.path ?? null,
+    }),
+  );
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->

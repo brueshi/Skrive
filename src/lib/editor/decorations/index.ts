@@ -17,8 +17,11 @@ import type { HandlerMap } from "./shared";
 import { codeHandlers } from "./code";
 import { emphasisHandlers } from "./emphasis";
 import { headingHandlers } from "./headings";
-import { imageHandlers } from "./images";
+import { imageContextField, imageHandlers } from "./images";
 import { linkHandlers } from "./links";
+
+export { setImageContext } from "./images";
+export type { ImageContext } from "./images";
 import {
   personalDictionaryField,
   spellcheckFrontmatterPlugin,
@@ -60,5 +63,6 @@ export function inlinePreview() {
     stableEmphasisField,
     spellcheckFrontmatterPlugin,
     personalDictionaryField,
+    imageContextField,
   ];
 }

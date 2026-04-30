@@ -52,6 +52,7 @@ pub fn run() {
             commands::create_subdirectory,
             commands::create_file,
             commands::delete_path,
+            commands::copy_attachment,
             commands::search_project,
             commands::get_backlinks,
             commands::get_outgoing_links,

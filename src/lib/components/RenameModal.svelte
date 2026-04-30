@@ -4,12 +4,14 @@
   // Shown when the user invokes rename via F2 on an active tab or the
   // "Rename…" context-menu item on a sidebar row. The modal displays:
   //
-  //   - The target file's directory prefix (read-only, so the user
-  //     renames *within* the same folder; moving to another directory
-  //     is deferred per the plan's out-of-scope list).
-  //   - An editable basename input, preseeded with the current basename
+  //   - The target file's directory prefix (read-only).
+  //   - An editable name input, preseeded with the current basename
   //     and with the stem (name-without-extension) selected so typing
-  //     replaces it cleanly.
+  //     replaces it cleanly. The input accepts path separators: typing
+  //     `docs/foo.md` moves the file into a `docs/` subdirectory of the
+  //     current location, creating intermediate folders as needed. The
+  //     backend's `rename_with_references` already handles fresh-subpath
+  //     moves and rewrites inbound references to the new location.
   //   - A live preview of every reference the commit will rewrite.
   //   - Cancel + Rename buttons.
   //
@@ -71,11 +73,21 @@
   const isInvalidBasename = $derived.by(() => {
     const b = pendingBasename.trim();
     if (b.length === 0) return "Name can't be empty.";
-    if (b.includes("/") || b.includes("\\")) {
-      return "Name can't contain path separators.";
+    if (b.includes("\\")) {
+      return "Name can't contain backslashes.";
     }
-    if (b === ".." || b === ".") return "Invalid name.";
-    if (!b.endsWith(".md") && !b.endsWith(".markdown")) {
+    if (b.startsWith("/")) {
+      return "Name can't start with /.";
+    }
+    const segments = b.split("/");
+    if (segments.some((s) => s.length === 0)) {
+      return "Name can't contain empty path segments.";
+    }
+    if (segments.some((s) => s === "." || s === "..")) {
+      return "Name can't contain . or .. segments.";
+    }
+    const last = segments[segments.length - 1];
+    if (!last.endsWith(".md") && !last.endsWith(".markdown")) {
       return "Name must end with .md or .markdown.";
     }
     return null;
@@ -222,6 +234,8 @@
       <p class="rename-error">A file already exists at {newPath}.</p>
     {:else if inputError}
       <p class="rename-error">{inputError}</p>
+    {:else if pendingBasename.includes("/")}
+      <p class="rename-moves-to">Moves to <span>{newPath}</span></p>
     {/if}
 
     <div class="rename-summary">
@@ -397,6 +411,18 @@
     background: color-mix(in srgb, var(--skrive-fg) 8%, transparent);
     border-radius: 3px;
     border-left: 2px solid var(--skrive-fg);
+  }
+
+  .rename-moves-to {
+    margin: 0.25rem 0.875rem 0;
+    padding: 0.35rem 0.5rem;
+    font-size: 12px;
+    color: var(--skrive-muted);
+  }
+
+  .rename-moves-to span {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--skrive-fg);
   }
 
   .rename-summary {

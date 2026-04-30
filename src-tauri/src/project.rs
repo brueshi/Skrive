@@ -1331,6 +1331,103 @@ pub fn resolve_project_for_file(file_path: &Path) -> Result<(PathBuf, PathBuf)> 
     Ok((root, rel))
 }
 
+/// Image extensions accepted by `copy_attachment`. The list mirrors what
+/// browsers and viewers reliably render inline; HEIC/HEIF show up because
+/// macOS screenshots default to it on recent OS versions, even though
+/// Markdown renderers usually need a converter to display them.
+const IMAGE_EXTS: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif", "heic", "heif",
+];
+
+fn is_image(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| {
+            let lower = e.to_lowercase();
+            IMAGE_EXTS.iter().any(|allowed| *allowed == lower)
+        })
+        .unwrap_or(false)
+}
+
+/// Copy an image from an arbitrary absolute path on disk into the
+/// project's `subdir` (typically "attachments/"), preserving the original
+/// filename and suffixing `-1`, `-2`, … on collision. Returns the new
+/// project-relative path with forward slashes — ready to drop into a
+/// Markdown `![alt](path)`.
+///
+/// Confinement: `subdir` is rejected if it contains `..`, root, or
+/// prefix components, mirroring the other create/rename helpers. The
+/// source path is *not* required to be inside the project (the user is
+/// dragging from anywhere — Finder, Photos, downloads), but it must
+/// exist, be a regular file, and have an image extension.
+pub fn copy_attachment(root: &Path, src_abs: &Path, subdir: &str) -> Result<String> {
+    if !src_abs.is_file() {
+        return Err(Error::Io(format!(
+            "{} is not a regular file",
+            src_abs.display()
+        )));
+    }
+    if !is_image(src_abs) {
+        return Err(Error::Io(format!(
+            "{} is not a supported image type",
+            src_abs.display()
+        )));
+    }
+
+    let subdir_rel = Path::new(subdir);
+    for component in subdir_rel.components() {
+        match component {
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => {
+                return Err(Error::PathOutsideProject);
+            }
+            _ => {}
+        }
+    }
+
+    let canonical_root = root.canonicalize()?;
+    let dest_dir = canonical_root.join(subdir_rel);
+    std::fs::create_dir_all(&dest_dir)?;
+
+    let original_name = src_abs
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| Error::Io("source filename is not valid UTF-8".into()))?;
+
+    // Split into stem + extension once so the collision loop can rebuild
+    // names cheaply: `foo.png` → ("foo", ".png"); `foo` → ("foo", "").
+    let (stem, ext_with_dot) = match original_name.rsplit_once('.') {
+        Some((s, e)) => (s.to_string(), format!(".{}", e)),
+        None => (original_name.to_string(), String::new()),
+    };
+
+    let mut chosen_name = original_name.to_string();
+    let mut dest_path = dest_dir.join(&chosen_name);
+    let mut suffix: u32 = 1;
+    while dest_path.exists() {
+        if suffix > 1000 {
+            return Err(Error::Io(
+                "too many filename collisions in attachments folder".into(),
+            ));
+        }
+        chosen_name = format!("{}-{}{}", stem, suffix, ext_with_dot);
+        dest_path = dest_dir.join(&chosen_name);
+        suffix += 1;
+    }
+
+    std::fs::copy(src_abs, &dest_path)?;
+
+    // Forward slashes regardless of platform — Markdown link targets are
+    // POSIX-style and the rest of the codebase normalizes the same way.
+    let rel = if subdir.is_empty() {
+        chosen_name
+    } else {
+        format!("{}/{}", subdir.trim_end_matches('/'), chosen_name)
+    };
+    Ok(rel)
+}
+
 /// Create a new directory at the given project-relative path. Parent
 /// directories are created as needed. Refuses if the path already exists.
 /// Path confinement uses the same rules as `create_new_file`.

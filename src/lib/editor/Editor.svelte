@@ -27,13 +27,25 @@
     history,
     defaultKeymap,
     historyKeymap,
+    indentMore,
+    indentLess,
   } from "@codemirror/commands";
   import { markdown } from "@codemirror/lang-markdown";
   import { GFM } from "@lezer/markdown";
+  import { invoke } from "@tauri-apps/api/core";
+  import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { skriveTheme } from "./skrive-theme";
-  import { inlinePreview } from "./decorations";
+  import { inlinePreview, setImageContext } from "./decorations";
   import { setPersonalDictionary } from "./decorations/spellcheck";
   import { preferences } from "$lib/stores/preferences.svelte";
+  import { project } from "$lib/stores/project.svelte";
+  import { notify } from "$lib/stores/notifications.svelte";
+  import { projectRelToSourceRel } from "$lib/imageSrc";
+
+  const IMAGE_FILE_RE = /\.(png|jpe?g|gif|webp|svg|bmp|avif|heic|heif)$/i;
+  const ATTACHMENTS_SUBDIR = "attachments";
+
+  let dragOver = $state(false);
 
   type Props = {
     value?: string;
@@ -67,6 +79,44 @@
     const word = v.state.doc.sliceString(range.from, range.to).trim();
     if (word.length === 0) return false;
     preferences.addPersonalWord(word);
+    return true;
+  };
+
+  // Tab/Shift-Tab indent or outdent list items when the cursor (or every
+  // line in the selection) sits on a markdown list line. Outside list
+  // context the commands return false so default Tab handling runs —
+  // important because writers occasionally indent prose, and indenting
+  // prose by 4+ spaces would silently turn it into a CommonMark code
+  // block. Gating on list context avoids that footgun.
+  //
+  // Pattern matches `- foo`, `* foo`, `+ foo`, `1. foo`, `1) foo`, and
+  // any of the above with leading indent (already-nested items).
+  const LIST_LINE = /^\s*(?:[-*+]|\d+[.)])\s/;
+
+  const allSelectionLinesAreLists = (v: EditorView): boolean => {
+    const { state } = v;
+    for (const range of state.selection.ranges) {
+      const fromLine = state.doc.lineAt(range.from).number;
+      const toLine = state.doc.lineAt(range.to).number;
+      for (let n = fromLine; n <= toLine; n++) {
+        if (!LIST_LINE.test(state.doc.line(n).text)) return false;
+      }
+    }
+    return true;
+  };
+
+  // Always returns true when the gesture lands on a list line — even if
+  // indentLess can't outdent further (e.g. Shift-Tab on a top-level
+  // bullet) — so focus doesn't escape the editor on a no-op outdent.
+  const tabIndentListItem: Command = (v) => {
+    if (!allSelectionLinesAreLists(v)) return false;
+    indentMore(v);
+    return true;
+  };
+
+  const shiftTabOutdentListItem: Command = (v) => {
+    if (!allSelectionLinesAreLists(v)) return false;
+    indentLess(v);
     return true;
   };
 
@@ -105,6 +155,8 @@
           EditorView.contentAttributes.of({ spellcheck: "true" }),
           keymap.of([
             { key: "Mod-'", run: addWordAtCursorCommand },
+            { key: "Tab", run: tabIndentListItem },
+            { key: "Shift-Tab", run: shiftTabOutdentListItem },
             ...defaultKeymap,
             ...historyKeymap,
           ]),
@@ -116,11 +168,105 @@
       parent: container,
     });
 
+    // File-drop import. Tauri v2 intercepts file drops at the webview
+    // level (default `dragDropEnabled: true`) and emits paths via the
+    // drag-drop event, so the standard browser drop event never fires
+    // for files. We don't position-scope: only the active tab's editor
+    // is mounted (SplitView re-keys on tab switch), so a drop anywhere
+    // on the window unambiguously targets the visible editor. Earlier
+    // attempts to scope by bounding rect were brittle on HiDPI because
+    // Tauri's `position` is reported in physical pixels.
+    let unlistenDragDrop: (() => void) | null = null;
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        switch (event.payload.type) {
+          case "enter":
+          case "over":
+            dragOver = true;
+            break;
+          case "leave":
+            dragOver = false;
+            break;
+          case "drop":
+            dragOver = false;
+            if (!view) return;
+            void handleFileDrop(event.payload.paths);
+            break;
+        }
+      })
+      .then((unlisten) => {
+        unlistenDragDrop = unlisten;
+      });
+
     return () => {
+      unlistenDragDrop?.();
       view?.destroy();
       view = null;
     };
   });
+
+  async function handleFileDrop(paths: string[]) {
+    if (!view) return;
+
+    // Empty paths means Tauri received a drop but the source didn't
+    // include any filesystem path — common when dragging from a
+    // browser, Slack, Photos.app's preview pane, or a screenshot tool
+    // before the file is saved. Surface this so the writer knows why
+    // nothing happened, rather than silently failing.
+    if (paths.length === 0) {
+      notify.info(
+        "That drag didn't include a file path. Save the image first, then drag it from Finder.",
+      );
+      return;
+    }
+
+    const imagePaths = paths.filter((p) => IMAGE_FILE_RE.test(p));
+    if (imagePaths.length === 0) {
+      notify.info("Drop an image file (png, jpg, gif, webp, svg, …).");
+      return;
+    }
+
+    const insertions: string[] = [];
+    let failures = 0;
+    const activeFilePath = project.activeTab?.path ?? null;
+    for (const srcPath of imagePaths) {
+      try {
+        const projectRel = await invoke<string>("copy_attachment", {
+          srcPath,
+          subdir: ATTACHMENTS_SUBDIR,
+        });
+        // Markdown image URLs are *source-file-relative*. From
+        // `chapters/draft.md`, the project's `attachments/foo.png`
+        // has to be written as `../attachments/foo.png` or no
+        // markdown reader (Skrive included) can resolve it.
+        const sourceRel = projectRelToSourceRel(projectRel, activeFilePath);
+        const slash = sourceRel.lastIndexOf("/");
+        const filename = slash >= 0 ? sourceRel.slice(slash + 1) : sourceRel;
+        const dot = filename.lastIndexOf(".");
+        const stem = dot > 0 ? filename.slice(0, dot) : filename;
+        // CommonMark URLs can't contain unescaped spaces or other
+        // special characters; an unescaped space in `![](path with
+        // spaces.png)` makes the parser bail on the Image node entirely
+        // — and a screenshot like "Screenshot 2026-04-29 at 6.25.png"
+        // is exactly that case. encodeURI keeps `/` and standard URL
+        // chars intact, encodes spaces and accented characters.
+        const encodedUrl = encodeURI(sourceRel);
+        insertions.push(`![${stem}](${encodedUrl})`);
+      } catch (err) {
+        failures += 1;
+        notify.error(`Couldn't import ${srcPath}: ${String(err)}`);
+      }
+    }
+
+    if (insertions.length === 0) {
+      if (failures === 0) {
+        notify.info("No image was imported.");
+      }
+      return;
+    }
+    view.focus();
+    view.dispatch(view.state.replaceSelection(insertions.join("\n")));
+  }
 
   // External writes to `value` (from parent state, e.g. opening a different
   // file) are reflected by dispatching a single replace transaction. We guard
@@ -181,15 +327,46 @@
     const dict = preferences.personalDictionary;
     view.dispatch({ effects: setPersonalDictionary.of(dict) });
   });
+
+  // Push project root + current file path into the image-decoration
+  // state so `![alt](attachments/foo.png)` resolves to a webview-loadable
+  // asset URL. Re-fires whenever the writer switches tabs or opens a
+  // different project.
+  $effect(() => {
+    if (!view) return;
+    const projectRoot = project.manifest?.root ?? "";
+    const filePath = project.activeTab?.path ?? null;
+    view.dispatch({
+      effects: setImageContext.of({ projectRoot, filePath }),
+    });
+  });
 </script>
 
-<div class="editor-host" bind:this={container}></div>
+<div class="editor-host" class:drag-over={dragOver} bind:this={container}></div>
 
 <style>
   .editor-host {
     height: 100%;
     width: 100%;
     overflow: hidden;
+    position: relative;
+  }
+
+  /* Drag-over visual: a dashed editorial inset and a barely-there
+     background tint. Loud enough to confirm "yes, drop here works,"
+     quiet enough not to feel like the app is shouting. The pseudo-
+     element approach keeps the outline above CodeMirror content
+     without nudging the layout. */
+  .editor-host.drag-over::after {
+    content: "";
+    position: absolute;
+    inset: 6px;
+    border: 1.5px dashed var(--skrive-fg);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--skrive-fg) 4%, transparent);
+    pointer-events: none;
+    opacity: 0.6;
+    z-index: 1;
   }
 
   :global(.cm-editor) {
