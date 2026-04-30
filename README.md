@@ -65,11 +65,11 @@ A couple of small things that make day-to-day writing feel good:
 
 ## Development
 
-Prerequisites: Rust toolchain, Node 20+, and the platform requirements listed in the [Tauri prerequisites guide](https://tauri.app/start/prerequisites/).
+Prerequisites: Rust toolchain, [Bun](https://bun.com), and the platform requirements listed in the [Tauri prerequisites guide](https://tauri.app/start/prerequisites/).
 
 ```bash
-npm install
-npm run tauri dev
+bun install
+bun run tauri dev
 ```
 
 ## Project layout

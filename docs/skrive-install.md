@@ -24,7 +24,7 @@ To install anyway:
 
 ## Linux
 
-Not shipping Linux builds yet. Build from source via `npm run tauri build`.
+Not shipping Linux builds yet. Build from source via `bun run tauri build`.
 
 ## First launch
 
