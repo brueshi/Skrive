@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
+    "dev:web": "VITE_TARGET=web vite dev",
     "build": "vite build",
+    "build:web": "VITE_TARGET=web vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:web": "VITE_TARGET=web svelte-kit sync && VITE_TARGET=web svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "tauri": "tauri"
   },

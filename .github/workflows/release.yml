@@ -107,3 +107,49 @@ jobs:
           releaseDraft: true
           prerelease: true
           args: ${{ matrix.args }}
+
+      # Upload version-less aliases of each platform's installer so
+      # skrive.md can link to stable URLs like
+      #   github.com/brueshi/Skrive/releases/latest/download/Skrive.dmg
+      # that resolve forever, no per-release URL edit needed. The
+      # original versioned files stay in place — these are additional
+      # copies, not replacements.
+      #
+      # Tauri 2's bundler doesn't expose a filename override, so we
+      # rename the produced artifacts post-build and re-upload via
+      # `gh release upload`. The upload appends to the existing draft
+      # release tauri-action just created.
+      - name: Upload stable-name aliases
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            macOS)
+              SRC=$(find src-tauri/target -type f -name "Skrive_*.dmg" | head -1)
+              if [[ -z "$SRC" ]]; then
+                echo "No .dmg produced — skipping alias upload" >&2
+                exit 0
+              fi
+              cp "$SRC" Skrive.dmg
+              gh release upload "$TAG" Skrive.dmg --clobber
+              ;;
+            Windows)
+              SRC_EXE=$(find src-tauri/target -type f -name "Skrive_*-setup.exe" | head -1)
+              SRC_MSI=$(find src-tauri/target -type f -name "Skrive_*_en-US.msi" | head -1)
+              if [[ -n "$SRC_EXE" ]]; then
+                cp "$SRC_EXE" Skrive-setup.exe
+                gh release upload "$TAG" Skrive-setup.exe --clobber
+              fi
+              if [[ -n "$SRC_MSI" ]]; then
+                cp "$SRC_MSI" Skrive.msi
+                gh release upload "$TAG" Skrive.msi --clobber
+              fi
+              ;;
+            *)
+              echo "Unknown runner OS: $RUNNER_OS" >&2
+              ;;
+          esac
