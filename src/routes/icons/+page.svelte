@@ -10,9 +10,12 @@
     IconPlus,
     IconX,
     IconCheck,
+    IconDocMarkdown,
+    IconFolder,
   } from "$lib/icons";
 
   let sidebarShown = $state(true);
+  let folderOpen = $state(false);
 </script>
 
 <svelte:head>
@@ -177,6 +180,47 @@
         <div class="label">
           <span class="slug">check <span class="angle">~ 40°</span></span>
           <span class="desc">Confirmation, saved</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <span class="section-mark">§ Row III</span>
+      <h2>Sidebar Tree — File System</h2>
+      <span class="section-rule"></span>
+    </div>
+    <div class="grid">
+      <div class="cell">
+        <div class="display">
+          <IconDocMarkdown />
+        </div>
+        <div class="scale">
+          <IconDocMarkdown size={16} />
+        </div>
+        <div class="label">
+          <span class="slug">doc-markdown <span class="angle">fold + #</span></span>
+          <span class="desc">Markdown document leaf</span>
+        </div>
+      </div>
+
+      <div class="cell">
+        <button
+          class="display interactive"
+          type="button"
+          onclick={() => (folderOpen = !folderOpen)}
+          aria-label="Toggle folder state"
+          aria-pressed={folderOpen}
+        >
+          <IconFolder open={folderOpen} />
+        </button>
+        <div class="scale">
+          <IconFolder size={16} open={folderOpen} />
+        </div>
+        <div class="label">
+          <span class="slug">folder <span class="angle">{folderOpen ? "kink · 40°" : "tab · 40°"}</span></span>
+          <span class="desc">{folderOpen ? "open — click to close" : "closed — click to open"}</span>
         </div>
       </div>
     </div>
