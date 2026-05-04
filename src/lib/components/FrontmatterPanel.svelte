@@ -468,10 +468,12 @@
       if (!panelRoot) return;
       const target = e.target as Node | null;
       if (target && !panelRoot.contains(target)) {
-        // Also ignore clicks on the header indicator itself — clicking it
+        // Also ignore clicks on the header toggle itself — clicking it
         // toggles via its own handler, and we don't want both handlers to
         // fire and re-open the panel we just closed.
-        const hit = (target as Element | null)?.closest?.(".fm-indicator");
+        const hit = (target as Element | null)?.closest?.(
+          '[data-panel-toggle="frontmatter"]',
+        );
         if (hit) return;
         project.closeFrontmatterPanel();
       }
@@ -507,6 +509,7 @@
     <header class="fm-panel-header">
       <span class="fm-panel-title">Frontmatter</span>
       <span class="fm-panel-path" title={activePathLabel}>{activePathLabel}</span>
+      <span class="fm-panel-count">{rows.length}</span>
     </header>
 
     <div class="fm-panel-body">
@@ -691,7 +694,6 @@
   .fm-panel-header {
     display: flex;
     align-items: baseline;
-    justify-content: space-between;
     gap: 0.75rem;
     padding: 0.625rem 0.875rem;
     border-bottom: 1px solid var(--skrive-rule);
@@ -705,16 +707,25 @@
     letter-spacing: 0.08em;
     font-weight: 600;
     color: var(--skrive-fg);
+    flex-shrink: 0;
   }
 
   .fm-panel-path {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 11px;
     color: var(--skrive-muted);
-    max-width: 20rem;
+    flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    min-width: 0;
+  }
+
+  .fm-panel-count {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--skrive-muted);
+    flex-shrink: 0;
   }
 
   .fm-panel-body {

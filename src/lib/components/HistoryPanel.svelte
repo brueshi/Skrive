@@ -150,15 +150,17 @@
   }
 
   // Click-outside dismissal. Mirrors the other panels' pattern,
-  // including the .hi-indicator escape hatch so clicking the header
-  // indicator toggles cleanly instead of firing close-then-open.
+  // including the data-panel-toggle escape hatch so clicking the header
+  // toggle closes the panel cleanly instead of firing close-then-open.
   $effect(() => {
     if (!project.historyPanelOpen) return;
     const handler = (e: MouseEvent) => {
       if (!panelRoot) return;
       const target = e.target as Node | null;
       if (target && !panelRoot.contains(target)) {
-        const hit = (target as Element | null)?.closest?.(".hi-indicator");
+        const hit = (target as Element | null)?.closest?.(
+          '[data-panel-toggle="history"]',
+        );
         if (hit) return;
         project.closeHistoryPanel();
       }

@@ -15,6 +15,11 @@
   import IconLayoutPreview from "$lib/icons/IconLayoutPreview.svelte";
   import IconSidebarToggle from "$lib/icons/IconSidebarToggle.svelte";
   import IconDotUnsaved from "$lib/icons/IconDotUnsaved.svelte";
+  import IconDocMarkdown from "$lib/icons/IconDocMarkdown.svelte";
+  import IconFrontmatter from "$lib/icons/IconFrontmatter.svelte";
+  import IconBacklinks from "$lib/icons/IconBacklinks.svelte";
+  import IconDictionary from "$lib/icons/IconDictionary.svelte";
+  import IconHistory from "$lib/icons/IconHistory.svelte";
   import IconX from "$lib/icons/IconX.svelte";
   import ContextMenu, {
     type ContextMenuItem,
@@ -38,20 +43,17 @@
 
   let { autoSaveHooks }: Props = $props();
 
+  // The window uses macOS overlay title bar (tauri.conf.json), so traffic
+  // lights float over our chrome. Pad the header on macOS only — Windows /
+  // Linux have native chrome above the app and don't need the offset.
+  const isMacOS =
+    typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
+
   let projectName = $derived.by(() => {
     const root = project.manifest?.root;
     if (!root) return "";
     const parts = root.split(/[/\\]/).filter(Boolean);
     return parts[parts.length - 1] ?? root;
-  });
-
-  // Field count for the FM · N indicator. Reads directly from the active
-  // tab's frontmatter map so it updates reactively as the user adds or
-  // removes fields through the panel.
-  let frontmatterFieldCount = $derived.by(() => {
-    const fm = project.activeTab?.content.frontmatter;
-    if (!fm) return 0;
-    return Object.keys(fm).length;
   });
 
   function setMode(mode: LayoutMode) {
@@ -142,7 +144,7 @@
   }
 </script>
 
-<header class="header">
+<header class="header" class:is-macos={isMacOS} data-tauri-drag-region>
   <div class="left">
     <button
       type="button"
@@ -181,6 +183,9 @@
         onclick={() => project.switchTab(i)}
         title={tab.path}
       >
+        <span class="tab-icon" aria-hidden="true">
+          <IconDocMarkdown size={16} />
+        </span>
         <span class="tab-name">{tab.path.split("/").pop()}</span>
         {#if tab.dirty}
           <span class="tab-dirty" aria-label="unsaved changes">
@@ -236,80 +241,64 @@
 
   <div class="right">
     {#if project.activeTab && project.activeView === "file"}
-      <button
-        type="button"
-        class="fm-indicator"
-        class:fm-indicator-empty={frontmatterFieldCount === 0}
-        class:fm-indicator-active={project.frontmatterPanelOpen}
-        aria-label={project.frontmatterPanelOpen
-          ? "Close frontmatter panel"
-          : "Open frontmatter panel"}
-        aria-pressed={project.frontmatterPanelOpen}
-        title="Frontmatter  ⌘⇧F"
-        onclick={() => project.toggleFrontmatterPanel()}
-      >
-        <span class="fm-label">FM</span>
-        <span class="fm-sep">·</span>
-        <span class="fm-count"
-          >{frontmatterFieldCount === 0 ? "+" : frontmatterFieldCount}</span
+      <div class="panel-toggles" role="group" aria-label="Side panels">
+        <button
+          type="button"
+          class="icon-button"
+          class:active={project.frontmatterPanelOpen}
+          data-panel-toggle="frontmatter"
+          aria-label={project.frontmatterPanelOpen
+            ? "Close frontmatter panel"
+            : "Open frontmatter panel"}
+          aria-pressed={project.frontmatterPanelOpen}
+          title="Frontmatter  ⌘⇧F"
+          onclick={() => project.toggleFrontmatterPanel()}
         >
-      </button>
-      <button
-        type="button"
-        class="bl-indicator"
-        class:bl-indicator-empty={project.backlinksOfActive.length === 0}
-        class:bl-indicator-active={project.backlinksPanelOpen}
-        aria-label={project.backlinksPanelOpen
-          ? "Close backlinks panel"
-          : "Open backlinks panel"}
-        aria-pressed={project.backlinksPanelOpen}
-        title="Backlinks  ⌘⇧B"
-        onclick={() => project.toggleBacklinksPanel()}
-      >
-        <span class="bl-label">BL</span>
-        <span class="bl-sep">·</span>
-        <span class="bl-count">{project.backlinksOfActive.length}</span>
-      </button>
-      <button
-        type="button"
-        class="aa-indicator"
-        class:aa-indicator-empty={preferences.personalDictionary.length === 0}
-        class:aa-indicator-active={preferences.dictionaryPanelOpen}
-        aria-label={preferences.dictionaryPanelOpen
-          ? "Close personal dictionary"
-          : "Open personal dictionary"}
-        aria-pressed={preferences.dictionaryPanelOpen}
-        title="Personal dictionary  ⌘⇧D"
-        onclick={() => preferences.toggleDictionaryPanel()}
-      >
-        <span class="aa-label">Aa</span>
-        <span class="aa-sep">·</span>
-        <span class="aa-count"
-          >{preferences.personalDictionary.length === 0
-            ? "+"
-            : preferences.personalDictionary.length}</span
+          <IconFrontmatter size={16} />
+        </button>
+        <button
+          type="button"
+          class="icon-button"
+          class:active={project.backlinksPanelOpen}
+          data-panel-toggle="backlinks"
+          aria-label={project.backlinksPanelOpen
+            ? "Close backlinks panel"
+            : "Open backlinks panel"}
+          aria-pressed={project.backlinksPanelOpen}
+          title="Backlinks  ⌘⇧B"
+          onclick={() => project.toggleBacklinksPanel()}
         >
-      </button>
-      <button
-        type="button"
-        class="hi-indicator"
-        class:hi-indicator-empty={project.historyOfActive.length === 0}
-        class:hi-indicator-active={project.historyPanelOpen}
-        aria-label={project.historyPanelOpen
-          ? "Close history panel"
-          : "Open history panel"}
-        aria-pressed={project.historyPanelOpen}
-        title={`History  ⌘⇧H${project.historyMode ? `  (${project.historyMode})` : ""}`}
-        onclick={() => project.toggleHistoryPanel()}
-      >
-        <span class="hi-label">HI</span>
-        <span class="hi-sep">·</span>
-        <span class="hi-count"
-          >{project.historyOfActive.length === 0
-            ? "+"
-            : project.historyOfActive.length}</span
+          <IconBacklinks size={16} />
+        </button>
+        <button
+          type="button"
+          class="icon-button"
+          class:active={preferences.dictionaryPanelOpen}
+          data-panel-toggle="dictionary"
+          aria-label={preferences.dictionaryPanelOpen
+            ? "Close personal dictionary"
+            : "Open personal dictionary"}
+          aria-pressed={preferences.dictionaryPanelOpen}
+          title="Personal dictionary  ⌘⇧D"
+          onclick={() => preferences.toggleDictionaryPanel()}
         >
-      </button>
+          <IconDictionary size={16} />
+        </button>
+        <button
+          type="button"
+          class="icon-button"
+          class:active={project.historyPanelOpen}
+          data-panel-toggle="history"
+          aria-label={project.historyPanelOpen
+            ? "Close history panel"
+            : "Open history panel"}
+          aria-pressed={project.historyPanelOpen}
+          title={`History  ⌘⇧H${project.historyMode ? `  (${project.historyMode})` : ""}`}
+          onclick={() => project.toggleHistoryPanel()}
+        >
+          <IconHistory size={16} />
+        </button>
+      </div>
       <div class="mode-toggle" role="group" aria-label="Layout mode">
         <button
           type="button"
@@ -367,14 +356,20 @@
 <style>
   .header {
     display: flex;
-    align-items: center;
+    align-items: stretch;
     gap: 0.75rem;
-    padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid var(--skrive-rule);
+    padding: 0 0.75rem;
     flex-shrink: 0;
-    background: var(--skrive-bg);
+    background: var(--skrive-chrome);
     height: 40px;
     box-sizing: border-box;
+  }
+
+  /* Clear the macOS traffic-light cluster (~78px wide). The chrome
+     extends up under it via titleBarStyle: "Overlay", so the lights
+     sit on the same surface as the rest of the chrome. */
+  .header.is-macos {
+    padding-left: 78px;
   }
 
   .left {
@@ -422,49 +417,77 @@
     opacity: 0.6;
   }
 
+  /* Tab strip hugs the bottom edge of the chrome row so the active
+     tab can extend down to the editor edge and visually merge with it
+     (Notion / browser pattern: chrome is the "shelf", active tab is
+     the lifted card). 6px top inset gives breathing room above tabs. */
   .tabs {
     flex: 1;
     display: flex;
-    gap: 0.25rem;
+    align-items: stretch;
+    gap: 2px;
     min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .tabs::-webkit-scrollbar {
-    display: none;
+    padding-top: 6px;
+    overflow: hidden;
   }
 
+  /* Browser-style sizing — tabs hug their natural content width
+     (icon + name + close), can shrink down to a 36px floor
+     (icon-only) when crowded, and cap at 14rem so a 60-char filename
+     can't dominate the row. flex-grow 0 means short names stay short
+     instead of stretching to fill empty space. */
   .tab {
+    position: relative;
     display: inline-flex;
     align-items: center;
     gap: 0.375rem;
-    padding: 0.25rem 0.375rem 0.25rem 0.625rem;
+    padding: 0 0.5rem 0 0.625rem;
     background: transparent;
     border: none;
-    border-radius: 3px;
+    border-radius: 4px 4px 0 0;
     color: var(--skrive-muted);
     font: inherit;
     font-size: 12px;
     cursor: pointer;
     white-space: nowrap;
+    flex: 0 1 auto;
+    min-width: 36px;
     max-width: 14rem;
-    flex-shrink: 0;
+    overflow: hidden;
+    transition:
+      color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+      background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .tab:hover {
-    background: var(--skrive-rule);
     color: var(--skrive-fg);
+    background: var(--skrive-rule);
   }
 
+  /* Active tab matches the editor cream, has only top corners
+     rounded, and extends to the bottom edge of the chrome row — its
+     bottom edge is the editor edge, so the two cream surfaces meet
+     without a seam. Reads as "the open document". */
   .tab.active {
-    background: var(--skrive-rule);
+    color: var(--skrive-fg);
+    background: var(--skrive-bg);
+  }
+
+  .tab-icon {
+    display: inline-flex;
+    flex-shrink: 0;
+    color: var(--skrive-muted);
+  }
+
+  .tab.active .tab-icon,
+  .tab:hover .tab-icon {
     color: var(--skrive-fg);
   }
 
   .tab-name {
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 10rem;
+    min-width: 0;
   }
 
   .tab-dirty {
@@ -494,7 +517,7 @@
 
   .tab-close:hover {
     color: var(--skrive-fg);
-    background: var(--skrive-bg);
+    background: var(--skrive-rule);
   }
 
   .right {
@@ -524,6 +547,21 @@
   .icon-button:hover {
     color: var(--skrive-fg);
     background: var(--skrive-rule);
+  }
+
+  .icon-button.active {
+    color: var(--skrive-fg);
+    background: var(--skrive-rule);
+  }
+
+  /* Group of four side-panel toggles (frontmatter / backlinks /
+     dictionary / history). Sits to the left of the layout-mode group;
+     the small inner gap keeps them as a visual cluster without
+     drawing a border around them. */
+  .panel-toggles {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
   }
 
   .mode-toggle {
@@ -571,198 +609,5 @@
 
   .mode-button.disabled:hover {
     color: var(--skrive-muted);
-  }
-
-  /* Frontmatter panel indicator. Lives to the left of the layout mode
-     toggle and acts as both an "N fields on this file" glance and the
-     click target for opening the panel. Monospace to match the project-
-     name style so it reads as metadata, not a primary action. */
-  .fm-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3em;
-    background: transparent;
-    border: 1px solid var(--skrive-rule);
-    border-radius: 4px;
-    height: 24px;
-    padding: 0 0.5rem;
-    color: var(--skrive-muted);
-    cursor: pointer;
-    font: inherit;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 11px;
-    letter-spacing: 0.02em;
-    transition:
-      color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-      background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-      border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  .fm-indicator:hover {
-    color: var(--skrive-fg);
-    border-color: var(--skrive-fg);
-  }
-
-  .fm-indicator.fm-indicator-active {
-    color: var(--skrive-fg);
-    background: var(--skrive-rule);
-    border-color: var(--skrive-fg);
-  }
-
-  /* Subtle de-emphasis when the active file has no frontmatter yet —
-     the `FM · +` state is still clickable and discoverable, just quieter
-     than a populated file would be. */
-  .fm-indicator.fm-indicator-empty .fm-count {
-    opacity: 0.7;
-  }
-
-  .fm-label {
-    font-weight: 600;
-  }
-
-  .fm-sep {
-    opacity: 0.5;
-  }
-
-  /* Personal dictionary indicator. Visually parallel to the FM indicator
-     so the two read as a coherent pair of "tools you can invoke from
-     here" — same sizing, same hover behavior, same active treatment. */
-  .aa-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3em;
-    background: transparent;
-    border: 1px solid var(--skrive-rule);
-    border-radius: 4px;
-    height: 24px;
-    padding: 0 0.5rem;
-    color: var(--skrive-muted);
-    cursor: pointer;
-    font: inherit;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 11px;
-    letter-spacing: 0.02em;
-    transition:
-      color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-      background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-      border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  .aa-indicator:hover {
-    color: var(--skrive-fg);
-    border-color: var(--skrive-fg);
-  }
-
-  .aa-indicator.aa-indicator-active {
-    color: var(--skrive-fg);
-    background: var(--skrive-rule);
-    border-color: var(--skrive-fg);
-  }
-
-  .aa-indicator.aa-indicator-empty .aa-count {
-    opacity: 0.7;
-  }
-
-  .aa-label {
-    font-weight: 600;
-  }
-
-  .aa-sep {
-    opacity: 0.5;
-  }
-
-  /* Backlinks indicator. Same visual language as the FM and Aa
-     indicators — the three should read as a coherent cluster of
-     "tools you can reach from here" and share the top-right zone. */
-  .bl-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3em;
-    background: transparent;
-    border: 1px solid var(--skrive-rule);
-    border-radius: 4px;
-    height: 24px;
-    padding: 0 0.5rem;
-    color: var(--skrive-muted);
-    cursor: pointer;
-    font: inherit;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 11px;
-    letter-spacing: 0.02em;
-    transition:
-      color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-      background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-      border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  .bl-indicator:hover {
-    color: var(--skrive-fg);
-    border-color: var(--skrive-fg);
-  }
-
-  .bl-indicator.bl-indicator-active {
-    color: var(--skrive-fg);
-    background: var(--skrive-rule);
-    border-color: var(--skrive-fg);
-  }
-
-  .bl-indicator.bl-indicator-empty .bl-count {
-    opacity: 0.7;
-  }
-
-  .bl-label {
-    font-weight: 600;
-  }
-
-  .bl-sep {
-    opacity: 0.5;
-  }
-
-  /* History indicator. Same visual language as the FM / Aa / BL
-     cluster — four peers, same height, same hover/active treatment.
-     Sits at the right end of the indicator cluster because history is
-     a slightly heavier tool than the others (it opens a diff view). */
-  .hi-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3em;
-    background: transparent;
-    border: 1px solid var(--skrive-rule);
-    border-radius: 4px;
-    height: 24px;
-    padding: 0 0.5rem;
-    color: var(--skrive-muted);
-    cursor: pointer;
-    font: inherit;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 11px;
-    letter-spacing: 0.02em;
-    transition:
-      color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-      background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-      border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  .hi-indicator:hover {
-    color: var(--skrive-fg);
-    border-color: var(--skrive-fg);
-  }
-
-  .hi-indicator.hi-indicator-active {
-    color: var(--skrive-fg);
-    background: var(--skrive-rule);
-    border-color: var(--skrive-fg);
-  }
-
-  .hi-indicator.hi-indicator-empty .hi-count {
-    opacity: 0.7;
-  }
-
-  .hi-label {
-    font-weight: 600;
-  }
-
-  .hi-sep {
-    opacity: 0.5;
   }
 </style>

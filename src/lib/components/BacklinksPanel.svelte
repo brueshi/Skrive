@@ -77,9 +77,11 @@
       if (!panelRoot) return;
       const target = e.target as Node | null;
       if (target && !panelRoot.contains(target)) {
-        // Ignore clicks on the BL indicator itself — its own click
+        // Ignore clicks on the backlinks toggle itself — its own click
         // handler toggles the panel and we don't want both to fire.
-        const hit = (target as Element | null)?.closest?.(".bl-indicator");
+        const hit = (target as Element | null)?.closest?.(
+          '[data-panel-toggle="backlinks"]',
+        );
         if (hit) return;
         project.closeBacklinksPanel();
       }

@@ -63,11 +63,11 @@
       if (!panelRoot) return;
       const target = e.target as Node | null;
       if (target && !panelRoot.contains(target)) {
-        // Ignore clicks on the Aa indicator itself — its own click
+        // Ignore clicks on the dictionary toggle itself — its own click
         // handler toggles the panel and we don't want both handlers
         // to fire.
         const hit = (target as Element | null)?.closest?.(
-          ".aa-indicator",
+          '[data-panel-toggle="dictionary"]',
         );
         if (hit) return;
         preferences.closeDictionaryPanel();

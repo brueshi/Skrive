@@ -13,6 +13,11 @@
         --skrive-link: #1a1a1a;
         --skrive-selection: rgba(26, 26, 26, 0.14);
         --skrive-rule: rgba(26, 26, 26, 0.08);
+        /* Chrome strip behind the top bar — slightly darker than the
+           editor cream so the active tab can lift to editor color and
+           visually flow into the writing surface below. Notion's tab
+           strip uses the same trick. */
+        --skrive-chrome: #efece5;
 
         /* Editor typography. Defaults match the pre-Settings theme;
            +page.svelte rewrites these from `preferences` once app
@@ -32,6 +37,10 @@
           --skrive-link: #f0ede5;
           --skrive-selection: rgba(240, 237, 229, 0.18);
           --skrive-rule: rgba(240, 237, 229, 0.1);
+          /* Chrome lifts above editor in dark mode (lighter than bg) so
+             the active tab — which matches editor — sinks visually and
+             still reads as connected to the writing surface. */
+          --skrive-chrome: #1a1a1a;
         }
       }
       html,

@@ -10,3 +10,7 @@ export { default as IconX } from "./IconX.svelte";
 export { default as IconCheck } from "./IconCheck.svelte";
 export { default as IconDocMarkdown } from "./IconDocMarkdown.svelte";
 export { default as IconFolder } from "./IconFolder.svelte";
+export { default as IconFrontmatter } from "./IconFrontmatter.svelte";
+export { default as IconBacklinks } from "./IconBacklinks.svelte";
+export { default as IconDictionary } from "./IconDictionary.svelte";
+export { default as IconHistory } from "./IconHistory.svelte";

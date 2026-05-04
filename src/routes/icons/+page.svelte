@@ -12,6 +12,10 @@
     IconCheck,
     IconDocMarkdown,
     IconFolder,
+    IconFrontmatter,
+    IconBacklinks,
+    IconDictionary,
+    IconHistory,
   } from "$lib/icons";
 
   let sidebarShown = $state(true);
@@ -221,6 +225,67 @@
         <div class="label">
           <span class="slug">folder <span class="angle">{folderOpen ? "kink · 40°" : "tab · 40°"}</span></span>
           <span class="desc">{folderOpen ? "open — click to close" : "closed — click to open"}</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <span class="section-mark">§ Row IV</span>
+      <h2>Side Panels — Crosscuts</h2>
+      <span class="section-rule"></span>
+    </div>
+    <div class="grid">
+      <div class="cell">
+        <div class="display">
+          <IconFrontmatter />
+        </div>
+        <div class="scale">
+          <IconFrontmatter size={16} />
+        </div>
+        <div class="label">
+          <span class="slug">frontmatter <span class="angle">band, body</span></span>
+          <span class="desc">Filled metadata band over body</span>
+        </div>
+      </div>
+
+      <div class="cell">
+        <div class="display">
+          <IconBacklinks />
+        </div>
+        <div class="scale">
+          <IconBacklinks size={16} />
+        </div>
+        <div class="label">
+          <span class="slug">backlinks <span class="angle">incoming · 2</span></span>
+          <span class="desc">Two arrows to a page</span>
+        </div>
+      </div>
+
+      <div class="cell">
+        <div class="display">
+          <IconDictionary />
+        </div>
+        <div class="scale">
+          <IconDictionary size={16} />
+        </div>
+        <div class="label">
+          <span class="slug">dictionary <span class="angle">spread, entries</span></span>
+          <span class="desc">Open spread, bulleted entries</span>
+        </div>
+      </div>
+
+      <div class="cell">
+        <div class="display">
+          <IconHistory />
+        </div>
+        <div class="scale">
+          <IconHistory size={16} />
+        </div>
+        <div class="label">
+          <span class="slug">history <span class="angle">doc, clock</span></span>
+          <span class="desc">Page with a clock inside</span>
         </div>
       </div>
     </div>
