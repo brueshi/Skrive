@@ -5,6 +5,9 @@ const api: SkriveIpc = {
   app: {
     version: () => ipcRenderer.invoke('app:version') as Promise<string>,
     platform: () => ipcRenderer.invoke('app:platform') as Promise<SkrivePlatform>
+  },
+  links: {
+    openExternal: (url: string) => ipcRenderer.invoke('links:openExternal', url) as Promise<void>
   }
 };
 

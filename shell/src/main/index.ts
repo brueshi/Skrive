@@ -44,6 +44,17 @@ function createWindow(): void {
 function registerIpcHandlers(): void {
   ipcMain.handle('app:version', () => app.getVersion());
   ipcMain.handle('app:platform', () => process.platform);
+
+  // External links from the Preview pane. We validate the scheme so a
+  // crafted markdown link can't trigger unexpected handlers (e.g. file://).
+  // Allow-list mirrors the Preview's `isExternalHref` set: http(s), mailto,
+  // tel, plus the skrive:// deep-link scheme we own.
+  ipcMain.handle('links:openExternal', async (_event, url: string) => {
+    if (typeof url !== 'string') return;
+    const allowed = /^(https?|mailto|tel|skrive):/i;
+    if (!allowed.test(url)) return;
+    await shell.openExternal(url);
+  });
 }
 
 void app.whenReady().then(() => {

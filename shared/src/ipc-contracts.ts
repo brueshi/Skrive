@@ -22,4 +22,11 @@ export interface SkriveIpc {
     version(): Promise<string>;
     platform(): Promise<SkrivePlatform>;
   };
+  links: {
+    /**
+     * Open an external URL in the OS default handler.
+     * Used by the Preview pane when the user clicks an http:// / mailto: link.
+     */
+    openExternal(url: string): Promise<void>;
+  };
 }

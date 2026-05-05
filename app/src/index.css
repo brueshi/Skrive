@@ -1,6 +1,35 @@
+/*
+ * Skrive design tokens.
+ *
+ * The CSS variables here are the single source of typography + color the
+ * editor and preview panes consume. Phase 9 (settings) will rewrite the
+ * editor-font / size / line-height variables from the preferences store.
+ * Light-mode palette swap lands when a third theme exists.
+ */
+
 :root {
   color-scheme: dark;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+
+  /* Surface palette — dark mode default, the only theme at v0.2. */
+  --skrive-bg: #1a1a1a;
+  --skrive-fg: #e8e6e1;
+  --skrive-muted: #8a857d;
+  --skrive-rule: #2a2a2a;
+  --skrive-link: #8db8d8;
+  --skrive-selection: rgba(141, 184, 216, 0.18);
+
+  /* Editor typography — the curated default. Phase 9 rewrites these. */
+  --skrive-editor-font:
+    'Iowan Old Style', 'Charter', 'Source Serif Pro', 'Source Serif 4',
+    'Apple Garamond', 'Garamond', Georgia, 'Times New Roman', serif;
+  --skrive-editor-font-size: 17px;
+  --skrive-editor-line-height: 1.7;
+
+  /* App-chrome typography (header, panels, modals). */
+  --skrive-ui-font:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+
+  font-family: var(--skrive-ui-font);
   font-size: 14px;
   line-height: 1.5;
 }
@@ -10,44 +39,326 @@ body,
 #root {
   height: 100%;
   margin: 0;
-  background: #1a1a1a;
-  color: #e8e6e1;
+  background: var(--skrive-bg);
+  color: var(--skrive-fg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 body {
   overflow: hidden;
+}
+
+/* ===================== App shell layout ===================== */
+
+.app-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+}
+
+.app-titlebar {
+  flex: 0 0 auto;
+  /* Tall enough to seat macOS traffic lights (positioned at y=16 in
+     main.ts) with breathing room. The traffic lights live in a ~14px
+     band starting 16px from the top, so the bar needs at least ~38px
+     to contain them without clipping into the editor area below. */
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.375rem 1rem 0.375rem 5rem; /* leave room for macOS traffic lights */
+  background: var(--skrive-bg);
+  -webkit-app-region: drag;
+  border-bottom: 1px solid var(--skrive-rule);
+  font-size: 0.8125rem;
+  color: var(--skrive-muted);
   user-select: none;
 }
 
-.shell {
+.app-titlebar__modes {
+  margin-left: auto;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100vh;
-  gap: 0.75rem;
-  -webkit-app-region: drag;
+  gap: 0.25rem;
+  -webkit-app-region: no-drag;
 }
 
-.shell__brand {
-  font-size: 1.75rem;
-  font-weight: 500;
-  letter-spacing: -0.02em;
-}
-
-.shell__meta {
-  display: flex;
-  gap: 0.5rem;
-  color: #8a857d;
-  font-size: 0.8125rem;
-  font-feature-settings: 'tnum';
-}
-
-.shell__status {
-  margin: 0;
-  color: #6a655d;
+.app-titlebar__mode {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--skrive-muted);
+  font: inherit;
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+  cursor: pointer;
   font-size: 0.75rem;
   letter-spacing: 0.02em;
+}
+
+.app-titlebar__mode:hover {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.app-titlebar__mode[aria-pressed='true'] {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.app-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* ===================== SplitView ===================== */
+
+.split-view {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.split-view .pane {
+  flex-basis: 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.split-view .editor-pane {
+  background: var(--skrive-bg);
+  position: relative;
+}
+
+.split-view .preview-pane {
+  background: var(--skrive-bg);
+}
+
+.split-view .divider {
+  flex: 0 0 1px;
+  width: 1px;
+  cursor: col-resize;
+  background: var(--skrive-rule);
+  position: relative;
+  touch-action: none;
+}
+
+/* Fatten the hit area without shifting layout. The visible rule stays
+   1px wide; the pseudo-element catches the pointer in a 9px gutter
+   centered on the rule so the user can grab it without pixel-hunting. */
+.split-view .divider::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+}
+
+.split-view .divider:hover,
+.split-view.dragging .divider {
+  background: var(--skrive-fg);
+}
+
+.split-view.dragging {
+  user-select: none;
+}
+
+/* ===================== Editor surface ===================== */
+
+.editor-host {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.cm-editor {
+  height: 100%;
+}
+
+/* Inline-preview decoration styles. Mark decorations from
+   `decorations/` apply these class names to the text *inside* hidden
+   markup, so the visual emphasis survives even when the surrounding
+   `**`, `*`, or `~~` are replaced to nothing.
+
+   Scoped under `.cm-content` so specificity beats lang-markdown's
+   built-in highlight classes — otherwise the stable-emphasis state
+   field would keep losing to the parser's transient "not bold" view
+   during active typing. */
+.cm-content .cm-md-bold {
+  font-weight: 700;
+}
+.cm-content .cm-md-italic {
+  font-style: italic;
+}
+.cm-content .cm-md-strikethrough {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* Inline code: the grammar doesn't tag the content of an InlineCode
+   span with `t.monospace` (only the `CodeMark` backticks are tagged),
+   so we apply the monospace font here via decoration class. */
+.cm-content .cm-md-code {
+  font-family:
+    ui-monospace, 'JetBrains Mono', SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  background: var(--skrive-rule);
+  border-radius: 2px;
+  padding: 0 0.2em;
+}
+
+/* Inline image widget rendered in place of `![alt](src)` on non-cursor
+   lines. Capped so a runaway asset can't hijack the line height. */
+.cm-content .cm-md-image {
+  max-height: 3em;
+  max-width: 20em;
+  vertical-align: middle;
+  border-radius: 3px;
+  object-fit: contain;
+}
+
+/* ===================== Preview pane ===================== */
+
+.preview {
+  height: 100%;
+  width: 100%;
+  overflow-y: auto;
+  background: var(--skrive-bg);
+  color: var(--skrive-fg);
+}
+
+.preview-inner {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 2.5rem 2rem 6rem;
+  /* Track the editor's font choice so split view stays coherent. */
+  font-family: var(--skrive-editor-font);
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.preview-inner h1,
+.preview-inner h2,
+.preview-inner h3,
+.preview-inner h4,
+.preview-inner h5,
+.preview-inner h6 {
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  margin: 1.75em 0 0.5em;
+  color: var(--skrive-fg);
+}
+
+.preview-inner h1 {
+  font-size: 1.85rem;
+  margin-top: 0;
+}
+.preview-inner h2 {
+  font-size: 1.45rem;
+}
+.preview-inner h3 {
+  font-size: 1.2rem;
+}
+.preview-inner h4,
+.preview-inner h5,
+.preview-inner h6 {
+  font-size: 1.05rem;
+}
+
+.preview-inner p {
+  margin: 0 0 1em;
+}
+
+.preview-inner a {
+  color: var(--skrive-link);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.preview-inner strong {
+  font-weight: 600;
+}
+
+.preview-inner em {
+  font-style: italic;
+}
+
+.preview-inner ul,
+.preview-inner ol {
+  margin: 0 0 1em;
+  padding-left: 1.5em;
+}
+
+.preview-inner li {
+  margin-bottom: 0.25em;
+}
+
+.preview-inner blockquote {
+  margin: 1em 0;
+  padding: 0.25em 0 0.25em 1em;
+  border-left: 2px solid var(--skrive-rule);
+  color: var(--skrive-muted);
+}
+
+.preview-inner hr {
+  border: 0;
+  border-top: 1px solid var(--skrive-rule);
+  margin: 2em 0;
+}
+
+.preview-inner code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  background: var(--skrive-rule);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+
+.preview-inner pre {
+  background: var(--skrive-rule);
+  padding: 1em;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 1em 0;
+  line-height: 1.5;
+}
+
+.preview-inner pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
+.preview-inner img {
+  max-width: 100%;
+  height: auto;
+}
+
+.preview-inner table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+  font-size: 0.95em;
+}
+
+.preview-inner th,
+.preview-inner td {
+  border-bottom: 1px solid var(--skrive-rule);
+  padding: 0.5em 0.75em;
+  text-align: left;
+}
+
+.preview-inner th {
+  font-weight: 600;
 }
