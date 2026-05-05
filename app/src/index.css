@@ -1,0 +1,53 @@
+:root {
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: #1a1a1a;
+  color: #e8e6e1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  overflow: hidden;
+  user-select: none;
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  gap: 0.75rem;
+  -webkit-app-region: drag;
+}
+
+.shell__brand {
+  font-size: 1.75rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.shell__meta {
+  display: flex;
+  gap: 0.5rem;
+  color: #8a857d;
+  font-size: 0.8125rem;
+  font-feature-settings: 'tnum';
+}
+
+.shell__status {
+  margin: 0;
+  color: #6a655d;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+}

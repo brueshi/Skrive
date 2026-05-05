@@ -1,6 +1,5 @@
 .DS_Store
 node_modules
-/build
 /.svelte-kit
 /package
 .env
@@ -10,3 +9,13 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .claude/
 planning/
+
+# Electron build output
+/out
+/dist
+*.tsbuildinfo
+
+# /build is electron-builder's resource dir; allow-list what we keep there.
+# Everything else (legacy SvelteKit prerender output, future build artifacts) is ignored.
+/build/*
+!/build/entitlements.mac.plist

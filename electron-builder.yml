@@ -1,0 +1,49 @@
+appId: com.silmaril.skrive
+productName: Skrive
+copyright: Copyright © 2026 Minas Technologies / Silmaril Studio
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - out/**
+  - package.json
+
+asarUnpack:
+  - resources/**
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+  category: public.app-category.productivity
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # v0.2 ships unsigned on Windows; signing is a post-port roadmap item.
+
+fileAssociations:
+  - ext: md
+    name: Markdown Document
+    role: Editor
+  - ext: markdown
+    name: Markdown Document
+    role: Editor
+
+protocols:
+  - name: Skrive
+    schemes:
+      - skrive
+
+publish:
+  provider: github
+  owner: brueshi
+  repo: Skrive
