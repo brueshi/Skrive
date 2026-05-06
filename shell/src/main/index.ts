@@ -1,6 +1,8 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { registerProjectHandlers } from '../ipc/project';
+import { registerFsHandlers } from '../ipc/fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -55,6 +57,9 @@ function registerIpcHandlers(): void {
     if (!allowed.test(url)) return;
     await shell.openExternal(url);
   });
+
+  registerProjectHandlers();
+  registerFsHandlers();
 }
 
 void app.whenReady().then(() => {
