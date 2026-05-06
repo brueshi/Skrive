@@ -58,53 +58,404 @@ body {
   min-height: 0;
 }
 
-.app-titlebar {
-  flex: 0 0 auto;
-  /* Tall enough to seat macOS traffic lights (positioned at y=16 in
-     main.ts) with breathing room. The traffic lights live in a ~14px
-     band starting 16px from the top, so the bar needs at least ~38px
-     to contain them without clipping into the editor area below. */
-  min-height: 40px;
+/* ===================== Header (overlay title bar) ===================== */
+
+.header {
+  display: flex;
+  align-items: stretch;
+  gap: 0.75rem;
+  padding: 0 0.75rem;
+  flex-shrink: 0;
+  background: var(--skrive-bg);
+  height: 40px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--skrive-rule);
+}
+
+/* Clear the macOS traffic-light cluster (~78px wide). With
+   titleBarStyle: hiddenInset, the chrome extends under the lights so
+   they sit on the same surface as the rest of the chrome. */
+.header.is-macos {
+  padding-left: 78px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.header .project-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: transparent;
+  border: none;
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+  font: inherit;
+  font-size: 0.6875rem;
+  color: var(--skrive-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 14rem;
+  cursor: pointer;
+  transition:
+    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.header .project-name:hover,
+.header .project-name[aria-expanded='true'] {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.header .project-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header .project-name-caret {
+  font-size: 0.625rem;
+  opacity: 0.6;
+}
+
+.header .header-icon-button {
+  background: transparent;
+  border: none;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  padding: 0;
+  transition:
+    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.header .header-icon-button:hover {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.header .header-icon-button[aria-pressed='true'] {
+  color: var(--skrive-fg);
+}
+
+/* Tab strip hugs the bottom edge of the chrome row so the active tab
+   can extend down to the editor edge and visually merge with it
+   (Notion / browser pattern: chrome is the "shelf", active tab is the
+   lifted card). 6px top inset gives breathing room above tabs. */
+.header .tabs {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 6px;
+  overflow: hidden;
+}
+
+/* Browser-style sizing — tabs hug their natural content width
+   (icon + name + close), can shrink down to a 36px floor when crowded,
+   and cap at 14rem so a long filename can't dominate the row. */
+.tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0 0.5rem 0 0.625rem;
+  background: transparent;
+  border: none;
+  border-radius: 4px 4px 0 0;
+  color: var(--skrive-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 36px;
+  max-width: 14rem;
+  overflow: hidden;
+  transition:
+    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tab:hover {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.tab.active {
+  color: var(--skrive-fg);
+  background: var(--skrive-bg);
+  box-shadow: inset 0 -1px 0 var(--skrive-bg);
+}
+
+.tab-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--skrive-muted);
+}
+
+.tab.active .tab-icon,
+.tab:hover .tab-icon {
+  color: var(--skrive-fg);
+}
+
+.tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.tab-dirty {
+  display: inline-flex;
+  color: var(--skrive-fg);
+}
+
+.tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 2px;
+  padding: 2px;
+  color: var(--skrive-muted);
+  cursor: pointer;
+}
+
+.tab:hover .tab-close,
+.tab.active .tab-close {
+  opacity: 1;
+}
+
+.tab-close:hover {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.mode-button {
+  background: transparent;
+  border: none;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  width: 28px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition:
+    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mode-button + .mode-button {
+  border-left: 1px solid var(--skrive-rule);
+}
+
+.mode-button:hover {
+  color: var(--skrive-fg);
+}
+
+.mode-button.active {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+/* ===================== Context menu ===================== */
+
+.ctx-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+}
+
+.ctx-menu {
+  position: fixed;
+  min-width: 10rem;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-fg);
+  padding: 0.25rem 0;
+  font-family: var(--skrive-ui-font);
+  font-size: 13px;
+  color: var(--skrive-fg);
+}
+
+.ctx-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.375rem 1rem 0.375rem 5rem; /* leave room for macOS traffic lights */
+  gap: 1.5rem;
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ctx-item:focus {
+  outline: none;
+  background: var(--skrive-rule);
+}
+
+.ctx-item:hover:not(:disabled) {
+  background: var(--skrive-rule);
+}
+
+.ctx-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ctx-item.destructive {
+  color: #a84030;
+}
+
+.ctx-shortcut {
+  color: var(--skrive-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+/* ===================== Modal (Radix Dialog) ===================== */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 150;
+}
+
+.modal-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   background: var(--skrive-bg);
-  -webkit-app-region: drag;
-  border-bottom: 1px solid var(--skrive-rule);
+  border: 2px solid var(--skrive-fg);
+  padding: 1.5rem 1.75rem;
+  width: 26rem;
+  max-width: calc(100vw - 2rem);
+  font-family: var(--skrive-ui-font);
+  z-index: 151;
+}
+
+.modal-title {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--skrive-fg);
+}
+
+.modal-desc {
+  margin: 0 0 1rem;
   font-size: 0.8125rem;
   color: var(--skrive-muted);
+  line-height: 1.5;
+}
+
+.modal-desc code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+  padding: 0.05rem 0.25rem;
+  border-radius: 2px;
+  word-break: break-all;
+}
+
+.modal-error {
+  margin: 0 0 0.75rem;
+  font-size: 0.75rem;
+  color: #a84030;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-word;
+}
+
+.modal-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.8125rem;
+  color: var(--skrive-muted);
+  cursor: pointer;
   user-select: none;
 }
 
-.app-titlebar__modes {
-  margin-left: auto;
+.modal-actions {
   display: flex;
-  gap: 0.25rem;
-  -webkit-app-region: no-drag;
+  gap: 0.5rem;
+  justify-content: flex-end;
 }
 
-.app-titlebar__mode {
-  appearance: none;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--skrive-muted);
+.modal-button {
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
   font: inherit;
-  padding: 0.15rem 0.5rem;
-  border-radius: 3px;
+  font-size: 0.8125rem;
   cursor: pointer;
-  font-size: 0.75rem;
-  letter-spacing: 0.02em;
+  border: 1px solid var(--skrive-fg);
+  background: transparent;
+  color: var(--skrive-fg);
+  transition:
+    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+    color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.app-titlebar__mode:hover {
-  color: var(--skrive-fg);
-  background: var(--skrive-rule);
+.modal-button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
-.app-titlebar__mode[aria-pressed='true'] {
+.modal-button.secondary {
+  border-color: var(--skrive-rule);
+  color: var(--skrive-muted);
+}
+
+.modal-button.secondary:not(:disabled):hover {
+  border-color: var(--skrive-fg);
   color: var(--skrive-fg);
-  background: var(--skrive-rule);
+}
+
+.modal-button.primary.destructive {
+  border-color: #a84030;
+  color: #a84030;
+}
+
+.modal-button.primary.destructive:not(:disabled):hover {
+  background: #a84030;
+  color: #fff;
 }
 
 .app-body {

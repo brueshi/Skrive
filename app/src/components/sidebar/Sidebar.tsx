@@ -1,6 +1,5 @@
-// The sidebar. Recursive directory tree with an inline "new file" /
-// "new folder" row, an active highlight, and the spine-rule indent
-// guides the v0.1.5 redesign introduced.
+// The sidebar. Recursive directory tree with the spine-rule indent
+// guides from the v0.1.5 redesign and right-click context menus.
 //
 // Spine rule (non-canonical, the user's IP — see memory):
 //   At each row, the set of spine columns drawn comes from its
@@ -10,13 +9,10 @@
 //   is a last child, its column-line stops at its own elbow rather
 //   than extending through descendants.
 //
-// Per-project sidebar width persistence wires through Phase 9. The
-// drag-to-resize lives here (zustand-local), so width adjustments
-// survive within a session but reset on app restart.
-//
-// Right-click context menus (delete, rename) and the rename modal are
-// Phase 4 chrome work — Phase 3 ships only the click-to-open + plus-menu
-// flow.
+// Phase 4 wires the right-click context menu (delete only — rename
+// modal with reference rewriting lands in Phase 6 with the link graph)
+// and the delete-confirm modal. Per-project sidebar width persistence
+// wires through Phase 9.
 
 import {
   useCallback,
@@ -26,6 +22,7 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent,
+  type MouseEvent,
   type PointerEvent
 } from 'react';
 import type { FileEntry } from '@skrive/shared';
@@ -33,27 +30,25 @@ import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
+  selectActivePath,
   useProjectStore
 } from '../../stores/project';
 import { resolveTitle } from '../../lib/title';
+import { notify } from '../../lib/notify';
+import { ContextMenu, type ContextMenuItem } from '../ContextMenu';
+import { DeleteConfirmModal } from '../DeleteConfirmModal';
 import { IconDocMarkdown } from '../icons/IconDocMarkdown';
 import { IconFolder } from '../icons/IconFolder';
 import { IconPlus } from '../icons/IconPlus';
 
 type TreeFolder = {
-  /** Leaf folder name (e.g., "chapter-3"). Empty string on the synthetic root. */
   name: string;
-  /** Full project-relative path (e.g., "drafts/chapter-3"). Empty string on root. */
   path: string;
   folders: TreeFolder[];
   files: FileEntry[];
 };
 
 function buildTree(files: FileEntry[]): TreeFolder {
-  // Build a recursive tree from the manifest's flat file list. Folders
-  // are synthesized from each file's path components. Empty folders
-  // (created via mkdir but not yet containing any files) don't appear —
-  // the manifest only carries files.
   const root: TreeFolder = { name: '', path: '', folders: [], files: [] };
   const byPath = new Map<string, TreeFolder>();
   byPath.set('', root);
@@ -80,9 +75,6 @@ function buildTree(files: FileEntry[]): TreeFolder {
     parent.files.push(f);
   }
 
-  // Sort each level: folders alphabetically, files alphabetically.
-  // Within a folder, files render before sub-folders — preserves the
-  // "root files first" reading order, applied recursively.
   const sortFolder = (folder: TreeFolder) => {
     folder.folders.sort((a, b) => a.name.localeCompare(b.name));
     folder.files.sort((a, b) => a.name.localeCompare(b.name));
@@ -93,14 +85,7 @@ function buildTree(files: FileEntry[]): TreeFolder {
   return root;
 }
 
-// Compose the inline style for a row's ancestor-spine background.
-// Each entry in `spineDepths` is a depth-d column where a full-height
-// 1px stripe should draw. Returns an empty object when no spines
-// need drawing (depth-0 rows, last-leaf chains, etc.).
-function buildSpineStyle(
-  spineDepths: number[],
-  depth: number
-): CSSProperties {
+function buildSpineStyle(spineDepths: number[], depth: number): CSSProperties {
   const base = { '--sb-depth': depth } as CSSProperties;
   if (spineDepths.length === 0) return base;
   const stripe =
@@ -120,7 +105,11 @@ function buildSpineStyle(
   } as CSSProperties;
 }
 
-function spineFromChain(parentChain: boolean[], lastChild: boolean, depth: number): number[] {
+function spineFromChain(
+  parentChain: boolean[],
+  lastChild: boolean,
+  depth: number
+): number[] {
   if (depth === 0) return [];
   const chain = [...parentChain, lastChild];
   return chain.map((isLast, i) => (isLast ? -1 : i)).filter((d) => d >= 0);
@@ -133,13 +122,20 @@ type FileRowProps = {
   depth: number;
   lastChild: boolean;
   parentChain: boolean[];
+  onContextMenu: (e: MouseEvent, file: FileEntry) => void;
+  onDeleteShortcut: (file: FileEntry) => void;
 };
 
-function FileRow({ file, depth, lastChild, parentChain }: FileRowProps) {
-  const activePath = useProjectStore(
-    (s) => s.activeFile?.path ?? null
-  );
-  const openFile = useProjectStore((s) => s.openFile);
+function FileRow({
+  file,
+  depth,
+  lastChild,
+  parentChain,
+  onContextMenu,
+  onDeleteShortcut
+}: FileRowProps) {
+  const activePath = useProjectStore(selectActivePath);
+  const openTab = useProjectStore((s) => s.openTab);
   const spineDepths = useMemo(
     () => spineFromChain(parentChain, lastChild, depth),
     [parentChain, lastChild, depth]
@@ -150,6 +146,13 @@ function FileRow({ file, depth, lastChild, parentChain }: FileRowProps) {
   );
   const resolved = resolveTitle(file);
 
+  function handleKey(e: KeyboardEvent<HTMLButtonElement>) {
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      onDeleteShortcut(file);
+    }
+  }
+
   return (
     <li>
       <button
@@ -157,8 +160,10 @@ function FileRow({ file, depth, lastChild, parentChain }: FileRowProps) {
         className={`file${activePath === file.path ? ' active' : ''}`}
         style={style}
         onClick={() => {
-          void openFile(file.path);
+          void openTab(file.path);
         }}
+        onContextMenu={(e) => onContextMenu(e, file)}
+        onKeyDown={handleKey}
         title={file.path}
       >
         <span className="file-icon">
@@ -182,16 +187,25 @@ type FolderTreeProps = {
   parentChain: boolean[];
   collapsed: ReadonlySet<string>;
   onToggle: (path: string) => void;
+  onFileContextMenu: (e: MouseEvent, file: FileEntry) => void;
+  onFileDeleteShortcut: (file: FileEntry) => void;
+  onDirContextMenu: (e: MouseEvent, dir: string) => void;
+  onDirDeleteShortcut: (dir: string) => void;
 };
 
-function FolderTree({
-  folder,
-  depth,
-  lastChild,
-  parentChain,
-  collapsed,
-  onToggle
-}: FolderTreeProps) {
+function FolderTree(props: FolderTreeProps) {
+  const {
+    folder,
+    depth,
+    lastChild,
+    parentChain,
+    collapsed,
+    onToggle,
+    onFileContextMenu,
+    onFileDeleteShortcut,
+    onDirContextMenu,
+    onDirDeleteShortcut
+  } = props;
   const isExpanded = !collapsed.has(folder.path);
   const spineDepths = useMemo(
     () => spineFromChain(parentChain, lastChild, depth),
@@ -210,6 +224,9 @@ function FolderTree({
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       onToggle(folder.path);
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      onDirDeleteShortcut(folder.path);
     }
   }
 
@@ -224,6 +241,7 @@ function FolderTree({
         style={style}
         onClick={() => onToggle(folder.path)}
         onKeyDown={handleKey}
+        onContextMenu={(e) => onDirContextMenu(e, folder.path)}
       >
         <span className="dir-icon">
           <IconFolder size={16} open={isExpanded} />
@@ -243,19 +261,20 @@ function FolderTree({
                     i === folder.files.length - 1 && folder.folders.length === 0
                   }
                   parentChain={chain}
+                  onContextMenu={onFileContextMenu}
+                  onDeleteShortcut={onFileDeleteShortcut}
                 />
               ))}
             </ul>
           )}
           {folder.folders.map((sub, i) => (
             <FolderTree
+              {...props}
               key={sub.path}
               folder={sub}
               depth={depth + 1}
               lastChild={i === folder.folders.length - 1}
               parentChain={chain}
-              collapsed={collapsed}
-              onToggle={onToggle}
             />
           ))}
         </>
@@ -266,6 +285,9 @@ function FolderTree({
 
 // ============================ Sidebar ============================
 
+type DeleteTarget = { kind: 'file' | 'directory'; path: string; name: string };
+type ContextMenuState = { x: number; y: number; items: ContextMenuItem[] };
+
 export function Sidebar() {
   const manifest = useProjectStore((s) => s.manifest);
   const sidebarVisible = useProjectStore((s) => s.sidebarVisible);
@@ -273,6 +295,8 @@ export function Sidebar() {
   const setSidebarWidth = useProjectStore((s) => s.setSidebarWidth);
   const createFile = useProjectStore((s) => s.createFile);
   const createDirectory = useProjectStore((s) => s.createDirectory);
+  const deleteFile = useProjectStore((s) => s.deleteFile);
+  const deleteDirectory = useProjectStore((s) => s.deleteDirectory);
 
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
     () => new Set()
@@ -280,6 +304,9 @@ export function Sidebar() {
   const [creating, setCreating] = useState<'file' | 'folder' | null>(null);
   const [newName, setNewName] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<DeleteTarget | null>(null);
+  const [plusOpen, setPlusOpen] = useState(false);
 
   const tree = useMemo(
     () => buildTree(manifest?.files ?? []),
@@ -295,7 +322,7 @@ export function Sidebar() {
     });
   }, []);
 
-  // ---------- Creation flow ----------
+  // ---------- Create flow ----------
 
   const startCreate = useCallback((kind: 'file' | 'folder') => {
     setCreating(kind);
@@ -342,7 +369,70 @@ export function Sidebar() {
     [confirmCreate, cancelCreate]
   );
 
-  const [plusOpen, setPlusOpen] = useState(false);
+  // ---------- Context menu / delete ----------
+
+  const requestDeleteFile = useCallback((file: FileEntry) => {
+    setPendingDelete({ kind: 'file', path: file.path, name: file.name });
+  }, []);
+
+  const requestDeleteDirectory = useCallback((dir: string) => {
+    const lastSep = dir.lastIndexOf('/');
+    const name = lastSep === -1 ? dir : dir.slice(lastSep + 1);
+    setPendingDelete({ kind: 'directory', path: dir, name });
+  }, []);
+
+  const openFileContextMenu = useCallback(
+    (e: MouseEvent, file: FileEntry) => {
+      e.preventDefault();
+      setContextMenu({
+        x: e.clientX,
+        y: e.clientY,
+        items: [
+          {
+            label: 'Delete…',
+            shortcut: '⌫',
+            variant: 'destructive',
+            onClick: () => requestDeleteFile(file)
+          }
+        ]
+      });
+    },
+    [requestDeleteFile]
+  );
+
+  const openDirectoryContextMenu = useCallback(
+    (e: MouseEvent, dir: string) => {
+      e.preventDefault();
+      setContextMenu({
+        x: e.clientX,
+        y: e.clientY,
+        items: [
+          {
+            label: 'Delete folder…',
+            shortcut: '⌫',
+            variant: 'destructive',
+            onClick: () => requestDeleteDirectory(dir)
+          }
+        ]
+      });
+    },
+    [requestDeleteDirectory]
+  );
+
+  const confirmPendingDelete = useCallback(async () => {
+    if (!pendingDelete) return;
+    const target = pendingDelete;
+    try {
+      if (target.kind === 'file') {
+        await deleteFile(target.path);
+      } else {
+        await deleteDirectory(target.path);
+      }
+    } catch (e) {
+      notify.error(`Couldn't delete ${target.name}`, e);
+      throw e;
+    }
+  }, [pendingDelete, deleteFile, deleteDirectory]);
 
   // ---------- Drag-to-resize ----------
 
@@ -400,8 +490,7 @@ export function Sidebar() {
         style={sidebarStyle}
         aria-label="Files"
         aria-hidden={!sidebarVisible}
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore — `inert` lands in stable React/TS as a string attribute
+        // @ts-expect-error inert is a string attribute in HTML
         inert={!sidebarVisible ? '' : undefined}
       >
         <header className="section-header">
@@ -488,6 +577,8 @@ export function Sidebar() {
                     i === tree.files.length - 1 && tree.folders.length === 0
                   }
                   parentChain={[]}
+                  onContextMenu={openFileContextMenu}
+                  onDeleteShortcut={requestDeleteFile}
                 />
               ))}
             </ul>
@@ -501,6 +592,10 @@ export function Sidebar() {
               parentChain={[]}
               collapsed={collapsed}
               onToggle={toggleCollapse}
+              onFileContextMenu={openFileContextMenu}
+              onFileDeleteShortcut={requestDeleteFile}
+              onDirContextMenu={openDirectoryContextMenu}
+              onDirDeleteShortcut={requestDeleteDirectory}
             />
           ))}
         </div>
@@ -519,6 +614,23 @@ export function Sidebar() {
           onDoubleClick={resetWidth}
         />
       )}
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onDismiss={() => setContextMenu(null)}
+        />
+      )}
+
+      <DeleteConfirmModal
+        open={pendingDelete !== null}
+        name={pendingDelete?.name ?? ''}
+        isDirectory={pendingDelete?.kind === 'directory'}
+        onConfirm={confirmPendingDelete}
+        onClose={() => setPendingDelete(null)}
+      />
     </>
   );
 }

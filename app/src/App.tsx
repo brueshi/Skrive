@@ -1,50 +1,49 @@
-// Phase 3 app shell: project sidebar + single-active-file editor.
-//
-// State model: one project at a time, one active file at a time. Tabs
-// land in Phase 4 (chrome). On every body edit, a 500ms-debounced
-// auto-save flushes to disk via fs:writeFile. ⌘S forces an immediate
-// flush.
-//
-// Per-file mode + ratio persistence wires through Phase 9 — for now
-// mode and split ratio are app-level (one value, applied to whichever
-// file is active).
+// Phase 4 app shell: real overlay title bar (Header), Notion-style
+// tabs, multi-tab editor surface with per-tab layout mode + split
+// ratio. Toasts via sonner. Right-click context menus + delete-confirm
+// modal land in Sidebar. Phase 9 wires per-project persistence.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { SplitView, type LayoutMode } from './components/editor/SplitView';
+import { useEffect, useRef } from 'react';
+import { Toaster } from 'sonner';
+import { SplitView } from './components/editor/SplitView';
 import { matchLayoutShortcut } from './components/editor/keys';
+import { Header, useChromeShortcuts } from './components/chrome/Header';
 import { Sidebar } from './components/sidebar/Sidebar';
-import { useProjectStore, logProjectError } from './stores/project';
+import {
+  logProjectError,
+  selectActiveTab,
+  useProjectStore
+} from './stores/project';
+import { notify } from './lib/notify';
 
 const SAVE_DEBOUNCE_MS = 500;
 
-const EMPTY_PANE_HINT =
-  'Select a file from the sidebar, or use ⌘O to open a different project.';
-
 export function App() {
   const manifest = useProjectStore((s) => s.manifest);
-  const activeFile = useProjectStore((s) => s.activeFile);
-  const activeBody = useProjectStore((s) => s.activeBody);
-  const activeDirty = useProjectStore((s) => s.activeDirty);
-  const setBody = useProjectStore((s) => s.setBody);
-  const saveActive = useProjectStore((s) => s.saveActive);
+  const activeTab = useProjectStore(selectActiveTab);
+  const activeTabIndex = useProjectStore((s) => s.activeTabIndex);
+  const setTabBody = useProjectStore((s) => s.setTabBody);
+  const setTabSplitRatio = useProjectStore((s) => s.setTabSplitRatio);
+  const setTabLayoutMode = useProjectStore((s) => s.setTabLayoutMode);
+  const saveActiveTab = useProjectStore((s) => s.saveActiveTab);
+  const saveAllDirty = useProjectStore((s) => s.saveAllDirty);
   const openProjectFromDialog = useProjectStore(
     (s) => s.openProjectFromDialog
   );
   const toggleSidebar = useProjectStore((s) => s.toggleSidebar);
 
-  const [mode, setMode] = useState<LayoutMode>('split');
-  const [ratio, setRatio] = useState(0.5);
+  useChromeShortcuts();
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Window-level shortcuts: ⌘1/⌘2/⌘3 layout, ⌘B sidebar, ⌘O open project,
-  // ⌘S explicit save.
+  // Window-level shortcuts: ⌘1/⌘2/⌘3 layout (per-tab), ⌘B sidebar,
+  // ⌘O open project, ⌘S explicit save.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const layout = matchLayoutShortcut(e);
       if (layout) {
         e.preventDefault();
-        setMode(layout);
+        if (activeTabIndex >= 0) setTabLayoutMode(activeTabIndex, layout);
         return;
       }
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
@@ -62,83 +61,80 @@ export function App() {
           clearTimeout(saveTimerRef.current);
           saveTimerRef.current = null;
         }
-        void saveActive().catch((err) => logProjectError('saveActive', err));
+        void saveActiveTab().catch((err) => {
+          logProjectError('saveActiveTab', err);
+          notify.error('Failed to save', err);
+        });
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [toggleSidebar, openProjectFromDialog, saveActive]);
+  }, [
+    activeTabIndex,
+    setTabLayoutMode,
+    toggleSidebar,
+    openProjectFromDialog,
+    saveActiveTab
+  ]);
 
-  // Debounced auto-save. Re-armed on every body edit.
+  // Debounced auto-save flushes any dirty tabs.
+  const dirtyTabHash = useProjectStore((s) =>
+    s.tabs.map((t) => `${t.path}:${t.dirty ? '1' : '0'}`).join('|')
+  );
   useEffect(() => {
-    if (!activeDirty) return;
+    if (!dirtyTabHash.includes(':1')) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       saveTimerRef.current = null;
-      void saveActive().catch((err) => logProjectError('saveActive', err));
+      void saveAllDirty().catch((err) => {
+        logProjectError('saveAllDirty', err);
+        notify.error('Failed to save', err);
+      });
     }, SAVE_DEBOUNCE_MS);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [activeDirty, activeBody, saveActive]);
+  }, [dirtyTabHash, saveAllDirty]);
 
-  // Save on unload — best-effort, the renderer can't await async.
+  // Best-effort save on unload — beforeunload can't await async, so
+  // pending writes that haven't completed by the time the renderer
+  // closes are lost. Acceptable for v0.2; Phase 9 hardens this with
+  // a synchronous-on-quit hook in the shell.
   useEffect(() => {
     function onBeforeUnload() {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
       }
-      void saveActive().catch((err) => logProjectError('saveActive', err));
+      void saveAllDirty().catch((err) => logProjectError('saveAllDirty', err));
     }
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [saveActive]);
-
-  const handleChange = useCallback(
-    (next: string) => setBody(next),
-    [setBody]
-  );
+  }, [saveAllDirty]);
 
   return (
     <div className="app-root">
-      <header className="app-titlebar">
-        <div
-          className="app-titlebar__modes"
-          role="group"
-          aria-label="Layout mode"
-        >
-          {(['raw', 'split', 'preview'] satisfies LayoutMode[]).map((m) => (
-            <button
-              key={m}
-              type="button"
-              className="app-titlebar__mode"
-              aria-pressed={mode === m}
-              onClick={() => setMode(m)}
-            >
-              {m === 'raw' ? 'Raw' : m === 'split' ? 'Split' : 'Preview'}
-            </button>
-          ))}
-        </div>
-      </header>
+      <Header />
 
       <main className="app-body">
         {manifest ? (
           <>
             <Sidebar />
             <section className="workspace">
-              {activeFile ? (
+              {activeTab ? (
                 <SplitView
-                  key={activeFile.path}
-                  mode={mode}
-                  ratio={ratio}
-                  body={activeBody}
-                  onChange={handleChange}
-                  onRatioChange={setRatio}
+                  key={activeTab.path}
+                  mode={activeTab.layoutMode}
+                  ratio={activeTab.splitDividerRatio}
+                  body={activeTab.body}
+                  onChange={(next) => setTabBody(activeTabIndex, next)}
+                  onRatioChange={(next) =>
+                    setTabSplitRatio(activeTabIndex, next)
+                  }
                 />
               ) : (
                 <div className="empty-pane">
-                  <p>{EMPTY_PANE_HINT}</p>
+                  <p>Select a file from the sidebar to open it as a tab.</p>
                 </div>
               )}
             </section>
@@ -164,6 +160,19 @@ export function App() {
           </div>
         )}
       </main>
+
+      <Toaster
+        position="bottom-right"
+        theme="dark"
+        toastOptions={{
+          style: {
+            background: 'var(--skrive-bg)',
+            color: 'var(--skrive-fg)',
+            border: '1px solid var(--skrive-rule)',
+            fontFamily: 'var(--skrive-ui-font)'
+          }
+        }}
+      />
     </div>
   );
 }

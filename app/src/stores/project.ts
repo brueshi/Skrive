@@ -1,38 +1,45 @@
 // The project store — zustand, single source of truth for the open
-// project, the active file's body, and sidebar visibility/width.
+// project, the open tabs, the active tab, and sidebar visibility/width.
 //
-// Phase 3 ships a single-active-file model. Phase 4 swaps it for the
-// tabs layer; the store's external surface stays small enough that the
-// swap is contained to `setActiveFile` / `closeFile` / etc.
+// Phase 4 swaps the single-active-file model from Phase 3 for the tabs
+// layer. Each tab carries its own layoutMode + splitDividerRatio so that
+// switching files restores the view the user last had on that file.
+//
+// Per-project tab persistence wires through Phase 9 (state model A3).
+// For now tabs reset on app restart.
 
 import { create } from 'zustand';
 import type {
-  FileContent,
   FileEntry,
   ProjectChange,
   ProjectManifest
 } from '@skrive/shared';
+import type { LayoutMode } from '../components/editor/SplitView';
 
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 500;
 export const SIDEBAR_DEFAULT_WIDTH = 260;
 
-const DEFAULT_BODY = '';
+const DEFAULT_LAYOUT_MODE: LayoutMode = 'split';
+const DEFAULT_SPLIT_RATIO = 0.5;
+
+export type Tab = {
+  path: string;
+  body: string;
+  dirty: boolean;
+  layoutMode: LayoutMode;
+  splitDividerRatio: number;
+};
 
 type State = {
   manifest: ProjectManifest | null;
-  activeFile: FileEntry | null;
-  activeBody: string;
-  activeDirty: boolean;
+  tabs: Tab[];
+  activeTabIndex: number;
   loading: boolean;
 
   sidebarVisible: boolean;
   sidebarWidth: number;
 
-  /**
-   * Detach function for the watcher subscription. Set when the project
-   * is opened, called when closing or replacing the project.
-   */
   unsubscribeWatch: (() => void) | null;
 };
 
@@ -42,12 +49,21 @@ type Actions = {
   closeProject(): Promise<void>;
   refreshManifest(): Promise<void>;
 
-  openFile(path: string): Promise<void>;
-  setBody(next: string): void;
-  saveActive(): Promise<void>;
+  openTab(path: string): Promise<void>;
+  closeTab(index: number): Promise<void>;
+  switchTab(index: number): void;
+
+  setTabBody(index: number, next: string): void;
+  setTabLayoutMode(index: number, mode: LayoutMode): void;
+  setTabSplitRatio(index: number, ratio: number): void;
+
+  saveActiveTab(): Promise<void>;
+  saveAllDirty(): Promise<void>;
 
   createFile(relPath: string): Promise<void>;
   createDirectory(relPath: string): Promise<void>;
+  deleteFile(relPath: string): Promise<void>;
+  deleteDirectory(relPath: string): Promise<void>;
 
   setSidebarVisible(v: boolean): void;
   toggleSidebar(): void;
@@ -59,22 +75,31 @@ function clampSidebarWidth(w: number): number {
   return Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, w));
 }
 
-function findEntry(manifest: ProjectManifest | null, path: string): FileEntry | null {
+function clampRatio(r: number): number {
+  if (Number.isNaN(r)) return DEFAULT_SPLIT_RATIO;
+  return Math.min(Math.max(r, 0.15), 0.85);
+}
+
+function findEntry(
+  manifest: ProjectManifest | null,
+  path: string
+): FileEntry | null {
   if (!manifest) return null;
   return manifest.files.find((f) => f.path === path) ?? null;
 }
 
 export const useProjectStore = create<State & Actions>((set, get) => ({
   manifest: null,
-  activeFile: null,
-  activeBody: DEFAULT_BODY,
-  activeDirty: false,
+  tabs: [],
+  activeTabIndex: -1,
   loading: false,
 
   sidebarVisible: true,
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
 
   unsubscribeWatch: null,
+
+  // ============================ Project ============================
 
   async openProjectFromDialog() {
     const path = await window.skrive.project.openDialog();
@@ -86,19 +111,12 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     set({ loading: true });
     try {
       const prev = get().unsubscribeWatch;
-      if (prev) {
-        prev();
-      }
+      if (prev) prev();
       await window.skrive.project.unwatch();
 
       const manifest = await window.skrive.project.open(path);
 
       const unsubscribe = window.skrive.project.onChange((event) => {
-        // Watcher events: refresh the manifest. We're conservative —
-        // any add/change/unlink at the file level triggers a full
-        // re-scan. With Phase 3's hardcoded skip list and markdown-only
-        // filter, the scan is cheap enough that incremental updates
-        // aren't worth the bookkeeping.
         if (event.kind === 'ready') return;
         void get().refreshManifest();
       });
@@ -106,9 +124,8 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
       set({
         manifest,
-        activeFile: null,
-        activeBody: DEFAULT_BODY,
-        activeDirty: false,
+        tabs: [],
+        activeTabIndex: -1,
         unsubscribeWatch: unsubscribe,
         loading: false
       });
@@ -122,11 +139,12 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const prev = get().unsubscribeWatch;
     if (prev) prev();
     await window.skrive.project.unwatch();
+    // Flush any dirty tabs first.
+    await get().saveAllDirty();
     set({
       manifest: null,
-      activeFile: null,
-      activeBody: DEFAULT_BODY,
-      activeDirty: false,
+      tabs: [],
+      activeTabIndex: -1,
       unsubscribeWatch: null
     });
   },
@@ -136,56 +154,143 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     if (!manifest) return;
     const next = await window.skrive.project.open(manifest.root);
     set({ manifest: next });
-    // If the active file vanished from disk, drop it. If it still exists,
-    // keep the live editor body — the user may have unsaved edits, and
-    // the watcher fired because *we* wrote it via `saveActive`.
-    const active = get().activeFile;
-    if (active && !next.files.find((f) => f.path === active.path)) {
-      set({ activeFile: null, activeBody: DEFAULT_BODY, activeDirty: false });
-    } else if (active) {
-      // Refresh the active FileEntry reference (mtime/size may have changed).
-      const updated = next.files.find((f) => f.path === active.path);
-      if (updated) set({ activeFile: updated });
+    // Drop tabs whose files vanished from disk.
+    const { tabs, activeTabIndex } = get();
+    const survivingTabs = tabs.filter((t) =>
+      next.files.some((f) => f.path === t.path)
+    );
+    if (survivingTabs.length !== tabs.length) {
+      let nextActive = activeTabIndex;
+      // If the active tab survived, find its new index. Otherwise step
+      // back to the previous tab (or to -1 when none left).
+      const wasActive = tabs[activeTabIndex];
+      if (wasActive) {
+        const i = survivingTabs.findIndex((t) => t.path === wasActive.path);
+        nextActive = i;
+      } else {
+        nextActive = Math.min(activeTabIndex, survivingTabs.length - 1);
+      }
+      set({ tabs: survivingTabs, activeTabIndex: nextActive });
     }
   },
 
-  async openFile(path: string) {
+  // ============================ Tabs ============================
+
+  async openTab(path: string) {
     const manifest = get().manifest;
     if (!manifest) return;
     const entry = findEntry(manifest, path);
     if (!entry) return;
-    const content: FileContent = await window.skrive.fs.readFile(
-      manifest.root,
-      path
-    );
-    set({
-      activeFile: entry,
-      activeBody: content.body,
-      activeDirty: false
-    });
-  },
-
-  setBody(next: string) {
-    const { activeFile, activeBody } = get();
-    if (!activeFile) {
-      // No active file → ignore edit (the editor shouldn't be mounted in
-      // this case, but defend against the race).
+    const tabs = get().tabs;
+    const existingIndex = tabs.findIndex((t) => t.path === path);
+    if (existingIndex !== -1) {
+      set({ activeTabIndex: existingIndex });
       return;
     }
-    if (next === activeBody) return;
-    set({ activeBody: next, activeDirty: true });
+    // Read body fresh from disk for the new tab.
+    const content = await window.skrive.fs.readFile(manifest.root, path);
+    const newTab: Tab = {
+      path,
+      body: content.body,
+      dirty: false,
+      layoutMode: DEFAULT_LAYOUT_MODE,
+      splitDividerRatio: DEFAULT_SPLIT_RATIO
+    };
+    const nextTabs = [...tabs, newTab];
+    set({ tabs: nextTabs, activeTabIndex: nextTabs.length - 1 });
   },
 
-  async saveActive() {
-    const { manifest, activeFile, activeBody, activeDirty } = get();
-    if (!manifest || !activeFile || !activeDirty) return;
-    await window.skrive.fs.writeFile(
-      manifest.root,
-      activeFile.path,
-      activeBody
-    );
-    set({ activeDirty: false });
+  async closeTab(index: number) {
+    const { tabs, activeTabIndex } = get();
+    const tab = tabs[index];
+    if (!tab) return;
+    if (tab.dirty) {
+      // Best-effort flush before discard. Errors surface via the caller's
+      // error path; the close still proceeds so the user isn't trapped.
+      try {
+        await window.skrive.fs.writeFile(
+          get().manifest!.root,
+          tab.path,
+          tab.body
+        );
+      } catch (err) {
+        console.error('[skrive] save-on-close failed', err);
+      }
+    }
+    const nextTabs = tabs.slice(0, index).concat(tabs.slice(index + 1));
+    let nextActive = activeTabIndex;
+    if (nextTabs.length === 0) {
+      nextActive = -1;
+    } else if (index < activeTabIndex) {
+      nextActive = activeTabIndex - 1;
+    } else if (index === activeTabIndex) {
+      nextActive = Math.min(activeTabIndex, nextTabs.length - 1);
+    }
+    set({ tabs: nextTabs, activeTabIndex: nextActive });
   },
+
+  switchTab(index: number) {
+    const { tabs } = get();
+    if (index < 0 || index >= tabs.length) return;
+    set({ activeTabIndex: index });
+  },
+
+  setTabBody(index: number, next: string) {
+    const { tabs } = get();
+    const tab = tabs[index];
+    if (!tab) return;
+    if (next === tab.body) return;
+    const updated = { ...tab, body: next, dirty: true };
+    const nextTabs = tabs.slice();
+    nextTabs[index] = updated;
+    set({ tabs: nextTabs });
+  },
+
+  setTabLayoutMode(index: number, mode: LayoutMode) {
+    const { tabs } = get();
+    const tab = tabs[index];
+    if (!tab || tab.layoutMode === mode) return;
+    const nextTabs = tabs.slice();
+    nextTabs[index] = { ...tab, layoutMode: mode };
+    set({ tabs: nextTabs });
+  },
+
+  setTabSplitRatio(index: number, ratio: number) {
+    const { tabs } = get();
+    const tab = tabs[index];
+    if (!tab) return;
+    const clamped = clampRatio(ratio);
+    if (tab.splitDividerRatio === clamped) return;
+    const nextTabs = tabs.slice();
+    nextTabs[index] = { ...tab, splitDividerRatio: clamped };
+    set({ tabs: nextTabs });
+  },
+
+  async saveActiveTab() {
+    const { manifest, tabs, activeTabIndex } = get();
+    const tab = tabs[activeTabIndex];
+    if (!manifest || !tab || !tab.dirty) return;
+    await window.skrive.fs.writeFile(manifest.root, tab.path, tab.body);
+    const nextTabs = tabs.slice();
+    nextTabs[activeTabIndex] = { ...tab, dirty: false };
+    set({ tabs: nextTabs });
+  },
+
+  async saveAllDirty() {
+    const { manifest, tabs } = get();
+    if (!manifest) return;
+    const dirtyTabs = tabs.filter((t) => t.dirty);
+    if (dirtyTabs.length === 0) return;
+    await Promise.all(
+      dirtyTabs.map((t) =>
+        window.skrive.fs.writeFile(manifest.root, t.path, t.body)
+      )
+    );
+    const nextTabs = tabs.map((t) => (t.dirty ? { ...t, dirty: false } : t));
+    set({ tabs: nextTabs });
+  },
+
+  // ============================ File CRUD ============================
 
   async createFile(relPath: string) {
     const { manifest } = get();
@@ -193,17 +298,59 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const normalized = relPath.endsWith('.md') ? relPath : `${relPath}.md`;
     await window.skrive.fs.newFile(manifest.root, normalized);
     await get().refreshManifest();
-    await get().openFile(normalized);
+    await get().openTab(normalized);
   },
 
   async createDirectory(relPath: string) {
     const { manifest } = get();
     if (!manifest) return;
     await window.skrive.fs.mkdir(manifest.root, relPath);
-    // Empty directories don't appear in the manifest (it's a flat file
-    // list) — no refresh needed. The watcher's addDir event also fires
-    // and refreshes on the next file added inside.
   },
+
+  async deleteFile(relPath: string) {
+    const { manifest } = get();
+    if (!manifest) return;
+    await window.skrive.fs.trash(manifest.root, relPath);
+    // Close any tab pointing at the deleted file. The watcher's unlink
+    // event will also fire and trigger refreshManifest, but explicitly
+    // closing here keeps the tab list responsive.
+    const tabs = get().tabs;
+    const i = tabs.findIndex((t) => t.path === relPath);
+    if (i !== -1) {
+      const next = tabs.slice(0, i).concat(tabs.slice(i + 1));
+      const { activeTabIndex } = get();
+      let nextActive = activeTabIndex;
+      if (next.length === 0) nextActive = -1;
+      else if (i < activeTabIndex) nextActive = activeTabIndex - 1;
+      else if (i === activeTabIndex)
+        nextActive = Math.min(activeTabIndex, next.length - 1);
+      set({ tabs: next, activeTabIndex: nextActive });
+    }
+    await get().refreshManifest();
+  },
+
+  async deleteDirectory(relPath: string) {
+    const { manifest } = get();
+    if (!manifest) return;
+    await window.skrive.fs.trash(manifest.root, relPath);
+    // Drop any tabs inside the deleted directory.
+    const prefix = relPath.endsWith('/') ? relPath : `${relPath}/`;
+    const tabs = get().tabs;
+    const survivors = tabs.filter((t) => !t.path.startsWith(prefix));
+    if (survivors.length !== tabs.length) {
+      const { activeTabIndex } = get();
+      const wasActive = tabs[activeTabIndex];
+      let nextActive = activeTabIndex;
+      if (wasActive) {
+        const i = survivors.findIndex((t) => t.path === wasActive.path);
+        nextActive = i === -1 ? Math.min(activeTabIndex, survivors.length - 1) : i;
+      }
+      set({ tabs: survivors, activeTabIndex: nextActive });
+    }
+    await get().refreshManifest();
+  },
+
+  // ============================ Sidebar ============================
 
   setSidebarVisible(v: boolean) {
     set({ sidebarVisible: v });
@@ -218,8 +365,22 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   }
 }));
 
-// Phase 9 hooks watcher events into project-state persistence; Phase 3
-// surfaces the unhandled-rejection log for now so failures aren't silent.
+// ============================ Selectors ============================
+//
+// Stable selectors for components that only need derived state. Using
+// these keeps re-renders tight — a tab body change shouldn't re-render
+// the sidebar, etc.
+
+export const selectActiveTab = (s: State): Tab | null => {
+  if (s.activeTabIndex < 0) return null;
+  return s.tabs[s.activeTabIndex] ?? null;
+};
+
+export const selectActivePath = (s: State): string | null =>
+  selectActiveTab(s)?.path ?? null;
+
+// ============================ Error logging ============================
+
 export function logProjectError(label: string, err: unknown) {
   console.error(`[skrive project] ${label}`, err);
 }
