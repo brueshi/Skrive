@@ -1,8 +1,14 @@
 export type {
+  Block,
+  BlockKind,
+  DiffOp,
   FileContent,
   FileEntry,
+  LineDiffRow,
+  LineKind,
   ProjectChange,
   ProjectManifest,
   SkriveIpc,
-  SkrivePlatform
+  SkrivePlatform,
+  WordOp
 } from './ipc-contracts';

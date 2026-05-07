@@ -58,6 +58,55 @@ export type ProjectChange =
   | { kind: 'addDir' | 'unlinkDir'; path: string }
   | { kind: 'ready' };
 
+// ============================ Diff types ============================
+// Shapes mirror what `@skrive/diff` (native/diff) emits via serde —
+// `BlockKind` and `DiffOp` are internally tagged on `kind`, with
+// camelCase fields. The TS types here are the source of truth on the
+// JS side; native/diff/__test__/fixtures.test.ts gates the boundary
+// against the algorithm's Rust unit tests.
+
+export type LineKind = 'kept' | 'added' | 'deleted';
+
+export type LineDiffRow = {
+  kind: LineKind;
+  before: string | null;
+  after: string | null;
+};
+
+export type BlockKind =
+  | { kind: 'heading'; level: number }
+  | { kind: 'paragraph' }
+  | { kind: 'list' }
+  | { kind: 'codeFence' }
+  | { kind: 'blockquote' }
+  | { kind: 'thematicBreak' }
+  | { kind: 'table' };
+
+export type Block = {
+  kind: BlockKind;
+  source: string;
+};
+
+export type WordOp =
+  | { kind: 'kept'; text: string }
+  | { kind: 'added'; text: string }
+  | { kind: 'deleted'; text: string };
+
+export type DiffOp =
+  | { kind: 'kept'; beforeIndex: number; afterIndex: number; block: Block }
+  | { kind: 'added'; afterIndex: number; block: Block }
+  | { kind: 'deleted'; beforeIndex: number; block: Block }
+  | { kind: 'moved'; from: number; to: number; block: Block }
+  | {
+      kind: 'reworded';
+      beforeIndex: number;
+      afterIndex: number;
+      before: Block;
+      after: Block;
+      score: number;
+      wordDiff: WordOp[];
+    };
+
 // ============================ The IPC surface ============================
 
 export interface SkriveIpc {
@@ -121,5 +170,18 @@ export interface SkriveIpc {
      * perspective via Finder/Explorer.
      */
     trash(projectRoot: string, relPath: string): Promise<void>;
+  };
+  diff: {
+    /**
+     * Structural diff (Phase 3.3b). Block-hash matching with 2-opt
+     * assignment; emits Kept/Added/Deleted/Moved/Reworded ops. Pure
+     * computation in the main process via @skrive/diff.
+     */
+    computeDiff(before: string, after: string): Promise<DiffOp[]>;
+    /**
+     * Line-level side-by-side rows. The baseline that drives raw-mode
+     * rendering and feeds the preview-segment coalescer.
+     */
+    computeLineDiff(before: string, after: string): Promise<LineDiffRow[]>;
   };
 }

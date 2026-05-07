@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  DiffOp,
   FileContent,
+  LineDiffRow,
   ProjectChange,
   ProjectManifest,
   SkriveIpc,
@@ -57,6 +59,16 @@ const api: SkriveIpc = {
       ) as Promise<void>,
     trash: (projectRoot: string, relPath: string) =>
       ipcRenderer.invoke('fs:trash', projectRoot, relPath) as Promise<void>
+  },
+  diff: {
+    computeDiff: (before: string, after: string) =>
+      ipcRenderer.invoke('diff:computeDiff', before, after) as Promise<DiffOp[]>,
+    computeLineDiff: (before: string, after: string) =>
+      ipcRenderer.invoke(
+        'diff:computeLineDiff',
+        before,
+        after
+      ) as Promise<LineDiffRow[]>
   }
 };
 

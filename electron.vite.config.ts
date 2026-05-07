@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [externalizeDepsPlugin({ include: ['@skrive/diff'] })],
     build: {
       outDir: 'out/main',
       lib: { entry: resolve(__dirname, 'shell/src/main/index.ts') }

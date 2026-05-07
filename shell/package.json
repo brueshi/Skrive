@@ -5,6 +5,7 @@
   "type": "module",
   "main": "./src/main.ts",
   "dependencies": {
+    "@skrive/diff": "workspace:*",
     "@skrive/shared": "workspace:*",
     "chokidar": "^4.0.1"
   }
