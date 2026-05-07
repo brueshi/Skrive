@@ -20,9 +20,11 @@
 
 use std::path::PathBuf;
 
-/// Location of the fixture files, relative to `src-tauri/Cargo.toml`.
+/// Location of the fixture files, relative to `native/diff/Cargo.toml`.
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
         .parent()
         .unwrap()
         .join("docs")

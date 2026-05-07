@@ -8,7 +8,6 @@
 use crate::error::{Error, Result};
 use crate::frontmatter;
 use crate::persistence::{self, AppUiState, ProjectUiState};
-use crate::diff::{self, DiffOp, LineDiffRow};
 use crate::history::{self, CheckpointVersion, GitVersion};
 use crate::project::{
     self, Backlink, DeadLink, FileContent, HistoryMode, OutgoingLink, ProjectManifest,
@@ -536,37 +535,6 @@ pub async fn create_checkpoint(
     let absolute = project::resolve_existing_within(&root, &rel)?;
     let bytes = std::fs::read(&absolute)?;
     history::create_manual_checkpoint(&app, &root, &rel, &name, &bytes, manual_cap)
-}
-
-// =========================== Diff commands ===========================
-
-/// Line-level side-by-side diff of two source strings. Computed in
-/// Rust with `similar::TextDiff` so Phase 3.3b's richer structural
-/// diff can extend the same module rather than diverge. Pure
-/// computation — no project state touched, no filesystem access —
-/// so it's safe to call from any context, including outside an
-/// open project.
-#[tauri::command]
-pub async fn compute_line_diff(
-    before: String,
-    after: String,
-) -> Result<Vec<LineDiffRow>> {
-    Ok(diff::compute_line_diff(&before, &after))
-}
-
-/// Structural diff of two source strings. Phase 3.3b's upgrade from
-/// the line-level renderer: returns a block-level op sequence
-/// (Kept/Added/Deleted/Moved/Reworded) that the frontend composes
-/// into the sage/slate/brass decorations documented in the UI memo.
-/// Pure computation, same contract as `compute_line_diff` —
-/// `DiffView.svelte` calls this alongside `compute_line_diff` in
-/// structural mode; the line-level rows still drive raw-mode.
-#[tauri::command]
-pub async fn compute_diff(
-    before: String,
-    after: String,
-) -> Result<Vec<DiffOp>> {
-    Ok(diff::compute_diff(&before, &after))
 }
 
 // =========================== Persistence commands ===========================

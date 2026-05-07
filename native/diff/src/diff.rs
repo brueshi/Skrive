@@ -212,7 +212,7 @@ pub struct Block {
 /// heading or a paragraph, not whether a paragraph contains a link.
 /// Unknown / uncategorized blocks fall into `Other`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum BlockKind {
     /// `# Heading` through `###### Heading`. `level` is 1..=6.
     Heading { level: u8 },
@@ -238,7 +238,7 @@ pub enum BlockKind {
 /// so the renderer can sort ops per-pane into layout order without a
 /// second pass over the inputs.
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum DiffOp {
     /// Byte-identical block at the same index in both panes.
     Kept {
@@ -676,9 +676,11 @@ fn word_level_diff(before: &str, after: &str) -> Vec<WordOp> {
 mod structural_tests {
     use super::*;
 
-    /// Location of the fixture files, relative to `src-tauri/Cargo.toml`.
+    /// Location of the fixture files, relative to `native/diff/Cargo.toml`.
     fn load_fixture(name: &str) -> (String, String) {
         let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
             .parent()
             .unwrap()
             .join("docs")
