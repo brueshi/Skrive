@@ -131,13 +131,21 @@ function isExternal(dest: string): boolean {
 }
 
 /** Normalize a relative link target into a project-relative path with
- *  forward slashes. Returns null when the link would escape the root. */
+ *  forward slashes. Strips any `#fragment` suffix — fragments address
+ *  within-file anchors and don't participate in path resolution.
+ *  Returns null when the link would escape the root or has no path
+ *  part (`#anchor`-only targets are caught earlier by `isExternal`,
+ *  but this guards against `#` after a slash sequence that fully
+ *  resolves to empty). */
 function resolveRelative(
   sourceRelpath: string,
   dest: string
 ): string | null {
+  const hashIdx = dest.indexOf('#');
+  const pathPart = hashIdx >= 0 ? dest.slice(0, hashIdx) : dest;
+  if (pathPart.length === 0) return null;
   const sourceParts = sourceRelpath.split('/').slice(0, -1);
-  const destParts = dest.split('/');
+  const destParts = pathPart.split('/');
   const stack: string[] = [...sourceParts];
   for (const part of destParts) {
     if (part === '' || part === '.') continue;
@@ -148,6 +156,7 @@ function resolveRelative(
     }
     stack.push(part);
   }
+  if (stack.length === 0) return null;
   return stack.join('/');
 }
 

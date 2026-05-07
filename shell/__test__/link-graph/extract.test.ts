@@ -40,6 +40,18 @@ describe('extract — inline links', () => {
     expect(relativeTargets(edges)).toContain('posts/sibling.md');
   });
 
+  it('strips #fragment from inline link targets', () => {
+    const body = '[anchor](other.md#section)';
+    const edges = extract(body, 'a.md');
+    expect(relativeTargets(edges)).toContain('other.md');
+    // Range still spans the full URL including the fragment — the
+    // fragment is part of the source text, just not the path.
+    const inline = edges.find((e) => e.kind === 'inline')!;
+    expect(body.slice(inline.range.start, inline.range.end)).toBe(
+      'other.md#section'
+    );
+  });
+
   it('line and column are 0-indexed code units', () => {
     const body = 'line0\n  [l2](target.md)\n';
     const edges = extract(body, 'a.md');

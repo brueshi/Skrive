@@ -22,12 +22,20 @@ import { LinkGraph } from '../lib/link-graph/graph';
 class ProjectState {
   root: string | null = null;
   linkGraph = new LinkGraph();
+  /** Markdown files in the project. These have entries in the link
+   *  graph; orphan detection runs against this set. */
   filePaths = new Set<string>();
+  /** Non-markdown files in the project (LICENSE, attachments, images,
+   *  etc.). Tracked purely so link-target existence checks consider
+   *  them present — they aren't markdown sources, so they have no
+   *  graph entry and can't be "orphaned." */
+  nonMarkdownPaths = new Set<string>();
 
   reset(root: string | null): void {
     this.root = root;
     this.linkGraph = new LinkGraph();
     this.filePaths = new Set();
+    this.nonMarkdownPaths = new Set();
   }
 
   /** Add a file to the canonical path set and re-extract its edges. */
@@ -42,9 +50,17 @@ class ProjectState {
     this.linkGraph.setLinks(relPath, []);
   }
 
+  /** Register a non-markdown file as present. Used by the project
+   *  scan so links to LICENSE / attachments / images don't surface
+   *  as dead. */
+  addNonMarkdown(relPath: string): void {
+    this.nonMarkdownPaths.add(relPath);
+  }
+
   /** Drop a file from the path set and the graph. */
   removeFile(relPath: string): void {
     this.filePaths.delete(relPath);
+    this.nonMarkdownPaths.delete(relPath);
     this.linkGraph.forget(relPath);
   }
 
@@ -65,7 +81,9 @@ class ProjectState {
   }
 
   hasFile(relPath: string): boolean {
-    return this.filePaths.has(relPath);
+    return (
+      this.filePaths.has(relPath) || this.nonMarkdownPaths.has(relPath)
+    );
   }
 }
 

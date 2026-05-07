@@ -64,13 +64,13 @@ type State = {
    *  backlinks panel — opening one closes the other. */
   frontmatterPanelOpen: boolean;
 
-  /** Floating top-right lint findings panel (phase 8). Mutually
-   *  exclusive with backlinks + frontmatter — opening one closes the
-   *  others. */
-  lintPanelOpen: boolean;
-
   /** Most recent project-wide lint report. Refreshed after open and
-   *  after any watcher event resolves. Null between project loads. */
+   *  after any watcher event resolves. Null between project loads.
+   *
+   *  Phase 8 ships gutter markers as the only UI surface; the
+   *  project-wide panel is deferred to v0.3+. The report is computed
+   *  centrally so a future panel can consume the same shape without
+   *  re-running the engine. */
   lintReport: ProjectLintReport | null;
 
   unsubscribeWatch: (() => void) | null;
@@ -109,8 +109,6 @@ type Actions = {
   toggleFrontmatterPanel(): void;
   closeFrontmatterPanel(): void;
 
-  setLintPanelOpen(v: boolean): void;
-  toggleLintPanel(): void;
   /** Re-run the lint engine against the current manifest + open tabs.
    *  Pulls deadLinks + orphanedFiles fresh from IPC. Safe to call when
    *  no project is open (no-op). */
@@ -182,7 +180,6 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   backlinksPanelOpen: false,
   frontmatterPanelOpen: false,
-  lintPanelOpen: false,
   lintReport: null,
 
   unsubscribeWatch: null,
@@ -486,11 +483,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   setBacklinksPanelOpen(v: boolean) {
     if (v) {
-      set({
-        backlinksPanelOpen: true,
-        frontmatterPanelOpen: false,
-        lintPanelOpen: false
-      });
+      set({ backlinksPanelOpen: true, frontmatterPanelOpen: false });
     } else {
       set({ backlinksPanelOpen: false });
     }
@@ -499,11 +492,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   toggleBacklinksPanel() {
     const next = !get().backlinksPanelOpen;
     if (next) {
-      set({
-        backlinksPanelOpen: true,
-        frontmatterPanelOpen: false,
-        lintPanelOpen: false
-      });
+      set({ backlinksPanelOpen: true, frontmatterPanelOpen: false });
     } else {
       set({ backlinksPanelOpen: false });
     }
@@ -513,11 +502,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   setFrontmatterPanelOpen(v: boolean) {
     if (v) {
-      set({
-        frontmatterPanelOpen: true,
-        backlinksPanelOpen: false,
-        lintPanelOpen: false
-      });
+      set({ frontmatterPanelOpen: true, backlinksPanelOpen: false });
     } else {
       set({ frontmatterPanelOpen: false });
     }
@@ -526,11 +511,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   toggleFrontmatterPanel() {
     const next = !get().frontmatterPanelOpen;
     if (next) {
-      set({
-        frontmatterPanelOpen: true,
-        backlinksPanelOpen: false,
-        lintPanelOpen: false
-      });
+      set({ frontmatterPanelOpen: true, backlinksPanelOpen: false });
     } else {
       set({ frontmatterPanelOpen: false });
     }
@@ -540,32 +521,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     set({ frontmatterPanelOpen: false });
   },
 
-  // ============================ Lint panel ============================
-
-  setLintPanelOpen(v: boolean) {
-    if (v) {
-      set({
-        lintPanelOpen: true,
-        backlinksPanelOpen: false,
-        frontmatterPanelOpen: false
-      });
-    } else {
-      set({ lintPanelOpen: false });
-    }
-  },
-
-  toggleLintPanel() {
-    const next = !get().lintPanelOpen;
-    if (next) {
-      set({
-        lintPanelOpen: true,
-        backlinksPanelOpen: false,
-        frontmatterPanelOpen: false
-      });
-    } else {
-      set({ lintPanelOpen: false });
-    }
-  },
+  // ============================ Lint ============================
 
   async refreshLint() {
     const manifest = get().manifest;

@@ -23,9 +23,6 @@ import { IconDotUnsaved } from '../icons/IconDotUnsaved';
 import { IconLayoutPreview } from '../icons/IconLayoutPreview';
 import { IconLayoutRaw } from '../icons/IconLayoutRaw';
 import { IconLayoutSplit } from '../icons/IconLayoutSplit';
-import { IconLintError } from '../icons/IconLintError';
-import { IconLintInfo } from '../icons/IconLintInfo';
-import { IconLintWarn } from '../icons/IconLintWarn';
 import { IconSidebarToggle } from '../icons/IconSidebarToggle';
 import { IconX } from '../icons/IconX';
 import type { LayoutMode } from '../editor/SplitView';
@@ -74,19 +71,10 @@ export function Header() {
   const toggleFrontmatterPanel = useProjectStore(
     (s) => s.toggleFrontmatterPanel
   );
-  const lintPanelOpen = useProjectStore((s) => s.lintPanelOpen);
-  const toggleLintPanel = useProjectStore((s) => s.toggleLintPanel);
-  const lintReport = useProjectStore((s) => s.lintReport);
 
   const frontmatterCount = activeTab
     ? Object.keys(activeTab.frontmatter).length
     : 0;
-
-  const lintErrorCount =
-    lintReport?.findings.filter((f) => f.severity === 'error').length ?? 0;
-  const lintWarnCount =
-    lintReport?.findings.filter((f) => f.severity === 'warn').length ?? 0;
-  const lintTotal = lintErrorCount + lintWarnCount;
 
   const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null);
 
@@ -191,38 +179,6 @@ export function Header() {
                     {frontmatterCount}
                   </span>
                 </>
-              )}
-            </button>
-          )}
-          {manifest && (
-            <button
-              type="button"
-              className={`header-icon-button lint-toggle${
-                lintErrorCount > 0
-                  ? ' has-errors'
-                  : lintWarnCount > 0
-                    ? ' has-warnings'
-                    : ''
-              }`}
-              data-panel-toggle="lint"
-              aria-label="Toggle lint panel"
-              aria-pressed={lintPanelOpen}
-              title={
-                lintTotal > 0
-                  ? `Lint — ${lintErrorCount} error${lintErrorCount === 1 ? '' : 's'}, ${lintWarnCount} warning${lintWarnCount === 1 ? '' : 's'}`
-                  : 'Lint — no findings'
-              }
-              onClick={() => toggleLintPanel()}
-            >
-              {lintErrorCount > 0 ? (
-                <IconLintError size={16} />
-              ) : lintWarnCount > 0 ? (
-                <IconLintWarn size={16} />
-              ) : (
-                <IconLintInfo size={16} />
-              )}
-              {lintTotal > 0 && (
-                <span className="lint-toggle-count">{lintTotal}</span>
               )}
             </button>
           )}

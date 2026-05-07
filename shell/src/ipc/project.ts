@@ -47,7 +47,9 @@ function toForwardSlash(p: string): string {
   return p.split(path.sep).join('/');
 }
 
-async function* walk(root: string, current: string): AsyncGenerator<string> {
+type WalkEntry = { fullPath: string; isMarkdown: boolean };
+
+async function* walk(root: string, current: string): AsyncGenerator<WalkEntry> {
   let entries;
   try {
     entries = await fs.readdir(current, { withFileTypes: true });
@@ -64,9 +66,11 @@ async function* walk(root: string, current: string): AsyncGenerator<string> {
       if (entry.name.startsWith('.')) continue;
       yield* walk(root, full);
     } else if (entry.isFile()) {
-      if (MARKDOWN_EXT.test(entry.name)) {
-        yield full;
-      }
+      // Skip dot-files (.DS_Store, .gitignore, etc.) and noise files
+      // by name; everything else gets yielded so link-target checks
+      // can see non-markdown siblings (LICENSE, images, attachments).
+      if (entry.name.startsWith('.')) continue;
+      yield { fullPath: full, isMarkdown: MARKDOWN_EXT.test(entry.name) };
     }
   }
 }
@@ -92,14 +96,27 @@ async function scanProject(root: string): Promise<ProjectManifest> {
   const tomlSource = await readSkriveToml(canonicalRoot);
   const { config, warnings } = parseSkriveToml(tomlSource);
 
-  for await (const fullPath of walk(canonicalRoot, canonicalRoot)) {
+  for await (const { fullPath, isMarkdown } of walk(
+    canonicalRoot,
+    canonicalRoot
+  )) {
+    const rel = toForwardSlash(path.relative(canonicalRoot, fullPath));
+
+    if (!isMarkdown) {
+      // Track non-markdown files as "exists" so link-target checks
+      // don't flag prose-adjacent assets (LICENSE, attachments,
+      // images) as broken. They aren't part of the manifest's `files`
+      // — the renderer's tab/sidebar surfaces stay markdown-only.
+      projectState.addNonMarkdown(rel);
+      continue;
+    }
+
     let stat;
     try {
       stat = await fs.stat(fullPath);
     } catch {
       continue;
     }
-    const rel = toForwardSlash(path.relative(canonicalRoot, fullPath));
 
     let body: string | null = null;
     try {
