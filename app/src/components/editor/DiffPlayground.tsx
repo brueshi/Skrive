@@ -140,20 +140,6 @@ export function DiffPlayground({ onClose }: Props) {
           Close
         </button>
       </div>
-      <div className="diff-playground-inputs">
-        <textarea
-          value={before}
-          onChange={(e) => setBefore(e.target.value)}
-          placeholder="before…"
-          spellCheck={false}
-        />
-        <textarea
-          value={after}
-          onChange={(e) => setAfter(e.target.value)}
-          placeholder="after…"
-          spellCheck={false}
-        />
-      </div>
       <div className="diff-playground-output">
         <DiffView
           mode={mode}

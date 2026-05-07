@@ -1429,18 +1429,19 @@ body {
 }
 
 /* Palette from docs/3.3-diff-ui-design.md §Visual language. Added:
-   sage tint background + fuller-saturation left bar, both warm-leaning
-   so they sit in the cream family rather than reading as git-diff
-   green. Deleted: no fill, strikethrough + 55% opacity + a thin
-   warm-gray bar — the "something was here" signal without competing
-   with the added content for attention. */
+   muted sage tint + fuller-saturation left bar, sitting in the cream
+   family rather than reading as git-diff green. Deleted: no fill,
+   strikethrough + 55% opacity + a thin warm-gray bar — the
+   "something was here" signal without competing with added content
+   for attention. v0.2 is dark-only so the palette is unconditional;
+   re-introduce a light variant when a second theme lands. */
 .diff-row-added {
-  background: hsl(95, 20%, 92%);
-  border-left-color: hsl(100, 15%, 45%);
+  background: hsl(95, 15%, 20%);
+  border-left-color: hsl(100, 22%, 65%);
 }
 
 .diff-row-deleted {
-  border-left-color: hsl(30, 8%, 60%);
+  border-left-color: hsl(30, 5%, 45%);
 }
 
 .diff-row-deleted .diff-text {
@@ -1453,16 +1454,6 @@ body {
   border-bottom: 1px dashed var(--skrive-rule);
   align-self: stretch;
   margin: 0.5em 0.25rem;
-}
-
-@media (prefers-color-scheme: dark) {
-  .diff-row-added {
-    background: hsl(95, 15%, 20%);
-    border-left-color: hsl(100, 22%, 65%);
-  }
-  .diff-row-deleted {
-    border-left-color: hsl(30, 5%, 45%);
-  }
 }
 
 .diff-pane-preview {
@@ -1483,12 +1474,12 @@ body {
 }
 
 .diff-preview-added {
-  background: hsl(95, 20%, 92%);
-  border-left-color: hsl(100, 15%, 45%);
+  background: hsl(95, 15%, 20%);
+  border-left-color: hsl(100, 22%, 65%);
 }
 
 .diff-preview-deleted {
-  border-left-color: hsl(30, 8%, 60%);
+  border-left-color: hsl(30, 5%, 45%);
   opacity: 0.7;
 }
 
@@ -1511,13 +1502,13 @@ body {
   align-items: center;
   justify-content: center;
   min-height: 2.5em;
-  border: 1px dashed hsl(95, 20%, 80%);
+  border: 1px dashed hsl(95, 15%, 30%);
   border-radius: 3px;
   margin: 0.5em -0.5rem;
 }
 
 .diff-preview-gap-deleted {
-  border-color: hsl(30, 12%, 75%);
+  border-color: hsl(30, 5%, 35%);
 }
 
 .diff-preview-chip {
@@ -1530,22 +1521,6 @@ body {
   border: 1px solid var(--skrive-rule);
   border-radius: 3px;
   background: var(--skrive-bg);
-}
-
-@media (prefers-color-scheme: dark) {
-  .diff-preview-added {
-    background: hsl(95, 15%, 20%);
-    border-left-color: hsl(100, 22%, 65%);
-  }
-  .diff-preview-deleted {
-    border-left-color: hsl(30, 5%, 45%);
-  }
-  .diff-preview-gap-added {
-    border-color: hsl(95, 15%, 30%);
-  }
-  .diff-preview-gap-deleted {
-    border-color: hsl(30, 5%, 35%);
-  }
 }
 
 /* Markdown typography inside preview-mode segments. Mirrors the
@@ -1692,11 +1667,17 @@ body {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
+  padding: 0.5rem 0.75rem 0.5rem 88px;
   border-bottom: 1px solid var(--skrive-rule);
   font-size: 12px;
   color: var(--skrive-muted);
   flex-shrink: 0;
+  -webkit-app-region: drag;
+}
+
+.diff-playground-toolbar select,
+.diff-playground-toolbar button {
+  -webkit-app-region: no-drag;
 }
 
 .diff-playground-toolbar select,
@@ -1708,32 +1689,6 @@ body {
   padding: 0.2rem 0.5rem;
   color: var(--skrive-fg);
   cursor: pointer;
-}
-
-.diff-playground-inputs {
-  display: flex;
-  flex: 0 0 30%;
-  min-height: 0;
-  border-bottom: 1px solid var(--skrive-rule);
-}
-
-.diff-playground-inputs textarea {
-  flex: 1;
-  min-width: 0;
-  background: var(--skrive-bg);
-  color: var(--skrive-fg);
-  border: 0;
-  border-right: 1px solid var(--skrive-rule);
-  padding: 0.75rem 1rem;
-  resize: none;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
-  line-height: 1.55;
-  outline: none;
-}
-
-.diff-playground-inputs textarea:last-child {
-  border-right: 0;
 }
 
 .diff-playground-output {
