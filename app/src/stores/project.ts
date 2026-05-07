@@ -40,6 +40,10 @@ type State = {
   sidebarVisible: boolean;
   sidebarWidth: number;
 
+  /** Floating top-right backlinks panel (phase 6). Toggled from the
+   *  Header; reads `linkGraph.getBacklinks(activeTab.path)` on open. */
+  backlinksPanelOpen: boolean;
+
   unsubscribeWatch: (() => void) | null;
 };
 
@@ -68,6 +72,9 @@ type Actions = {
   setSidebarVisible(v: boolean): void;
   toggleSidebar(): void;
   setSidebarWidth(width: number): void;
+
+  setBacklinksPanelOpen(v: boolean): void;
+  toggleBacklinksPanel(): void;
 };
 
 function clampSidebarWidth(w: number): number {
@@ -96,6 +103,8 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   sidebarVisible: true,
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
+
+  backlinksPanelOpen: false,
 
   unsubscribeWatch: null,
 
@@ -362,6 +371,16 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   setSidebarWidth(width: number) {
     set({ sidebarWidth: clampSidebarWidth(width) });
+  },
+
+  // ============================ Backlinks panel ============================
+
+  setBacklinksPanelOpen(v: boolean) {
+    set({ backlinksPanelOpen: v });
+  },
+
+  toggleBacklinksPanel() {
+    set({ backlinksPanelOpen: !get().backlinksPanelOpen });
   }
 }));
 

@@ -9,6 +9,7 @@ import { SplitView } from './components/editor/SplitView';
 import { DiffPlayground } from './components/editor/DiffPlayground';
 import { matchLayoutShortcut } from './components/editor/keys';
 import { Header, useChromeShortcuts } from './components/chrome/Header';
+import { BacklinksPanel } from './components/panels/BacklinksPanel';
 import { Sidebar } from './components/sidebar/Sidebar';
 import {
   logProjectError,
@@ -177,6 +178,8 @@ export function App() {
           </div>
         )}
       </main>
+
+      <BacklinksPanel />
 
       {diffPlaygroundOpen && (
         <DiffPlayground onClose={() => setDiffPlaygroundOpen(false)} />

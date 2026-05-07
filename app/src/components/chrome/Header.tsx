@@ -17,6 +17,7 @@ import {
   type Tab
 } from '../../stores/project';
 import { ContextMenu, type ContextMenuItem } from '../ContextMenu';
+import { IconBacklinks } from '../icons/IconBacklinks';
 import { IconDocMarkdown } from '../icons/IconDocMarkdown';
 import { IconDotUnsaved } from '../icons/IconDotUnsaved';
 import { IconLayoutPreview } from '../icons/IconLayoutPreview';
@@ -60,6 +61,10 @@ export function Header() {
     (s) => s.openProjectFromDialog
   );
   const closeProject = useProjectStore((s) => s.closeProject);
+  const backlinksPanelOpen = useProjectStore((s) => s.backlinksPanelOpen);
+  const toggleBacklinksPanel = useProjectStore(
+    (s) => s.toggleBacklinksPanel
+  );
 
   const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null);
 
@@ -146,6 +151,19 @@ export function Header() {
         </div>
 
         <div className="header-right" style={noDragStyle}>
+          {activeTab && (
+            <button
+              type="button"
+              className="header-icon-button"
+              data-panel-toggle="backlinks"
+              aria-label="Toggle backlinks panel"
+              aria-pressed={backlinksPanelOpen}
+              title="Backlinks"
+              onClick={() => toggleBacklinksPanel()}
+            >
+              <IconBacklinks size={16} />
+            </button>
+          )}
           {activeTab && (
             <div className="mode-toggle" role="group" aria-label="Layout mode">
               <button
