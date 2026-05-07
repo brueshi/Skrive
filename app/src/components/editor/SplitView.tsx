@@ -18,6 +18,7 @@
 // the parent owns these in-memory and they reset on app restart.
 
 import { useRef, useState } from 'react';
+import type { LintFinding } from '@skrive/shared';
 import { Editor } from './Editor';
 import { Preview } from './Preview';
 
@@ -30,6 +31,9 @@ type Props = {
   onChange: (next: string) => void;
   onRatioChange: (ratio: number) => void;
   onInternalLink?: (href: string) => void;
+  /** Lint findings for the active file. Forwarded to the editor's
+   *  gutter/tooltip surface. */
+  lintFindings?: LintFinding[];
 };
 
 const MIN_RATIO = 0.15;
@@ -46,7 +50,8 @@ export function SplitView({
   body,
   onChange,
   onRatioChange,
-  onInternalLink
+  onInternalLink,
+  lintFindings
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const dragBoundsRef = useRef<{ left: number; width: number } | null>(null);
@@ -94,7 +99,11 @@ export function SplitView({
           className="pane editor-pane"
           style={{ flexGrow: mode === 'split' ? editorFlex : 1 }}
         >
-          <Editor value={body} onChange={onChange} />
+          <Editor
+            value={body}
+            onChange={onChange}
+            lintFindings={lintFindings}
+          />
         </div>
       )}
 

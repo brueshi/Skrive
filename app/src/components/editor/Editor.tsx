@@ -13,7 +13,7 @@
 // each other.
 
 import { useEffect, useRef } from 'react';
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import type { Command } from '@codemirror/view';
 import {
   EditorView,
@@ -29,13 +29,20 @@ import {
   indentLess
 } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
+import { forceLinting } from '@codemirror/lint';
 import { GFM } from '@lezer/markdown';
+import type { LintFinding } from '@skrive/shared';
 import { skriveTheme } from './skrive-theme';
 import { inlinePreview } from './decorations';
+import { skriveLintExtension } from './lint-extension';
 
 type Props = {
   value: string;
   onChange: (next: string) => void;
+  /** Lint findings for the active file. Empty array when lint hasn't
+   *  run yet or the file is clean. CM6 reads them via a closure that's
+   *  re-pointed on every render so reconfigure isn't needed. */
+  lintFindings?: LintFinding[];
 };
 
 // Tab/Shift-Tab indent or outdent list items when the cursor (or every
@@ -73,15 +80,25 @@ const shiftTabOutdentListItem: Command = (v) => {
   return true;
 };
 
-export function Editor({ value, onChange }: Props) {
+export function Editor({ value, onChange, lintFindings = [] }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
+  const lintFindingsRef = useRef<LintFinding[]>(lintFindings);
+  const lintCompartmentRef = useRef<Compartment | null>(null);
 
   // Keep onChange's reference fresh without re-creating the editor.
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+
+  // Mirror findings into a ref so the lint source closure always
+  // reads the current set without re-creating the extension.
+  useEffect(() => {
+    lintFindingsRef.current = lintFindings;
+    const view = viewRef.current;
+    if (view) forceLinting(view);
+  }, [lintFindings]);
 
   // Construct the EditorView once on mount. We deliberately do *not*
   // reconstruct the view on `value` changes — that's what the second
@@ -95,6 +112,9 @@ export function Editor({ value, onChange }: Props) {
       const next = update.state.doc.toString();
       onChangeRef.current(next);
     });
+
+    const lintCompartment = new Compartment();
+    lintCompartmentRef.current = lintCompartment;
 
     const view = new EditorView({
       state: EditorState.create({
@@ -119,7 +139,10 @@ export function Editor({ value, onChange }: Props) {
           ]),
           skriveTheme,
           updateListener,
-          EditorView.lineWrapping
+          EditorView.lineWrapping,
+          lintCompartment.of(
+            skriveLintExtension(() => lintFindingsRef.current)
+          )
         ]
       }),
       parent: container

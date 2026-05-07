@@ -84,6 +84,8 @@ const api: SkriveIpc = {
       >,
     getDeadLinks: () =>
       ipcRenderer.invoke('linkGraph:getDeadLinks') as Promise<DeadLink[]>,
+    getOrphanedFiles: () =>
+      ipcRenderer.invoke('linkGraph:getOrphanedFiles') as Promise<string[]>,
     previewRename: (oldPath: string, newPath: string) =>
       ipcRenderer.invoke(
         'linkGraph:previewRename',

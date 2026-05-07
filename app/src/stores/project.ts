@@ -13,6 +13,7 @@ import type {
   FileEntry,
   FrontmatterMap,
   ProjectChange,
+  ProjectLintReport,
   ProjectManifest
 } from '@skrive/shared';
 import type { LayoutMode } from '../components/editor/SplitView';
@@ -22,6 +23,8 @@ import {
   serializeFrontmatter,
   stampAutoFields
 } from '../lib/frontmatter';
+import { runProjectLint } from '../lib/lint';
+import { notify } from '../lib/notify';
 
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 500;
@@ -61,6 +64,15 @@ type State = {
    *  backlinks panel — opening one closes the other. */
   frontmatterPanelOpen: boolean;
 
+  /** Floating top-right lint findings panel (phase 8). Mutually
+   *  exclusive with backlinks + frontmatter — opening one closes the
+   *  others. */
+  lintPanelOpen: boolean;
+
+  /** Most recent project-wide lint report. Refreshed after open and
+   *  after any watcher event resolves. Null between project loads. */
+  lintReport: ProjectLintReport | null;
+
   unsubscribeWatch: (() => void) | null;
 };
 
@@ -96,6 +108,13 @@ type Actions = {
   setFrontmatterPanelOpen(v: boolean): void;
   toggleFrontmatterPanel(): void;
   closeFrontmatterPanel(): void;
+
+  setLintPanelOpen(v: boolean): void;
+  toggleLintPanel(): void;
+  /** Re-run the lint engine against the current manifest + open tabs.
+   *  Pulls deadLinks + orphanedFiles fresh from IPC. Safe to call when
+   *  no project is open (no-op). */
+  refreshLint(): Promise<void>;
 
   /** Replace the value of a frontmatter field on the active tab. New
    *  fields are inserted at the end of the map; existing fields are
@@ -163,6 +182,8 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   backlinksPanelOpen: false,
   frontmatterPanelOpen: false,
+  lintPanelOpen: false,
+  lintReport: null,
 
   unsubscribeWatch: null,
 
@@ -193,9 +214,17 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         manifest,
         tabs: [],
         activeTabIndex: -1,
+        lintReport: null,
         unsubscribeWatch: unsubscribe,
         loading: false
       });
+      // Surface .skrive.toml warnings once per open. Live reload is
+      // a documented post-port follow-up; reopen the project to apply
+      // edits and re-trigger validation.
+      for (const warning of manifest.warnings) {
+        notify.warn(warning);
+      }
+      void get().refreshLint();
     } catch (err) {
       set({ loading: false });
       throw err;
@@ -212,6 +241,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       manifest: null,
       tabs: [],
       activeTabIndex: -1,
+      lintReport: null,
       unsubscribeWatch: null
     });
   },
@@ -221,6 +251,9 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     if (!manifest) return;
     const next = await window.skrive.project.open(manifest.root);
     set({ manifest: next });
+    // Re-run lint after any manifest refresh — covers save events
+    // (which trigger the watcher) and direct fs operations.
+    void get().refreshLint();
     // Drop tabs whose files vanished from disk.
     const { tabs, activeTabIndex } = get();
     const survivingTabs = tabs.filter((t) =>
@@ -453,7 +486,11 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   setBacklinksPanelOpen(v: boolean) {
     if (v) {
-      set({ backlinksPanelOpen: true, frontmatterPanelOpen: false });
+      set({
+        backlinksPanelOpen: true,
+        frontmatterPanelOpen: false,
+        lintPanelOpen: false
+      });
     } else {
       set({ backlinksPanelOpen: false });
     }
@@ -462,7 +499,11 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   toggleBacklinksPanel() {
     const next = !get().backlinksPanelOpen;
     if (next) {
-      set({ backlinksPanelOpen: true, frontmatterPanelOpen: false });
+      set({
+        backlinksPanelOpen: true,
+        frontmatterPanelOpen: false,
+        lintPanelOpen: false
+      });
     } else {
       set({ backlinksPanelOpen: false });
     }
@@ -472,7 +513,11 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   setFrontmatterPanelOpen(v: boolean) {
     if (v) {
-      set({ frontmatterPanelOpen: true, backlinksPanelOpen: false });
+      set({
+        frontmatterPanelOpen: true,
+        backlinksPanelOpen: false,
+        lintPanelOpen: false
+      });
     } else {
       set({ frontmatterPanelOpen: false });
     }
@@ -481,7 +526,11 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   toggleFrontmatterPanel() {
     const next = !get().frontmatterPanelOpen;
     if (next) {
-      set({ frontmatterPanelOpen: true, backlinksPanelOpen: false });
+      set({
+        frontmatterPanelOpen: true,
+        backlinksPanelOpen: false,
+        lintPanelOpen: false
+      });
     } else {
       set({ frontmatterPanelOpen: false });
     }
@@ -489,6 +538,83 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   closeFrontmatterPanel() {
     set({ frontmatterPanelOpen: false });
+  },
+
+  // ============================ Lint panel ============================
+
+  setLintPanelOpen(v: boolean) {
+    if (v) {
+      set({
+        lintPanelOpen: true,
+        backlinksPanelOpen: false,
+        frontmatterPanelOpen: false
+      });
+    } else {
+      set({ lintPanelOpen: false });
+    }
+  },
+
+  toggleLintPanel() {
+    const next = !get().lintPanelOpen;
+    if (next) {
+      set({
+        lintPanelOpen: true,
+        backlinksPanelOpen: false,
+        frontmatterPanelOpen: false
+      });
+    } else {
+      set({ lintPanelOpen: false });
+    }
+  },
+
+  async refreshLint() {
+    const manifest = get().manifest;
+    if (!manifest) {
+      if (get().lintReport !== null) set({ lintReport: null });
+      return;
+    }
+    try {
+      const [deadLinks, orphanedFiles] = await Promise.all([
+        window.skrive.linkGraph.getDeadLinks(),
+        window.skrive.linkGraph.getOrphanedFiles()
+      ]);
+      // Build the body map from open tabs so unsaved edits are linted
+      // against the editor content, not the on-disk version. Files not
+      // currently open fall back to disk during the engine's per-file
+      // pass — the engine treats missing entries as empty bodies, which
+      // is a no-op for the single-file rules. Cross-file rules don't
+      // depend on bodies here (links + orphans come from IPC).
+      const bodies = new Map<string, string>();
+      for (const tab of get().tabs) {
+        bodies.set(tab.path, tab.body);
+      }
+      // For files not in tabs, read from disk so per-file rules
+      // (heading hierarchy, duplicate headings) cover the whole project.
+      for (const file of manifest.files) {
+        if (bodies.has(file.path)) continue;
+        try {
+          const content = await window.skrive.fs.readFile(
+            manifest.root,
+            file.path
+          );
+          bodies.set(file.path, parseFrontmatter(content.body).body);
+        } catch {
+          // File vanished mid-scan; leave it out — engine treats
+          // missing as empty.
+        }
+      }
+      const report = runProjectLint({
+        manifest,
+        bodies,
+        deadLinks,
+        orphanedFiles
+      });
+      // If the project changed underneath us, drop this report.
+      if (get().manifest?.root !== manifest.root) return;
+      set({ lintReport: report });
+    } catch (err) {
+      logProjectError('refreshLint', err);
+    }
   },
 
   // ============================ Frontmatter mutations ============================

@@ -30,7 +30,7 @@
     "@codemirror/lang-markdown": "^6.5.0",
     "@codemirror/language": "^6.12.3",
     "@codemirror/state": "^6.6.0",
-    "@codemirror/view": "^6.41.0",
+    "@codemirror/view": "^6.42.0",
     "@skrive/diff": "workspace:*",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.0",

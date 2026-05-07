@@ -73,6 +73,22 @@ export class LinkGraph {
   sourceCount(): number {
     return this.forwardMap.size;
   }
+
+  /** Files in `candidates` with zero inbound *relative-link* edges.
+   *  Wiki edges aren't tracked in the backward index (they aren't
+   *  path-resolved at extraction); a file referenced only by `[[name]]`
+   *  will appear here. The `orphaned_files` lint rule defaults to off,
+   *  so users opting in should be aware of this caveat — documented in
+   *  `docs/skrive-toml-reference.md`. */
+  orphanedAmong(candidates: Iterable<string>): string[] {
+    const out: string[] = [];
+    for (const path of candidates) {
+      const set = this.backwardMap.get(path);
+      if (!set || set.size === 0) out.push(path);
+    }
+    out.sort();
+    return out;
+  }
 }
 
 function relativeTargets(edges: Edge[]): Set<string> {

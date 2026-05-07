@@ -7,6 +7,7 @@
  */
 
 import type { FrontmatterMap, ProjectSchema } from './frontmatter';
+import type { SkriveProjectConfig } from './skrive-toml';
 
 export type SkrivePlatform =
   | 'aix'
@@ -43,6 +44,16 @@ export type ProjectManifest = {
   /** Project-wide frontmatter schema, derived from every file's
    *  `frontmatter` map at scan time. Drives the panel's autocomplete. */
   schema: ProjectSchema;
+  /** Parsed `.skrive.toml`, or defaults if the file is absent or
+   *  unparseable. Phase 8 (lint) is the first real consumer; the
+   *  schema is documented in `docs/skrive-toml-reference.md`. */
+  config: SkriveProjectConfig;
+  /** Human-readable warnings produced while parsing `.skrive.toml`.
+   *  Empty when the file is absent, parses cleanly, or has no
+   *  unrecognized fields. The renderer surfaces each as a sonner toast
+   *  on open. Per `docs/skrive-toml-reference.md` § Parse behavior:
+   *  parsing is warn-and-continue, never blocking. */
+  warnings: string[];
 };
 
 export type FileContent = {
@@ -306,6 +317,10 @@ export interface SkriveIpc {
     /** Every relative-target edge in the project whose target doesn't
      *  resolve to a file in the current manifest. */
     getDeadLinks(): Promise<DeadLink[]>;
+    /** Project-relative paths of every file with zero inbound edges.
+     *  Drives the `orphaned_files` lint rule (Phase 8). Sorted
+     *  alphabetically. */
+    getOrphanedFiles(): Promise<string[]>;
     /** Read-only preview of a rename: which files have references to
      *  `oldPath` and would be rewritten if it became `newPath`. */
     previewRename(oldPath: string, newPath: string): Promise<RenamePreview>;

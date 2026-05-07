@@ -36,3 +36,22 @@ export {
   serialize as serializeFrontmatter,
   valueTypeName
 } from './frontmatter';
+
+export type {
+  DictionaryConfig,
+  LintConfig,
+  LintRuleId,
+  LintSeverity,
+  ProjectMeta,
+  RequiredFrontmatterConfig,
+  SkriveProjectConfig
+} from './skrive-toml';
+
+export {
+  DEFAULT_LINT_CONFIG,
+  DEFAULT_PROJECT_CONFIG,
+  LINT_RULE_IDS,
+  LINT_RULE_TOML_KEYS
+} from './skrive-toml';
+
+export type { LintFinding, ProjectLintReport } from './lint';

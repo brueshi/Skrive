@@ -146,6 +146,13 @@ export function registerLinksHandlers(): void {
     }
   );
 
+  ipcMain.handle(
+    'linkGraph:getOrphanedFiles',
+    async (): Promise<string[]> => {
+      return projectState.linkGraph.orphanedAmong(projectState.filePaths);
+    }
+  );
+
   ipcMain.handle('linkGraph:getDeadLinks', async (): Promise<DeadLink[]> => {
     const out: DeadLink[] = [];
     for (const [source, edges] of projectState.linkGraph.iter()) {

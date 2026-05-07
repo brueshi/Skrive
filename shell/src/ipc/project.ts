@@ -20,6 +20,7 @@ import {
   type ProjectManifest
 } from '@skrive/shared';
 import { projectState } from '../state/project-state';
+import { parseSkriveToml } from '../lib/skrive-toml';
 
 // Hardcoded skip list per `planning/open-questions.md` P3. Phase 3.4
 // will layer `.gitignore` and `.skrive.toml` `[project].exclude` on top
@@ -70,6 +71,15 @@ async function* walk(root: string, current: string): AsyncGenerator<string> {
   }
 }
 
+async function readSkriveToml(root: string): Promise<string | null> {
+  try {
+    return await fs.readFile(path.join(root, '.skrive.toml'), 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
 async function scanProject(root: string): Promise<ProjectManifest> {
   const canonicalRoot = path.resolve(root);
   const files: FileEntry[] = [];
@@ -77,6 +87,10 @@ async function scanProject(root: string): Promise<ProjectManifest> {
   // Reset link-graph state for the new project. Files get added to
   // the graph as we walk, with their edges extracted from disk.
   projectState.reset(canonicalRoot);
+
+  // `.skrive.toml` lives at the project root; absent → defaults.
+  const tomlSource = await readSkriveToml(canonicalRoot);
+  const { config, warnings } = parseSkriveToml(tomlSource);
 
   for await (const fullPath of walk(canonicalRoot, canonicalRoot)) {
     let stat;
@@ -117,7 +131,9 @@ async function scanProject(root: string): Promise<ProjectManifest> {
   return {
     root: canonicalRoot,
     files,
-    schema: inferSchema(files)
+    schema: inferSchema(files),
+    config,
+    warnings
   };
 }
 

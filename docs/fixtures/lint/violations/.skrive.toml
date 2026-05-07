@@ -1,0 +1,5 @@
+[lint]
+orphaned_files = "warn"
+
+[lint.required_frontmatter]
+fields = ["title", "date"]

@@ -13,6 +13,9 @@ export const notify = {
   info(message: string): void {
     toast(message, { duration: 3000 });
   },
+  warn(message: string): void {
+    toast.warning(message, { duration: 5000 });
+  },
   success(message: string): void {
     toast.success(message, { duration: 2500 });
   },

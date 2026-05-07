@@ -3,7 +3,7 @@
 // ratio. Toasts via sonner. Right-click context menus + delete-confirm
 // modal land in Sidebar. Phase 9 wires per-project persistence.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
 import { SplitView } from './components/editor/SplitView';
 import { DiffPlayground } from './components/editor/DiffPlayground';
@@ -11,6 +11,7 @@ import { matchLayoutShortcut } from './components/editor/keys';
 import { Header, useChromeShortcuts } from './components/chrome/Header';
 import { BacklinksPanel } from './components/panels/BacklinksPanel';
 import { FrontmatterPanel } from './components/panels/FrontmatterPanel';
+import { LintPanel } from './components/panels/LintPanel';
 import { Sidebar } from './components/sidebar/Sidebar';
 import {
   logProjectError,
@@ -37,6 +38,13 @@ export function App() {
   const toggleFrontmatterPanel = useProjectStore(
     (s) => s.toggleFrontmatterPanel
   );
+  const toggleLintPanel = useProjectStore((s) => s.toggleLintPanel);
+  const lintReport = useProjectStore((s) => s.lintReport);
+
+  const activeLintFindings = useMemo(() => {
+    if (!activeTab || !lintReport) return [];
+    return lintReport.findings.filter((f) => f.path === activeTab.path);
+  }, [activeTab, lintReport]);
 
   useChromeShortcuts();
 
@@ -79,6 +87,17 @@ export function App() {
         toggleFrontmatterPanel();
         return;
       }
+      // ⌘⇧L — toggle lint panel.
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        !e.altKey &&
+        (e.key === 'l' || e.key === 'L')
+      ) {
+        e.preventDefault();
+        toggleLintPanel();
+        return;
+      }
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
       if (e.key === 'b' || e.key === 'B') {
         e.preventDefault();
@@ -108,7 +127,8 @@ export function App() {
     toggleSidebar,
     openProjectFromDialog,
     saveActiveTab,
-    toggleFrontmatterPanel
+    toggleFrontmatterPanel,
+    toggleLintPanel
   ]);
 
   // Debounced auto-save flushes any dirty tabs.
@@ -165,6 +185,7 @@ export function App() {
                   onRatioChange={(next) =>
                     setTabSplitRatio(activeTabIndex, next)
                   }
+                  lintFindings={activeLintFindings}
                 />
               ) : (
                 <div className="empty-pane">
@@ -197,6 +218,7 @@ export function App() {
 
       <BacklinksPanel />
       <FrontmatterPanel />
+      <LintPanel />
 
       {diffPlaygroundOpen && (
         <DiffPlayground onClose={() => setDiffPlaygroundOpen(false)} />
