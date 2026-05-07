@@ -1168,3 +1168,576 @@ body {
 .preview-inner th {
   font-weight: 600;
 }
+
+/* ===================== Diff view ===================== */
+
+.diff-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.diff-chrome {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--skrive-rule);
+  background: var(--skrive-bg);
+  flex-shrink: 0;
+  min-height: 36px;
+  box-sizing: border-box;
+}
+
+/* Each chrome slot mirrors its pane's horizontal extent by solving
+   the same calc() off a shared --diff-left-ratio property. Doing
+   this with `flex: X 1 0` produced a sub-pixel drift on resize
+   because the flex algorithm rounded the proportional split slightly
+   differently in the chrome and pane rows. A calc()-based fixed
+   flex-basis is exact: chrome and panes use identical formulas off
+   the same custom property, so their dividers land on the same
+   physical column at every drag position. */
+.diff-chrome-slot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.diff-chrome-slot-before {
+  flex: 0 0 calc((100% - 1px) * var(--diff-left-ratio));
+}
+
+.diff-chrome-slot-after {
+  flex: 1 1 0;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.diff-chrome-divider {
+  flex: 0 0 1px;
+  background: var(--skrive-rule);
+}
+
+.diff-pane-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 12px;
+  color: var(--skrive-fg);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.diff-pane-label-kind {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--skrive-muted);
+  flex-shrink: 0;
+}
+
+.diff-pane-label-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.diff-pane-label-time {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--skrive-muted);
+  flex-shrink: 0;
+}
+
+.diff-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.diff-change-counter {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--skrive-muted);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.diff-scroll-toggle,
+.diff-mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.diff-scroll-button {
+  background: transparent;
+  border: none;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  height: 24px;
+  padding: 0 0.5rem;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  transition:
+    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.diff-scroll-button + .diff-scroll-button,
+.diff-mode-button + .diff-mode-button {
+  border-left: 1px solid var(--skrive-rule);
+}
+
+.diff-scroll-button:hover,
+.diff-mode-button:hover {
+  color: var(--skrive-fg);
+}
+
+.diff-scroll-button.active,
+.diff-mode-button.active {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.diff-mode-button {
+  background: transparent;
+  border: none;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  width: 28px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition:
+    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.diff-close {
+  background: transparent;
+  border: none;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  width: 26px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  padding: 0;
+  transition:
+    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.diff-close:hover {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.diff-panes {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.diff-pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--skrive-bg);
+}
+
+.diff-pane-before {
+  flex: 0 0 calc((100% - 1px) * var(--diff-left-ratio));
+}
+
+.diff-pane-after {
+  flex: 1 1 0;
+}
+
+.diff-pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.diff-pane-raw {
+  padding: 0.5rem 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--skrive-fg);
+  background: var(--skrive-bg);
+  tab-size: 2;
+}
+
+/* Inline-block wrapper so the container's width is
+   max(100%, widest-row-content). Rows inside are block-level and
+   inherit that width, which lets tinted backgrounds extend to the
+   end of the widest row on every row — otherwise a short added
+   line's sage tint would stop mid-pane while a long line's would
+   push past the scrollbar. */
+.diff-rows {
+  display: inline-block;
+  min-width: 100%;
+}
+
+.diff-row {
+  display: flex;
+  align-items: baseline;
+  min-height: 1.55em;
+  border-left: 2px solid transparent;
+  padding-right: 1rem;
+}
+
+.diff-gutter {
+  flex: 0 0 1.5rem;
+  text-align: center;
+  color: var(--skrive-muted);
+  user-select: none;
+  font-size: 11px;
+  align-self: center;
+}
+
+.diff-text {
+  white-space: pre;
+}
+
+.diff-text-placeholder {
+  flex: 1;
+  min-width: 0;
+  min-height: 1.55em;
+}
+
+/* Palette from docs/3.3-diff-ui-design.md §Visual language. Added:
+   sage tint background + fuller-saturation left bar, both warm-leaning
+   so they sit in the cream family rather than reading as git-diff
+   green. Deleted: no fill, strikethrough + 55% opacity + a thin
+   warm-gray bar — the "something was here" signal without competing
+   with the added content for attention. */
+.diff-row-added {
+  background: hsl(95, 20%, 92%);
+  border-left-color: hsl(100, 15%, 45%);
+}
+
+.diff-row-deleted {
+  border-left-color: hsl(30, 8%, 60%);
+}
+
+.diff-row-deleted .diff-text {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+.diff-row-added .diff-text-placeholder,
+.diff-row-deleted .diff-text-placeholder {
+  border-bottom: 1px dashed var(--skrive-rule);
+  align-self: stretch;
+  margin: 0.5em 0.25rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .diff-row-added {
+    background: hsl(95, 15%, 20%);
+    border-left-color: hsl(100, 22%, 65%);
+  }
+  .diff-row-deleted {
+    border-left-color: hsl(30, 5%, 45%);
+  }
+}
+
+.diff-pane-preview {
+  padding: 1.25rem 1.5rem 3rem;
+  font-family:
+    'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia,
+    serif;
+  font-size: 1rem;
+  line-height: 1.65;
+  color: var(--skrive-fg);
+}
+
+.diff-preview-seg {
+  border-left: 2px solid transparent;
+  padding: 0.05rem 0.75rem 0.05rem 1rem;
+  margin: 0 -0.5rem 0.25rem;
+  border-radius: 2px;
+}
+
+.diff-preview-added {
+  background: hsl(95, 20%, 92%);
+  border-left-color: hsl(100, 15%, 45%);
+}
+
+.diff-preview-deleted {
+  border-left-color: hsl(30, 8%, 60%);
+  opacity: 0.7;
+}
+
+.diff-preview-deleted p,
+.diff-preview-deleted li,
+.diff-preview-deleted h1,
+.diff-preview-deleted h2,
+.diff-preview-deleted h3,
+.diff-preview-deleted h4,
+.diff-preview-deleted h5,
+.diff-preview-deleted h6,
+.diff-preview-deleted blockquote {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.diff-preview-gap-added,
+.diff-preview-gap-deleted {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5em;
+  border: 1px dashed hsl(95, 20%, 80%);
+  border-radius: 3px;
+  margin: 0.5em -0.5rem;
+}
+
+.diff-preview-gap-deleted {
+  border-color: hsl(30, 12%, 75%);
+}
+
+.diff-preview-chip {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--skrive-muted);
+  padding: 0.1em 0.45em;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 3px;
+  background: var(--skrive-bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  .diff-preview-added {
+    background: hsl(95, 15%, 20%);
+    border-left-color: hsl(100, 22%, 65%);
+  }
+  .diff-preview-deleted {
+    border-left-color: hsl(30, 5%, 45%);
+  }
+  .diff-preview-gap-added {
+    border-color: hsl(95, 15%, 30%);
+  }
+  .diff-preview-gap-deleted {
+    border-color: hsl(30, 5%, 35%);
+  }
+}
+
+/* Markdown typography inside preview-mode segments. Mirrors the
+   editor's preview rules so rendered prose reads the same in
+   full-file preview and in diff-preview. */
+.diff-pane-preview h1,
+.diff-pane-preview h2,
+.diff-pane-preview h3,
+.diff-pane-preview h4,
+.diff-pane-preview h5,
+.diff-pane-preview h6 {
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  margin: 1.25em 0 0.4em;
+  color: var(--skrive-fg);
+}
+
+.diff-pane-preview h1 {
+  font-size: 1.6rem;
+  margin-top: 0;
+}
+.diff-pane-preview h2 { font-size: 1.3rem; }
+.diff-pane-preview h3 { font-size: 1.1rem; }
+.diff-pane-preview h4,
+.diff-pane-preview h5,
+.diff-pane-preview h6 { font-size: 1rem; }
+
+.diff-pane-preview p { margin: 0 0 0.85em; }
+
+.diff-pane-preview a {
+  color: var(--skrive-link);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.diff-pane-preview strong { font-weight: 600; }
+.diff-pane-preview em { font-style: italic; }
+
+.diff-pane-preview ul,
+.diff-pane-preview ol {
+  margin: 0 0 0.85em;
+  padding-left: 1.5em;
+}
+.diff-pane-preview li { margin-bottom: 0.2em; }
+
+.diff-pane-preview blockquote {
+  margin: 0.85em 0;
+  padding: 0.25em 0 0.25em 1em;
+  border-left: 2px solid var(--skrive-rule);
+  color: var(--skrive-muted);
+}
+
+.diff-pane-preview hr {
+  border: 0;
+  border-top: 1px solid var(--skrive-rule);
+  margin: 1.5em 0;
+}
+
+.diff-pane-preview code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  background: var(--skrive-rule);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+
+.diff-pane-preview pre {
+  background: var(--skrive-rule);
+  padding: 0.85em;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 0.85em 0;
+  line-height: 1.5;
+}
+
+.diff-pane-preview pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
+.diff-pane-preview img {
+  max-width: 100%;
+  height: auto;
+}
+
+.diff-pane-preview table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.85em 0;
+  font-size: 0.95em;
+}
+
+.diff-pane-preview th,
+.diff-pane-preview td {
+  border-bottom: 1px solid var(--skrive-rule);
+  padding: 0.5em 0.75em;
+  text-align: left;
+}
+
+.diff-pane-preview th { font-weight: 600; }
+
+.diff-divider {
+  flex: 0 0 1px;
+  width: 1px;
+  cursor: col-resize;
+  background: var(--skrive-rule);
+  position: relative;
+  touch-action: none;
+}
+
+.diff-divider::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+}
+
+.diff-divider:hover,
+.diff-view.dragging .diff-divider {
+  background: var(--skrive-fg);
+}
+
+.diff-view.dragging {
+  user-select: none;
+}
+
+/* Dev-only diff playground overlay (Phase 5). Replaced by HistoryPanel
+   in Phase 10; kept behind a hidden ⌘⇧D toggle for parity A/B. */
+.diff-playground {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  background: var(--skrive-bg);
+}
+
+.diff-playground-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--skrive-rule);
+  font-size: 12px;
+  color: var(--skrive-muted);
+  flex-shrink: 0;
+}
+
+.diff-playground-toolbar select,
+.diff-playground-toolbar button {
+  font: inherit;
+  background: transparent;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 3px;
+  padding: 0.2rem 0.5rem;
+  color: var(--skrive-fg);
+  cursor: pointer;
+}
+
+.diff-playground-inputs {
+  display: flex;
+  flex: 0 0 30%;
+  min-height: 0;
+  border-bottom: 1px solid var(--skrive-rule);
+}
+
+.diff-playground-inputs textarea {
+  flex: 1;
+  min-width: 0;
+  background: var(--skrive-bg);
+  color: var(--skrive-fg);
+  border: 0;
+  border-right: 1px solid var(--skrive-rule);
+  padding: 0.75rem 1rem;
+  resize: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  outline: none;
+}
+
+.diff-playground-inputs textarea:last-child {
+  border-right: 0;
+}
+
+.diff-playground-output {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}

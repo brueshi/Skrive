@@ -3,9 +3,10 @@
 // ratio. Toasts via sonner. Right-click context menus + delete-confirm
 // modal land in Sidebar. Phase 9 wires per-project persistence.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
 import { SplitView } from './components/editor/SplitView';
+import { DiffPlayground } from './components/editor/DiffPlayground';
 import { matchLayoutShortcut } from './components/editor/keys';
 import { Header, useChromeShortcuts } from './components/chrome/Header';
 import { Sidebar } from './components/sidebar/Sidebar';
@@ -34,6 +35,11 @@ export function App() {
 
   useChromeShortcuts();
 
+  // Phase 5 dev surface: ⌘⇧D toggles a diff playground overlay so the
+  // new DiffView can be A/B'd against v0.1.6 before HistoryPanel wires
+  // the real surface in Phase 10. Removed when HistoryPanel ships.
+  const [diffPlaygroundOpen, setDiffPlaygroundOpen] = useState(false);
+
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Window-level shortcuts: ⌘1/⌘2/⌘3 layout (per-tab), ⌘B sidebar,
@@ -44,6 +50,17 @@ export function App() {
       if (layout) {
         e.preventDefault();
         if (activeTabIndex >= 0) setTabLayoutMode(activeTabIndex, layout);
+        return;
+      }
+      // ⌘⇧D — toggle diff playground (Phase 5 dev surface).
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        !e.altKey &&
+        (e.key === 'd' || e.key === 'D')
+      ) {
+        e.preventDefault();
+        setDiffPlaygroundOpen((open) => !open);
         return;
       }
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
@@ -160,6 +177,10 @@ export function App() {
           </div>
         )}
       </main>
+
+      {diffPlaygroundOpen && (
+        <DiffPlayground onClose={() => setDiffPlaygroundOpen(false)} />
+      )}
 
       <Toaster
         position="bottom-right"
