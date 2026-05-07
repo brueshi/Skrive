@@ -14,6 +14,7 @@ export type {
   OutgoingLink,
   ProjectChange,
   ProjectManifest,
+  Reference,
   RenamePreview,
   RenameReport,
   SkriveIpc,

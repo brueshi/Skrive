@@ -6,7 +6,14 @@ import { ipcMain } from 'electron';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { projectState } from '../state/project-state';
-import type { Backlink, DeadLink, OutgoingLink } from '@skrive/shared';
+import { previewRename, renameWithReferences } from '../lib/link-graph';
+import type {
+  Backlink,
+  DeadLink,
+  OutgoingLink,
+  RenamePreview,
+  RenameReport
+} from '@skrive/shared';
 
 /** Read one line of a source file for snippet display. Failures
  *  collapse to an empty snippet — backlinks UI tolerates it. */
@@ -86,6 +93,56 @@ export function registerLinksHandlers(): void {
         }
       }
       return out;
+    }
+  );
+
+  ipcMain.handle(
+    'linkGraph:previewRename',
+    async (
+      _event,
+      oldPath: string,
+      newPath: string
+    ): Promise<RenamePreview> => {
+      const root = projectState.root;
+      if (!root) {
+        return {
+          targetExists: false,
+          references: [],
+          definitionUpdates: []
+        };
+      }
+      return previewRename(
+        {
+          root,
+          graph: projectState.linkGraph,
+          filePaths: projectState.filePaths
+        },
+        oldPath,
+        newPath
+      );
+    }
+  );
+
+  ipcMain.handle(
+    'linkGraph:renameWithReferences',
+    async (
+      _event,
+      oldPath: string,
+      newPath: string
+    ): Promise<RenameReport> => {
+      const root = projectState.root;
+      if (!root) {
+        throw new Error('No project is open');
+      }
+      return renameWithReferences(
+        {
+          root,
+          graph: projectState.linkGraph,
+          filePaths: projectState.filePaths
+        },
+        oldPath,
+        newPath
+      );
     }
   );
 

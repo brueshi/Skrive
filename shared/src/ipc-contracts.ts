@@ -186,28 +186,33 @@ export type DeadLink = {
   kind: LinkKind;
 };
 
+/** One reference that would be rewritten by a rename. UI-facing
+ *  shape — `line` / `column` are 1-indexed for display. */
+export type Reference = {
+  path: string;
+  line: number;
+  column: number;
+  snippet: string;
+  kind: LinkKind;
+};
+
 export type RenamePreview = {
-  /** Total edges that would be rewritten across all sources. */
-  edgeCount: number;
-  /** Per-source breakdown of edges to rewrite. */
-  sources: Array<{
-    source: string;
-    edges: Array<{
-      range: { start: number; end: number };
-      line: number;
-      column: number;
-      kind: LinkKind;
-    }>;
-  }>;
+  /** True when the target path already exists (in the graph or on
+   *  disk) — the UI uses this to disable the commit. */
+  targetExists: boolean;
+  /** Cross-file references to the renamed file. */
+  references: Reference[];
+  /** Self-references (the renamed file's own outgoing edges that
+   *  point at itself). Phase 3.1 split these from `references` so
+   *  the UI could group them under the renamed file. */
+  definitionUpdates: Reference[];
 };
 
 export type RenameReport = {
-  /** Final relative path of the renamed file. */
-  newPath: string;
-  /** Sources whose bodies were rewritten. */
-  rewrittenSources: string[];
-  /** Total edges rewritten. */
-  edgeCount: number;
+  /** Source files whose bodies were rewritten. */
+  filesWritten: string[];
+  /** Total references rewritten across all files. */
+  referencesUpdated: number;
 };
 
 // ============================ The IPC surface ============================
@@ -298,5 +303,15 @@ export interface SkriveIpc {
     /** Every relative-target edge in the project whose target doesn't
      *  resolve to a file in the current manifest. */
     getDeadLinks(): Promise<DeadLink[]>;
+    /** Read-only preview of a rename: which files have references to
+     *  `oldPath` and would be rewritten if it became `newPath`. */
+    previewRename(oldPath: string, newPath: string): Promise<RenamePreview>;
+    /** Commit a rename. Renames the file, rewrites every reference,
+     *  refreshes the in-memory graph. The renderer's chrome refreshes
+     *  the manifest from the watcher event afterwards. */
+    renameWithReferences(
+      oldPath: string,
+      newPath: string
+    ): Promise<RenameReport>;
   };
 }

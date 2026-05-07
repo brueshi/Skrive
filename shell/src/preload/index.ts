@@ -8,6 +8,8 @@ import type {
   OutgoingLink,
   ProjectChange,
   ProjectManifest,
+  RenamePreview,
+  RenameReport,
   SkriveIpc,
   SkrivePlatform
 } from '@skrive/shared';
@@ -81,7 +83,19 @@ const api: SkriveIpc = {
         OutgoingLink[]
       >,
     getDeadLinks: () =>
-      ipcRenderer.invoke('linkGraph:getDeadLinks') as Promise<DeadLink[]>
+      ipcRenderer.invoke('linkGraph:getDeadLinks') as Promise<DeadLink[]>,
+    previewRename: (oldPath: string, newPath: string) =>
+      ipcRenderer.invoke(
+        'linkGraph:previewRename',
+        oldPath,
+        newPath
+      ) as Promise<RenamePreview>,
+    renameWithReferences: (oldPath: string, newPath: string) =>
+      ipcRenderer.invoke(
+        'linkGraph:renameWithReferences',
+        oldPath,
+        newPath
+      ) as Promise<RenameReport>
   }
 };
 
