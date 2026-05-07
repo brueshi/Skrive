@@ -13,6 +13,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import chokidar, { type FSWatcher } from 'chokidar';
 import type { FileEntry, ProjectChange, ProjectManifest } from '@skrive/shared';
+import { projectState } from '../state/project-state';
 
 // Hardcoded skip list per `planning/open-questions.md` P3. Phase 3.4
 // will layer `.gitignore` and `.skrive.toml` `[project].exclude` on top
@@ -67,6 +68,10 @@ async function scanProject(root: string): Promise<ProjectManifest> {
   const canonicalRoot = path.resolve(root);
   const files: FileEntry[] = [];
 
+  // Reset link-graph state for the new project. Files get added to
+  // the graph as we walk, with their edges extracted from disk.
+  projectState.reset(canonicalRoot);
+
   for await (const fullPath of walk(canonicalRoot, canonicalRoot)) {
     let stat;
     try {
@@ -83,6 +88,15 @@ async function scanProject(root: string): Promise<ProjectManifest> {
       frontmatter: {},
       outgoingLinks: []
     });
+
+    try {
+      const body = await fs.readFile(fullPath, 'utf8');
+      projectState.upsertFile(rel, body);
+    } catch {
+      // A file that disappeared mid-scan still belongs in the
+      // manifest from the stat above; just don't add edges for it.
+      projectState.addEmpty(rel);
+    }
   }
 
   files.sort((a, b) => a.path.localeCompare(b.path));
@@ -173,6 +187,15 @@ export function registerProjectHandlers(): void {
     }
     const sender = event.sender;
     activeWatcher = startWatcher(root, (e) => {
+      // Keep the link graph in sync with disk before the renderer
+      // hears about the change — that way the renderer's follow-up
+      // backlinks query sees the up-to-date graph.
+      if (e.kind === 'add' || e.kind === 'change') {
+        void projectState.refreshFromDisk(e.path);
+      } else if (e.kind === 'unlink') {
+        projectState.removeFile(e.path);
+      }
+
       // The webContents may have been destroyed if the renderer
       // navigated or closed. Send is a no-op in that case but the
       // guard avoids a stack trace in the main log.

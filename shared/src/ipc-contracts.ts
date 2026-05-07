@@ -287,4 +287,16 @@ export interface SkriveIpc {
      */
     computeLineDiff(before: string, after: string): Promise<LineDiffRow[]>;
   };
+  linkGraph: {
+    /** Sources that link to `target` (project-relative path). Wiki
+     *  edges aren't included — the backward index is keyed on resolved
+     *  relative paths only. */
+    getBacklinks(target: string): Promise<Backlink[]>;
+    /** Outgoing edges from `source`. Carries a `resolved` flag the UI
+     *  uses to surface dead links inline. */
+    getOutgoing(source: string): Promise<OutgoingLink[]>;
+    /** Every relative-target edge in the project whose target doesn't
+     *  resolve to a file in the current manifest. */
+    getDeadLinks(): Promise<DeadLink[]>;
+  };
 }

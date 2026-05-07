@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { registerProjectHandlers } from '../ipc/project';
 import { registerFsHandlers } from '../ipc/fs';
 import { registerDiffHandlers } from '../ipc/diff';
+import { registerLinksHandlers } from '../ipc/links';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -62,6 +63,7 @@ function registerIpcHandlers(): void {
   registerProjectHandlers();
   registerFsHandlers();
   registerDiffHandlers();
+  registerLinksHandlers();
 }
 
 void app.whenReady().then(() => {

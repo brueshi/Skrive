@@ -1,8 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  Backlink,
+  DeadLink,
   DiffOp,
   FileContent,
   LineDiffRow,
+  OutgoingLink,
   ProjectChange,
   ProjectManifest,
   SkriveIpc,
@@ -69,6 +72,16 @@ const api: SkriveIpc = {
         before,
         after
       ) as Promise<LineDiffRow[]>
+  },
+  linkGraph: {
+    getBacklinks: (target: string) =>
+      ipcRenderer.invoke('linkGraph:getBacklinks', target) as Promise<Backlink[]>,
+    getOutgoing: (source: string) =>
+      ipcRenderer.invoke('linkGraph:getOutgoing', source) as Promise<
+        OutgoingLink[]
+      >,
+    getDeadLinks: () =>
+      ipcRenderer.invoke('linkGraph:getDeadLinks') as Promise<DeadLink[]>
   }
 };
 
