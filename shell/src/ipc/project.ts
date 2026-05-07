@@ -1,8 +1,8 @@
 // Project IPC: folder picker, recursive scan, filesystem watcher.
 //
-// Phase 3 scope: emit a flat manifest of markdown files. Frontmatter
-// parsing (Phase 7) and outgoing-link extraction (Phase 6) layer in
-// later — for now `frontmatter` and `outgoingLinks` ship empty.
+// Phase 7 scope: scan emits a manifest with parsed frontmatter per file
+// plus a project-wide schema (presence + types + known-values per field)
+// for the renderer's frontmatter-panel autocomplete.
 //
 // Watcher: a single chokidar instance per renderer. Re-entering `watch`
 // closes the previous watcher first. Events are forwarded to the
@@ -12,7 +12,13 @@ import { BrowserWindow, dialog, ipcMain } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import chokidar, { type FSWatcher } from 'chokidar';
-import type { FileEntry, ProjectChange, ProjectManifest } from '@skrive/shared';
+import {
+  inferSchema,
+  parseFrontmatter,
+  type FileEntry,
+  type ProjectChange,
+  type ProjectManifest
+} from '@skrive/shared';
 import { projectState } from '../state/project-state';
 
 // Hardcoded skip list per `planning/open-questions.md` P3. Phase 3.4
@@ -80,30 +86,38 @@ async function scanProject(root: string): Promise<ProjectManifest> {
       continue;
     }
     const rel = toForwardSlash(path.relative(canonicalRoot, fullPath));
+
+    let body: string | null = null;
+    try {
+      body = await fs.readFile(fullPath, 'utf8');
+    } catch {
+      // A file that disappeared mid-scan still belongs in the
+      // manifest from the stat above; just don't add edges for it.
+    }
+
+    if (body === null) {
+      projectState.addEmpty(rel);
+    } else {
+      projectState.upsertFile(rel, body);
+    }
+
+    const fm = body === null ? {} : parseFrontmatter(body).frontmatter;
     files.push({
       path: rel,
       name: path.basename(fullPath),
       sizeBytes: stat.size,
       modifiedMs: stat.mtimeMs ?? null,
-      frontmatter: {},
+      frontmatter: fm,
       outgoingLinks: []
     });
-
-    try {
-      const body = await fs.readFile(fullPath, 'utf8');
-      projectState.upsertFile(rel, body);
-    } catch {
-      // A file that disappeared mid-scan still belongs in the
-      // manifest from the stat above; just don't add edges for it.
-      projectState.addEmpty(rel);
-    }
   }
 
   files.sort((a, b) => a.path.localeCompare(b.path));
 
   return {
     root: canonicalRoot,
-    files
+    files,
+    schema: inferSchema(files)
   };
 }
 

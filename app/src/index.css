@@ -1861,3 +1861,386 @@ body {
   width: 100%;
   line-height: 1.4;
 }
+
+/* ===================== Frontmatter panel ===================== */
+
+.fm-panel-wrapper {
+  position: absolute;
+  top: 48px;
+  right: 12px;
+  width: 32rem;
+  max-width: calc(100vw - 24px);
+  z-index: 100;
+
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+
+.fm-panel-wrapper.fm-panel-open {
+  grid-template-rows: 1fr;
+  pointer-events: auto;
+}
+
+.fm-panel {
+  overflow: hidden;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-fg);
+  border-radius: 4px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  opacity: 0;
+  transition: opacity 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  max-height: 50vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.fm-panel-wrapper.fm-panel-open .fm-panel {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fm-panel-wrapper,
+  .fm-panel {
+    transition: none;
+  }
+}
+
+.fm-panel-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  border-bottom: 1px solid var(--skrive-rule);
+  flex-shrink: 0;
+  background: var(--skrive-bg);
+}
+
+.fm-panel-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  color: var(--skrive-fg);
+  flex-shrink: 0;
+}
+
+.fm-panel-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--skrive-muted);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.fm-panel-count {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--skrive-muted);
+  flex-shrink: 0;
+}
+
+.fm-panel-body {
+  padding: 0.625rem 0.875rem;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  font-family: var(--skrive-ui-font);
+  font-size: 13px;
+}
+
+.fm-empty {
+  margin: 0 0 0.75rem;
+  font-size: 12px;
+  color: var(--skrive-muted);
+  line-height: 1.5;
+}
+
+.fm-row {
+  display: grid;
+  grid-template-columns: 9rem 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.25rem 0;
+}
+
+.fm-row + .fm-row {
+  border-top: 1px dashed var(--skrive-rule);
+}
+
+.key-input,
+.value-input {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 0.3rem 0.4rem;
+  width: 100%;
+  box-sizing: border-box;
+  outline: none;
+  transition:
+    border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.key-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--skrive-muted);
+}
+
+.key-input:hover,
+.value-input:hover {
+  border-color: var(--skrive-rule);
+}
+
+.key-input:focus,
+.value-input:focus {
+  border-color: var(--skrive-fg);
+  color: var(--skrive-fg);
+}
+
+.value-slot {
+  min-width: 0;
+}
+
+/* Wrapper for an input + its anchored autocomplete dropdown. */
+.input-with-suggestions {
+  position: relative;
+  width: 100%;
+}
+
+.value-object {
+  display: inline-block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--skrive-muted);
+  padding: 0.3rem 0.4rem;
+  font-style: italic;
+}
+
+.fm-panel .remove-button {
+  background: transparent;
+  border: none;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 3px;
+  transition:
+    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.fm-panel .remove-button:hover {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.fm-panel .add-button {
+  background: transparent;
+  border: 1px dashed var(--skrive-rule);
+  border-radius: 3px;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 0.375rem 0.625rem;
+  margin-top: 0.5rem;
+  width: 100%;
+  text-align: center;
+  transition:
+    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.fm-panel .add-button:hover:not(:disabled) {
+  color: var(--skrive-fg);
+  border-color: var(--skrive-fg);
+}
+
+.fm-panel .add-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ===================== Frontmatter chip input ===================== */
+
+.chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.25rem 0.375rem;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 3px;
+  background: var(--skrive-bg);
+  min-height: 26px;
+  align-items: center;
+  transition: border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.chip-group:focus-within {
+  border-color: var(--skrive-fg);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  background: var(--skrive-rule);
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1;
+  overflow: hidden;
+}
+
+.chip-label {
+  background: transparent;
+  border: none;
+  color: var(--skrive-fg);
+  cursor: pointer;
+  padding: 0.25rem 0.25rem 0.25rem 0.5rem;
+  font: inherit;
+  font-size: 12px;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.chip-remove {
+  background: transparent;
+  border: none;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  padding: 0.25rem 0.375rem;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  transition: color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.chip-remove:hover {
+  color: var(--skrive-fg);
+}
+
+.chip-edit {
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-fg);
+  border-radius: 3px;
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 0.2rem 0.4rem;
+  min-width: 4rem;
+  width: auto;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.chip-pending {
+  background: transparent;
+  border: none;
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 0.25rem 0.25rem;
+  flex: 1;
+  min-width: 6rem;
+  outline: none;
+}
+
+.chip-pending::placeholder {
+  color: var(--skrive-muted);
+}
+
+/* ===================== Suggestion dropdown ===================== */
+
+.suggestion-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem 0;
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-fg);
+  border-radius: 3px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+  max-height: 12rem;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
+.suggestion {
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  color: var(--skrive-fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background-color 0.06s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.suggestion.selected {
+  background: var(--skrive-rule);
+  color: var(--skrive-fg);
+}
+
+/* ===================== Header FM indicator ===================== */
+
+.fm-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 22px;
+  padding: 0 0.5rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  transition:
+    border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.fm-indicator:hover {
+  color: var(--skrive-fg);
+  border-color: var(--skrive-rule);
+}
+
+.fm-indicator[aria-pressed='true'] {
+  color: var(--skrive-fg);
+  border-color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.fm-indicator-count {
+  color: var(--skrive-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.fm-indicator[aria-pressed='true'] .fm-indicator-count {
+  color: var(--skrive-fg);
+}

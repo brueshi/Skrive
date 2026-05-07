@@ -10,6 +10,7 @@ import { DiffPlayground } from './components/editor/DiffPlayground';
 import { matchLayoutShortcut } from './components/editor/keys';
 import { Header, useChromeShortcuts } from './components/chrome/Header';
 import { BacklinksPanel } from './components/panels/BacklinksPanel';
+import { FrontmatterPanel } from './components/panels/FrontmatterPanel';
 import { Sidebar } from './components/sidebar/Sidebar';
 import {
   logProjectError,
@@ -33,6 +34,9 @@ export function App() {
     (s) => s.openProjectFromDialog
   );
   const toggleSidebar = useProjectStore((s) => s.toggleSidebar);
+  const toggleFrontmatterPanel = useProjectStore(
+    (s) => s.toggleFrontmatterPanel
+  );
 
   useChromeShortcuts();
 
@@ -64,6 +68,17 @@ export function App() {
         setDiffPlaygroundOpen((open) => !open);
         return;
       }
+      // ⌘⇧F — toggle frontmatter panel.
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        !e.altKey &&
+        (e.key === 'f' || e.key === 'F')
+      ) {
+        e.preventDefault();
+        toggleFrontmatterPanel();
+        return;
+      }
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
       if (e.key === 'b' || e.key === 'B') {
         e.preventDefault();
@@ -92,7 +107,8 @@ export function App() {
     setTabLayoutMode,
     toggleSidebar,
     openProjectFromDialog,
-    saveActiveTab
+    saveActiveTab,
+    toggleFrontmatterPanel
   ]);
 
   // Debounced auto-save flushes any dirty tabs.
@@ -180,6 +196,7 @@ export function App() {
       </main>
 
       <BacklinksPanel />
+      <FrontmatterPanel />
 
       {diffPlaygroundOpen && (
         <DiffPlayground onClose={() => setDiffPlaygroundOpen(false)} />

@@ -6,6 +6,8 @@
  * Phase 3 = `project` + `fs` + watcher subscriptions.
  */
 
+import type { FrontmatterMap, ProjectSchema } from './frontmatter';
+
 export type SkrivePlatform =
   | 'aix'
   | 'android'
@@ -28,11 +30,9 @@ export type FileEntry = {
   name: string;
   sizeBytes: number;
   modifiedMs: number | null;
-  /**
-   * Empty in Phase 3. Phase 7 wires frontmatter parsing into the project
-   * scan; Phase 6 wires outgoing-link extraction.
-   */
-  frontmatter: Record<string, unknown>;
+  /** Parsed YAML frontmatter map (Phase 7). Empty for files without a
+   *  leading frontmatter block, or when parsing falls back leniently. */
+  frontmatter: FrontmatterMap;
   outgoingLinks: string[];
 };
 
@@ -40,6 +40,9 @@ export type ProjectManifest = {
   /** Canonical absolute path of the project root. */
   root: string;
   files: FileEntry[];
+  /** Project-wide frontmatter schema, derived from every file's
+   *  `frontmatter` map at scan time. Drives the panel's autocomplete. */
+  schema: ProjectSchema;
 };
 
 export type FileContent = {

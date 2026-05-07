@@ -21,3 +21,18 @@ export type {
   SkrivePlatform,
   WordOp
 } from './ipc-contracts';
+
+export type {
+  FieldInfo,
+  FrontmatterMap,
+  ParsedDocument,
+  ProjectSchema
+} from './frontmatter';
+
+export {
+  inferSchema,
+  mightHaveLeadingFrontmatter,
+  parse as parseFrontmatter,
+  serialize as serializeFrontmatter,
+  valueTypeName
+} from './frontmatter';

@@ -65,6 +65,16 @@ export function Header() {
   const toggleBacklinksPanel = useProjectStore(
     (s) => s.toggleBacklinksPanel
   );
+  const frontmatterPanelOpen = useProjectStore(
+    (s) => s.frontmatterPanelOpen
+  );
+  const toggleFrontmatterPanel = useProjectStore(
+    (s) => s.toggleFrontmatterPanel
+  );
+
+  const frontmatterCount = activeTab
+    ? Object.keys(activeTab.frontmatter).length
+    : 0;
 
   const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null);
 
@@ -151,6 +161,27 @@ export function Header() {
         </div>
 
         <div className="header-right" style={noDragStyle}>
+          {activeTab && (
+            <button
+              type="button"
+              className="fm-indicator"
+              data-panel-toggle="frontmatter"
+              aria-label="Toggle frontmatter panel"
+              aria-pressed={frontmatterPanelOpen}
+              title="Frontmatter  ⌘⇧F"
+              onClick={() => toggleFrontmatterPanel()}
+            >
+              <span>FM</span>
+              {frontmatterCount > 0 && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="fm-indicator-count">
+                    {frontmatterCount}
+                  </span>
+                </>
+              )}
+            </button>
+          )}
           {activeTab && (
             <button
               type="button"

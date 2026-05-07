@@ -11,10 +11,17 @@
 import { create } from 'zustand';
 import type {
   FileEntry,
+  FrontmatterMap,
   ProjectChange,
   ProjectManifest
 } from '@skrive/shared';
 import type { LayoutMode } from '../components/editor/SplitView';
+import {
+  mightHaveLeadingFrontmatter,
+  parseFrontmatter,
+  serializeFrontmatter,
+  stampAutoFields
+} from '../lib/frontmatter';
 
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 500;
@@ -25,7 +32,12 @@ const DEFAULT_SPLIT_RATIO = 0.5;
 
 export type Tab = {
   path: string;
+  /** Body without the leading frontmatter block. The editor reads/writes
+   *  this; the full file is reassembled at save time. */
   body: string;
+  /** Parsed YAML frontmatter for the file. Populated on openTab; mutated
+   *  by the FrontmatterPanel; auto-stamped fields refreshed on save. */
+  frontmatter: FrontmatterMap;
   dirty: boolean;
   layoutMode: LayoutMode;
   splitDividerRatio: number;
@@ -43,6 +55,11 @@ type State = {
   /** Floating top-right backlinks panel (phase 6). Toggled from the
    *  Header; reads `linkGraph.getBacklinks(activeTab.path)` on open. */
   backlinksPanelOpen: boolean;
+
+  /** Floating top-right frontmatter editor (phase 7). Toggled from the
+   *  Header's FM·N indicator or via ⌘⇧F. Mutually exclusive with the
+   *  backlinks panel — opening one closes the other. */
+  frontmatterPanelOpen: boolean;
 
   unsubscribeWatch: (() => void) | null;
 };
@@ -75,6 +92,21 @@ type Actions = {
 
   setBacklinksPanelOpen(v: boolean): void;
   toggleBacklinksPanel(): void;
+
+  setFrontmatterPanelOpen(v: boolean): void;
+  toggleFrontmatterPanel(): void;
+  closeFrontmatterPanel(): void;
+
+  /** Replace the value of a frontmatter field on the active tab. New
+   *  fields are inserted at the end of the map; existing fields are
+   *  updated in place (preserving order on the wire). */
+  updateActiveTabFrontmatter(key: string, value: unknown): void;
+  /** Remove a frontmatter field from the active tab. */
+  removeActiveTabFrontmatter(key: string): void;
+  /** Rename a frontmatter key on the active tab. Silently no-ops on
+   *  conflict — the panel's commitKey detects the no-op and reverts the
+   *  input back to the original key. */
+  renameActiveTabFrontmatterKey(oldKey: string, newKey: string): void;
 };
 
 function clampSidebarWidth(w: number): number {
@@ -95,6 +127,31 @@ function findEntry(
   return manifest.files.find((f) => f.path === path) ?? null;
 }
 
+/**
+ * Build the on-disk file contents for a tab. Re-stamps auto-fields,
+ * absorbs any leading `---` block the user typed straight into the
+ * editor body into the structured map, and concatenates the serialized
+ * frontmatter with the body. Mutates `tab.frontmatter` and `tab.body`
+ * if absorption happened so the panel reflects the absorbed fields.
+ */
+function buildSavePayload(tab: Tab): string {
+  // Absorb a leading frontmatter block the user typed into the editor.
+  // Only attempts this when the structured map is currently empty —
+  // otherwise we'd be silently merging two sources of truth.
+  if (
+    Object.keys(tab.frontmatter).length === 0 &&
+    mightHaveLeadingFrontmatter(tab.body)
+  ) {
+    const extracted = parseFrontmatter(tab.body);
+    if (Object.keys(extracted.frontmatter).length > 0) {
+      tab.frontmatter = extracted.frontmatter;
+      tab.body = extracted.body;
+    }
+  }
+  stampAutoFields(tab.frontmatter, tab.body);
+  return serializeFrontmatter(tab.frontmatter) + tab.body;
+}
+
 export const useProjectStore = create<State & Actions>((set, get) => ({
   manifest: null,
   tabs: [],
@@ -105,6 +162,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
 
   backlinksPanelOpen: false,
+  frontmatterPanelOpen: false,
 
   unsubscribeWatch: null,
 
@@ -196,11 +254,15 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       set({ activeTabIndex: existingIndex });
       return;
     }
-    // Read body fresh from disk for the new tab.
+    // Read body fresh from disk for the new tab. Parse the leading
+    // frontmatter so the editor sees the body sans-fence and the panel
+    // sees the structured map. The full file is reassembled at save time.
     const content = await window.skrive.fs.readFile(manifest.root, path);
+    const parsed = parseFrontmatter(content.body);
     const newTab: Tab = {
       path,
-      body: content.body,
+      body: parsed.body,
+      frontmatter: parsed.frontmatter,
       dirty: false,
       layoutMode: DEFAULT_LAYOUT_MODE,
       splitDividerRatio: DEFAULT_SPLIT_RATIO
@@ -217,10 +279,12 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       // Best-effort flush before discard. Errors surface via the caller's
       // error path; the close still proceeds so the user isn't trapped.
       try {
+        const writableTab: Tab = { ...tab, frontmatter: { ...tab.frontmatter } };
+        const payload = buildSavePayload(writableTab);
         await window.skrive.fs.writeFile(
           get().manifest!.root,
           tab.path,
-          tab.body
+          payload
         );
       } catch (err) {
         console.error('[skrive] save-on-close failed', err);
@@ -279,24 +343,36 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const { manifest, tabs, activeTabIndex } = get();
     const tab = tabs[activeTabIndex];
     if (!manifest || !tab || !tab.dirty) return;
-    await window.skrive.fs.writeFile(manifest.root, tab.path, tab.body);
+    // Clone before stamping so the live tab object isn't mutated mid-render.
+    const writable: Tab = { ...tab, frontmatter: { ...tab.frontmatter } };
+    const payload = buildSavePayload(writable);
+    await window.skrive.fs.writeFile(manifest.root, tab.path, payload);
     const nextTabs = tabs.slice();
-    nextTabs[activeTabIndex] = { ...tab, dirty: false };
+    nextTabs[activeTabIndex] = {
+      ...writable,
+      dirty: false
+    };
     set({ tabs: nextTabs });
   },
 
   async saveAllDirty() {
     const { manifest, tabs } = get();
     if (!manifest) return;
-    const dirtyTabs = tabs.filter((t) => t.dirty);
-    if (dirtyTabs.length === 0) return;
-    await Promise.all(
-      dirtyTabs.map((t) =>
-        window.skrive.fs.writeFile(manifest.root, t.path, t.body)
-      )
-    );
-    const nextTabs = tabs.map((t) => (t.dirty ? { ...t, dirty: false } : t));
-    set({ tabs: nextTabs });
+    const dirtyIndices: number[] = [];
+    const writes: Array<Promise<void>> = [];
+    const updatedTabs = tabs.slice();
+    for (let i = 0; i < tabs.length; i++) {
+      const t = tabs[i];
+      if (!t || !t.dirty) continue;
+      const writable: Tab = { ...t, frontmatter: { ...t.frontmatter } };
+      const payload = buildSavePayload(writable);
+      dirtyIndices.push(i);
+      updatedTabs[i] = { ...writable, dirty: false };
+      writes.push(window.skrive.fs.writeFile(manifest.root, t.path, payload));
+    }
+    if (writes.length === 0) return;
+    await Promise.all(writes);
+    set({ tabs: updatedTabs });
   },
 
   // ============================ File CRUD ============================
@@ -376,11 +452,86 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   // ============================ Backlinks panel ============================
 
   setBacklinksPanelOpen(v: boolean) {
-    set({ backlinksPanelOpen: v });
+    if (v) {
+      set({ backlinksPanelOpen: true, frontmatterPanelOpen: false });
+    } else {
+      set({ backlinksPanelOpen: false });
+    }
   },
 
   toggleBacklinksPanel() {
-    set({ backlinksPanelOpen: !get().backlinksPanelOpen });
+    const next = !get().backlinksPanelOpen;
+    if (next) {
+      set({ backlinksPanelOpen: true, frontmatterPanelOpen: false });
+    } else {
+      set({ backlinksPanelOpen: false });
+    }
+  },
+
+  // ============================ Frontmatter panel ============================
+
+  setFrontmatterPanelOpen(v: boolean) {
+    if (v) {
+      set({ frontmatterPanelOpen: true, backlinksPanelOpen: false });
+    } else {
+      set({ frontmatterPanelOpen: false });
+    }
+  },
+
+  toggleFrontmatterPanel() {
+    const next = !get().frontmatterPanelOpen;
+    if (next) {
+      set({ frontmatterPanelOpen: true, backlinksPanelOpen: false });
+    } else {
+      set({ frontmatterPanelOpen: false });
+    }
+  },
+
+  closeFrontmatterPanel() {
+    set({ frontmatterPanelOpen: false });
+  },
+
+  // ============================ Frontmatter mutations ============================
+
+  updateActiveTabFrontmatter(key: string, value: unknown) {
+    const { tabs, activeTabIndex } = get();
+    const tab = tabs[activeTabIndex];
+    if (!tab) return;
+    const next = { ...tab.frontmatter };
+    next[key] = value;
+    const nextTabs = tabs.slice();
+    nextTabs[activeTabIndex] = { ...tab, frontmatter: next, dirty: true };
+    set({ tabs: nextTabs });
+  },
+
+  removeActiveTabFrontmatter(key: string) {
+    const { tabs, activeTabIndex } = get();
+    const tab = tabs[activeTabIndex];
+    if (!tab || !(key in tab.frontmatter)) return;
+    const next = { ...tab.frontmatter };
+    delete next[key];
+    const nextTabs = tabs.slice();
+    nextTabs[activeTabIndex] = { ...tab, frontmatter: next, dirty: true };
+    set({ tabs: nextTabs });
+  },
+
+  renameActiveTabFrontmatterKey(oldKey: string, newKey: string) {
+    const { tabs, activeTabIndex } = get();
+    const tab = tabs[activeTabIndex];
+    if (!tab) return;
+    if (oldKey === newKey) return;
+    if (!(oldKey in tab.frontmatter)) return;
+    if (newKey in tab.frontmatter) return; // Conflict — silently no-op.
+    // Rebuild the map preserving original key order, swapping oldKey→newKey
+    // in place so the panel rows don't reorder unexpectedly.
+    const next: FrontmatterMap = {};
+    for (const [k, v] of Object.entries(tab.frontmatter)) {
+      if (k === oldKey) next[newKey] = v;
+      else next[k] = v;
+    }
+    const nextTabs = tabs.slice();
+    nextTabs[activeTabIndex] = { ...tab, frontmatter: next, dirty: true };
+    set({ tabs: nextTabs });
   }
 }));
 
