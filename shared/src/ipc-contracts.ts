@@ -107,6 +107,109 @@ export type DiffOp =
       wordDiff: WordOp[];
     };
 
+// ============================ Link graph types ============================
+// Mirrors `src-tauri/src/link_graph.rs` with one principled difference:
+// offsets are UTF-16 code units (what JS strings, CodeMirror, and DOM
+// selections all natively use), not bytes. The renderer feeds these
+// straight to the editor for cursor positioning; rename-with-references
+// uses them to slice + rewrite source bodies. Surrogate pairs are
+// vanishingly rare in prose; if they ever show up, code-unit semantics
+// match what every other layer expects.
+
+export type LinkKind =
+  | 'inline'
+  | 'wiki'
+  | 'referenceUse'
+  | 'referenceDefinition';
+
+export type LinkTarget =
+  | {
+      kind: 'relative';
+      /** Project-relative, forward-slash separated. */
+      path: string;
+    }
+  | {
+      kind: 'wiki';
+      /** Inner name, verbatim. Filename resolution happens at lookup. */
+      name: string;
+    };
+
+export type Edge = {
+  target: LinkTarget;
+  /** UTF-16 code-unit range in the source body. Meaning depends on
+   *  `kind`:
+   *   - `inline`: the URL portion inside `[text](url)`.
+   *   - `wiki`: the inner name inside `[[Name]]`.
+   *   - `referenceUse`: the full `[text][label]` / `[label]` span;
+   *     not rewritten on rename (it references the label, not the path).
+   *   - `referenceDefinition`: the target URL inside `[label]: target`.
+   */
+  range: { start: number; end: number };
+  /** 0-indexed line number. */
+  line: number;
+  /** 0-indexed UTF-16 column in `line`. */
+  column: number;
+  kind: LinkKind;
+};
+
+export type Backlink = {
+  /** The file that links to the active target. */
+  source: string;
+  range: { start: number; end: number };
+  line: number;
+  column: number;
+  kind: LinkKind;
+  /** Source-file line containing the link, trimmed for display. */
+  snippet: string;
+};
+
+export type OutgoingLink = {
+  /** Project-relative target path, or the wiki name. */
+  target: string;
+  targetKind: 'relative' | 'wiki';
+  range: { start: number; end: number };
+  line: number;
+  column: number;
+  kind: LinkKind;
+  /** Whether the relative target resolves to a file in the project.
+   *  Always `true` for wiki edges (resolution happens at lookup). */
+  resolved: boolean;
+};
+
+export type DeadLink = {
+  source: string;
+  /** Resolved relative target that doesn't correspond to any project file. */
+  target: string;
+  range: { start: number; end: number };
+  line: number;
+  column: number;
+  kind: LinkKind;
+};
+
+export type RenamePreview = {
+  /** Total edges that would be rewritten across all sources. */
+  edgeCount: number;
+  /** Per-source breakdown of edges to rewrite. */
+  sources: Array<{
+    source: string;
+    edges: Array<{
+      range: { start: number; end: number };
+      line: number;
+      column: number;
+      kind: LinkKind;
+    }>;
+  }>;
+};
+
+export type RenameReport = {
+  /** Final relative path of the renamed file. */
+  newPath: string;
+  /** Sources whose bodies were rewritten. */
+  rewrittenSources: string[];
+  /** Total edges rewritten. */
+  edgeCount: number;
+};
+
 // ============================ The IPC surface ============================
 
 export interface SkriveIpc {
