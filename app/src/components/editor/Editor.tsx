@@ -43,6 +43,21 @@ type Props = {
    *  run yet or the file is clean. CM6 reads them via a closure that's
    *  re-pointed on every render so reconfigure isn't needed. */
   lintFindings?: LintFinding[];
+  /** Initial cursor position applied to the freshly-mounted view.
+   *  `line` is 1-indexed (CM6's line.number); `column` is 0-indexed
+   *  UTF-16. Subsequent mounts (different file) recreate the editor
+   *  via the parent's `key={tab.path}`. */
+  initialCursorLine?: number;
+  initialCursorColumn?: number;
+  /** Initial scrollTop in pixels. Applied once after the view is
+   *  mounted; later scrolls are user-driven. */
+  initialScrollTop?: number;
+  /** Cursor changes (selection.head). Fires on every selection change
+   *  regardless of doc edits — the parent decides what to persist. */
+  onCursorChange?: (line: number, column: number) => void;
+  /** Editor scroll changes. Fires on the DOM scroll event of the
+   *  editor scroller. */
+  onScrollTopChange?: (top: number) => void;
 };
 
 // Tab/Shift-Tab indent or outdent list items when the cursor (or every
@@ -80,17 +95,38 @@ const shiftTabOutdentListItem: Command = (v) => {
   return true;
 };
 
-export function Editor({ value, onChange, lintFindings = [] }: Props) {
+export function Editor({
+  value,
+  onChange,
+  lintFindings = [],
+  initialCursorLine,
+  initialCursorColumn,
+  initialScrollTop,
+  onCursorChange,
+  onScrollTopChange
+}: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
+  const onCursorChangeRef = useRef(onCursorChange);
+  const onScrollTopChangeRef = useRef(onScrollTopChange);
   const lintFindingsRef = useRef<LintFinding[]>(lintFindings);
   const lintCompartmentRef = useRef<Compartment | null>(null);
+  const lastCursorRef = useRef<{ line: number; column: number }>({
+    line: initialCursorLine ?? 1,
+    column: initialCursorColumn ?? 0
+  });
 
-  // Keep onChange's reference fresh without re-creating the editor.
+  // Keep callback refs fresh without re-creating the editor.
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+  useEffect(() => {
+    onCursorChangeRef.current = onCursorChange;
+  }, [onCursorChange]);
+  useEffect(() => {
+    onScrollTopChangeRef.current = onScrollTopChange;
+  }, [onScrollTopChange]);
 
   // Mirror findings into a ref so the lint source closure always
   // reads the current set without re-creating the extension.
@@ -108,9 +144,20 @@ export function Editor({ value, onChange, lintFindings = [] }: Props) {
     if (!container) return;
 
     const updateListener = EditorView.updateListener.of((update) => {
-      if (!update.docChanged) return;
-      const next = update.state.doc.toString();
-      onChangeRef.current(next);
+      if (update.docChanged) {
+        const next = update.state.doc.toString();
+        onChangeRef.current(next);
+      }
+      if (update.selectionSet || update.docChanged) {
+        const head = update.state.selection.main.head;
+        const line = update.state.doc.lineAt(head);
+        const column = head - line.from;
+        const last = lastCursorRef.current;
+        if (last.line !== line.number || last.column !== column) {
+          lastCursorRef.current = { line: line.number, column };
+          onCursorChangeRef.current?.(line.number, column);
+        }
+      }
     });
 
     const lintCompartment = new Compartment();
@@ -150,7 +197,33 @@ export function Editor({ value, onChange, lintFindings = [] }: Props) {
 
     viewRef.current = view;
 
+    // Apply initial cursor + scroll once the view exists. Cursor lives
+    // in EditorState; scroll is a DOM property of `view.scrollDOM`.
+    if (
+      typeof initialCursorLine === 'number' &&
+      initialCursorLine >= 1 &&
+      initialCursorLine <= view.state.doc.lines
+    ) {
+      const line = view.state.doc.line(initialCursorLine);
+      const col = Math.min(
+        Math.max(initialCursorColumn ?? 0, 0),
+        line.length
+      );
+      const pos = line.from + col;
+      view.dispatch({ selection: { anchor: pos, head: pos } });
+      lastCursorRef.current = { line: initialCursorLine, column: col };
+    }
+    if (typeof initialScrollTop === 'number' && initialScrollTop > 0) {
+      view.scrollDOM.scrollTop = initialScrollTop;
+    }
+
+    const handleScroll = () => {
+      onScrollTopChangeRef.current?.(view.scrollDOM.scrollTop);
+    };
+    view.scrollDOM.addEventListener('scroll', handleScroll, { passive: true });
+
     return () => {
+      view.scrollDOM.removeEventListener('scroll', handleScroll);
       view.destroy();
       viewRef.current = null;
     };

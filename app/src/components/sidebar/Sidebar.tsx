@@ -33,6 +33,7 @@ import {
   selectActivePath,
   useProjectStore
 } from '../../stores/project';
+import { usePreferencesStore } from '../../stores/preferences';
 import { resolveTitle } from '../../lib/title';
 import { notify } from '../../lib/notify';
 import { ContextMenu, type ContextMenuItem } from '../ContextMenu';
@@ -371,15 +372,37 @@ export function Sidebar() {
 
   // ---------- Context menu / delete ----------
 
-  const requestDeleteFile = useCallback((file: FileEntry) => {
-    setPendingDelete({ kind: 'file', path: file.path, name: file.name });
-  }, []);
+  const skipDeleteConfirm = usePreferencesStore(
+    (s) => s.skipDeleteConfirmation
+  );
 
-  const requestDeleteDirectory = useCallback((dir: string) => {
-    const lastSep = dir.lastIndexOf('/');
-    const name = lastSep === -1 ? dir : dir.slice(lastSep + 1);
-    setPendingDelete({ kind: 'directory', path: dir, name });
-  }, []);
+  const requestDeleteFile = useCallback(
+    (file: FileEntry) => {
+      if (skipDeleteConfirm) {
+        void deleteFile(file.path).catch((e) =>
+          notify.error(`Couldn't delete ${file.name}`, e)
+        );
+        return;
+      }
+      setPendingDelete({ kind: 'file', path: file.path, name: file.name });
+    },
+    [skipDeleteConfirm, deleteFile]
+  );
+
+  const requestDeleteDirectory = useCallback(
+    (dir: string) => {
+      const lastSep = dir.lastIndexOf('/');
+      const name = lastSep === -1 ? dir : dir.slice(lastSep + 1);
+      if (skipDeleteConfirm) {
+        void deleteDirectory(dir).catch((e) =>
+          notify.error(`Couldn't delete ${name}`, e)
+        );
+        return;
+      }
+      setPendingDelete({ kind: 'directory', path: dir, name });
+    },
+    [skipDeleteConfirm, deleteDirectory]
+  );
 
   const openFileContextMenu = useCallback(
     (e: MouseEvent, file: FileEntry) => {

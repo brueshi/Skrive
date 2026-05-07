@@ -5,6 +5,7 @@ import { registerProjectHandlers } from '../ipc/project';
 import { registerFsHandlers } from '../ipc/fs';
 import { registerDiffHandlers } from '../ipc/diff';
 import { registerLinksHandlers } from '../ipc/links';
+import { registerPersistenceHandlers } from '../ipc/persistence';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -64,6 +65,7 @@ function registerIpcHandlers(): void {
   registerFsHandlers();
   registerDiffHandlers();
   registerLinksHandlers();
+  registerPersistenceHandlers();
 }
 
 void app.whenReady().then(() => {

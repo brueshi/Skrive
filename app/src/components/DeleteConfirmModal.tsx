@@ -1,13 +1,14 @@
 // Delete confirmation modal for the sidebar.
 //
 // Built on Radix Dialog so focus trap, ESC handling, scroll lock, and
-// portal placement come out of the box. The "Don't ask again" preference
-// (per A3 schema) lands when settings ship in Phase 9; for now the
-// checkbox is decorative — the modal always shows. Phase 9 wires it
-// through to AppUiState.skipDeleteConfirmation.
+// portal placement come out of the box. The "Don't ask again" checkbox
+// flips `AppUiState.skipDeleteConfirmation` on confirm; subsequent
+// deletes go straight to trash (the Sidebar's `requestDelete*` helpers
+// short-circuit when the pref is set).
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { useState } from 'react';
+import { usePreferencesStore } from '../stores/preferences';
 
 type Props = {
   open: boolean;
@@ -27,14 +28,17 @@ export function DeleteConfirmModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dontAskAgain, setDontAskAgain] = useState(false);
+  const setSkipDeleteConfirmation = usePreferencesStore(
+    (s) => s.setSkipDeleteConfirmation
+  );
 
   async function handleConfirm() {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
-      // TODO Phase 9: persist `dontAskAgain` into AppUiState.skipDeleteConfirmation.
       await onConfirm();
+      if (dontAskAgain) setSkipDeleteConfirmation(true);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

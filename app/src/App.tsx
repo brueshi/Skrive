@@ -11,12 +11,15 @@ import { matchLayoutShortcut } from './components/editor/keys';
 import { Header, useChromeShortcuts } from './components/chrome/Header';
 import { BacklinksPanel } from './components/panels/BacklinksPanel';
 import { FrontmatterPanel } from './components/panels/FrontmatterPanel';
+import { SettingsModal } from './components/settings/SettingsModal';
 import { Sidebar } from './components/sidebar/Sidebar';
 import {
   logProjectError,
   selectActiveTab,
   useProjectStore
 } from './stores/project';
+import { usePreferencesStore } from './stores/preferences';
+import { useTypographyVars } from './lib/typography-css';
 import { notify } from './lib/notify';
 
 const SAVE_DEBOUNCE_MS = 500;
@@ -38,6 +41,20 @@ export function App() {
     (s) => s.toggleFrontmatterPanel
   );
   const lintReport = useProjectStore((s) => s.lintReport);
+  const setTabCursor = useProjectStore((s) => s.setTabCursor);
+  const setTabScrollTop = useProjectStore((s) => s.setTabScrollTop);
+  const persistProjectStateNow = useProjectStore(
+    (s) => s.persistProjectStateNow
+  );
+  const openProject = useProjectStore((s) => s.openProject);
+  const hydratePreferences = usePreferencesStore((s) => s.hydrate);
+  const persistPreferencesNow = usePreferencesStore((s) => s.persistNow);
+  const preferencesHydrated = usePreferencesStore((s) => s.hydrated);
+  const lastOpenedProject = usePreferencesStore((s) => s.lastOpenedProject);
+  const recentProjects = usePreferencesStore((s) => s.recentProjects);
+  const removeRecentProject = usePreferencesStore(
+    (s) => s.removeRecentProject
+  );
 
   const activeLintFindings = useMemo(() => {
     if (!activeTab || !lintReport) return [];
@@ -45,6 +62,44 @@ export function App() {
   }, [activeTab, lintReport]);
 
   useChromeShortcuts();
+  useTypographyVars();
+
+  const [appVersion, setAppVersion] = useState('0.0.0');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Boot: hydrate preferences and read the app version from the shell
+  // exactly once. Both are fire-and-forget — failure is logged, not
+  // surfaced; the UI runs on defaults rather than blocking.
+  useEffect(() => {
+    void hydratePreferences();
+    window.skrive.app
+      .version()
+      .then((v) => setAppVersion(v))
+      .catch((err) => logProjectError('app:version', err));
+  }, [hydratePreferences]);
+
+  // Auto-open the last project once preferences hydrate. Skipped if
+  // a project is already loaded (defensive — first render might race
+  // a manual openProject from the URL handler we don't have yet).
+  const didAutoOpenRef = useRef(false);
+  useEffect(() => {
+    if (didAutoOpenRef.current) return;
+    if (!preferencesHydrated) return;
+    if (manifest) {
+      didAutoOpenRef.current = true;
+      return;
+    }
+    if (!lastOpenedProject) {
+      didAutoOpenRef.current = true;
+      return;
+    }
+    didAutoOpenRef.current = true;
+    void openProject(lastOpenedProject).catch((err) => {
+      logProjectError('auto-open lastOpenedProject', err);
+      // The path may have moved; clear it so we don't retry every boot.
+      usePreferencesStore.getState().setLastOpenedProject(null);
+    });
+  }, [preferencesHydrated, manifest, lastOpenedProject, openProject]);
 
   // Phase 5 dev surface: ⌘⇧D toggles a diff playground overlay so the
   // new DiffView can be A/B'd against v0.1.6 before HistoryPanel wires
@@ -83,6 +138,17 @@ export function App() {
       ) {
         e.preventDefault();
         toggleFrontmatterPanel();
+        return;
+      }
+      // ⌘, — open settings (macOS standard).
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key === ','
+      ) {
+        e.preventDefault();
+        setSettingsOpen((open) => !open);
         return;
       }
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
@@ -138,8 +204,8 @@ export function App() {
 
   // Best-effort save on unload — beforeunload can't await async, so
   // pending writes that haven't completed by the time the renderer
-  // closes are lost. Acceptable for v0.2; Phase 9 hardens this with
-  // a synchronous-on-quit hook in the shell.
+  // closes are lost. We still flush dirty tabs, project state, and
+  // any pending preferences debounce; all best-effort.
   useEffect(() => {
     function onBeforeUnload() {
       if (saveTimerRef.current) {
@@ -147,14 +213,26 @@ export function App() {
         saveTimerRef.current = null;
       }
       void saveAllDirty().catch((err) => logProjectError('saveAllDirty', err));
+      void persistProjectStateNow().catch((err) =>
+        logProjectError('persistProjectStateNow', err)
+      );
+      void persistPreferencesNow().catch((err) =>
+        logProjectError('persistPreferencesNow', err)
+      );
     }
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [saveAllDirty]);
+  }, [saveAllDirty, persistProjectStateNow, persistPreferencesNow]);
+
+  // Suppress the empty-state flash while preferences haven't loaded —
+  // a recent project may auto-open once the store is hydrated. The
+  // hydrate call is fast (a single IPC round-trip) so this gate only
+  // blocks the very first paint.
+  void preferencesHydrated;
 
   return (
     <div className="app-root">
-      <Header />
+      <Header onOpenSettings={() => setSettingsOpen(true)} />
 
       <main className="app-body">
         {manifest ? (
@@ -172,6 +250,15 @@ export function App() {
                     setTabSplitRatio(activeTabIndex, next)
                   }
                   lintFindings={activeLintFindings}
+                  initialCursorLine={activeTab.cursorLine}
+                  initialCursorColumn={activeTab.cursorColumn}
+                  initialScrollTop={activeTab.scrollTop}
+                  onCursorChange={(line, column) =>
+                    setTabCursor(activeTabIndex, line, column)
+                  }
+                  onScrollTopChange={(top) =>
+                    setTabScrollTop(activeTabIndex, top)
+                  }
                 />
               ) : (
                 <div className="empty-pane">
@@ -198,12 +285,55 @@ export function App() {
             <p className="hint">
               Or press <kbd>⌘O</kbd>.
             </p>
+            {recentProjects.length > 0 && (
+              <div className="empty-recent">
+                <h2>Recent projects</h2>
+                <ul className="empty-recent-list">
+                  {recentProjects.map((rp) => (
+                    <li key={rp.path} className="empty-recent-row">
+                      <button
+                        type="button"
+                        className="empty-recent-button"
+                        onClick={() =>
+                          void openProject(rp.path).catch((err) => {
+                            logProjectError('openProject (recent)', err);
+                            notify.error(
+                              `Couldn't open ${rp.name}`,
+                              err
+                            );
+                            removeRecentProject(rp.path);
+                          })
+                        }
+                        title={rp.path}
+                      >
+                        <span className="empty-recent-name">{rp.name}</span>
+                        <span className="empty-recent-path">{rp.path}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="empty-recent-remove"
+                        aria-label={`Remove ${rp.name} from recents`}
+                        title="Remove from recents"
+                        onClick={() => removeRecentProject(rp.path)}
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
       </main>
 
       <BacklinksPanel />
       <FrontmatterPanel />
+      <SettingsModal
+        open={settingsOpen}
+        appVersion={appVersion}
+        onClose={() => setSettingsOpen(false)}
+      />
 
       {diffPlaygroundOpen && (
         <DiffPlayground onClose={() => setDiffPlaygroundOpen(false)} />

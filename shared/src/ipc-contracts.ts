@@ -7,6 +7,7 @@
  */
 
 import type { FrontmatterMap, ProjectSchema } from './frontmatter';
+import type { AppUiState, ProjectUiState } from './persistence';
 import type { SkriveProjectConfig } from './skrive-toml';
 
 export type SkrivePlatform =
@@ -331,5 +332,26 @@ export interface SkriveIpc {
       oldPath: string,
       newPath: string
     ): Promise<RenameReport>;
+  };
+  persistence: {
+    /** Load `{userData}/app.json`. Returns defaults on missing /
+     *  unparseable / unknown-future-version files (with a console
+     *  warning in the latter case). */
+    loadAppState(): Promise<AppUiState>;
+    /** Atomic write of `{userData}/app.json`. */
+    saveAppState(state: AppUiState): Promise<void>;
+    /** Load `{userData}/projects/{hash}.json` for the given canonical
+     *  project root path. Null when the file doesn't exist (first time
+     *  this project is opened). */
+    loadProjectState(projectRoot: string): Promise<ProjectUiState | null>;
+    /** Atomic write of `{userData}/projects/{hash}.json`. Creates the
+     *  `projects/` directory on first call. */
+    saveProjectState(
+      projectRoot: string,
+      state: ProjectUiState
+    ): Promise<void>;
+    /** Open the userData directory in the OS file browser ("Reveal
+     *  preferences" in Settings → About). */
+    revealUserData(): Promise<void>;
   };
 }

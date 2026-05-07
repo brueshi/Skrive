@@ -23,6 +23,7 @@ import { IconDotUnsaved } from '../icons/IconDotUnsaved';
 import { IconLayoutPreview } from '../icons/IconLayoutPreview';
 import { IconLayoutRaw } from '../icons/IconLayoutRaw';
 import { IconLayoutSplit } from '../icons/IconLayoutSplit';
+import { IconSettings } from '../icons/IconSettings';
 import { IconSidebarToggle } from '../icons/IconSidebarToggle';
 import { IconX } from '../icons/IconX';
 import type { LayoutMode } from '../editor/SplitView';
@@ -31,6 +32,10 @@ type ProjectMenuState = {
   x: number;
   y: number;
   items: ContextMenuItem[];
+};
+
+type HeaderProps = {
+  onOpenSettings: () => void;
 };
 
 const isMacOS =
@@ -47,7 +52,7 @@ function projectName(root: string | null | undefined): string {
   return parts[parts.length - 1] ?? root;
 }
 
-export function Header() {
+export function Header({ onOpenSettings }: HeaderProps) {
   const manifest = useProjectStore((s) => s.manifest);
   const tabs = useProjectStore((s) => s.tabs);
   const activeTabIndex = useProjectStore((s) => s.activeTabIndex);
@@ -128,6 +133,15 @@ export function Header() {
             onClick={() => toggleSidebar()}
           >
             <IconSidebarToggle size={16} shown={sidebarVisible} />
+          </button>
+          <button
+            type="button"
+            className="header-icon-button"
+            aria-label="Open settings"
+            title="Settings  ⌘,"
+            onClick={() => onOpenSettings()}
+          >
+            <IconSettings size={16} />
           </button>
           {manifest && (
             <button

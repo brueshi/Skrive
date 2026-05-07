@@ -5,16 +5,23 @@
 // layer. Each tab carries its own layoutMode + splitDividerRatio so that
 // switching files restores the view the user last had on that file.
 //
-// Per-project tab persistence wires through Phase 9 (state model A3).
-// For now tabs reset on app restart.
+// Phase 9 wires per-project persistence: the tab set, cursor/scroll
+// state, layout mode, and sidebar visibility/width are reloaded from
+// `{userData}/projects/{hash}.json` on open and written back via three
+// tiers — immediate (open/close/reorder, layout, sidebar visibility),
+// debounced 1s (scroll, split-divider drag, sidebar width drag), and
+// blur/quit (cursor position).
 
 import { create } from 'zustand';
-import type {
-  FileEntry,
-  FrontmatterMap,
-  ProjectChange,
-  ProjectLintReport,
-  ProjectManifest
+import {
+  defaultProjectUiState,
+  type FileEntry,
+  type FrontmatterMap,
+  type ProjectChange,
+  type ProjectLintReport,
+  type ProjectManifest,
+  type ProjectUiState,
+  type TabState
 } from '@skrive/shared';
 import type { LayoutMode } from '../components/editor/SplitView';
 import {
@@ -25,6 +32,7 @@ import {
 } from '../lib/frontmatter';
 import { runProjectLint } from '../lib/lint';
 import { notify } from '../lib/notify';
+import { usePreferencesStore } from './preferences';
 
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 500;
@@ -32,6 +40,7 @@ export const SIDEBAR_DEFAULT_WIDTH = 260;
 
 const DEFAULT_LAYOUT_MODE: LayoutMode = 'split';
 const DEFAULT_SPLIT_RATIO = 0.5;
+const DEBOUNCED_SAVE_MS = 1000;
 
 export type Tab = {
   path: string;
@@ -44,6 +53,12 @@ export type Tab = {
   dirty: boolean;
   layoutMode: LayoutMode;
   splitDividerRatio: number;
+  /** Cursor + scroll persisted in the per-project state (Phase 9).
+   *  `cursorLine` is 1-indexed (CodeMirror line numbers); `cursorColumn`
+   *  is 0-indexed UTF-16 within the line. */
+  cursorLine: number;
+  cursorColumn: number;
+  scrollTop: number;
 };
 
 type State = {
@@ -82,13 +97,15 @@ type Actions = {
   closeProject(): Promise<void>;
   refreshManifest(): Promise<void>;
 
-  openTab(path: string): Promise<void>;
+  openTab(path: string, hydrate?: HydrateTab): Promise<void>;
   closeTab(index: number): Promise<void>;
   switchTab(index: number): void;
 
   setTabBody(index: number, next: string): void;
   setTabLayoutMode(index: number, mode: LayoutMode): void;
   setTabSplitRatio(index: number, ratio: number): void;
+  setTabCursor(index: number, line: number, column: number): void;
+  setTabScrollTop(index: number, top: number): void;
 
   saveActiveTab(): Promise<void>;
   saveAllDirty(): Promise<void>;
@@ -101,6 +118,11 @@ type Actions = {
   setSidebarVisible(v: boolean): void;
   toggleSidebar(): void;
   setSidebarWidth(width: number): void;
+
+  /** Flush any pending project-state debounce immediately. Used by
+   *  the beforeunload handler and project close. Safe to call when no
+   *  project is open. */
+  persistProjectStateNow(): Promise<void>;
 
   setBacklinksPanelOpen(v: boolean): void;
   toggleBacklinksPanel(): void;
@@ -126,9 +148,93 @@ type Actions = {
   renameActiveTabFrontmatterKey(oldKey: string, newKey: string): void;
 };
 
+type HydrateTab = {
+  cursorLine: number;
+  cursorColumn: number;
+  scrollTop: number;
+  layoutMode: LayoutMode;
+  splitDividerRatio: number;
+  /** When true, openTab will not overwrite the layout/ratio with the
+   *  defaults — it sets them from this object. Used during the
+   *  per-project state restore on `openProject`. */
+  applyOverrides: true;
+};
+
 function clampSidebarWidth(w: number): number {
   if (Number.isNaN(w)) return SIDEBAR_DEFAULT_WIDTH;
   return Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, w));
+}
+
+// ============================ Persistence pipeline ============================
+//
+// Three save tiers per A3:
+//   - Immediate: tab open/close, layout-mode, sidebar visibility.
+//   - Debounced 1s: scroll, split-divider drag, sidebar width drag.
+//   - Blur/quit: cursor position (saves on tab switch, tab close,
+//     project close, beforeunload).
+//
+// The renderer doesn't track "dirty" per tier; it just schedules a
+// timer and any incoming save before the timer fires resets it. The
+// flush action grabs whatever's currently in the store.
+
+let debouncedSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let lastImmediateSave: Promise<void> = Promise.resolve();
+
+function snapshotProjectState(state: State): ProjectUiState | null {
+  if (!state.manifest) return null;
+  const config = state.manifest.config;
+  return {
+    schemaVersion: 1,
+    projectPath: state.manifest.root,
+    projectName:
+      config.project.name ??
+      basename(state.manifest.root) ??
+      state.manifest.root,
+    lastOpenedMs: Date.now(),
+    sidebar: {
+      visible: state.sidebarVisible,
+      width: state.sidebarWidth
+    },
+    tabs: state.tabs.map(
+      (tab): TabState => ({
+        path: tab.path,
+        layoutMode: tab.layoutMode,
+        cursor: { line: tab.cursorLine, column: tab.cursorColumn },
+        scrollTop: tab.scrollTop,
+        splitDividerRatio: tab.splitDividerRatio
+      })
+    ),
+    activeTabIndex: state.activeTabIndex
+  };
+}
+
+function basename(p: string): string | null {
+  if (!p) return null;
+  const parts = p.split(/[/\\]/).filter(Boolean);
+  return parts[parts.length - 1] ?? null;
+}
+
+function scheduleImmediateSave(getState: () => State): void {
+  const state = getState();
+  if (!state.manifest) return;
+  const snapshot = snapshotProjectState(state);
+  if (!snapshot) return;
+  const root = state.manifest.root;
+  lastImmediateSave = (async () => {
+    try {
+      await window.skrive.persistence.saveProjectState(root, snapshot);
+    } catch (err) {
+      logProjectError('saveProjectState', err);
+    }
+  })();
+}
+
+function scheduleDebouncedSave(getState: () => State): void {
+  if (debouncedSaveTimer) clearTimeout(debouncedSaveTimer);
+  debouncedSaveTimer = setTimeout(() => {
+    debouncedSaveTimer = null;
+    scheduleImmediateSave(getState);
+  }, DEBOUNCED_SAVE_MS);
 }
 
 function clampRatio(r: number): number {
@@ -195,6 +301,13 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   async openProject(path: string) {
     set({ loading: true });
     try {
+      // Flush any debounced project state from the previously open
+      // project before tearing it down. closeProject already saves
+      // dirty tabs, but if the user goes File → Open without quitting,
+      // the previous project's project.json could lose a debounced
+      // sidebar/scroll write otherwise.
+      await get().persistProjectStateNow();
+
       const prev = get().unsubscribeWatch;
       if (prev) prev();
       await window.skrive.project.unwatch();
@@ -207,14 +320,60 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       });
       await window.skrive.project.watch(manifest.root);
 
+      // Phase 9: pull the persisted UI state for this project before
+      // committing the manifest, so the initial render lands with the
+      // saved sidebar geometry / tabs / cursor instead of flashing
+      // defaults.
+      const persisted = await window.skrive.persistence.loadProjectState(
+        manifest.root
+      );
+
+      const sidebarState = persisted?.sidebar ?? {
+        visible: true,
+        width: SIDEBAR_DEFAULT_WIDTH
+      };
+
       set({
         manifest,
         tabs: [],
         activeTabIndex: -1,
+        sidebarVisible: sidebarState.visible,
+        sidebarWidth: clampSidebarWidth(sidebarState.width),
         lintReport: null,
         unsubscribeWatch: unsubscribe,
         loading: false
       });
+
+      // Re-open every tab the user had last time, in order. Each tab
+      // hydrates with its persisted layout/cursor/scroll/ratio.
+      if (persisted) {
+        for (const t of persisted.tabs) {
+          const exists = manifest.files.some((f) => f.path === t.path);
+          if (!exists) continue;
+          await get().openTab(t.path, {
+            cursorLine: t.cursor.line,
+            cursorColumn: t.cursor.column,
+            scrollTop: t.scrollTop,
+            layoutMode: t.layoutMode,
+            splitDividerRatio: clampRatio(t.splitDividerRatio),
+            applyOverrides: true
+          });
+        }
+        const tabsAfter = get().tabs;
+        const target = Math.min(
+          Math.max(persisted.activeTabIndex, -1),
+          tabsAfter.length - 1
+        );
+        if (target >= 0) set({ activeTabIndex: target });
+      }
+
+      // Recent-projects + last-opened bookkeeping. Survives writes
+      // through the preferences store's debounce.
+      const prefs = usePreferencesStore.getState();
+      const projectName = manifest.config.project.name ?? basename(manifest.root) ?? manifest.root;
+      prefs.recordRecentProject(manifest.root, projectName);
+      prefs.setLastOpenedProject(manifest.root);
+
       // Surface .skrive.toml warnings once per open. Live reload is
       // a documented post-port follow-up; reopen the project to apply
       // edits and re-trigger validation.
@@ -232,8 +391,10 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const prev = get().unsubscribeWatch;
     if (prev) prev();
     await window.skrive.project.unwatch();
-    // Flush any dirty tabs first.
+    // Flush dirty tabs + persist project UI state before clearing.
     await get().saveAllDirty();
+    await get().persistProjectStateNow();
+    usePreferencesStore.getState().setLastOpenedProject(null);
     set({
       manifest: null,
       tabs: [],
@@ -273,7 +434,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   // ============================ Tabs ============================
 
-  async openTab(path: string) {
+  async openTab(path: string, hydrate?: HydrateTab) {
     const manifest = get().manifest;
     if (!manifest) return;
     const entry = findEntry(manifest, path);
@@ -294,11 +455,21 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       body: parsed.body,
       frontmatter: parsed.frontmatter,
       dirty: false,
-      layoutMode: DEFAULT_LAYOUT_MODE,
-      splitDividerRatio: DEFAULT_SPLIT_RATIO
+      layoutMode: hydrate?.applyOverrides
+        ? hydrate.layoutMode
+        : DEFAULT_LAYOUT_MODE,
+      splitDividerRatio: hydrate?.applyOverrides
+        ? hydrate.splitDividerRatio
+        : DEFAULT_SPLIT_RATIO,
+      cursorLine: hydrate?.applyOverrides ? hydrate.cursorLine : 1,
+      cursorColumn: hydrate?.applyOverrides ? hydrate.cursorColumn : 0,
+      scrollTop: hydrate?.applyOverrides ? hydrate.scrollTop : 0
     };
     const nextTabs = [...tabs, newTab];
     set({ tabs: nextTabs, activeTabIndex: nextTabs.length - 1 });
+    if (!hydrate?.applyOverrides) {
+      scheduleImmediateSave(get);
+    }
   },
 
   async closeTab(index: number) {
@@ -330,12 +501,14 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       nextActive = Math.min(activeTabIndex, nextTabs.length - 1);
     }
     set({ tabs: nextTabs, activeTabIndex: nextActive });
+    scheduleImmediateSave(get);
   },
 
   switchTab(index: number) {
     const { tabs } = get();
     if (index < 0 || index >= tabs.length) return;
     set({ activeTabIndex: index });
+    scheduleImmediateSave(get);
   },
 
   setTabBody(index: number, next: string) {
@@ -356,6 +529,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const nextTabs = tabs.slice();
     nextTabs[index] = { ...tab, layoutMode: mode };
     set({ tabs: nextTabs });
+    scheduleImmediateSave(get);
   },
 
   setTabSplitRatio(index: number, ratio: number) {
@@ -367,6 +541,32 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const nextTabs = tabs.slice();
     nextTabs[index] = { ...tab, splitDividerRatio: clamped };
     set({ tabs: nextTabs });
+    scheduleDebouncedSave(get);
+  },
+
+  setTabCursor(index: number, line: number, column: number) {
+    const { tabs } = get();
+    const tab = tabs[index];
+    if (!tab) return;
+    if (tab.cursorLine === line && tab.cursorColumn === column) return;
+    const nextTabs = tabs.slice();
+    nextTabs[index] = { ...tab, cursorLine: line, cursorColumn: column };
+    set({ tabs: nextTabs });
+    // Cursor is the blur/quit tier — don't schedule a write per
+    // keystroke. Persistence flushes on tab close, project close,
+    // and beforeunload.
+  },
+
+  setTabScrollTop(index: number, top: number) {
+    const { tabs } = get();
+    const tab = tabs[index];
+    if (!tab) return;
+    const clamped = top < 0 ? 0 : Math.round(top);
+    if (tab.scrollTop === clamped) return;
+    const nextTabs = tabs.slice();
+    nextTabs[index] = { ...tab, scrollTop: clamped };
+    set({ tabs: nextTabs });
+    scheduleDebouncedSave(get);
   },
 
   async saveActiveTab() {
@@ -468,15 +668,49 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   // ============================ Sidebar ============================
 
   setSidebarVisible(v: boolean) {
+    if (get().sidebarVisible === v) return;
     set({ sidebarVisible: v });
+    scheduleImmediateSave(get);
   },
 
   toggleSidebar() {
     set({ sidebarVisible: !get().sidebarVisible });
+    scheduleImmediateSave(get);
   },
 
   setSidebarWidth(width: number) {
-    set({ sidebarWidth: clampSidebarWidth(width) });
+    const clamped = clampSidebarWidth(width);
+    if (get().sidebarWidth === clamped) return;
+    set({ sidebarWidth: clamped });
+    scheduleDebouncedSave(get);
+  },
+
+  // ============================ Project state flush ============================
+
+  async persistProjectStateNow() {
+    if (debouncedSaveTimer) {
+      clearTimeout(debouncedSaveTimer);
+      debouncedSaveTimer = null;
+    }
+    const state = get();
+    if (!state.manifest) return;
+    const snapshot = snapshotProjectState(state);
+    if (!snapshot) return;
+    try {
+      await window.skrive.persistence.saveProjectState(
+        state.manifest.root,
+        snapshot
+      );
+    } catch (err) {
+      logProjectError('persistProjectStateNow', err);
+    }
+    // Also wait on whatever the last immediate-save scheduled, so the
+    // caller can rely on "everything is on disk" after this resolves.
+    try {
+      await lastImmediateSave;
+    } catch {
+      // already logged
+    }
   },
 
   // ============================ Backlinks panel ============================

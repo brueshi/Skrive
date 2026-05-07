@@ -533,6 +533,86 @@ body {
   opacity: 0.85;
 }
 
+.empty-recent {
+  margin-top: 1.5rem;
+  width: 100%;
+  max-width: 32rem;
+  text-align: left;
+}
+
+.empty-recent h2 {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--skrive-muted);
+}
+
+.empty-recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.empty-recent-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 4px;
+}
+
+.empty-recent-row:hover {
+  border-color: var(--skrive-fg);
+}
+
+.empty-recent-button {
+  flex: 1 1 auto;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  color: var(--skrive-fg);
+  font: inherit;
+  min-width: 0;
+}
+
+.empty-recent-name {
+  font-size: 0.92rem;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+
+.empty-recent-path {
+  font-size: 0.72rem;
+  color: var(--skrive-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty-recent-remove {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--skrive-muted);
+  padding: 0.25rem 0.5rem;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.empty-recent-remove:hover {
+  color: var(--skrive-fg);
+}
+
 .empty-pane {
   flex: 1;
   display: flex;
@@ -2243,4 +2323,339 @@ body {
 
 .fm-indicator[aria-pressed='true'] .fm-indicator-count {
   color: var(--skrive-fg);
+}
+
+/* ============================ Settings modal ============================ */
+
+.settings-dialog {
+  width: min(48rem, calc(100vw - 4rem));
+  max-height: calc(100vh - 4rem);
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-title {
+  font-size: 0.78rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--skrive-muted);
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid var(--skrive-rule);
+  margin: 0;
+}
+
+.settings-shell {
+  display: grid;
+  grid-template-columns: 11rem 1fr;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.settings-nav {
+  border-right: 1px solid var(--skrive-rule);
+  padding: 0.5rem 0;
+  background: color-mix(in srgb, var(--skrive-bg) 96%, var(--skrive-fg) 4%);
+}
+
+.settings-nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-nav-item {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  padding: 0.45rem 1rem;
+  text-align: left;
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+
+.settings-nav-item:hover {
+  color: var(--skrive-fg);
+}
+
+.settings-nav-item.active {
+  color: var(--skrive-fg);
+  border-left-color: var(--skrive-fg);
+  background: color-mix(in srgb, var(--skrive-bg) 90%, var(--skrive-fg) 10%);
+}
+
+.settings-pane {
+  padding: 1.25rem 1.5rem;
+  overflow-y: auto;
+}
+
+.settings-pane-header {
+  margin-bottom: 1rem;
+}
+
+.settings-pane-header h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--skrive-fg);
+}
+
+.settings-pane-blurb {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--skrive-muted);
+  line-height: 1.5;
+  max-width: 32rem;
+}
+
+.settings-group {
+  margin-bottom: 1.25rem;
+}
+
+.settings-group:last-child {
+  margin-bottom: 0;
+}
+
+.settings-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--skrive-muted);
+  margin-bottom: 0.5rem;
+}
+
+.settings-input {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 3px;
+  padding: 0.45rem 0.65rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--skrive-fg);
+  font-family: var(--skrive-ui-font);
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: var(--skrive-fg);
+}
+
+.settings-secondary-button {
+  background: transparent;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 3px;
+  padding: 0.4rem 0.85rem;
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--skrive-fg);
+  cursor: pointer;
+}
+
+.settings-secondary-button:hover:not(:disabled) {
+  border-color: var(--skrive-fg);
+}
+
+.settings-secondary-button:disabled {
+  color: var(--skrive-muted);
+  cursor: not-allowed;
+}
+
+/* General — toggle row (also used by Updates) */
+
+.settings-toggle-row {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  cursor: pointer;
+  padding: 0.5rem 0;
+  user-select: none;
+}
+
+.settings-toggle-row input {
+  margin-top: 0.1rem;
+}
+
+.settings-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.settings-toggle-label {
+  font-size: 0.85rem;
+  color: var(--skrive-fg);
+}
+
+.settings-toggle-desc {
+  font-size: 0.76rem;
+  color: var(--skrive-muted);
+  line-height: 1.45;
+  max-width: 30rem;
+}
+
+/* Editor — font preset grid */
+
+.settings-font-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.settings-font-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  align-items: flex-start;
+  padding: 0.55rem 0.75rem;
+  background: transparent;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--skrive-fg);
+  font: inherit;
+}
+
+.settings-font-tile:hover {
+  border-color: var(--skrive-fg);
+}
+
+.settings-font-tile.active {
+  border-color: var(--skrive-fg);
+  background: color-mix(in srgb, var(--skrive-bg) 90%, var(--skrive-fg) 10%);
+}
+
+.settings-font-tile-label {
+  font-size: 1rem;
+  letter-spacing: -0.01em;
+}
+
+.settings-font-tile-subtext {
+  font-size: 0.72rem;
+  color: var(--skrive-muted);
+  font-family: var(--skrive-ui-font);
+}
+
+/* Editor — stepped controls (size, line-height) */
+
+.settings-stepper {
+  display: inline-flex;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.settings-stepper-button {
+  padding: 0.4rem 0.7rem;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--skrive-rule);
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-stepper-button:last-child {
+  border-right: 0;
+}
+
+.settings-stepper-button:hover {
+  color: var(--skrive-fg);
+}
+
+.settings-stepper-button.active {
+  background: color-mix(in srgb, var(--skrive-bg) 90%, var(--skrive-fg) 10%);
+  color: var(--skrive-fg);
+}
+
+/* Personal dictionary */
+
+.settings-dict-input {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.settings-dict-input .settings-input {
+  flex: 1 1 auto;
+}
+
+.settings-empty {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--skrive-muted);
+  font-style: italic;
+}
+
+.settings-dict-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.settings-dict-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.5rem 0.2rem 0.65rem;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 999px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--skrive-fg);
+}
+
+.settings-dict-remove {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--skrive-muted);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+}
+
+.settings-dict-remove:hover {
+  color: var(--skrive-fg);
+}
+
+/* About / Updates — meta rows */
+
+.settings-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--skrive-rule);
+  font-size: 0.82rem;
+}
+
+.settings-meta-row:last-of-type {
+  border-bottom: 0;
+  margin-bottom: 0.5rem;
+}
+
+.settings-meta-label {
+  color: var(--skrive-muted);
+}
+
+.settings-meta-value {
+  color: var(--skrive-fg);
+  font-variant-numeric: tabular-nums;
 }

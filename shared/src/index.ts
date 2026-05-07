@@ -55,3 +55,23 @@ export {
 } from './skrive-toml';
 
 export type { LintFinding, ProjectLintReport } from './lint';
+
+export type {
+  AppUiState,
+  CursorPosition,
+  EditorFontId,
+  LayoutMode,
+  ProjectUiState,
+  RecentFile,
+  RecentProject,
+  SidebarState,
+  TabState
+} from './persistence';
+
+export {
+  DEFAULT_APP_UI_STATE,
+  DEFAULT_RECENT_PROJECTS_CAP,
+  DEFAULT_SIDEBAR_WIDTH,
+  DEFAULT_SPLIT_DIVIDER_RATIO,
+  defaultProjectUiState
+} from './persistence';

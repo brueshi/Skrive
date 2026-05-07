@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  AppUiState,
   Backlink,
   DeadLink,
   DiffOp,
@@ -8,6 +9,7 @@ import type {
   OutgoingLink,
   ProjectChange,
   ProjectManifest,
+  ProjectUiState,
   RenamePreview,
   RenameReport,
   SkriveIpc,
@@ -98,6 +100,25 @@ const api: SkriveIpc = {
         oldPath,
         newPath
       ) as Promise<RenameReport>
+  },
+  persistence: {
+    loadAppState: () =>
+      ipcRenderer.invoke('appState:load') as Promise<AppUiState>,
+    saveAppState: (state: AppUiState) =>
+      ipcRenderer.invoke('appState:save', state) as Promise<void>,
+    loadProjectState: (projectRoot: string) =>
+      ipcRenderer.invoke(
+        'projectState:load',
+        projectRoot
+      ) as Promise<ProjectUiState | null>,
+    saveProjectState: (projectRoot: string, state: ProjectUiState) =>
+      ipcRenderer.invoke(
+        'projectState:save',
+        projectRoot,
+        state
+      ) as Promise<void>,
+    revealUserData: () =>
+      ipcRenderer.invoke('appState:revealUserData') as Promise<void>
   }
 };
 

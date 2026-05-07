@@ -34,6 +34,11 @@ type Props = {
   /** Lint findings for the active file. Forwarded to the editor's
    *  gutter/tooltip surface. */
   lintFindings?: LintFinding[];
+  initialCursorLine?: number;
+  initialCursorColumn?: number;
+  initialScrollTop?: number;
+  onCursorChange?: (line: number, column: number) => void;
+  onScrollTopChange?: (top: number) => void;
 };
 
 const MIN_RATIO = 0.15;
@@ -51,7 +56,12 @@ export function SplitView({
   onChange,
   onRatioChange,
   onInternalLink,
-  lintFindings
+  lintFindings,
+  initialCursorLine,
+  initialCursorColumn,
+  initialScrollTop,
+  onCursorChange,
+  onScrollTopChange
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const dragBoundsRef = useRef<{ left: number; width: number } | null>(null);
@@ -103,6 +113,11 @@ export function SplitView({
             value={body}
             onChange={onChange}
             lintFindings={lintFindings}
+            initialCursorLine={initialCursorLine}
+            initialCursorColumn={initialCursorColumn}
+            initialScrollTop={initialScrollTop}
+            onCursorChange={onCursorChange}
+            onScrollTopChange={onScrollTopChange}
           />
         </div>
       )}
