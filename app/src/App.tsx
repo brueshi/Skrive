@@ -11,7 +11,7 @@ import { matchLayoutShortcut } from './components/editor/keys';
 import { Header, useChromeShortcuts } from './components/chrome/Header';
 import { BacklinksPanel } from './components/panels/BacklinksPanel';
 import { FrontmatterPanel } from './components/panels/FrontmatterPanel';
-import { SettingsModal } from './components/settings/SettingsModal';
+import { SettingsView } from './components/settings/SettingsView';
 import { Sidebar } from './components/sidebar/Sidebar';
 import {
   logProjectError,
@@ -47,6 +47,8 @@ export function App() {
     (s) => s.persistProjectStateNow
   );
   const openProject = useProjectStore((s) => s.openProject);
+  const activeView = useProjectStore((s) => s.activeView);
+  const toggleSettings = useProjectStore((s) => s.toggleSettings);
   const hydratePreferences = usePreferencesStore((s) => s.hydrate);
   const persistPreferencesNow = usePreferencesStore((s) => s.persistNow);
   const preferencesHydrated = usePreferencesStore((s) => s.hydrated);
@@ -65,7 +67,6 @@ export function App() {
   useTypographyVars();
 
   const [appVersion, setAppVersion] = useState('0.0.0');
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Boot: hydrate preferences and read the app version from the shell
   // exactly once. Both are fire-and-forget — failure is logged, not
@@ -140,7 +141,9 @@ export function App() {
         toggleFrontmatterPanel();
         return;
       }
-      // ⌘, — open settings (macOS standard).
+      // ⌘, — toggle the settings view in the workspace area.
+      // Only effective when a project is open; settings live inside
+      // the project shell so they can't render without one.
       if (
         (e.metaKey || e.ctrlKey) &&
         !e.shiftKey &&
@@ -148,7 +151,7 @@ export function App() {
         e.key === ','
       ) {
         e.preventDefault();
-        setSettingsOpen((open) => !open);
+        if (manifest) toggleSettings();
         return;
       }
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
@@ -180,7 +183,9 @@ export function App() {
     toggleSidebar,
     openProjectFromDialog,
     saveActiveTab,
-    toggleFrontmatterPanel
+    toggleFrontmatterPanel,
+    manifest,
+    toggleSettings
   ]);
 
   // Debounced auto-save flushes any dirty tabs.
@@ -232,14 +237,16 @@ export function App() {
 
   return (
     <div className="app-root">
-      <Header onOpenSettings={() => setSettingsOpen(true)} />
+      <Header />
 
       <main className="app-body">
         {manifest ? (
           <>
             <Sidebar />
             <section className="workspace">
-              {activeTab ? (
+              {activeView === 'settings' ? (
+                <SettingsView appVersion={appVersion} />
+              ) : activeTab ? (
                 <SplitView
                   key={activeTab.path}
                   mode={activeTab.layoutMode}
@@ -329,11 +336,6 @@ export function App() {
 
       <BacklinksPanel />
       <FrontmatterPanel />
-      <SettingsModal
-        open={settingsOpen}
-        appVersion={appVersion}
-        onClose={() => setSettingsOpen(false)}
-      />
 
       {diffPlaygroundOpen && (
         <DiffPlayground onClose={() => setDiffPlaygroundOpen(false)} />

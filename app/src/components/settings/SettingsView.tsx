@@ -1,16 +1,17 @@
-// Settings modal. Built on Radix Dialog (focus trap, ESC, scroll lock).
-// Phase 9 sections: General, Editor, Personal dictionary, Updates,
-// About. Saves are debounced through the preferences store; this
-// component just dispatches actions on every change.
+// Settings as an in-workspace view (Phase 9). Lives where the
+// SplitView normally lives; the header + sidebar stay put. Invoked
+// only via ⌘, — no chrome affordance.
+//
+// Sections: General, Editor, Personal dictionary, Updates, About.
+// Saves are debounced through the preferences store; this component
+// just dispatches actions on every change.
 //
 // The Updates section's "Check for updates…" button is rendered but
-// inert — `electron-updater` wiring is post-Phase 9 (release-pipeline
-// follow-up). The toggle state still persists.
+// inert — `electron-updater` wiring is post-Phase 9.
 
-import * as Dialog from '@radix-ui/react-dialog';
-import { useState } from 'react';
-import type { EditorFontId } from '@skrive/shared';
+import { useEffect, useState } from 'react';
 import { usePreferencesStore } from '../../stores/preferences';
+import { useProjectStore } from '../../stores/project';
 import {
   EDITOR_FONT_PRESETS,
   FONT_SIZE_STEPS,
@@ -18,6 +19,7 @@ import {
   lineHeightLabel
 } from '../../lib/typography';
 import { notify } from '../../lib/notify';
+import { IconX } from '../icons/IconX';
 
 type SectionId = 'general' | 'editor' | 'dictionary' | 'updates' | 'about';
 
@@ -32,62 +34,69 @@ const SECTIONS: { id: SectionId; label: string }[] = [
 const APP_LICENSE_LABEL = 'PolyForm Noncommercial 1.0.0';
 
 type Props = {
-  open: boolean;
   appVersion: string;
-  onClose: () => void;
 };
 
-export function SettingsModal({ open, appVersion, onClose }: Props) {
+export function SettingsView({ appVersion }: Props) {
   const [section, setSection] = useState<SectionId>('general');
+  const closeSettings = useProjectStore((s) => s.setActiveView);
+
+  // Escape returns to the editor. Keystroke is captured here rather
+  // than at app-level so it doesn't fight other modals' Escape
+  // handlers when they're open.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeSettings('editor');
+      }
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [closeSettings]);
 
   return (
-    <Dialog.Root
-      open={open}
-      onOpenChange={(o) => {
-        if (!o) onClose();
-      }}
-    >
-      <Dialog.Portal>
-        <Dialog.Overlay className="modal-backdrop" />
-        <Dialog.Content
-          className="modal-dialog settings-dialog"
-          aria-describedby={undefined}
+    <section className="settings-view" aria-label="Settings">
+      <header className="settings-view-header">
+        <h1 className="settings-view-title">Settings</h1>
+        <button
+          type="button"
+          className="settings-close"
+          aria-label="Close settings"
+          title="Close settings  Esc"
+          onClick={() => closeSettings('editor')}
         >
-          <Dialog.Title className="settings-title">Settings</Dialog.Title>
-          <div className="settings-shell">
-            <nav className="settings-nav" aria-label="Settings sections">
-              <ul className="settings-nav-list">
-                {SECTIONS.map((s) => (
-                  <li key={s.id}>
-                    <button
-                      type="button"
-                      className={`settings-nav-item${
-                        section === s.id ? ' active' : ''
-                      }`}
-                      onClick={() => setSection(s.id)}
-                      aria-current={section === s.id ? 'page' : undefined}
-                    >
-                      {s.label}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </nav>
-            <div className="settings-pane">
-              {section === 'general' && <GeneralSection />}
-              {section === 'editor' && <EditorSection />}
-              {section === 'dictionary' && <DictionarySection />}
-              {section === 'updates' && (
-                <UpdatesSection appVersion={appVersion} />
-              )}
-              {section === 'about' && (
-                <AboutSection appVersion={appVersion} />
-              )}
-            </div>
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+          <IconX size={16} />
+        </button>
+      </header>
+      <div className="settings-shell">
+        <nav className="settings-nav" aria-label="Settings sections">
+          <ul className="settings-nav-list">
+            {SECTIONS.map((s) => (
+              <li key={s.id}>
+                <button
+                  type="button"
+                  className={`settings-nav-item${
+                    section === s.id ? ' active' : ''
+                  }`}
+                  onClick={() => setSection(s.id)}
+                  aria-current={section === s.id ? 'page' : undefined}
+                >
+                  {s.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <div className="settings-pane">
+          {section === 'general' && <GeneralSection />}
+          {section === 'editor' && <EditorSection />}
+          {section === 'dictionary' && <DictionarySection />}
+          {section === 'updates' && <UpdatesSection appVersion={appVersion} />}
+          {section === 'about' && <AboutSection appVersion={appVersion} />}
+        </div>
+      </div>
+    </section>
   );
 }
 

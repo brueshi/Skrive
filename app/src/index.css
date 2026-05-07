@@ -2325,31 +2325,53 @@ body {
   color: var(--skrive-fg);
 }
 
-/* ============================ Settings modal ============================ */
+/* ============================ Settings view ============================ */
 
-.settings-dialog {
-  width: min(48rem, calc(100vw - 4rem));
-  max-height: calc(100vh - 4rem);
-  padding: 0;
-  overflow: hidden;
+.settings-view {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--skrive-bg);
+  font-family: var(--skrive-ui-font);
 }
 
-.settings-title {
-  font-size: 0.78rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--skrive-muted);
-  padding: 0.85rem 1.25rem;
+.settings-view-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
   border-bottom: 1px solid var(--skrive-rule);
+}
+
+.settings-view-title {
   margin: 0;
+  font-size: 0.95rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--skrive-fg);
+}
+
+.settings-close {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--skrive-muted);
+  padding: 0.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+}
+
+.settings-close:hover {
+  color: var(--skrive-fg);
+  background: color-mix(in srgb, var(--skrive-bg) 85%, var(--skrive-fg) 15%);
 }
 
 .settings-shell {
   display: grid;
-  grid-template-columns: 11rem 1fr;
+  grid-template-columns: 12rem 1fr;
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -2392,8 +2414,10 @@ body {
 }
 
 .settings-pane {
-  padding: 1.25rem 1.5rem;
+  padding: 1.5rem 2rem;
   overflow-y: auto;
+  max-width: 56rem;
+  width: 100%;
 }
 
 .settings-pane-header {

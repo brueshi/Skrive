@@ -42,6 +42,8 @@ const DEFAULT_LAYOUT_MODE: LayoutMode = 'split';
 const DEFAULT_SPLIT_RATIO = 0.5;
 const DEBOUNCED_SAVE_MS = 1000;
 
+export type WorkspaceView = 'editor' | 'settings';
+
 export type Tab = {
   path: string;
   /** Body without the leading frontmatter block. The editor reads/writes
@@ -78,6 +80,12 @@ type State = {
    *  Header's FM·N indicator or via ⌘⇧F. Mutually exclusive with the
    *  backlinks panel — opening one closes the other. */
   frontmatterPanelOpen: boolean;
+
+  /** What's filling the workspace area. `'editor'` is the normal
+   *  SplitView; `'settings'` is the project-scoped Settings page,
+   *  invoked via ⌘, (Phase 9). Resets to `'editor'` on every project
+   *  open / close. */
+  activeView: WorkspaceView;
 
   /** Most recent project-wide lint report. Refreshed after open and
    *  after any watcher event resolves. Null between project loads.
@@ -118,6 +126,9 @@ type Actions = {
   setSidebarVisible(v: boolean): void;
   toggleSidebar(): void;
   setSidebarWidth(width: number): void;
+
+  setActiveView(view: WorkspaceView): void;
+  toggleSettings(): void;
 
   /** Flush any pending project-state debounce immediately. Used by
    *  the beforeunload handler and project close. Safe to call when no
@@ -286,6 +297,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   backlinksPanelOpen: false,
   frontmatterPanelOpen: false,
+  activeView: 'editor',
   lintReport: null,
 
   unsubscribeWatch: null,
@@ -339,6 +351,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         activeTabIndex: -1,
         sidebarVisible: sidebarState.visible,
         sidebarWidth: clampSidebarWidth(sidebarState.width),
+        activeView: 'editor',
         lintReport: null,
         unsubscribeWatch: unsubscribe,
         loading: false
@@ -399,6 +412,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       manifest: null,
       tabs: [],
       activeTabIndex: -1,
+      activeView: 'editor',
       lintReport: null,
       unsubscribeWatch: null
     });
@@ -683,6 +697,20 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     if (get().sidebarWidth === clamped) return;
     set({ sidebarWidth: clamped });
     scheduleDebouncedSave(get);
+  },
+
+  // ============================ Workspace view ============================
+
+  setActiveView(view: WorkspaceView) {
+    if (get().activeView === view) return;
+    set({ activeView: view });
+    // Workspace view isn't part of the persisted ProjectUiState — it
+    // resets on every open. No save scheduled.
+  },
+
+  toggleSettings() {
+    const next = get().activeView === 'settings' ? 'editor' : 'settings';
+    set({ activeView: next });
   },
 
   // ============================ Project state flush ============================
