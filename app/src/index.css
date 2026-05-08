@@ -1732,51 +1732,6 @@ body {
   user-select: none;
 }
 
-/* Dev-only diff playground overlay (Phase 5). Replaced by HistoryPanel
-   in Phase 10; kept behind a hidden ⌘⇧D toggle for parity A/B. */
-.diff-playground {
-  position: absolute;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  background: var(--skrive-bg);
-}
-
-.diff-playground-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem 0.5rem 88px;
-  border-bottom: 1px solid var(--skrive-rule);
-  font-size: 12px;
-  color: var(--skrive-muted);
-  flex-shrink: 0;
-  -webkit-app-region: drag;
-}
-
-.diff-playground-toolbar select,
-.diff-playground-toolbar button {
-  -webkit-app-region: no-drag;
-}
-
-.diff-playground-toolbar select,
-.diff-playground-toolbar button {
-  font: inherit;
-  background: transparent;
-  border: 1px solid var(--skrive-rule);
-  border-radius: 3px;
-  padding: 0.2rem 0.5rem;
-  color: var(--skrive-fg);
-  cursor: pointer;
-}
-
-.diff-playground-output {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-}
-
 /* ===================== Backlinks panel ===================== */
 
 .bl-panel-wrapper {
@@ -2856,4 +2811,244 @@ body {
   color: inherit;
   font-weight: 600;
   padding: 0 1px;
+}
+
+/* ===================== History panel (Phase 10) ===================== */
+
+.hi-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 22px;
+  padding: 0 0.5rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  transition:
+    border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hi-indicator:hover {
+  color: var(--skrive-fg);
+  border-color: var(--skrive-rule);
+}
+
+.hi-indicator[aria-pressed='true'] {
+  color: var(--skrive-fg);
+  border-color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.hi-panel-wrapper {
+  position: absolute;
+  top: 48px;
+  right: 12px;
+  width: 26rem;
+  max-width: calc(100vw - 24px);
+  z-index: 100;
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+
+.hi-panel-wrapper.hi-panel-open {
+  grid-template-rows: 1fr;
+  pointer-events: auto;
+}
+
+.hi-panel {
+  overflow: hidden;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-fg);
+  border-radius: 4px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  opacity: 0;
+  transition: opacity 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  max-height: 50vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.hi-panel-wrapper.hi-panel-open .hi-panel {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hi-panel-wrapper,
+  .hi-panel {
+    transition: none;
+  }
+}
+
+.hi-panel-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  border-bottom: 1px solid var(--skrive-rule);
+  flex-shrink: 0;
+  background: var(--skrive-bg);
+}
+
+.hi-panel-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  color: var(--skrive-fg);
+  flex-shrink: 0;
+}
+
+.hi-panel-target {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--skrive-muted);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.hi-panel-mode {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--skrive-muted);
+  border: 1px solid var(--skrive-rule);
+  border-radius: 3px;
+  padding: 0 0.35rem;
+  flex-shrink: 0;
+}
+
+.hi-panel-count {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--skrive-muted);
+  flex-shrink: 0;
+}
+
+.hi-panel-body {
+  padding: 0.25rem 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  font-family: var(--skrive-ui-font);
+  font-size: 13px;
+}
+
+.hi-empty {
+  margin: 0;
+  padding: 0.5rem 0.875rem 0.75rem;
+  font-size: 12px;
+  color: var(--skrive-muted);
+  line-height: 1.5;
+}
+
+.hi-notice {
+  margin: 0;
+  padding: 0.55rem 0.875rem;
+  font-size: 12px;
+  color: var(--skrive-muted);
+  background: var(--skrive-rule);
+  border-bottom: 1px solid var(--skrive-rule);
+  line-height: 1.45;
+}
+
+.hi-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.hi-row + .hi-row {
+  border-top: 1px dashed var(--skrive-rule);
+}
+
+.hi-row-button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 0.45rem 0.875rem;
+  font: inherit;
+  color: var(--skrive-fg);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hi-row-button:hover,
+.hi-row-button:focus-visible {
+  background: var(--skrive-rule);
+  outline: none;
+}
+
+.hi-row-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.hi-row-button:disabled:hover {
+  background: transparent;
+}
+
+.hi-row-button.hi-row-pinned {
+  background: var(--skrive-rule);
+}
+
+.hi-row-line-1 {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  width: 100%;
+  overflow: hidden;
+}
+
+.hi-row-primary {
+  font-size: 13px;
+  color: var(--skrive-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.hi-row-anchor {
+  font-size: 11px;
+  color: var(--skrive-muted);
+  flex-shrink: 0;
+}
+
+.hi-row-line-2 {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--skrive-muted);
+  width: 100%;
+  overflow: hidden;
+}
+
+.hi-row-meta {
+  flex-shrink: 0;
+}
+
+.hi-row-time {
+  flex-shrink: 0;
+  opacity: 0.85;
 }

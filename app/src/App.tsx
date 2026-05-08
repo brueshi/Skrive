@@ -6,11 +6,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
 import { SplitView } from './components/editor/SplitView';
-import { DiffPlayground } from './components/editor/DiffPlayground';
+import { DiffView } from './components/editor/DiffView';
 import { matchLayoutShortcut } from './components/editor/keys';
 import { Header, useChromeShortcuts } from './components/chrome/Header';
 import { BacklinksPanel } from './components/panels/BacklinksPanel';
 import { FrontmatterPanel } from './components/panels/FrontmatterPanel';
+import { HistoryPanel } from './components/panels/HistoryPanel';
 import { SettingsView } from './components/settings/SettingsView';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { SearchModal } from './components/modals/SearchModal';
@@ -41,6 +42,15 @@ export function App() {
   const toggleFrontmatterPanel = useProjectStore(
     (s) => s.toggleFrontmatterPanel
   );
+  const toggleBacklinksPanel = useProjectStore(
+    (s) => s.toggleBacklinksPanel
+  );
+  const toggleHistoryPanel = useProjectStore((s) => s.toggleHistoryPanel);
+  const setTabDiffMode = useProjectStore((s) => s.setTabDiffMode);
+  const setTabDiffDividerRatio = useProjectStore(
+    (s) => s.setTabDiffDividerRatio
+  );
+  const closeDiff = useProjectStore((s) => s.closeDiff);
   const lintReport = useProjectStore((s) => s.lintReport);
   const setTabCursor = useProjectStore((s) => s.setTabCursor);
   const setTabScrollTop = useProjectStore((s) => s.setTabScrollTop);
@@ -106,10 +116,6 @@ export function App() {
     });
   }, [preferencesHydrated, manifest, lastOpenedProject, openProject]);
 
-  // Phase 5 dev surface: ⌘⇧D toggles a diff playground overlay so the
-  // new DiffView can be A/B'd against v0.1.6 before HistoryPanel wires
-  // the real surface in Phase 10. Removed when HistoryPanel ships.
-  const [diffPlaygroundOpen, setDiffPlaygroundOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -124,17 +130,6 @@ export function App() {
         if (activeTabIndex >= 0) setTabLayoutMode(activeTabIndex, layout);
         return;
       }
-      // ⌘⇧D — toggle diff playground (Phase 5 dev surface).
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        e.shiftKey &&
-        !e.altKey &&
-        (e.key === 'd' || e.key === 'D')
-      ) {
-        e.preventDefault();
-        setDiffPlaygroundOpen((open) => !open);
-        return;
-      }
       // ⌘⇧F — toggle frontmatter panel.
       if (
         (e.metaKey || e.ctrlKey) &&
@@ -144,6 +139,34 @@ export function App() {
       ) {
         e.preventDefault();
         toggleFrontmatterPanel();
+        return;
+      }
+      // ⌘⇧B — toggle the backlinks panel. Requires an active tab —
+      // backlinks are contextual to the file being viewed.
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        !e.altKey &&
+        (e.key === 'b' || e.key === 'B')
+      ) {
+        if (activeTab) {
+          e.preventDefault();
+          toggleBacklinksPanel();
+        }
+        return;
+      }
+      // ⌘⇧H — toggle the version-history panel. Same posture as the
+      // other top-right panels.
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        !e.altKey &&
+        (e.key === 'h' || e.key === 'H')
+      ) {
+        if (activeTab) {
+          e.preventDefault();
+          toggleHistoryPanel();
+        }
         return;
       }
       // ⌘F — toggle the project-wide search modal. Skrive's "find" is
@@ -200,11 +223,14 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     activeTabIndex,
+    activeTab,
     setTabLayoutMode,
     toggleSidebar,
     openProjectFromDialog,
     saveActiveTab,
     toggleFrontmatterPanel,
+    toggleBacklinksPanel,
+    toggleHistoryPanel,
     manifest,
     toggleSettings
   ]);
@@ -267,6 +293,25 @@ export function App() {
             <section className="workspace">
               {activeView === 'settings' ? (
                 <SettingsView appVersion={appVersion} />
+              ) : activeTab && activeTab.diff ? (
+                <DiffView
+                  mode={activeTab.diff.diffMode}
+                  before={{
+                    label: activeTab.diff.before.label,
+                    timestampMs: activeTab.diff.before.timestampMs
+                  }}
+                  after={{
+                    label: activeTab.diff.after.label,
+                    timestampMs: activeTab.diff.after.timestampMs
+                  }}
+                  dividerRatio={activeTab.diff.dividerRatio}
+                  rows={activeTab.diff.rows}
+                  onModeChange={(mode) => setTabDiffMode(activeTabIndex, mode)}
+                  onDividerChange={(ratio) =>
+                    setTabDiffDividerRatio(activeTabIndex, ratio)
+                  }
+                  onClose={closeDiff}
+                />
               ) : activeTab ? (
                 <SplitView
                   key={activeTab.path}
@@ -361,10 +406,7 @@ export function App() {
 
       <BacklinksPanel />
       <FrontmatterPanel />
-
-      {diffPlaygroundOpen && (
-        <DiffPlayground onClose={() => setDiffPlaygroundOpen(false)} />
-      )}
+      <HistoryPanel />
 
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
 

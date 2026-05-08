@@ -5,10 +5,11 @@
 // lights float over our chrome. We pad the header on macOS only;
 // Windows has native chrome above the app and doesn't need the offset.
 //
-// Panel-toggle buttons (frontmatter / backlinks / dictionary / history)
-// are intentionally absent at v0.2 Phase 4 — the panels they target
-// land in Phases 6/7/9/10. Their slot lives between the project menu
-// and the mode toggle, ready to receive them.
+// Panel-toggle buttons live between the tab strip and the mode toggle:
+// FM (frontmatter), backlinks, HI (history). The dictionary panel is
+// post-port. When the active tab is showing a diff, the editor mode
+// toggle hides — DiffView carries its own diff-raw / diff-preview
+// toggle and exit affordance.
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
@@ -71,10 +72,14 @@ export function Header() {
   const toggleFrontmatterPanel = useProjectStore(
     (s) => s.toggleFrontmatterPanel
   );
+  const historyPanelOpen = useProjectStore((s) => s.historyPanelOpen);
+  const toggleHistoryPanel = useProjectStore((s) => s.toggleHistoryPanel);
+  const historyMode = useProjectStore((s) => s.historyMode);
 
   const frontmatterCount = activeTab
     ? Object.keys(activeTab.frontmatter).length
     : 0;
+  const inDiff = !!activeTab?.diff;
 
   const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null);
 
@@ -189,13 +194,30 @@ export function Header() {
               data-panel-toggle="backlinks"
               aria-label="Toggle backlinks panel"
               aria-pressed={backlinksPanelOpen}
-              title="Backlinks"
+              title="Backlinks  ⌘⇧B"
               onClick={() => toggleBacklinksPanel()}
             >
               <IconBacklinks size={16} />
             </button>
           )}
           {activeTab && (
+            <button
+              type="button"
+              className="hi-indicator"
+              data-panel-toggle="history"
+              aria-label="Toggle history panel"
+              aria-pressed={historyPanelOpen}
+              title={
+                historyMode === 'git'
+                  ? 'History (git)  ⌘⇧H'
+                  : 'History (checkpoints)  ⌘⇧H'
+              }
+              onClick={() => toggleHistoryPanel()}
+            >
+              <span>HI</span>
+            </button>
+          )}
+          {activeTab && !inDiff && (
             <div className="mode-toggle" role="group" aria-label="Layout mode">
               <button
                 type="button"

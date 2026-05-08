@@ -17,6 +17,9 @@ import {
   defaultProjectUiState,
   type FileEntry,
   type FrontmatterMap,
+  type HistoryEntry,
+  type HistoryMode,
+  type LineDiffRow,
   type ProjectChange,
   type ProjectLintReport,
   type ProjectManifest,
@@ -24,6 +27,7 @@ import {
   type TabState
 } from '@skrive/shared';
 import type { LayoutMode } from '../components/editor/SplitView';
+import { computeLineDiff } from '../lib/diff/line-diff';
 import {
   mightHaveLeadingFrontmatter,
   parseFrontmatter,
@@ -55,6 +59,33 @@ export type PendingSelection = {
   nonce: number;
 };
 
+/** One side of a side-by-side diff. `source` distinguishes git
+ *  blobs, on-disk checkpoints, and the live working content; the
+ *  `label` is what DiffView renders on the pane header. */
+export type DiffSide = {
+  content: string;
+  timestampMs: number;
+  label: string;
+  source: 'git' | 'checkpoint' | 'current';
+};
+
+/** Active diff state on a tab. Diff lives at the tab level so
+ *  switching tabs preserves it; closing the diff (Escape / X)
+ *  restores `restoreMode` so the user lands back where they started.
+ *  Not persisted — diff is an ephemeral overlay. */
+export type TabDiffState = {
+  before: DiffSide;
+  after: DiffSide;
+  rows: LineDiffRow[];
+  dividerRatio: number;
+  /** Editor mode the tab returns to on close. Diff entry from
+   *  'preview' returns to 'preview'; anything else returns to 'raw'.
+   *  Diff entry from 'split' is blocked at the panel layer. */
+  restoreMode: 'raw' | 'preview';
+  /** Sub-mode controlling DiffView's pane content. */
+  diffMode: 'diff-raw' | 'diff-preview';
+};
+
 export type Tab = {
   path: string;
   /** Body without the leading frontmatter block. The editor reads/writes
@@ -75,6 +106,9 @@ export type Tab = {
   /** Search / backlinks jump request. Editor consumes via nonce-tracked
    *  effect; cleared after apply. Not persisted. */
   pendingSelection: PendingSelection | null;
+  /** Active history-driven diff overlay. When non-null, the workspace
+   *  area renders DiffView in place of SplitView for this tab. */
+  diff: TabDiffState | null;
 };
 
 type State = {
@@ -94,6 +128,20 @@ type State = {
    *  Header's FM·N indicator or via ⌘⇧F. Mutually exclusive with the
    *  backlinks panel — opening one closes the other. */
   frontmatterPanelOpen: boolean;
+
+  /** Floating top-right history list (phase 10). One row per git
+   *  commit or checkpoint touching the active tab. Mutually exclusive
+   *  with backlinks + frontmatter. */
+  historyPanelOpen: boolean;
+  /** Project-level history backend, decided at project:open. Drives
+   *  the panel's mode badge and gates the manual-checkpoint action. */
+  historyMode: HistoryMode | null;
+  /** History rows for the active tab. Refreshed on tab change + on
+   *  watcher events that touch the tab's path. */
+  historyOfActive: HistoryEntry[];
+  /** The "baseline" entry for shift-click pair compares. Stashed by
+   *  every single click; consumed by the next shift-click. */
+  historyPairBaseId: string | null;
 
   /** What's filling the workspace area. `'editor'` is the normal
    *  SplitView; `'settings'` is the project-scoped Settings page,
@@ -167,6 +215,30 @@ type Actions = {
   setFrontmatterPanelOpen(v: boolean): void;
   toggleFrontmatterPanel(): void;
   closeFrontmatterPanel(): void;
+
+  setHistoryPanelOpen(v: boolean): void;
+  toggleHistoryPanel(): void;
+  closeHistoryPanel(): void;
+  setHistoryPairBaseId(id: string | null): void;
+  /** Refresh history rows for the active tab. Called when the panel
+   *  opens, when the active tab changes, and when the watcher reports
+   *  a change to the active path. Best-effort. */
+  refreshHistory(): Promise<void>;
+  /** Render the diff overlay on the active tab. Single click passes
+   *  `(entry, null)` — diff against current. Shift-click passes
+   *  `(entry, baseline)` — pair-diff. Older side always lands on the
+   *  "before" pane regardless of click order. */
+  openDiffForEntry(
+    entry: HistoryEntry,
+    baseline: HistoryEntry | null
+  ): Promise<void>;
+  /** Close the diff overlay; restore the editor mode it replaced. */
+  closeDiff(): void;
+  setTabDiffMode(index: number, mode: 'diff-raw' | 'diff-preview'): void;
+  setTabDiffDividerRatio(index: number, ratio: number): void;
+  /** Pin the active tab's current contents as a manual checkpoint.
+   *  No-op in git mode (the panel hides the action). */
+  createManualCheckpoint(name: string): Promise<void>;
 
   /** Re-run the lint engine against the current manifest + open tabs.
    *  Pulls deadLinks + orphanedFiles fresh from IPC. Safe to call when
@@ -299,6 +371,55 @@ function findEntry(
  * frontmatter with the body. Mutates `tab.frontmatter` and `tab.body`
  * if absorption happened so the panel reflects the absorbed fields.
  */
+/**
+ * Build a DiffSide from a HistoryEntry. Fetches the historical content
+ * via the appropriate IPC; the returned `label` is short (subject
+ * line, manual pin name, or "Autosave") so the DiffView pane header
+ * stays scannable.
+ */
+async function resolveDiffSide(
+  relPath: string,
+  entry: HistoryEntry
+): Promise<DiffSide> {
+  if (entry.source === 'git') {
+    const content = await window.skrive.history.readGitBlobAt(
+      relPath,
+      entry.sha
+    );
+    return {
+      content,
+      timestampMs: entry.timestampMs,
+      label: entry.subject || entry.shortSha,
+      source: 'git'
+    };
+  }
+  const content = await window.skrive.history.readCheckpointAt(
+    relPath,
+    entry.id
+  );
+  const fallback = entry.kind === 'manual' ? 'Pinned' : 'Autosave';
+  return {
+    content,
+    timestampMs: entry.timestampMs,
+    label: entry.name ?? fallback,
+    source: 'checkpoint'
+  };
+}
+
+/** "Current" side of the diff — the live, possibly-dirty body of the
+ *  active tab, exactly the bytes a save would emit. We re-stamp
+ *  frontmatter on the fly via buildSavePayload so the diff matches
+ *  what the next save writes. */
+function resolveCurrentSide(tab: Tab): DiffSide {
+  const writable: Tab = { ...tab, frontmatter: { ...tab.frontmatter } };
+  return {
+    content: buildSavePayload(writable),
+    timestampMs: Date.now(),
+    label: 'Current',
+    source: 'current'
+  };
+}
+
 function buildSavePayload(tab: Tab): string {
   // Absorb a leading frontmatter block the user typed into the editor.
   // Only attempts this when the structured map is currently empty —
@@ -328,6 +449,10 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   backlinksPanelOpen: false,
   frontmatterPanelOpen: false,
+  historyPanelOpen: false,
+  historyMode: null,
+  historyOfActive: [],
+  historyPairBaseId: null,
   activeView: 'editor',
   lintReport: null,
 
@@ -376,6 +501,17 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         width: SIDEBAR_DEFAULT_WIDTH
       };
 
+      // Phase 10: pull the project's history mode (git vs checkpoint)
+      // up-front so HI button + history panel pick it up on first
+      // render. Best-effort — fall back to checkpoint if the IPC
+      // hiccups; history listing degrades gracefully on either path.
+      let historyMode: HistoryMode = 'checkpoint';
+      try {
+        historyMode = await window.skrive.history.getMode();
+      } catch (err) {
+        logProjectError('history:getMode', err);
+      }
+
       set({
         manifest,
         tabs: [],
@@ -384,6 +520,10 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         sidebarWidth: clampSidebarWidth(sidebarState.width),
         activeView: 'editor',
         lintReport: null,
+        historyMode,
+        historyOfActive: [],
+        historyPairBaseId: null,
+        historyPanelOpen: false,
         unsubscribeWatch: unsubscribe,
         loading: false
       });
@@ -445,6 +585,10 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       activeTabIndex: -1,
       activeView: 'editor',
       lintReport: null,
+      historyMode: null,
+      historyOfActive: [],
+      historyPairBaseId: null,
+      historyPanelOpen: false,
       unsubscribeWatch: null
     });
   },
@@ -509,7 +653,8 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       cursorLine: hydrate?.applyOverrides ? hydrate.cursorLine : 1,
       cursorColumn: hydrate?.applyOverrides ? hydrate.cursorColumn : 0,
       scrollTop: hydrate?.applyOverrides ? hydrate.scrollTop : 0,
-      pendingSelection: null
+      pendingSelection: null,
+      diff: null
     };
     const nextTabs = [...tabs, newTab];
     set({ tabs: nextTabs, activeTabIndex: nextTabs.length - 1 });
@@ -803,7 +948,11 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   setBacklinksPanelOpen(v: boolean) {
     if (v) {
-      set({ backlinksPanelOpen: true, frontmatterPanelOpen: false });
+      set({
+        backlinksPanelOpen: true,
+        frontmatterPanelOpen: false,
+        historyPanelOpen: false
+      });
     } else {
       set({ backlinksPanelOpen: false });
     }
@@ -812,7 +961,11 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   toggleBacklinksPanel() {
     const next = !get().backlinksPanelOpen;
     if (next) {
-      set({ backlinksPanelOpen: true, frontmatterPanelOpen: false });
+      set({
+        backlinksPanelOpen: true,
+        frontmatterPanelOpen: false,
+        historyPanelOpen: false
+      });
     } else {
       set({ backlinksPanelOpen: false });
     }
@@ -822,7 +975,11 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   setFrontmatterPanelOpen(v: boolean) {
     if (v) {
-      set({ frontmatterPanelOpen: true, backlinksPanelOpen: false });
+      set({
+        frontmatterPanelOpen: true,
+        backlinksPanelOpen: false,
+        historyPanelOpen: false
+      });
     } else {
       set({ frontmatterPanelOpen: false });
     }
@@ -831,7 +988,11 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   toggleFrontmatterPanel() {
     const next = !get().frontmatterPanelOpen;
     if (next) {
-      set({ frontmatterPanelOpen: true, backlinksPanelOpen: false });
+      set({
+        frontmatterPanelOpen: true,
+        backlinksPanelOpen: false,
+        historyPanelOpen: false
+      });
     } else {
       set({ frontmatterPanelOpen: false });
     }
@@ -839,6 +1000,152 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   closeFrontmatterPanel() {
     set({ frontmatterPanelOpen: false });
+  },
+
+  // ============================ History panel ============================
+
+  setHistoryPanelOpen(v: boolean) {
+    if (v) {
+      set({
+        historyPanelOpen: true,
+        frontmatterPanelOpen: false,
+        backlinksPanelOpen: false
+      });
+      void get().refreshHistory();
+    } else {
+      set({ historyPanelOpen: false });
+    }
+  },
+
+  toggleHistoryPanel() {
+    const next = !get().historyPanelOpen;
+    if (next) {
+      set({
+        historyPanelOpen: true,
+        frontmatterPanelOpen: false,
+        backlinksPanelOpen: false
+      });
+      void get().refreshHistory();
+    } else {
+      set({ historyPanelOpen: false });
+    }
+  },
+
+  closeHistoryPanel() {
+    set({ historyPanelOpen: false });
+  },
+
+  setHistoryPairBaseId(id) {
+    set({ historyPairBaseId: id });
+  },
+
+  async refreshHistory() {
+    const tab = selectActiveTab(get());
+    if (!tab) {
+      set({ historyOfActive: [] });
+      return;
+    }
+    try {
+      const rows = await window.skrive.history.listForFile(tab.path);
+      // Drop the result if the active tab changed mid-fetch.
+      const after = selectActiveTab(get());
+      if (!after || after.path !== tab.path) return;
+      set({ historyOfActive: rows });
+    } catch (err) {
+      logProjectError('history:listForFile', err);
+      set({ historyOfActive: [] });
+    }
+  },
+
+  async openDiffForEntry(entry, baseline) {
+    const { tabs, activeTabIndex } = get();
+    const tab = tabs[activeTabIndex];
+    if (!tab) return;
+    if (tab.layoutMode === 'split') return;
+    const restoreMode: 'raw' | 'preview' =
+      tab.layoutMode === 'preview' ? 'preview' : 'raw';
+    const diffMode: 'diff-raw' | 'diff-preview' =
+      restoreMode === 'preview' ? 'diff-preview' : 'diff-raw';
+    try {
+      const beforeEntry: HistoryEntry = baseline ?? entry;
+      const afterEntry: HistoryEntry | null = baseline ? entry : null;
+      const [first, second] = await Promise.all([
+        resolveDiffSide(tab.path, beforeEntry),
+        afterEntry ? resolveDiffSide(tab.path, afterEntry) : resolveCurrentSide(tab)
+      ]);
+      const [left, right] =
+        first.timestampMs <= second.timestampMs
+          ? [first, second]
+          : [second, first];
+      const rows = await computeLineDiff(left.content, right.content);
+      // Re-check active tab in case it changed mid-fetch.
+      const stateAfter = get();
+      const current = stateAfter.tabs[stateAfter.activeTabIndex];
+      if (!current || current.path !== tab.path) return;
+      const nextTabs = stateAfter.tabs.slice();
+      nextTabs[stateAfter.activeTabIndex] = {
+        ...current,
+        diff: {
+          before: left,
+          after: right,
+          rows,
+          dividerRatio: 0.5,
+          restoreMode,
+          diffMode
+        }
+      };
+      set({
+        tabs: nextTabs,
+        historyPairBaseId: null,
+        historyPanelOpen: false
+      });
+    } catch (err) {
+      logProjectError('openDiffForEntry', err);
+    }
+  },
+
+  closeDiff() {
+    const { tabs, activeTabIndex } = get();
+    const tab = tabs[activeTabIndex];
+    if (!tab || !tab.diff) return;
+    const nextTabs = tabs.slice();
+    nextTabs[activeTabIndex] = { ...tab, diff: null };
+    set({ tabs: nextTabs });
+  },
+
+  setTabDiffMode(index, mode) {
+    const { tabs } = get();
+    const tab = tabs[index];
+    if (!tab || !tab.diff || tab.diff.diffMode === mode) return;
+    const nextTabs = tabs.slice();
+    nextTabs[index] = { ...tab, diff: { ...tab.diff, diffMode: mode } };
+    set({ tabs: nextTabs });
+  },
+
+  setTabDiffDividerRatio(index, ratio) {
+    const { tabs } = get();
+    const tab = tabs[index];
+    if (!tab || !tab.diff) return;
+    const clamped = clampRatio(ratio);
+    if (tab.diff.dividerRatio === clamped) return;
+    const nextTabs = tabs.slice();
+    nextTabs[index] = { ...tab, diff: { ...tab.diff, dividerRatio: clamped } };
+    set({ tabs: nextTabs });
+  },
+
+  async createManualCheckpoint(name) {
+    const { manifest, tabs, activeTabIndex } = get();
+    const tab = tabs[activeTabIndex];
+    if (!manifest || !tab) return;
+    if (get().historyMode !== 'checkpoint') return;
+    const writable: Tab = { ...tab, frontmatter: { ...tab.frontmatter } };
+    const payload = buildSavePayload(writable);
+    await window.skrive.history.createManualCheckpoint(
+      tab.path,
+      name,
+      payload
+    );
+    void get().refreshHistory();
   },
 
   // ============================ Lint ============================

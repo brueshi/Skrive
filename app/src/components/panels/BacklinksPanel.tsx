@@ -18,7 +18,7 @@ export function BacklinksPanel() {
   const open = useProjectStore((s) => s.backlinksPanelOpen);
   const setOpen = useProjectStore((s) => s.setBacklinksPanelOpen);
   const activeTab = useProjectStore(selectActiveTab);
-  const openTab = useProjectStore((s) => s.openTab);
+  const openTabAtLine = useProjectStore((s) => s.openTabAtLine);
 
   const [rows, setRows] = useState<Backlink[]>([]);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -75,9 +75,11 @@ export function BacklinksPanel() {
     };
   }, [open, setOpen]);
 
-  function handleRowClick(path: string) {
+  function handleRowClick(row: Backlink) {
     setOpen(false);
-    void openTab(path);
+    // Backlink.line is 0-indexed; openTabAtLine expects 1-indexed
+    // (CodeMirror's line.number convention).
+    void openTabAtLine(row.source, row.line + 1, row.column, 0);
   }
 
   const activePath = activeTab?.path ?? '';
@@ -115,7 +117,7 @@ export function BacklinksPanel() {
                   <button
                     type="button"
                     className="bl-row-button"
-                    onClick={() => handleRowClick(row.source)}
+                    onClick={() => handleRowClick(row)}
                     title={`${row.source}:${row.line + 1}`}
                   >
                     <span className="bl-row-meta">
