@@ -6,8 +6,8 @@
 // Saves are debounced through the preferences store; this component
 // just dispatches actions on every change.
 //
-// The Updates section's "Check for updates…" button is rendered but
-// inert — `electron-updater` wiring is post-Phase 9.
+// The Updates section drives electron-updater (wired in Phase 12c):
+// status subscription, manual check, and download/install affordances.
 
 import { useEffect, useState } from 'react';
 import type { UpdaterStatus } from '@skrive/shared';
@@ -299,7 +299,10 @@ function DictionarySection() {
           </button>
         </div>
         {sorted.length === 0 ? (
-          <p className="settings-empty">No words yet.</p>
+          <p className="settings-empty">
+            No words yet — right-click a misspelled word in the editor to
+            add one, or type one above.
+          </p>
         ) : (
           <ul className="settings-dict-list">
             {sorted.map((word) => (
@@ -493,7 +496,7 @@ function AboutSection({ appVersion }: { appVersion: string }) {
     try {
       await window.skrive.persistence.revealUserData();
     } catch (err) {
-      notify.error('Could not reveal preferences', err);
+      notify.error("Couldn't reveal preferences", err);
     }
   }
   return (

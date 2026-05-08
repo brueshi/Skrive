@@ -107,7 +107,11 @@ export function BacklinksPanel() {
 
         <div className="bl-panel-body">
           {rows.length === 0 ? (
-            <p className="bl-empty">Nothing links to this file yet.</p>
+            <p className="bl-empty">
+              Nothing links to this file yet — references with{' '}
+              <code>[[wiki]]</code> or{' '}
+              <code>[markdown](links)</code> will show up here.
+            </p>
           ) : (
             <ul className="bl-rows">
               {rows.map((row) => (

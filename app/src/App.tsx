@@ -241,7 +241,7 @@ export function App() {
       saveTimerRef.current = null;
       void saveAllDirty().catch((err) => {
         logProjectError('saveAllDirty', err);
-        notify.error('Failed to save', err);
+        notify.error("Couldn't save", err);
       });
     }, SAVE_DEBOUNCE_MS);
     return () => {

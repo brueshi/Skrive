@@ -190,7 +190,7 @@ export function HistoryPanel() {
           ) : rows.length === 0 ? (
             <p className="hi-empty">
               {mode === 'git'
-                ? 'No commits touch this file yet.'
+                ? 'No git history for this file yet — Skrive shows commits where it changed.'
                 : 'No checkpoints yet — Skrive writes one every few minutes of editing.'}
             </p>
           ) : (

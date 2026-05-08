@@ -1,7 +1,19 @@
 // Toast adapter over sonner. Preserves the v0.1.x `notify.error()` API
 // shape so call sites don't need to know which library backs the
-// surface — Phase 13 UI audit can decide whether to keep this façade or
-// inline sonner directly.
+// surface.
+//
+// Voice convention (set by the Phase 13 audit):
+//   - Errors are conversational, not passive: "Couldn't save", not
+//     "Failed to save". The writer-first ethos extends to error copy.
+//
+// Silent-success-on-write is deliberate. Saves, renames, deletes-to-
+// trash, and project opens complete without a confirmation toast. A
+// writer who just hit ⌘S doesn't need the app to congratulate them;
+// the dirty-dot vanishing is the receipt. `success()` is kept on the
+// surface for future flows that genuinely need positive confirmation
+// (e.g. "Update downloaded — restart to apply") — don't reach for it
+// just because something worked. If you find yourself wanting to,
+// see planning/react-electron-phase-13-audit.md (PUNT P3).
 
 import { toast } from 'sonner';
 
@@ -16,6 +28,10 @@ export const notify = {
   warn(message: string): void {
     toast.warning(message, { duration: 5000 });
   },
+  /** Confirms a meaningful event the writer wouldn't otherwise see —
+   *  background work completing, an updater step finishing. Don't fire
+   *  this on routine writes; see the file header for the silent-
+   *  success policy. */
   success(message: string): void {
     toast.success(message, { duration: 2500 });
   },
