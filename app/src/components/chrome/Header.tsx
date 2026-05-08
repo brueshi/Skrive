@@ -11,13 +11,13 @@
 // toggle hides — DiffView carries its own diff-raw / diff-preview
 // toggle and exit affordance.
 
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, type CSSProperties } from 'react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   selectActiveTab,
   useProjectStore,
   type Tab
 } from '../../stores/project';
-import { ContextMenu, type ContextMenuItem } from '../ContextMenu';
 import { IconBacklinks } from '../icons/IconBacklinks';
 import { IconDocMarkdown } from '../icons/IconDocMarkdown';
 import { IconDotUnsaved } from '../icons/IconDotUnsaved';
@@ -27,12 +27,6 @@ import { IconLayoutSplit } from '../icons/IconLayoutSplit';
 import { IconSidebarToggle } from '../icons/IconSidebarToggle';
 import { IconX } from '../icons/IconX';
 import type { LayoutMode } from '../editor/SplitView';
-
-type ProjectMenuState = {
-  x: number;
-  y: number;
-  items: ContextMenuItem[];
-};
 
 const isMacOS =
   typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
@@ -81,25 +75,6 @@ export function Header() {
     : 0;
   const inDiff = !!activeTab?.diff;
 
-  const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null);
-
-  function openProjectMenu(e: React.MouseEvent<HTMLButtonElement>) {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const items: ContextMenuItem[] = [
-      {
-        label: 'Open project…',
-        shortcut: '⌘O',
-        onClick: () => void openProjectFromDialog()
-      },
-      {
-        label: 'Close project',
-        shortcut: '⌘⇧W',
-        onClick: () => void closeProject()
-      }
-    ];
-    setProjectMenu({ x: rect.left, y: rect.bottom + 4, items });
-  }
-
   function setMode(mode: LayoutMode) {
     if (activeTabIndex < 0) return;
     setTabLayoutMode(activeTabIndex, mode);
@@ -135,21 +110,44 @@ export function Header() {
             <IconSidebarToggle size={16} shown={sidebarVisible} />
           </button>
           {manifest && (
-            <button
-              type="button"
-              className="project-name"
-              title={manifest.root}
-              aria-haspopup="menu"
-              aria-expanded={projectMenu !== null}
-              onClick={openProjectMenu}
-            >
-              <span className="project-name-text">
-                {projectName(manifest.root)}
-              </span>
-              <span className="project-name-caret" aria-hidden="true">
-                ▾
-              </span>
-            </button>
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  type="button"
+                  className="project-name"
+                  title={manifest.root}
+                >
+                  <span className="project-name-text">
+                    {projectName(manifest.root)}
+                  </span>
+                  <span className="project-name-caret" aria-hidden="true">
+                    ▾
+                  </span>
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="ctx-menu"
+                  align="start"
+                  sideOffset={4}
+                >
+                  <DropdownMenu.Item
+                    className="ctx-item"
+                    onSelect={() => void openProjectFromDialog()}
+                  >
+                    <span className="ctx-label">Open project…</span>
+                    <span className="ctx-shortcut">⌘O</span>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    className="ctx-item"
+                    onSelect={() => void closeProject()}
+                  >
+                    <span className="ctx-label">Close project</span>
+                    <span className="ctx-shortcut">⌘⇧W</span>
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
           )}
         </div>
 
@@ -250,15 +248,6 @@ export function Header() {
           )}
         </div>
       </header>
-
-      {projectMenu && (
-        <ContextMenu
-          x={projectMenu.x}
-          y={projectMenu.y}
-          items={projectMenu.items}
-          onDismiss={() => setProjectMenu(null)}
-        />
-      )}
     </>
   );
 }

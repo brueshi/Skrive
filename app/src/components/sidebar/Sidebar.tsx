@@ -36,7 +36,8 @@ import {
 import { usePreferencesStore } from '../../stores/preferences';
 import { resolveTitle } from '../../lib/title';
 import { notify } from '../../lib/notify';
-import { ContextMenu, type ContextMenuItem } from '../ContextMenu';
+import * as ContextMenu from '@radix-ui/react-context-menu';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { DeleteConfirmModal } from '../DeleteConfirmModal';
 import { IconDocMarkdown } from '../icons/IconDocMarkdown';
 import { IconFolder } from '../icons/IconFolder';
@@ -123,8 +124,8 @@ type FileRowProps = {
   depth: number;
   lastChild: boolean;
   parentChain: boolean[];
-  onContextMenu: (e: MouseEvent, file: FileEntry) => void;
-  onDeleteShortcut: (file: FileEntry) => void;
+  onRename: (file: FileEntry) => void;
+  onDelete: (file: FileEntry) => void;
 };
 
 function FileRow({
@@ -132,8 +133,8 @@ function FileRow({
   depth,
   lastChild,
   parentChain,
-  onContextMenu,
-  onDeleteShortcut
+  onRename,
+  onDelete
 }: FileRowProps) {
   const activePath = useProjectStore(selectActivePath);
   const openTab = useProjectStore((s) => s.openTab);
@@ -150,33 +151,54 @@ function FileRow({
   function handleKey(e: KeyboardEvent<HTMLButtonElement>) {
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
-      onDeleteShortcut(file);
+      onDelete(file);
     }
   }
 
   return (
     <li>
-      <button
-        type="button"
-        className={`file${activePath === file.path ? ' active' : ''}`}
-        style={style}
-        onClick={() => {
-          void openTab(file.path);
-        }}
-        onContextMenu={(e) => onContextMenu(e, file)}
-        onKeyDown={handleKey}
-        title={file.path}
-      >
-        <span className="file-icon">
-          <IconDocMarkdown size={16} />
-        </span>
-        <span className="file-labels">
-          <span className="file-title">{resolved.primary}</span>
-          {resolved.secondary && (
-            <span className="file-filename">{resolved.secondary}</span>
-          )}
-        </span>
-      </button>
+      <ContextMenu.Root>
+        <ContextMenu.Trigger asChild>
+          <button
+            type="button"
+            className={`file${activePath === file.path ? ' active' : ''}`}
+            style={style}
+            onClick={() => {
+              void openTab(file.path);
+            }}
+            onKeyDown={handleKey}
+            title={file.path}
+          >
+            <span className="file-icon">
+              <IconDocMarkdown size={16} />
+            </span>
+            <span className="file-labels">
+              <span className="file-title">{resolved.primary}</span>
+              {resolved.secondary && (
+                <span className="file-filename">{resolved.secondary}</span>
+              )}
+            </span>
+          </button>
+        </ContextMenu.Trigger>
+        <ContextMenu.Portal>
+          <ContextMenu.Content className="ctx-menu">
+            <ContextMenu.Item
+              className="ctx-item"
+              onSelect={() => onRename(file)}
+            >
+              <span className="ctx-label">Rename…</span>
+              <span className="ctx-shortcut">F2</span>
+            </ContextMenu.Item>
+            <ContextMenu.Item
+              className="ctx-item destructive"
+              onSelect={() => onDelete(file)}
+            >
+              <span className="ctx-label">Delete…</span>
+              <span className="ctx-shortcut">⌫</span>
+            </ContextMenu.Item>
+          </ContextMenu.Content>
+        </ContextMenu.Portal>
+      </ContextMenu.Root>
     </li>
   );
 }
@@ -188,10 +210,9 @@ type FolderTreeProps = {
   parentChain: boolean[];
   collapsed: ReadonlySet<string>;
   onToggle: (path: string) => void;
-  onFileContextMenu: (e: MouseEvent, file: FileEntry) => void;
-  onFileDeleteShortcut: (file: FileEntry) => void;
-  onDirContextMenu: (e: MouseEvent, dir: string) => void;
-  onDirDeleteShortcut: (dir: string) => void;
+  onFileRename: (file: FileEntry) => void;
+  onFileDelete: (file: FileEntry) => void;
+  onDirDelete: (dir: string) => void;
 };
 
 function FolderTree(props: FolderTreeProps) {
@@ -202,10 +223,9 @@ function FolderTree(props: FolderTreeProps) {
     parentChain,
     collapsed,
     onToggle,
-    onFileContextMenu,
-    onFileDeleteShortcut,
-    onDirContextMenu,
-    onDirDeleteShortcut
+    onFileRename,
+    onFileDelete,
+    onDirDelete
   } = props;
   const isExpanded = !collapsed.has(folder.path);
   const spineDepths = useMemo(
@@ -227,28 +247,42 @@ function FolderTree(props: FolderTreeProps) {
       onToggle(folder.path);
     } else if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
-      onDirDeleteShortcut(folder.path);
+      onDirDelete(folder.path);
     }
   }
 
   return (
     <>
-      <div
-        className="dir-label"
-        title={folder.path}
-        tabIndex={0}
-        role="button"
-        aria-expanded={isExpanded}
-        style={style}
-        onClick={() => onToggle(folder.path)}
-        onKeyDown={handleKey}
-        onContextMenu={(e) => onDirContextMenu(e, folder.path)}
-      >
-        <span className="dir-icon">
-          <IconFolder size={16} open={isExpanded} />
-        </span>
-        <span className="dir-name">{folder.name}</span>
-      </div>
+      <ContextMenu.Root>
+        <ContextMenu.Trigger asChild>
+          <div
+            className="dir-label"
+            title={folder.path}
+            tabIndex={0}
+            role="button"
+            aria-expanded={isExpanded}
+            style={style}
+            onClick={() => onToggle(folder.path)}
+            onKeyDown={handleKey}
+          >
+            <span className="dir-icon">
+              <IconFolder size={16} open={isExpanded} />
+            </span>
+            <span className="dir-name">{folder.name}</span>
+          </div>
+        </ContextMenu.Trigger>
+        <ContextMenu.Portal>
+          <ContextMenu.Content className="ctx-menu">
+            <ContextMenu.Item
+              className="ctx-item destructive"
+              onSelect={() => onDirDelete(folder.path)}
+            >
+              <span className="ctx-label">Delete folder…</span>
+              <span className="ctx-shortcut">⌫</span>
+            </ContextMenu.Item>
+          </ContextMenu.Content>
+        </ContextMenu.Portal>
+      </ContextMenu.Root>
       {isExpanded && (
         <>
           {folder.files.length > 0 && (
@@ -262,8 +296,8 @@ function FolderTree(props: FolderTreeProps) {
                     i === folder.files.length - 1 && folder.folders.length === 0
                   }
                   parentChain={chain}
-                  onContextMenu={onFileContextMenu}
-                  onDeleteShortcut={onFileDeleteShortcut}
+                  onRename={onFileRename}
+                  onDelete={onFileDelete}
                 />
               ))}
             </ul>
@@ -287,7 +321,6 @@ function FolderTree(props: FolderTreeProps) {
 // ============================ Sidebar ============================
 
 type DeleteTarget = { kind: 'file' | 'directory'; path: string; name: string };
-type ContextMenuState = { x: number; y: number; items: ContextMenuItem[] };
 
 export function Sidebar() {
   const manifest = useProjectStore((s) => s.manifest);
@@ -305,9 +338,7 @@ export function Sidebar() {
   const [creating, setCreating] = useState<'file' | 'folder' | null>(null);
   const [newName, setNewName] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
-  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<DeleteTarget | null>(null);
-  const [plusOpen, setPlusOpen] = useState(false);
 
   const tree = useMemo(
     () => buildTree(manifest?.files ?? []),
@@ -406,47 +437,9 @@ export function Sidebar() {
 
   const openRenameModal = useProjectStore((s) => s.openRenameModal);
 
-  const openFileContextMenu = useCallback(
-    (e: MouseEvent, file: FileEntry) => {
-      e.preventDefault();
-      setContextMenu({
-        x: e.clientX,
-        y: e.clientY,
-        items: [
-          {
-            label: 'Rename…',
-            shortcut: 'F2',
-            onClick: () => openRenameModal(file.path)
-          },
-          {
-            label: 'Delete…',
-            shortcut: '⌫',
-            variant: 'destructive',
-            onClick: () => requestDeleteFile(file)
-          }
-        ]
-      });
-    },
-    [openRenameModal, requestDeleteFile]
-  );
-
-  const openDirectoryContextMenu = useCallback(
-    (e: MouseEvent, dir: string) => {
-      e.preventDefault();
-      setContextMenu({
-        x: e.clientX,
-        y: e.clientY,
-        items: [
-          {
-            label: 'Delete folder…',
-            shortcut: '⌫',
-            variant: 'destructive',
-            onClick: () => requestDeleteDirectory(dir)
-          }
-        ]
-      });
-    },
-    [requestDeleteDirectory]
+  const renameFile = useCallback(
+    (file: FileEntry) => openRenameModal(file.path),
+    [openRenameModal]
   );
 
   const confirmPendingDelete = useCallback(async () => {
@@ -526,44 +519,39 @@ export function Sidebar() {
         <header className="section-header">
           <span className="title">Files</span>
           <div className="section-header__actions">
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="New file or folder"
-              title="New file or folder"
-              onClick={() => setPlusOpen((v) => !v)}
-              disabled={creating !== null || !manifest}
-            >
-              <IconPlus size={16} />
-            </button>
-            {plusOpen && (
-              <div
-                className="plus-menu"
-                role="menu"
-                onMouseLeave={() => setPlusOpen(false)}
-              >
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
                 <button
                   type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setPlusOpen(false);
-                    startCreate('file');
-                  }}
+                  className="icon-button"
+                  aria-label="New file or folder"
+                  title="New file or folder"
+                  disabled={creating !== null || !manifest}
                 >
-                  New file
+                  <IconPlus size={16} />
                 </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setPlusOpen(false);
-                    startCreate('folder');
-                  }}
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="ctx-menu"
+                  align="end"
+                  sideOffset={4}
                 >
-                  New folder
-                </button>
-              </div>
-            )}
+                  <DropdownMenu.Item
+                    className="ctx-item"
+                    onSelect={() => startCreate('file')}
+                  >
+                    <span className="ctx-label">New file</span>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    className="ctx-item"
+                    onSelect={() => startCreate('folder')}
+                  >
+                    <span className="ctx-label">New folder</span>
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
           </div>
         </header>
 
@@ -607,8 +595,8 @@ export function Sidebar() {
                     i === tree.files.length - 1 && tree.folders.length === 0
                   }
                   parentChain={[]}
-                  onContextMenu={openFileContextMenu}
-                  onDeleteShortcut={requestDeleteFile}
+                  onRename={renameFile}
+                  onDelete={requestDeleteFile}
                 />
               ))}
             </ul>
@@ -622,10 +610,9 @@ export function Sidebar() {
               parentChain={[]}
               collapsed={collapsed}
               onToggle={toggleCollapse}
-              onFileContextMenu={openFileContextMenu}
-              onFileDeleteShortcut={requestDeleteFile}
-              onDirContextMenu={openDirectoryContextMenu}
-              onDirDeleteShortcut={requestDeleteDirectory}
+              onFileRename={renameFile}
+              onFileDelete={requestDeleteFile}
+              onDirDelete={requestDeleteDirectory}
             />
           ))}
         </div>
@@ -642,15 +629,6 @@ export function Sidebar() {
           aria-valuemax={SIDEBAR_MAX_WIDTH}
           onPointerDown={startDrag}
           onDoubleClick={resetWidth}
-        />
-      )}
-
-      {contextMenu && (
-        <ContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          items={contextMenu.items}
-          onDismiss={() => setContextMenu(null)}
         />
       )}
 
