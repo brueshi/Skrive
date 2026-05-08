@@ -1,19 +1,23 @@
-# Build and release Skrive on every `v*` tag push.
+# Build + sign + publish Skrive on every `v*` tag push.
 #
 # macOS: aarch64 (Apple Silicon) .dmg, signed with a Developer ID
-# Application cert and notarized with Apple. End users get a
-# no-warning install as long as the cert + notarization secrets are
-# present. Intel Macs run the binary under Rosetta 2 — Apple stopped
-# selling Intel Macs in 2023 and a writing tool isn't perf-sensitive
-# enough for translation overhead to bite, so dropping the universal
-# target halves macOS Rust compile time per release.
+# Application cert and notarized. End users get a no-warning install
+# as long as the cert + notarization secrets are present. Intel Macs
+# run the binary under Rosetta 2 — Apple stopped selling Intel Macs
+# in 2023 and a writing tool isn't perf-sensitive enough for translation
+# overhead to bite, so dropping the universal target halves macOS Rust
+# compile time per release.
 #
-# Windows: .msi, unsigned. SmartScreen will warn on first run; users
-# click "More info → Run anyway". Proper Windows code-signing is
-# deferred until a public launch (EV cert cost + hardware token).
+# Windows: NSIS .exe installer, unsigned. SmartScreen warns on first
+# run; users click "More info → Run anyway." Proper Windows code-
+# signing is deferred until a public launch (EV cert cost + hardware
+# token).
 #
-# The release is created as a draft + prerelease so we can review and
-# publish manually once the action finishes.
+# The release is created as a draft so we can review and publish
+# manually once the action finishes. electron-builder also uploads
+# `latest-mac.yml` / `latest.yml` — the feed electron-updater polls.
+# Don't publish the release until both files are present, or in-app
+# update prompts will look broken.
 
 name: Release
 
@@ -22,14 +26,14 @@ on:
     tags:
       - "v*"
   # Manual dispatch for testing the build without cutting a tag. No
-  # release is created for these runs — artifacts land in the job
-  # summary only.
+  # release is created for these runs.
   workflow_dispatch:
 
 jobs:
   build:
     permissions:
-      # tauri-action creates the GitHub Release and uploads the bundles.
+      # electron-builder creates the GitHub Release and uploads the
+      # bundles when invoked with --publish always.
       contents: write
 
     strategy:
@@ -39,9 +43,11 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: --target aarch64-apple-darwin
+            target: mac
+            rust-target: aarch64-apple-darwin
           - platform: windows-latest
-            args: ""
+            target: win
+            rust-target: ""
 
     runs-on: ${{ matrix.platform }}
 
@@ -53,72 +59,54 @@ jobs:
         with:
           bun-version: latest
 
+      # napi-rs needs the Rust toolchain. macOS only builds aarch64;
+      # Windows uses the runner's default toolchain (x86_64-pc-windows-msvc).
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          # macOS ships Apple Silicon only; Windows uses the default
-          # toolchain. If the universal target ever returns, add
-          # `x86_64-apple-darwin` back here and update `args` above.
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
+          targets: ${{ matrix.rust-target }}
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: native/diff
 
-      - name: Install frontend deps
+      - name: Install JS deps
         run: bun install --frozen-lockfile
 
-      - name: Build, sign, notarize, and release
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Build the napi-rs native module before electron-builder runs —
+      # the .node file is what gets bundled into the app, not the Rust
+      # source.
+      - name: Build native (@skrive/diff)
+        working-directory: native/diff
+        run: bun run build
 
-          # macOS Developer ID signing. Ignored on Windows (the env
-          # vars just don't match anything on that runner). See
-          # docs/release-process.md for how to populate these.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-
-          # Notarization — requires an app-specific password, not the
-          # regular Apple ID password.
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
-          # Tauri updater signing. Separate from Apple code signing —
-          # this is the keypair Tauri uses to verify update bundles on
-          # the client side, independent of OS-level signing. When
-          # these are set, tauri-action generates `latest.json` next
-          # to the platform artifacts and uploads it to the release,
-          # which the app then polls.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
-        with:
-          # Only create a release when a tag actually pushed. Manual
-          # workflow_dispatch runs pass an empty tagName which tells
-          # tauri-action to skip the release step.
-          tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
-          releaseName: "Skrive v__VERSION__"
-          releaseBody: |
-            Pre-alpha build. See [install instructions](https://github.com/${{ github.repository }}/blob/main/docs/install.md) for each platform.
-          releaseDraft: true
-          prerelease: true
-          args: ${{ matrix.args }}
-
-      # Upload version-less aliases of each platform's installer so
-      # skrive.md can link to stable URLs like
-      #   github.com/brueshi/Skrive/releases/latest/download/Skrive.dmg
-      # that resolve forever, no per-release URL edit needed. The
-      # original versioned files stay in place — these are additional
-      # copies, not replacements.
+      # electron-builder reads the GitHub provider config from
+      # electron-builder.yml. --publish always uploads to a draft
+      # release plus generates latest-mac.yml / latest.yml for the
+      # in-app updater feed.
       #
-      # Tauri 2's bundler doesn't expose a filename override, so we
-      # rename the produced artifacts post-build and re-upload via
-      # `gh release upload`. The upload appends to the existing draft
-      # release tauri-action just created.
+      # Env-var mapping for macOS signing + notarization:
+      #   CSC_LINK / CSC_KEY_PASSWORD     ← APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD
+      #   APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID
+      # On Windows these are unset; electron-builder skips signing.
+      - name: Build, sign, notarize, publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.APPLE_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          bun run package:${{ matrix.target }} -- --publish ${{ github.event_name == 'push' && 'always' || 'never' }}
+
+      # Upload version-less aliases of each platform's installer so the
+      # landing page can link to stable URLs that resolve forever:
+      #   github.com/brueshi/Skrive/releases/latest/download/Skrive.dmg
+      # The originals stay in place; these are additional copies, not
+      # replacements. electron-updater reads its own latest-mac.yml /
+      # latest.yml and is unaffected by these aliases.
       - name: Upload stable-name aliases
         if: github.event_name == 'push'
         shell: bash
@@ -129,7 +117,7 @@ jobs:
           set -euo pipefail
           case "$RUNNER_OS" in
             macOS)
-              SRC=$(find src-tauri/target -type f -name "Skrive_*.dmg" | head -1)
+              SRC=$(find dist -maxdepth 2 -type f -name "Skrive-*.dmg" | head -1)
               if [[ -z "$SRC" ]]; then
                 echo "No .dmg produced — skipping alias upload" >&2
                 exit 0
@@ -138,15 +126,10 @@ jobs:
               gh release upload "$TAG" Skrive.dmg --clobber
               ;;
             Windows)
-              SRC_EXE=$(find src-tauri/target -type f -name "Skrive_*-setup.exe" | head -1)
-              SRC_MSI=$(find src-tauri/target -type f -name "Skrive_*_en-US.msi" | head -1)
+              SRC_EXE=$(find dist -maxdepth 2 -type f -name "Skrive-*-Setup.exe" | head -1)
               if [[ -n "$SRC_EXE" ]]; then
                 cp "$SRC_EXE" Skrive-setup.exe
                 gh release upload "$TAG" Skrive-setup.exe --clobber
-              fi
-              if [[ -n "$SRC_MSI" ]]; then
-                cp "$SRC_MSI" Skrive.msi
-                gh release upload "$TAG" Skrive.msi --clobber
               fi
               ;;
             *)

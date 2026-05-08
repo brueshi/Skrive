@@ -8,6 +8,7 @@ import { registerHistoryHandlers } from '../ipc/history';
 import { registerLinksHandlers } from '../ipc/links';
 import { registerPersistenceHandlers } from '../ipc/persistence';
 import { registerSearchHandlers } from '../ipc/search';
+import { registerUpdaterHandlers } from '../ipc/updater';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -70,6 +71,7 @@ function registerIpcHandlers(): void {
   registerPersistenceHandlers();
   registerSearchHandlers();
   registerHistoryHandlers();
+  registerUpdaterHandlers();
 }
 
 void app.whenReady().then(() => {

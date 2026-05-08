@@ -10,8 +10,9 @@
 // inert — `electron-updater` wiring is post-Phase 9.
 
 import { useEffect, useState } from 'react';
+import type { UpdaterStatus } from '@skrive/shared';
 import { usePreferencesStore } from '../../stores/preferences';
-import { useProjectStore } from '../../stores/project';
+import { logProjectError, useProjectStore } from '../../stores/project';
 import {
   EDITOR_FONT_PRESETS,
   FONT_SIZE_STEPS,
@@ -324,11 +325,34 @@ function DictionarySection() {
 function UpdatesSection({ appVersion }: { appVersion: string }) {
   const autoUpdate = usePreferencesStore((s) => s.autoUpdateOnLaunch);
   const setAutoUpdate = usePreferencesStore((s) => s.setAutoUpdateOnLaunch);
+  const [status, setStatus] = useState<UpdaterStatus>({ kind: 'idle' });
+
+  useEffect(() => {
+    window.skrive.updater
+      .current()
+      .then(setStatus)
+      .catch((err) => logProjectError('updater:current', err));
+    const unsubscribe = window.skrive.updater.onStatus(setStatus);
+    return unsubscribe;
+  }, []);
+
+  function triggerCheck() {
+    void window.skrive.updater
+      .check()
+      .catch((err) => logProjectError('updater:check', err));
+  }
+
+  function triggerAction() {
+    void window.skrive.updater
+      .downloadAndInstall()
+      .catch((err) => logProjectError('updater:downloadAndInstall', err));
+  }
+
   return (
     <>
       <SectionHeader
         title="Updates"
-        blurb="Skrive checks for new releases via GitHub. Auto-updater wiring lands with the v0.2 release pipeline."
+        blurb="Skrive checks for new releases via GitHub. Auto-download is opt-in — Skrive won't pull a new artifact in the background unless you click Download."
       />
       <div className="settings-group">
         <label className="settings-toggle-row">
@@ -353,17 +377,115 @@ function UpdatesSection({ appVersion }: { appVersion: string }) {
           <span className="settings-meta-label">Current version</span>
           <span className="settings-meta-value">{appVersion}</span>
         </div>
-        <button
-          type="button"
-          className="settings-secondary-button"
-          disabled
-          title="Available once the auto-updater wiring lands (post-Phase 9)."
-        >
-          Check for updates…
-        </button>
+        <UpdaterControls
+          status={status}
+          onCheck={triggerCheck}
+          onAction={triggerAction}
+        />
       </div>
     </>
   );
+}
+
+function UpdaterControls({
+  status,
+  onCheck,
+  onAction
+}: {
+  status: UpdaterStatus;
+  onCheck: () => void;
+  onAction: () => void;
+}) {
+  switch (status.kind) {
+    case 'idle':
+      return (
+        <button
+          type="button"
+          className="settings-secondary-button"
+          onClick={onCheck}
+        >
+          Check for updates…
+        </button>
+      );
+    case 'checking':
+      return (
+        <button type="button" className="settings-secondary-button" disabled>
+          Checking…
+        </button>
+      );
+    case 'no-update':
+      return (
+        <>
+          <p className="settings-updater-status">
+            You're up to date. Last checked{' '}
+            {new Date(status.checkedAtMs).toLocaleTimeString()}.
+          </p>
+          <button
+            type="button"
+            className="settings-secondary-button"
+            onClick={onCheck}
+          >
+            Check again
+          </button>
+        </>
+      );
+    case 'available':
+      return (
+        <>
+          <p className="settings-updater-status">
+            Update available: <strong>v{status.version}</strong>
+          </p>
+          <button
+            type="button"
+            className="settings-secondary-button"
+            onClick={onAction}
+          >
+            Download
+          </button>
+        </>
+      );
+    case 'downloading':
+      return (
+        <>
+          <p className="settings-updater-status">
+            Downloading v{status.version} — {Math.round(status.percent)}%
+          </p>
+          <button type="button" className="settings-secondary-button" disabled>
+            Downloading…
+          </button>
+        </>
+      );
+    case 'ready':
+      return (
+        <>
+          <p className="settings-updater-status">
+            v{status.version} ready to install on next launch.
+          </p>
+          <button
+            type="button"
+            className="settings-secondary-button"
+            onClick={onAction}
+          >
+            Restart to install
+          </button>
+        </>
+      );
+    case 'error':
+      return (
+        <>
+          <p className="settings-updater-status settings-updater-error">
+            {status.message}
+          </p>
+          <button
+            type="button"
+            className="settings-secondary-button"
+            onClick={onCheck}
+          >
+            Try again
+          </button>
+        </>
+      );
+  }
 }
 
 function AboutSection({ appVersion }: { appVersion: string }) {

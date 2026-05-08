@@ -119,6 +119,35 @@ export function App() {
       .catch((err) => logProjectError('app:version', err));
   }, [hydratePreferences]);
 
+  // Silent updater check on launch when the preference is on. The
+  // shell short-circuits to 'no-update' in dev (!app.isPackaged) so
+  // this stays quiet during development. Only an `available`
+  // transition surfaces — as a sonner prompt that links to Settings.
+  // Subsequent transitions (download progress, ready, error) flow
+  // through the Settings UI's own subscription; we don't double-toast.
+  const launchUpdateRef = useRef(false);
+  useEffect(() => {
+    if (launchUpdateRef.current) return;
+    if (!preferencesHydrated) return;
+    launchUpdateRef.current = true;
+    if (!usePreferencesStore.getState().autoUpdateOnLaunch) return;
+    const seen = new Set<string>();
+    const unsubscribe = window.skrive.updater.onStatus((status) => {
+      if (status.kind !== 'available') return;
+      if (seen.has(status.version)) return;
+      seen.add(status.version);
+      notify.prompt(
+        `Skrive v${status.version} is available.`,
+        'Open Settings',
+        () => useProjectStore.getState().toggleSettings()
+      );
+    });
+    void window.skrive.updater
+      .check()
+      .catch((err) => logProjectError('updater:launch-check', err));
+    return unsubscribe;
+  }, [preferencesHydrated]);
+
   // Auto-open the last project once preferences hydrate. Skipped if
   // a project is already loaded (defensive — first render might race
   // a manual openProject from the URL handler we don't have yet).

@@ -2518,6 +2518,25 @@ body {
   cursor: not-allowed;
 }
 
+/* Updater status line — sits above the action button in the Updates
+   section. Plain prose by default; .settings-updater-error is a soft
+   red so a network/GitHub-rate-limit failure reads at a glance. */
+.settings-updater-status {
+  margin: 0 0 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--skrive-muted);
+  line-height: 1.4;
+}
+
+.settings-updater-status strong {
+  color: var(--skrive-fg);
+  font-weight: 600;
+}
+
+.settings-updater-error {
+  color: #a84030;
+}
+
 /* General — toggle row (also used by Updates) */
 
 .settings-toggle-row {

@@ -26,6 +26,7 @@ export type {
   SearchOptions,
   SkriveIpc,
   SkrivePlatform,
+  UpdaterStatus,
   WordOp
 } from './ipc-contracts';
 

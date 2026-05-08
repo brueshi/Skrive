@@ -9,9 +9,20 @@ directories:
 files:
   - out/**
   - package.json
+  # The napi-rs diff core lives in the workspace as a separate package
+  # (@skrive/diff). electron-builder follows workspace deps, but the
+  # produced .node binary needs to be explicitly included so it survives
+  # the asar pack.
+  - native/diff/index.js
+  - native/diff/index.d.ts
+  - native/diff/package.json
+  - native/diff/*.node
 
+# Native modules can't be loaded from inside an asar archive — the OS
+# loader needs a real file path. asarUnpack pulls the matched files
+# back out into app.asar.unpacked/ so dlopen can find them.
 asarUnpack:
-  - resources/**
+  - "**/*.node"
 
 mac:
   target:
@@ -22,6 +33,11 @@ mac:
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  # electron-builder reads APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD +
+  # APPLE_TEAM_ID from the env when notarize: true is set. The CI
+  # workflow maps these from the existing APPLE_* secrets. Local
+  # builds without these env vars set will fail the notarize step;
+  # use `bun run start` for dev — packaging is a CI-only path.
   notarize: true
 
 win:
@@ -29,6 +45,13 @@ win:
     - target: nsis
       arch: [x64]
   # v0.2 ships unsigned on Windows; signing is a post-port roadmap item.
+
+# Drop the space from electron-builder's default NSIS filename
+# ("Skrive Setup 0.2.0.exe") so the release workflow's stable-name
+# alias step doesn't have to deal with quoting. The macOS DMG already
+# uses the dash-separated default.
+nsis:
+  artifactName: ${productName}-${version}-Setup.${ext}
 
 fileAssociations:
   - ext: md

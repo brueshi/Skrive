@@ -17,7 +17,8 @@ import type {
   SearchHit,
   SearchOptions,
   SkriveIpc,
-  SkrivePlatform
+  SkrivePlatform,
+  UpdaterStatus
 } from '@skrive/shared';
 
 const api: SkriveIpc = {
@@ -150,6 +151,21 @@ const api: SkriveIpc = {
         oldPath,
         newPath
       ) as Promise<RenameReport>
+  },
+  updater: {
+    current: () =>
+      ipcRenderer.invoke('updater:current') as Promise<UpdaterStatus>,
+    check: () => ipcRenderer.invoke('updater:check') as Promise<void>,
+    downloadAndInstall: () =>
+      ipcRenderer.invoke('updater:downloadAndInstall') as Promise<void>,
+    onStatus: (handler: (status: UpdaterStatus) => void) => {
+      const wrapped = (_event: unknown, payload: UpdaterStatus) =>
+        handler(payload);
+      ipcRenderer.on('updater:status', wrapped);
+      return () => {
+        ipcRenderer.removeListener('updater:status', wrapped);
+      };
+    }
   },
   persistence: {
     loadAppState: () =>

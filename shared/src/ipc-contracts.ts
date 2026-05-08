@@ -304,6 +304,20 @@ export type HistoryEntry =
   | ({ source: 'git' } & GitVersion)
   | ({ source: 'checkpoint' } & CheckpointVersion);
 
+// ============================ Updater status ============================
+
+/** State machine the renderer renders against. The shell side is the
+ *  source of truth — a single `current` value is broadcast to every
+ *  subscribed renderer whenever electron-updater emits an event. */
+export type UpdaterStatus =
+  | { kind: 'idle' }
+  | { kind: 'checking' }
+  | { kind: 'no-update'; current: string; checkedAtMs: number }
+  | { kind: 'available'; version: string; releaseNotes: string | null }
+  | { kind: 'downloading'; version: string; percent: number; bytesPerSecond: number }
+  | { kind: 'ready'; version: string }
+  | { kind: 'error'; message: string };
+
 // ============================ The IPC surface ============================
 
 export interface SkriveIpc {
@@ -452,6 +466,27 @@ export interface SkriveIpc {
       oldPath: string,
       newPath: string
     ): Promise<RenameReport>;
+  };
+  updater: {
+    /** Read the shell's current status snapshot. Useful for renderers
+     *  that mount after the shell has already broadcast a transition. */
+    current(): Promise<UpdaterStatus>;
+    /** Trigger a check against the GitHub Releases provider. Status
+     *  flows through `onStatus` rather than this method's return —
+     *  electron-updater is event-driven, and the renderer subscribes
+     *  before calling `check()`. Returns when the check has been
+     *  *initiated* (not when it resolves). */
+    check(): Promise<void>;
+    /** Begin downloading the latest release the renderer was told
+     *  about via `update-available`. Auto-download is intentionally
+     *  off — a writer should consent before the app fetches a
+     *  multi-MB artifact in the background. When already in `ready`
+     *  state this triggers `quitAndInstall`. */
+    downloadAndInstall(): Promise<void>;
+    /** Subscribe to update-status transitions. Returns an unsubscribe
+     *  function. The handler is *not* invoked synchronously with the
+     *  current status — call `current()` first if you need it. */
+    onStatus(handler: (status: UpdaterStatus) => void): () => void;
   };
   persistence: {
     /** Load `{userData}/app.json`. Returns defaults on missing /
