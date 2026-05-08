@@ -12,6 +12,8 @@ import type {
   ProjectUiState,
   RenamePreview,
   RenameReport,
+  SearchHit,
+  SearchOptions,
   SkriveIpc,
   SkrivePlatform
 } from '@skrive/shared';
@@ -76,6 +78,14 @@ const api: SkriveIpc = {
         before,
         after
       ) as Promise<LineDiffRow[]>
+  },
+  search: {
+    searchProject: (query: string, options: SearchOptions) =>
+      ipcRenderer.invoke(
+        'search:searchProject',
+        query,
+        options
+      ) as Promise<SearchHit[]>
   },
   linkGraph: {
     getBacklinks: (target: string) =>

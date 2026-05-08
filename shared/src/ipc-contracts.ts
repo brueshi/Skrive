@@ -230,6 +230,27 @@ export type RenameReport = {
   referencesUpdated: number;
 };
 
+// ============================ Search types ============================
+
+export type SearchOptions = {
+  /** Plain ASCII case folding when false. Mirrors the v0.1.6 contract;
+   *  enough for dogfood content. */
+  caseSensitive: boolean;
+};
+
+/** One hit inside a file. `line` is 1-indexed (humans + CodeMirror);
+ *  `column` and `matchLength` are UTF-16 code units (same convention as
+ *  Backlink / OutgoingLink) so the renderer's `String#slice` math stays
+ *  correct on astral-plane input. `snippet` is the full source line —
+ *  the renderer trims and truncates for display. */
+export type SearchHit = {
+  path: string;
+  line: number;
+  column: number;
+  matchLength: number;
+  snippet: string;
+};
+
 // ============================ The IPC surface ============================
 
 export interface SkriveIpc {
@@ -306,6 +327,13 @@ export interface SkriveIpc {
      * rendering and feeds the preview-segment coalescer.
      */
     computeLineDiff(before: string, after: string): Promise<LineDiffRow[]>;
+  };
+  search: {
+    /** Walk every Markdown file in the open project and return matches
+     *  for `query`. Hits are stable-sorted by path, then line, then
+     *  column. Capped at 500 hits; pathological queries (`.`, single
+     *  letters) return the cap and stop scanning. */
+    searchProject(query: string, options: SearchOptions): Promise<SearchHit[]>;
   };
   linkGraph: {
     /** Sources that link to `target` (project-relative path). Wiki

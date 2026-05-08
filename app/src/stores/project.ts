@@ -44,6 +44,17 @@ const DEBOUNCED_SAVE_MS = 1000;
 
 export type WorkspaceView = 'editor' | 'settings';
 
+/** A one-shot "go to this position with this selection length" request
+ *  applied by the editor on the next render. The nonce is what the
+ *  Editor effect tracks — bumping it re-fires even when line/column
+ *  repeat (jumping back to the same hit a second time still works). */
+export type PendingSelection = {
+  line: number;
+  column: number;
+  length: number;
+  nonce: number;
+};
+
 export type Tab = {
   path: string;
   /** Body without the leading frontmatter block. The editor reads/writes
@@ -61,6 +72,9 @@ export type Tab = {
   cursorLine: number;
   cursorColumn: number;
   scrollTop: number;
+  /** Search / backlinks jump request. Editor consumes via nonce-tracked
+   *  effect; cleared after apply. Not persisted. */
+  pendingSelection: PendingSelection | null;
 };
 
 type State = {
@@ -106,8 +120,20 @@ type Actions = {
   refreshManifest(): Promise<void>;
 
   openTab(path: string, hydrate?: HydrateTab): Promise<void>;
+  /** Open `path` (or focus the existing tab) and request a selection
+   *  spanning `length` UTF-16 code units starting at (`line`, `column`).
+   *  Used by the search modal and any "jump to here" surface. */
+  openTabAtLine(
+    path: string,
+    line: number,
+    column: number,
+    length: number
+  ): Promise<void>;
   closeTab(index: number): Promise<void>;
   switchTab(index: number): void;
+  /** Cleared from the editor after the selection has been applied so a
+   *  subsequent re-render with the same nonce doesn't re-apply. */
+  clearPendingSelection(index: number): void;
 
   setTabBody(index: number, next: string): void;
   setTabLayoutMode(index: number, mode: LayoutMode): void;
@@ -190,6 +216,11 @@ function clampSidebarWidth(w: number): number {
 
 let debouncedSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let lastImmediateSave: Promise<void> = Promise.resolve();
+
+// Monotonic counter so each openTabAtLine call produces a fresh nonce.
+// The Editor effect tracks this; identical line/column requests still
+// re-fire because the nonce always advances.
+let pendingSelectionCounter = 0;
 
 function snapshotProjectState(state: State): ProjectUiState | null {
   if (!state.manifest) return null;
@@ -477,7 +508,8 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         : DEFAULT_SPLIT_RATIO,
       cursorLine: hydrate?.applyOverrides ? hydrate.cursorLine : 1,
       cursorColumn: hydrate?.applyOverrides ? hydrate.cursorColumn : 0,
-      scrollTop: hydrate?.applyOverrides ? hydrate.scrollTop : 0
+      scrollTop: hydrate?.applyOverrides ? hydrate.scrollTop : 0,
+      pendingSelection: null
     };
     const nextTabs = [...tabs, newTab];
     set({ tabs: nextTabs, activeTabIndex: nextTabs.length - 1 });
@@ -523,6 +555,32 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     if (index < 0 || index >= tabs.length) return;
     set({ activeTabIndex: index });
     scheduleImmediateSave(get);
+  },
+
+  async openTabAtLine(path, line, column, length) {
+    await get().openTab(path);
+    const { tabs } = get();
+    const i = tabs.findIndex((t) => t.path === path);
+    if (i < 0) return;
+    pendingSelectionCounter += 1;
+    const sel: PendingSelection = {
+      line: Math.max(line, 1),
+      column: Math.max(column, 0),
+      length: Math.max(length, 0),
+      nonce: pendingSelectionCounter
+    };
+    const nextTabs = tabs.slice();
+    nextTabs[i] = { ...tabs[i]!, pendingSelection: sel };
+    set({ tabs: nextTabs, activeTabIndex: i, activeView: 'editor' });
+  },
+
+  clearPendingSelection(index) {
+    const { tabs } = get();
+    const tab = tabs[index];
+    if (!tab || !tab.pendingSelection) return;
+    const nextTabs = tabs.slice();
+    nextTabs[index] = { ...tab, pendingSelection: null };
+    set({ tabs: nextTabs });
   },
 
   setTabBody(index: number, next: string) {

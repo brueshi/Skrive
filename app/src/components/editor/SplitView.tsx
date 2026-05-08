@@ -21,6 +21,7 @@ import { useRef, useState } from 'react';
 import type { LintFinding } from '@skrive/shared';
 import { Editor } from './Editor';
 import { Preview } from './Preview';
+import type { PendingSelection } from '../../stores/project';
 
 export type LayoutMode = 'raw' | 'split' | 'preview';
 
@@ -37,6 +38,10 @@ type Props = {
   initialCursorLine?: number;
   initialCursorColumn?: number;
   initialScrollTop?: number;
+  /** One-shot selection request from search / backlinks. Forwarded to
+   *  the editor; cleared by the parent once applied. */
+  pendingSelection?: PendingSelection | null;
+  onPendingSelectionApplied?: () => void;
   onCursorChange?: (line: number, column: number) => void;
   onScrollTopChange?: (top: number) => void;
 };
@@ -60,6 +65,8 @@ export function SplitView({
   initialCursorLine,
   initialCursorColumn,
   initialScrollTop,
+  pendingSelection,
+  onPendingSelectionApplied,
   onCursorChange,
   onScrollTopChange
 }: Props) {
@@ -116,6 +123,8 @@ export function SplitView({
             initialCursorLine={initialCursorLine}
             initialCursorColumn={initialCursorColumn}
             initialScrollTop={initialScrollTop}
+            pendingSelection={pendingSelection}
+            onPendingSelectionApplied={onPendingSelectionApplied}
             onCursorChange={onCursorChange}
             onScrollTopChange={onScrollTopChange}
           />

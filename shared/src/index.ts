@@ -17,6 +17,8 @@ export type {
   Reference,
   RenamePreview,
   RenameReport,
+  SearchHit,
+  SearchOptions,
   SkriveIpc,
   SkrivePlatform,
   WordOp

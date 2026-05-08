@@ -35,6 +35,7 @@ import type { LintFinding } from '@skrive/shared';
 import { skriveTheme } from './skrive-theme';
 import { inlinePreview } from './decorations';
 import { skriveLintExtension } from './lint-extension';
+import type { PendingSelection } from '../../stores/project';
 
 type Props = {
   value: string;
@@ -52,6 +53,11 @@ type Props = {
   /** Initial scrollTop in pixels. Applied once after the view is
    *  mounted; later scrolls are user-driven. */
   initialScrollTop?: number;
+  /** One-shot "go here and select N units" request. Tracked by nonce
+   *  so identical line/column requests still fire (search-jump back to
+   *  the same hit). The parent clears via onPendingSelectionApplied. */
+  pendingSelection?: PendingSelection | null;
+  onPendingSelectionApplied?: () => void;
   /** Cursor changes (selection.head). Fires on every selection change
    *  regardless of doc edits — the parent decides what to persist. */
   onCursorChange?: (line: number, column: number) => void;
@@ -102,6 +108,8 @@ export function Editor({
   initialCursorLine,
   initialCursorColumn,
   initialScrollTop,
+  pendingSelection,
+  onPendingSelectionApplied,
   onCursorChange,
   onScrollTopChange
 }: Props) {
@@ -244,6 +252,39 @@ export function Editor({
       });
     }
   }, [value]);
+
+  // Apply a pending selection request (search-jump, backlink-click).
+  // We track the last-applied nonce so the same selection request
+  // doesn't re-apply on unrelated re-renders, but two distinct requests
+  // to the same (line, column) still fire because the nonce changes.
+  const lastSelectionNonceRef = useRef<number>(-1);
+  const onPendingSelectionAppliedRef = useRef(onPendingSelectionApplied);
+  useEffect(() => {
+    onPendingSelectionAppliedRef.current = onPendingSelectionApplied;
+  }, [onPendingSelectionApplied]);
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || !pendingSelection) return;
+    if (pendingSelection.nonce === lastSelectionNonceRef.current) return;
+    lastSelectionNonceRef.current = pendingSelection.nonce;
+    const doc = view.state.doc;
+    const lineNo = Math.min(Math.max(pendingSelection.line, 1), doc.lines);
+    const lineInfo = doc.line(lineNo);
+    const anchor = Math.min(
+      lineInfo.from + Math.max(pendingSelection.column, 0),
+      lineInfo.to
+    );
+    const head = Math.min(
+      anchor + Math.max(pendingSelection.length, 0),
+      lineInfo.to
+    );
+    view.dispatch({
+      selection: { anchor, head },
+      effects: EditorView.scrollIntoView(anchor, { y: 'center' })
+    });
+    view.focus();
+    onPendingSelectionAppliedRef.current?.();
+  }, [pendingSelection]);
 
   return <div className="editor-host" ref={containerRef} />;
 }

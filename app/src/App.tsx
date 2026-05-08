@@ -13,6 +13,7 @@ import { BacklinksPanel } from './components/panels/BacklinksPanel';
 import { FrontmatterPanel } from './components/panels/FrontmatterPanel';
 import { SettingsView } from './components/settings/SettingsView';
 import { Sidebar } from './components/sidebar/Sidebar';
+import { SearchModal } from './components/modals/SearchModal';
 import {
   logProjectError,
   selectActiveTab,
@@ -43,6 +44,9 @@ export function App() {
   const lintReport = useProjectStore((s) => s.lintReport);
   const setTabCursor = useProjectStore((s) => s.setTabCursor);
   const setTabScrollTop = useProjectStore((s) => s.setTabScrollTop);
+  const clearPendingSelection = useProjectStore(
+    (s) => s.clearPendingSelection
+  );
   const persistProjectStateNow = useProjectStore(
     (s) => s.persistProjectStateNow
   );
@@ -106,6 +110,7 @@ export function App() {
   // new DiffView can be A/B'd against v0.1.6 before HistoryPanel wires
   // the real surface in Phase 10. Removed when HistoryPanel ships.
   const [diffPlaygroundOpen, setDiffPlaygroundOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -139,6 +144,22 @@ export function App() {
       ) {
         e.preventDefault();
         toggleFrontmatterPanel();
+        return;
+      }
+      // ⌘F — toggle the project-wide search modal. Skrive's "find" is
+      // project-wide; in-document navigation is by scroll. Overrides
+      // CodeMirror's built-in find binding intentionally — same posture
+      // as v0.1.6.
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        (e.key === 'f' || e.key === 'F')
+      ) {
+        if (manifest) {
+          e.preventDefault();
+          setSearchOpen((open) => !open);
+        }
         return;
       }
       // ⌘, — toggle the settings view in the workspace area.
@@ -260,6 +281,10 @@ export function App() {
                   initialCursorLine={activeTab.cursorLine}
                   initialCursorColumn={activeTab.cursorColumn}
                   initialScrollTop={activeTab.scrollTop}
+                  pendingSelection={activeTab.pendingSelection}
+                  onPendingSelectionApplied={() =>
+                    clearPendingSelection(activeTabIndex)
+                  }
                   onCursorChange={(line, column) =>
                     setTabCursor(activeTabIndex, line, column)
                   }
@@ -340,6 +365,8 @@ export function App() {
       {diffPlaygroundOpen && (
         <DiffPlayground onClose={() => setDiffPlaygroundOpen(false)} />
       )}
+
+      <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
 
       <Toaster
         position="bottom-right"
