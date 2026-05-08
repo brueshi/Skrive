@@ -15,6 +15,7 @@ import { HistoryPanel } from './components/panels/HistoryPanel';
 import { SettingsView } from './components/settings/SettingsView';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { SearchModal } from './components/modals/SearchModal';
+import { RenameModal } from './components/modals/RenameModal';
 import { CommandPalette } from './components/cmdk/CommandPalette';
 import { FileSwitcher } from './components/cmdk/FileSwitcher';
 import type { CommandDeps } from './lib/commands/registry';
@@ -54,6 +55,7 @@ export function App() {
     (s) => s.setTabDiffDividerRatio
   );
   const closeDiff = useProjectStore((s) => s.closeDiff);
+  const openRenameModal = useProjectStore((s) => s.openRenameModal);
   const lintReport = useProjectStore((s) => s.lintReport);
   const setTabCursor = useProjectStore((s) => s.setTabCursor);
   const setTabScrollTop = useProjectStore((s) => s.setTabScrollTop);
@@ -127,16 +129,12 @@ export function App() {
     () => ({
       openFileSwitcher: () => setSwitcherOpen(true),
       openSearch: () => setSearchOpen(true),
-      openRename: (_path: string) => {
-        // 11b lands the rename modal; for 11a the command is wired
-        // but inert. The palette's `when` keeps it visible only when
-        // a tab is active, which is the right gate for both phases.
-      },
+      openRename: (path: string) => openRenameModal(path),
       openNewProject: () => {
         // 11c lands the new-project dialog.
       }
     }),
-    []
+    [openRenameModal]
   );
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -187,6 +185,22 @@ export function App() {
         if (activeTab) {
           e.preventDefault();
           toggleHistoryPanel();
+        }
+        return;
+      }
+      // F2 — rename the active tab's file. No modifier keys; fires
+      // straight from the keymap. Gated on an active tab so we don't
+      // open an empty modal.
+      if (
+        e.key === 'F2' &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.shiftKey &&
+        !e.altKey
+      ) {
+        if (activeTab) {
+          e.preventDefault();
+          openRenameModal(activeTab.path);
         }
         return;
       }
@@ -271,6 +285,7 @@ export function App() {
     toggleFrontmatterPanel,
     toggleBacklinksPanel,
     toggleHistoryPanel,
+    openRenameModal,
     manifest,
     toggleSettings
   ]);
@@ -449,6 +464,7 @@ export function App() {
       <HistoryPanel />
 
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <RenameModal />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}

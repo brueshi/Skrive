@@ -458,6 +458,11 @@ body {
   color: #fff;
 }
 
+.modal-button.primary:not(.destructive):not(:disabled):hover {
+  background: var(--skrive-fg);
+  color: var(--skrive-bg);
+}
+
 .app-body {
   flex: 1;
   display: flex;
@@ -2811,6 +2816,177 @@ body {
   color: inherit;
   font-weight: 600;
   padding: 0 1px;
+}
+
+/* ===================== Rename modal (Phase 11) ===================== */
+
+.rename-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--skrive-bg);
+  border: 2px solid var(--skrive-fg);
+  padding: 1.25rem 1.5rem 1rem;
+  width: 36rem;
+  max-width: calc(100vw - 2rem);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--skrive-ui-font);
+  z-index: 151;
+}
+
+.rename-modal .rename-title {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--skrive-fg);
+}
+
+.rename-old {
+  margin: 0 0 0.875rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  color: var(--skrive-muted);
+  word-break: break-all;
+  line-height: 1.4;
+}
+
+.rename-input-row {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.875rem;
+  margin-bottom: 0.625rem;
+}
+
+.rename-input-row:focus-within {
+  border-color: var(--skrive-fg);
+}
+
+.rename-prefix {
+  flex-shrink: 0;
+  padding: 0.4rem 0.5rem 0.4rem 0.75rem;
+  color: var(--skrive-muted);
+  background: transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 50%;
+}
+
+.rename-basename {
+  flex: 1;
+  padding: 0.4rem 0.75rem 0.4rem 0;
+  border: none;
+  background: transparent;
+  color: var(--skrive-fg);
+  font: inherit;
+}
+
+.rename-basename:focus {
+  outline: none;
+}
+
+.rename-error,
+.rename-moves-to {
+  margin: 0 0 0.625rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.rename-error {
+  color: #a84030;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.rename-moves-to {
+  color: var(--skrive-muted);
+}
+
+.rename-moves-to span {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--skrive-fg);
+}
+
+.rename-summary {
+  font-size: 0.75rem;
+  color: var(--skrive-muted);
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.rename-count-pending {
+  font-style: italic;
+}
+
+.rename-count-sep {
+  opacity: 0.5;
+}
+
+.rename-preview {
+  overflow-y: auto;
+  max-height: 30vh;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 3px;
+  margin-bottom: 0.875rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.rename-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rename-row {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr) minmax(0, 2fr);
+  gap: 0.5rem;
+  padding: 0.3rem 0.625rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  border-bottom: 1px dashed var(--skrive-rule);
+}
+
+.rename-row:last-child {
+  border-bottom: none;
+}
+
+.rename-row-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.6875rem;
+  color: var(--skrive-muted);
+  align-self: center;
+}
+
+.rename-row-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--skrive-fg);
+  font-weight: 500;
+}
+
+.rename-row-line {
+  color: var(--skrive-muted);
+  font-weight: 400;
+}
+
+.rename-row-snippet {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--skrive-muted);
 }
 
 /* ===================== Cmdk palette + switcher (Phase 11) ===================== */

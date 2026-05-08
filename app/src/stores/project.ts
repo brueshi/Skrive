@@ -129,6 +129,11 @@ type State = {
    *  backlinks panel — opening one closes the other. */
   frontmatterPanelOpen: boolean;
 
+  /** Path of the file currently being renamed, or null when no
+   *  rename modal is open. Lives at the project level so the modal
+   *  doesn't lose its target if the active tab changes mid-flight. */
+  renameModalPath: string | null;
+
   /** Floating top-right history list (phase 10). One row per git
    *  commit or checkpoint touching the active tab. Mutually exclusive
    *  with backlinks + frontmatter. */
@@ -215,6 +220,14 @@ type Actions = {
   setFrontmatterPanelOpen(v: boolean): void;
   toggleFrontmatterPanel(): void;
   closeFrontmatterPanel(): void;
+
+  openRenameModal(path: string): void;
+  closeRenameModal(): void;
+  /** Commit a rename through linkGraph.renameWithReferences. Renames
+   *  the file, rewrites every reference, and walks open tabs to point
+   *  the renamed one at its new path. Refreshes the manifest from the
+   *  watcher event afterwards. */
+  commitRename(oldPath: string, newPath: string): Promise<void>;
 
   setHistoryPanelOpen(v: boolean): void;
   toggleHistoryPanel(): void;
@@ -453,6 +466,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   historyMode: null,
   historyOfActive: [],
   historyPairBaseId: null,
+  renameModalPath: null,
   activeView: 'editor',
   lintReport: null,
 
@@ -1004,6 +1018,61 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   closeFrontmatterPanel() {
     set({ frontmatterPanelOpen: false });
+  },
+
+  // ============================ Rename ============================
+
+  openRenameModal(path) {
+    set({ renameModalPath: path });
+  },
+
+  closeRenameModal() {
+    set({ renameModalPath: null });
+  },
+
+  async commitRename(oldPath, newPath) {
+    const manifest = get().manifest;
+    if (!manifest) return;
+    if (oldPath === newPath) return;
+    // Flush dirty state on the renamed tab first so an in-flight
+    // edit doesn't get clobbered when the renderer reopens it under
+    // the new path. Best-effort — a failed flush is noisier than a
+    // failed rename and the user can retry.
+    const { tabs } = get();
+    const renamedIndex = tabs.findIndex((t) => t.path === oldPath);
+    if (renamedIndex >= 0) {
+      const renamed = tabs[renamedIndex];
+      if (renamed?.dirty) {
+        try {
+          const writable: Tab = {
+            ...renamed,
+            frontmatter: { ...renamed.frontmatter }
+          };
+          const payload = buildSavePayload(writable);
+          await window.skrive.fs.writeFile(manifest.root, oldPath, payload);
+        } catch (err) {
+          logProjectError('flush before rename', err);
+        }
+      }
+    }
+    await window.skrive.linkGraph.renameWithReferences(oldPath, newPath);
+    // The watcher's add+unlink events refresh the manifest, but we
+    // also need to repoint the open tab at its new path so the
+    // editor doesn't try to load from the gone-away `oldPath`.
+    {
+      const { tabs: latest, activeTabIndex } = get();
+      const i = latest.findIndex((t) => t.path === oldPath);
+      if (i >= 0) {
+        const next = latest.slice();
+        const renamed = latest[i]!;
+        next[i] = { ...renamed, path: newPath };
+        set({ tabs: next });
+        // If the renamed file was the active tab, focus stays on it
+        // — activeTabIndex doesn't move because we mutated in place.
+        void activeTabIndex;
+      }
+    }
+    await get().refreshManifest();
   },
 
   // ============================ History panel ============================

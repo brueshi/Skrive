@@ -404,6 +404,8 @@ export function Sidebar() {
     [skipDeleteConfirm, deleteDirectory]
   );
 
+  const openRenameModal = useProjectStore((s) => s.openRenameModal);
+
   const openFileContextMenu = useCallback(
     (e: MouseEvent, file: FileEntry) => {
       e.preventDefault();
@@ -411,6 +413,11 @@ export function Sidebar() {
         x: e.clientX,
         y: e.clientY,
         items: [
+          {
+            label: 'Rename…',
+            shortcut: 'F2',
+            onClick: () => openRenameModal(file.path)
+          },
           {
             label: 'Delete…',
             shortcut: '⌫',
@@ -420,7 +427,7 @@ export function Sidebar() {
         ]
       });
     },
-    [requestDeleteFile]
+    [openRenameModal, requestDeleteFile]
   );
 
   const openDirectoryContextMenu = useCallback(
