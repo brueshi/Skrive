@@ -84,7 +84,7 @@ export function Header() {
     return activeTab?.layoutMode === mode;
   }
 
-  function handleCloseTab(e: React.MouseEvent | React.KeyboardEvent, i: number) {
+  function handleCloseTab(e: React.MouseEvent, i: number) {
     e.stopPropagation();
     void closeTab(i);
   }
@@ -256,7 +256,7 @@ type TabPillProps = {
   tab: Tab;
   active: boolean;
   onSelect: () => void;
-  onClose: (e: React.MouseEvent | React.KeyboardEvent) => void;
+  onClose: (e: React.MouseEvent) => void;
 };
 
 function TabPill({ tab, active, onSelect, onClose }: TabPillProps) {
@@ -279,15 +279,17 @@ function TabPill({ tab, active, onSelect, onClose }: TabPillProps) {
           <IconDotUnsaved size={16} />
         </span>
       )}
+      {/* The close affordance is intentionally not a real interactive
+          element — a <button> nested in the parent <button role="tab">
+          is invalid HTML, and a focusable inner control would split the
+          tab's keyboard activation between Enter (select) and Space
+          (close), which is confusing. Mouse close still works via the
+          click bubbling to onClose; keyboard users close via ⌘W or the
+          right-click context menu. */}
       <span
         className="tab-close"
-        role="button"
-        tabIndex={-1}
-        aria-label="Close tab"
+        aria-hidden="true"
         onClick={onClose}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') onClose(e);
-        }}
       >
         <IconX size={16} />
       </span>

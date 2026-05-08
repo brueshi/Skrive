@@ -59,7 +59,11 @@ export function BacklinksPanel() {
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
+        // stopImmediatePropagation so the HistoryPanel / SettingsView
+        // document-level handlers don't also fire and close themselves —
+        // Escape should dismiss one layer at a time.
         e.preventDefault();
+        e.stopImmediatePropagation();
         setOpen(false);
       }
     }

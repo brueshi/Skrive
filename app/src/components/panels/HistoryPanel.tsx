@@ -120,6 +120,7 @@ export function HistoryPanel() {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         e.preventDefault();
+        e.stopImmediatePropagation();
         closePanel();
       }
     }

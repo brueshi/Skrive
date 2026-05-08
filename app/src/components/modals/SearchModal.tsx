@@ -45,6 +45,9 @@ function flatIndexFor(groups: Group[], gi: number, hi: number): number {
   return n;
 }
 
+const RESULTS_LISTBOX_ID = 'skrive-search-results';
+const HIT_OPTION_ID = (idx: number) => `skrive-search-hit-${idx}`;
+
 function splitSnippet(hit: SearchHit): {
   before: string;
   matched: string;
@@ -190,6 +193,13 @@ export function SearchModal({ open, onClose }: Props) {
               onKeyDown={handleKey}
               autoFocus
               spellCheck={false}
+              role="combobox"
+              aria-controls={RESULTS_LISTBOX_ID}
+              aria-expanded={hits.length > 0}
+              aria-activedescendant={
+                hits.length > 0 ? HIT_OPTION_ID(selectedIndex) : undefined
+              }
+              aria-autocomplete="list"
             />
             <label className="search-case-toggle" title="Match case">
               <input
@@ -218,7 +228,13 @@ export function SearchModal({ open, onClose }: Props) {
             )}
           </div>
 
-          <div ref={listRef} className="search-results" role="listbox">
+          <div
+            ref={listRef}
+            className="search-results"
+            role="listbox"
+            id={RESULTS_LISTBOX_ID}
+            aria-label="Search results"
+          >
             {groups.map((group, gi) => (
               <div key={group.path} className="search-group">
                 <div className="search-group-header">
@@ -235,6 +251,7 @@ export function SearchModal({ open, onClose }: Props) {
                       type="button"
                       className={`search-hit${selected ? ' selected' : ''}`}
                       data-index={idx}
+                      id={HIT_OPTION_ID(idx)}
                       role="option"
                       aria-selected={selected}
                       onMouseEnter={() => setSelectedIndex(idx)}

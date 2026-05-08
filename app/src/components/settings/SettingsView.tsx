@@ -43,11 +43,14 @@ export function SettingsView({ appVersion }: Props) {
 
   // Escape returns to the editor. Keystroke is captured here rather
   // than at app-level so it doesn't fight other modals' Escape
-  // handlers when they're open.
+  // handlers when they're open. stopImmediatePropagation guards
+  // against double-close when stacked under a panel that also
+  // handles Escape at the document level.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         e.preventDefault();
+        e.stopImmediatePropagation();
         closeSettings('editor');
       }
     }

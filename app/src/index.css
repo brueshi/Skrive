@@ -17,6 +17,7 @@
   --skrive-rule: #2a2a2a;
   --skrive-link: #8db8d8;
   --skrive-selection: rgba(141, 184, 216, 0.18);
+  --skrive-focus-ring: #8db8d8;
 
   /* Editor typography — the curated default. Phase 9 rewrites these. */
   --skrive-editor-font:
@@ -47,6 +48,16 @@ body,
 
 body {
   overflow: hidden;
+}
+
+/* Global keyboard-focus indicator. Modern browsers only show :focus-visible
+   on keyboard navigation, not mouse clicks, so this stays out of the way
+   for pointer users. Local rules can opt out by setting `outline: none`
+   on `:focus-visible` (used by sidebar rows and panel rows that already
+   indicate focus through background-color highlighting). */
+:focus-visible {
+  outline: 2px solid var(--skrive-focus-ring);
+  outline-offset: 2px;
 }
 
 /* ===================== App shell layout ===================== */
@@ -906,7 +917,7 @@ body {
 }
 
 .new-file-row input:focus {
-  outline: none;
+  border-color: var(--skrive-fg);
 }
 
 .create-error {
@@ -961,7 +972,6 @@ body {
 }
 
 .sidebar .dir-label:focus {
-  outline: none;
   background-color: var(--skrive-rule);
 }
 
@@ -1047,7 +1057,6 @@ body {
 }
 
 .sidebar .file:focus {
-  outline: none;
   background-color: var(--skrive-rule);
 }
 
@@ -1868,6 +1877,14 @@ body {
   overflow: hidden;
 }
 
+/* The panel root is focused programmatically on open so Escape and
+   inner Tab navigation work without an extra click; the panel's solid
+   border already reads as the focus surface, so suppress the global
+   keyboard ring on the wrapper. */
+.panel-shell:focus-visible {
+  outline: none;
+}
+
 .bl-panel-header {
   display: flex;
   align-items: baseline;
@@ -2066,7 +2083,6 @@ body {
   padding: 0.3rem 0.4rem;
   width: 100%;
   box-sizing: border-box;
-  outline: none;
   transition:
     border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
     background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
@@ -2229,10 +2245,13 @@ body {
   padding: 0.2rem 0.4rem;
   min-width: 4rem;
   width: auto;
-  outline: none;
   box-sizing: border-box;
 }
 
+/* The chip-pending input nests inside a .chip-group container that
+   already shows focus-within state via border-color; suppress the
+   default keyboard ring so the indicator stays on the group, not the
+   individual input. */
 .chip-pending {
   background: transparent;
   border: none;
@@ -2242,6 +2261,9 @@ body {
   padding: 0.25rem 0.25rem;
   flex: 1;
   min-width: 6rem;
+}
+
+.chip-pending:focus-visible {
   outline: none;
 }
 
@@ -2473,7 +2495,6 @@ body {
 }
 
 .settings-input:focus {
-  outline: none;
   border-color: var(--skrive-fg);
 }
 
@@ -2741,7 +2762,10 @@ body {
   font-size: 0.9375rem;
 }
 
-.search-query:focus {
+/* The palette itself is the focus surface; the input is its entry
+   point. Suppress the keyboard ring on the borderless input — its
+   blinking caret is the indicator. */
+.search-query:focus-visible {
   outline: none;
 }
 
@@ -2892,7 +2916,6 @@ body {
 }
 
 .np-field input:focus {
-  outline: none;
   border-color: var(--skrive-fg);
 }
 
@@ -2986,7 +3009,10 @@ body {
   font: inherit;
 }
 
-.rename-basename:focus {
+/* The .rename-input-row wrapper carries the focus indicator via
+   :focus-within border-color; suppress the keyboard ring on the
+   borderless input so the indicator stays on the row. */
+.rename-basename:focus-visible {
   outline: none;
 }
 
@@ -3131,7 +3157,9 @@ body {
   flex-shrink: 0;
 }
 
-.cmdk-input:focus {
+/* Same posture as the search input: the palette surface is the focus
+   indicator; the input's caret and the highlighted row do the rest. */
+.cmdk-input:focus-visible {
   outline: none;
 }
 

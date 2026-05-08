@@ -9,7 +9,7 @@
 // extra class names. Everything else is shared.
 
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { forwardRef, type ReactNode } from 'react';
+import { forwardRef, useEffect, useRef, type ReactNode } from 'react';
 
 type Props = {
   open: boolean;
@@ -37,13 +37,40 @@ export const PanelShell = forwardRef<HTMLDivElement, Props>(
     _
   ) {
     const reduced = useReducedMotion();
+    const internalRef = useRef<HTMLDivElement | null>(null);
+
+    // Forward the rendered node to both the parent's click-outside ref
+    // and our own internal ref (used for the auto-focus effect below).
+    function setRef(node: HTMLDivElement | null) {
+      internalRef.current = node;
+      if (typeof panelRef === 'function') {
+        panelRef(node);
+      } else if (panelRef) {
+        (panelRef as React.MutableRefObject<HTMLDivElement | null>).current =
+          node;
+      }
+    }
+
+    // Move keyboard focus into the panel on open. Without this, a user
+    // who hits ⌘⇧F/⌘⇧B/⌘⇧H keeps focus on whatever they had before
+    // (typically the editor), so neither Tab navigation nor Escape
+    // dismissal works as expected. rAF lets the framer-motion enter
+    // transition mount the node first.
+    useEffect(() => {
+      if (!open) return;
+      const id = requestAnimationFrame(() => {
+        internalRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(id);
+    }, [open]);
+
     return (
       <AnimatePresence>
         {open && (
           <motion.div
             className={`panel-shell${className ? ` ${className}` : ''}`}
             style={{ width }}
-            ref={panelRef}
+            ref={setRef}
             role="dialog"
             tabIndex={-1}
             aria-label={ariaLabel}
