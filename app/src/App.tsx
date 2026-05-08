@@ -16,6 +16,7 @@ import { SettingsView } from './components/settings/SettingsView';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { SearchModal } from './components/modals/SearchModal';
 import { RenameModal } from './components/modals/RenameModal';
+import { NewProjectDialog } from './components/modals/NewProjectDialog';
 import { CommandPalette } from './components/cmdk/CommandPalette';
 import { FileSwitcher } from './components/cmdk/FileSwitcher';
 import type { CommandDeps } from './lib/commands/registry';
@@ -124,15 +125,14 @@ export function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
 
   const commandDeps: CommandDeps = useMemo(
     () => ({
       openFileSwitcher: () => setSwitcherOpen(true),
       openSearch: () => setSearchOpen(true),
       openRename: (path: string) => openRenameModal(path),
-      openNewProject: () => {
-        // 11c lands the new-project dialog.
-      }
+      openNewProject: () => setNewProjectOpen(true)
     }),
     [openRenameModal]
   );
@@ -403,17 +403,26 @@ export function App() {
           <div className="empty-state">
             <h1>Skrive</h1>
             <p>A markdown editor for writers. Open a project to begin.</p>
-            <button
-              type="button"
-              className="primary"
-              onClick={() => {
-                void openProjectFromDialog().catch((err) =>
-                  logProjectError('openProjectFromDialog', err)
-                );
-              }}
-            >
-              Open project…
-            </button>
+            <div className="empty-actions">
+              <button
+                type="button"
+                className="primary"
+                onClick={() => {
+                  void openProjectFromDialog().catch((err) =>
+                    logProjectError('openProjectFromDialog', err)
+                  );
+                }}
+              >
+                Open project…
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setNewProjectOpen(true)}
+              >
+                New project…
+              </button>
+            </div>
             <p className="hint">
               Or press <kbd>⌘O</kbd>.
             </p>
@@ -465,6 +474,10 @@ export function App() {
 
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
       <RenameModal />
+      <NewProjectDialog
+        open={newProjectOpen}
+        onClose={() => setNewProjectOpen(false)}
+      />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}

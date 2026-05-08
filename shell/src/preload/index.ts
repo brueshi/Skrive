@@ -45,7 +45,14 @@ const api: SkriveIpc = {
       return () => {
         ipcRenderer.removeListener('project:change', wrapped);
       };
-    }
+    },
+    create: (parent: string, name: string, options: { gitInit: boolean }) =>
+      ipcRenderer.invoke(
+        'project:create',
+        parent,
+        name,
+        options
+      ) as Promise<string>
   },
   fs: {
     readFile: (projectRoot: string, relPath: string) =>

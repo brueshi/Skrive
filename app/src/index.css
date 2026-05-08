@@ -519,23 +519,45 @@ body {
   border-radius: 3px;
 }
 
-.empty-state button.primary {
+.empty-state .empty-actions {
+  display: flex;
+  gap: 0.5rem;
   margin-top: 0.5rem;
+}
+
+.empty-state button.primary,
+.empty-state button.secondary {
   appearance: none;
-  background: var(--skrive-fg);
-  color: var(--skrive-bg);
-  border: none;
   font: inherit;
   font-weight: 500;
   font-size: 0.875rem;
   padding: 0.5rem 1rem;
   border-radius: 4px;
   cursor: pointer;
-  transition: opacity 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    opacity 120ms cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 120ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 120ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.empty-state button.primary {
+  background: var(--skrive-fg);
+  color: var(--skrive-bg);
+  border: none;
 }
 
 .empty-state button.primary:hover {
   opacity: 0.85;
+}
+
+.empty-state button.secondary {
+  background: transparent;
+  color: var(--skrive-fg);
+  border: 1px solid var(--skrive-rule);
+}
+
+.empty-state button.secondary:hover {
+  border-color: var(--skrive-fg);
 }
 
 .empty-recent {
@@ -2816,6 +2838,61 @@ body {
   color: inherit;
   font-weight: 600;
   padding: 0 1px;
+}
+
+/* ===================== New-project dialog (Phase 11) ===================== */
+
+.new-project-modal {
+  width: 28rem;
+}
+
+.np-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.875rem;
+  font-size: 0.8125rem;
+}
+
+.np-field label {
+  color: var(--skrive-muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+}
+
+.np-field input {
+  background: transparent;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 3px;
+  padding: 0.4rem 0.6rem;
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.np-field input:focus {
+  outline: none;
+  border-color: var(--skrive-fg);
+}
+
+.np-field input[readonly] {
+  color: var(--skrive-muted);
+  cursor: default;
+}
+
+.np-location-row {
+  display: flex;
+  gap: 0.375rem;
+}
+
+.np-location-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.np-location-row .modal-button {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.75rem;
 }
 
 /* ===================== Rename modal (Phase 11) ===================== */

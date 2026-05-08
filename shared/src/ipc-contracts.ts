@@ -343,6 +343,17 @@ export interface SkriveIpc {
      * Subscribe to watcher events. Returns an unsubscribe function.
      */
     onChange(handler: (event: ProjectChange) => void): () => void;
+    /**
+     * Create a new project directory at `{parent}/{name}` plus a
+     * starter README.md, and optionally `git init` it. Returns the
+     * canonical absolute path of the new project. Errors when the
+     * directory already exists or the parent isn't writable.
+     */
+    create(
+      parent: string,
+      name: string,
+      options: { gitInit: boolean }
+    ): Promise<string>;
   };
   fs: {
     /** Read a project-relative file. Path is resolved against the active project root. */

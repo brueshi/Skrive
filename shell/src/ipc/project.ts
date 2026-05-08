@@ -9,6 +9,7 @@
 // renderer via `webContents.send('project:change', ...)`.
 
 import { BrowserWindow, dialog, ipcMain } from 'electron';
+import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import chokidar, { type FSWatcher } from 'chokidar';
@@ -268,4 +269,52 @@ export function registerProjectHandlers(): void {
       activeWatcher = null;
     }
   });
+
+  ipcMain.handle(
+    'project:create',
+    async (
+      _event,
+      parent: string,
+      name: string,
+      options: { gitInit: boolean }
+    ): Promise<string> => {
+      if (typeof parent !== 'string' || parent.length === 0) {
+        throw new Error('project:create requires a parent directory');
+      }
+      const trimmed = (name ?? '').trim();
+      if (trimmed.length === 0) {
+        throw new Error('project:create requires a non-empty name');
+      }
+      // Reject path separators in the name — the user picked a parent;
+      // they shouldn't be able to nest the new project arbitrarily.
+      if (/[\\/]/.test(trimmed) || trimmed === '.' || trimmed === '..') {
+        throw new Error('Project name cannot contain path separators');
+      }
+      const target = path.resolve(parent, trimmed);
+      try {
+        await fs.mkdir(target, { recursive: false });
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'EEXIST') {
+          throw new Error(`A directory already exists at ${target}`);
+        }
+        throw err;
+      }
+      // Starter README so the project has at least one file the
+      // sidebar / linter / search has something to chew on.
+      const readme = `# ${trimmed}\n\nWritten with Skrive.\n`;
+      await fs.writeFile(path.join(target, 'README.md'), readme, 'utf8');
+      if (options?.gitInit) {
+        await new Promise<void>((resolve) => {
+          const child = spawn('git', ['init', '--quiet'], {
+            cwd: target,
+            windowsHide: true
+          });
+          child.on('error', () => resolve()); // git missing → ignore
+          child.on('close', () => resolve());
+        });
+      }
+      return target;
+    }
+  );
 }
