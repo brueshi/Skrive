@@ -25,6 +25,10 @@ type Props = {
   children: ReactNode;
 };
 
+// Entry slides 8px down; exit lifts only 6px. The exit being shallower
+// than the entry is deliberate — paired with the opacity fade, the
+// panel feels like it's evaporating in place rather than retracting,
+// which reads less assertive when the user is dismissing it.
 const PANEL_VARIANTS = {
   hidden: { opacity: 0, y: -8 },
   visible: { opacity: 1, y: 0 },

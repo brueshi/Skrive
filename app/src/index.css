@@ -30,6 +30,46 @@
   --skrive-ui-font:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 
+  /* ============ Geometry + motion tokens (Phase 13b) ============
+   *
+   * Pre-13b these literals were sprinkled across the file with no
+   * documented scale. The audit's coherence pass surfaced two-sized
+   * radii (3px and 4px) on neighboring buttons, asymmetric modal
+   * padding, and unexplained variation in transition durations. The
+   * tokens below are the documented scale; replacing every literal is
+   * not a goal — replacing the side-by-side offenders is.
+   */
+
+  /* Radius. Existing convention preserved: xs for embedded chrome
+     (inline code, close-button hover); sm for small icon buttons,
+     chips, inputs; md for prominent controls (modal buttons, mode
+     toggle, panel containers, tab tops). The 999px pill on Settings
+     dictionary chips stays a literal — pill is a category, not a
+     scale step. */
+  --skrive-radius-xs: 2px;
+  --skrive-radius-sm: 3px;
+  --skrive-radius-md: 4px;
+
+  /* Z-index scale. Higher = closer to the viewer. Context menus sit
+     above modals so right-clicking inside a modal still surfaces a
+     menu over its dialog. */
+  --skrive-z-sticky: 1;
+  --skrive-z-dropdown: 10;
+  --skrive-z-panel: 100;
+  --skrive-z-modal-backdrop: 150;
+  --skrive-z-modal-content: 151;
+  --skrive-z-context-menu: 200;
+
+  /* Motion. Quick = chrome state changes; standard = modal entrance/
+     exit; slow = sidebar collapse (the heaviest weight that animates).
+     Easing is a single curve everywhere — uniform feel beats per-
+     component bespoke timing. The 60ms suggestion-list highlight is
+     intentionally faster than `quick` for keyboard-nav snappiness. */
+  --skrive-duration-quick: 120ms;
+  --skrive-duration-standard: 160ms;
+  --skrive-duration-slow: 180ms;
+  --skrive-easing: cubic-bezier(0.4, 0, 0.2, 1);
+
   font-family: var(--skrive-ui-font);
   font-size: 14px;
   line-height: 1.5;
@@ -105,7 +145,7 @@ body {
   background: transparent;
   border: none;
   padding: 0.125rem 0.375rem;
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   font: inherit;
   font-size: 0.6875rem;
   color: var(--skrive-muted);
@@ -115,8 +155,8 @@ body {
   max-width: 14rem;
   cursor: pointer;
   transition:
-    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .header .project-name:hover,
@@ -145,11 +185,11 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   padding: 0;
   transition:
-    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .header .header-icon-button:hover {
@@ -186,7 +226,7 @@ body {
   padding: 0 0.5rem 0 0.625rem;
   background: transparent;
   border: none;
-  border-radius: 4px 4px 0 0;
+  border-radius: var(--skrive-radius-md) var(--skrive-radius-md) 0 0;
   color: var(--skrive-muted);
   font: inherit;
   font-size: 12px;
@@ -197,8 +237,8 @@ body {
   max-width: 14rem;
   overflow: hidden;
   transition:
-    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .tab:hover {
@@ -239,8 +279,8 @@ body {
   align-items: center;
   justify-content: center;
   opacity: 0;
-  transition: opacity 0.12s cubic-bezier(0.4, 0, 0.2, 1);
-  border-radius: 2px;
+  transition: opacity var(--skrive-duration-quick) var(--skrive-easing);
+  border-radius: var(--skrive-radius-xs);
   padding: 2px;
   color: var(--skrive-muted);
   cursor: pointer;
@@ -266,7 +306,7 @@ body {
 .mode-toggle {
   display: inline-flex;
   border: 1px solid var(--skrive-rule);
-  border-radius: 4px;
+  border-radius: var(--skrive-radius-md);
   overflow: hidden;
 }
 
@@ -282,8 +322,8 @@ body {
   justify-content: center;
   padding: 0;
   transition:
-    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .mode-button + .mode-button {
@@ -314,8 +354,8 @@ body {
   font-family: var(--skrive-ui-font);
   font-size: 13px;
   color: var(--skrive-fg);
-  z-index: 200;
-  animation: skrive-ctx-in 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: var(--skrive-z-context-menu);
+  animation: skrive-ctx-in var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .ctx-item {
@@ -427,37 +467,40 @@ body {
 
 /* Backdrop fade. Drives both the dimmed overlay behind .modal-dialog
    and the cmdk / search palette overlays — they all share the same
-   data-state contract from Radix Dialog. */
+   data-state contract from Radix Dialog.
+   140ms is a deliberate literal: 20ms shorter than the standard
+   content-in (160ms) so the backdrop gets a head start and the dialog
+   feels like it lifts onto an already-dimmed stage. */
 .modal-backdrop,
 .cmdk-backdrop,
 .search-backdrop {
-  animation: skrive-modal-fade-in 140ms cubic-bezier(0.4, 0, 0.2, 1);
+  animation: skrive-modal-fade-in 140ms var(--skrive-easing);
 }
 
 .modal-backdrop[data-state='closed'],
 .cmdk-backdrop[data-state='closed'],
 .search-backdrop[data-state='closed'] {
-  animation: skrive-modal-fade-out 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  animation: skrive-modal-fade-out var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .modal-dialog,
 .rename-modal {
-  animation: skrive-modal-content-in 160ms cubic-bezier(0.4, 0, 0.2, 1);
+  animation: skrive-modal-content-in var(--skrive-duration-standard) var(--skrive-easing);
 }
 
 .modal-dialog[data-state='closed'],
 .rename-modal[data-state='closed'] {
-  animation: skrive-modal-content-out 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  animation: skrive-modal-content-out var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .cmdk-palette,
 .search-palette {
-  animation: skrive-cmdk-content-in 160ms cubic-bezier(0.4, 0, 0.2, 1);
+  animation: skrive-cmdk-content-in var(--skrive-duration-standard) var(--skrive-easing);
 }
 
 .cmdk-palette[data-state='closed'],
 .search-palette[data-state='closed'] {
-  animation: skrive-cmdk-content-out 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  animation: skrive-cmdk-content-out var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -483,7 +526,7 @@ body {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
-  z-index: 150;
+  z-index: var(--skrive-z-modal-backdrop);
 }
 
 .modal-dialog {
@@ -497,7 +540,7 @@ body {
   width: 26rem;
   max-width: calc(100vw - 2rem);
   font-family: var(--skrive-ui-font);
-  z-index: 151;
+  z-index: var(--skrive-z-modal-content);
 }
 
 .modal-title {
@@ -520,7 +563,7 @@ body {
   color: var(--skrive-fg);
   background: var(--skrive-rule);
   padding: 0.05rem 0.25rem;
-  border-radius: 2px;
+  border-radius: var(--skrive-radius-xs);
   word-break: break-all;
 }
 
@@ -551,7 +594,7 @@ body {
 
 .modal-button {
   padding: 0.5rem 1rem;
-  border-radius: 4px;
+  border-radius: var(--skrive-radius-md);
   font: inherit;
   font-size: 0.8125rem;
   cursor: pointer;
@@ -559,8 +602,8 @@ body {
   background: transparent;
   color: var(--skrive-fg);
   transition:
-    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-    color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+    background-color var(--skrive-duration-quick) var(--skrive-easing),
+    color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .modal-button:disabled {
@@ -646,7 +689,7 @@ body {
   font-size: 0.8em;
   background: var(--skrive-rule);
   padding: 0.05em 0.35em;
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
 }
 
 .empty-state .empty-actions {
@@ -662,12 +705,12 @@ body {
   font-weight: 500;
   font-size: 0.875rem;
   padding: 0.5rem 1rem;
-  border-radius: 4px;
+  border-radius: var(--skrive-radius-md);
   cursor: pointer;
   transition:
-    opacity 120ms cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 120ms cubic-bezier(0.4, 0, 0.2, 1),
-    color 120ms cubic-bezier(0.4, 0, 0.2, 1);
+    opacity var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing),
+    color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .empty-state button.primary {
@@ -720,7 +763,7 @@ body {
   align-items: center;
   gap: 0.25rem;
   border: 1px solid var(--skrive-rule);
-  border-radius: 4px;
+  border-radius: var(--skrive-radius-md);
 }
 
 .empty-recent-row:hover {
@@ -802,8 +845,8 @@ body {
   flex-direction: column;
   min-height: 0;
   transition:
-    width 180ms cubic-bezier(0.4, 0, 0.2, 1),
-    opacity 180ms cubic-bezier(0.4, 0, 0.2, 1);
+    width var(--skrive-duration-slow) var(--skrive-easing),
+    opacity var(--skrive-duration-slow) var(--skrive-easing);
 }
 
 .sidebar.collapsed {
@@ -812,7 +855,7 @@ body {
 }
 
 .sidebar.dragging {
-  transition: opacity 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity var(--skrive-duration-slow) var(--skrive-easing);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -839,7 +882,7 @@ body {
   left: 0;
   width: 1px;
   background: var(--skrive-rule);
-  transition: background 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .resize-handle:hover::before,
@@ -855,7 +898,7 @@ body {
   position: sticky;
   top: 0;
   background: var(--skrive-bg);
-  z-index: 1;
+  z-index: var(--skrive-z-sticky);
 }
 
 .sidebar .title {
@@ -884,10 +927,10 @@ body {
   align-items: center;
   justify-content: center;
   padding: 0;
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   transition:
-    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-    color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+    background-color var(--skrive-duration-quick) var(--skrive-easing),
+    color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .sidebar .icon-button:hover:not(:disabled) {
@@ -908,7 +951,7 @@ body {
   width: 100%;
   padding: 0.375rem 0.5rem;
   border: 1px solid var(--skrive-fg);
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   background: var(--skrive-bg);
   color: var(--skrive-fg);
   font: inherit;
@@ -1096,7 +1139,7 @@ body {
 
 /* Folder pocket-line transition (matches the icon's animated d). */
 .pocket-line {
-  transition: d 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: d var(--skrive-duration-slow) var(--skrive-easing);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1109,7 +1152,7 @@ body {
 .rail-fill {
   transform-box: fill-box;
   transform-origin: left center;
-  transition: transform 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .rail-fill.is-hidden {
@@ -1221,7 +1264,7 @@ body {
     ui-monospace, 'JetBrains Mono', SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.92em;
   background: var(--skrive-rule);
-  border-radius: 2px;
+  border-radius: var(--skrive-radius-xs);
   padding: 0 0.2em;
 }
 
@@ -1231,7 +1274,7 @@ body {
   max-height: 3em;
   max-width: 20em;
   vertical-align: middle;
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   object-fit: contain;
 }
 
@@ -1331,13 +1374,13 @@ body {
   font-size: 0.9em;
   background: var(--skrive-rule);
   padding: 0.1em 0.35em;
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
 }
 
 .preview-inner pre {
   background: var(--skrive-rule);
   padding: 1em;
-  border-radius: 4px;
+  border-radius: var(--skrive-radius-md);
   overflow-x: auto;
   margin: 1em 0;
   line-height: 1.5;
@@ -1478,7 +1521,7 @@ body {
 .diff-mode-toggle {
   display: inline-flex;
   border: 1px solid var(--skrive-rule);
-  border-radius: 4px;
+  border-radius: var(--skrive-radius-md);
   overflow: hidden;
 }
 
@@ -1495,8 +1538,8 @@ body {
   letter-spacing: 0.04em;
   text-transform: lowercase;
   transition:
-    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .diff-scroll-button + .diff-scroll-button,
@@ -1527,8 +1570,8 @@ body {
   justify-content: center;
   padding: 0;
   transition:
-    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .diff-close {
@@ -1541,11 +1584,11 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   padding: 0;
   transition:
-    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .diff-close:hover {
@@ -1673,7 +1716,7 @@ body {
   border-left: 2px solid transparent;
   padding: 0.05rem 0.75rem 0.05rem 1rem;
   margin: 0 -0.5rem 0.25rem;
-  border-radius: 2px;
+  border-radius: var(--skrive-radius-xs);
 }
 
 .diff-preview-added {
@@ -1706,7 +1749,7 @@ body {
   justify-content: center;
   min-height: 2.5em;
   border: 1px dashed hsl(95, 15%, 30%);
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   margin: 0.5em -0.5rem;
 }
 
@@ -1722,7 +1765,7 @@ body {
   color: var(--skrive-muted);
   padding: 0.1em 0.45em;
   border: 1px solid var(--skrive-rule);
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   background: var(--skrive-bg);
 }
 
@@ -1789,13 +1832,13 @@ body {
   font-size: 0.9em;
   background: var(--skrive-rule);
   padding: 0.1em 0.35em;
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
 }
 
 .diff-pane-preview pre {
   background: var(--skrive-rule);
   padding: 0.85em;
-  border-radius: 4px;
+  border-radius: var(--skrive-radius-md);
   overflow-x: auto;
   margin: 0.85em 0;
   line-height: 1.5;
@@ -1867,10 +1910,10 @@ body {
   right: 12px;
   max-width: calc(100vw - 24px);
   max-height: 50vh;
-  z-index: 100;
+  z-index: var(--skrive-z-panel);
   background: var(--skrive-bg);
   border: 1px solid var(--skrive-fg);
-  border-radius: 4px;
+  border-radius: var(--skrive-radius-md);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
   display: flex;
   flex-direction: column;
@@ -1963,7 +2006,7 @@ body {
   color: var(--skrive-fg);
   cursor: pointer;
   text-align: left;
-  transition: background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .bl-row-button:hover,
@@ -2076,7 +2119,7 @@ body {
 .value-input {
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   color: var(--skrive-fg);
   font: inherit;
   font-size: 12px;
@@ -2084,8 +2127,8 @@ body {
   width: 100%;
   box-sizing: border-box;
   transition:
-    border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+    border-color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .key-input {
@@ -2136,10 +2179,10 @@ body {
   padding: 0;
   font-size: 14px;
   line-height: 1;
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   transition:
-    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .fm-panel .remove-button:hover {
@@ -2150,7 +2193,7 @@ body {
 .fm-panel .add-button {
   background: transparent;
   border: 1px dashed var(--skrive-rule);
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   color: var(--skrive-muted);
   cursor: pointer;
   font: inherit;
@@ -2160,8 +2203,8 @@ body {
   width: 100%;
   text-align: center;
   transition:
-    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-    border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    border-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .fm-panel .add-button:hover:not(:disabled) {
@@ -2182,11 +2225,11 @@ body {
   gap: 0.25rem;
   padding: 0.25rem 0.375rem;
   border: 1px solid var(--skrive-rule);
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   background: var(--skrive-bg);
   min-height: 26px;
   align-items: center;
-  transition: border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: border-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .chip-group:focus-within {
@@ -2198,7 +2241,7 @@ body {
   align-items: center;
   gap: 0;
   background: var(--skrive-rule);
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   font-size: 12px;
   line-height: 1;
   overflow: hidden;
@@ -2228,7 +2271,7 @@ body {
   font: inherit;
   font-size: 14px;
   line-height: 1;
-  transition: color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .chip-remove:hover {
@@ -2238,7 +2281,7 @@ body {
 .chip-edit {
   background: var(--skrive-bg);
   border: 1px solid var(--skrive-fg);
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   color: var(--skrive-fg);
   font: inherit;
   font-size: 12px;
@@ -2283,9 +2326,9 @@ body {
   right: 0;
   background: var(--skrive-bg);
   border: 1px solid var(--skrive-fg);
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  z-index: 10;
+  z-index: var(--skrive-z-dropdown);
   max-height: 12rem;
   overflow-y: auto;
   font-size: 12px;
@@ -2300,7 +2343,10 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: background-color 0.06s cubic-bezier(0.4, 0, 0.2, 1);
+  /* 60ms — intentionally faster than --skrive-duration-quick. The
+     suggestion list is keyboard-driven and the highlight needs to
+     track keys without lag. Documented at the token block. */
+  transition: background-color 0.06s var(--skrive-easing);
 }
 
 .suggestion.selected {
@@ -2318,16 +2364,16 @@ body {
   padding: 0 0.5rem;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   color: var(--skrive-muted);
   cursor: pointer;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   letter-spacing: 0.04em;
   transition:
-    border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+    border-color var(--skrive-duration-quick) var(--skrive-easing),
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .fm-indicator:hover {
@@ -2386,7 +2432,7 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
 }
 
 .settings-close:hover {
@@ -2486,7 +2532,7 @@ body {
   width: 100%;
   background: transparent;
   border: 1px solid var(--skrive-rule);
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   padding: 0.45rem 0.65rem;
   font: inherit;
   font-size: 0.85rem;
@@ -2501,7 +2547,7 @@ body {
 .settings-secondary-button {
   background: transparent;
   border: 1px solid var(--skrive-rule);
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   padding: 0.4rem 0.85rem;
   font: inherit;
   font-size: 0.82rem;
@@ -2587,7 +2633,7 @@ body {
   padding: 0.55rem 0.75rem;
   background: transparent;
   border: 1px solid var(--skrive-rule);
-  border-radius: 4px;
+  border-radius: var(--skrive-radius-md);
   cursor: pointer;
   text-align: left;
   color: var(--skrive-fg);
@@ -2619,7 +2665,7 @@ body {
 .settings-stepper {
   display: inline-flex;
   border: 1px solid var(--skrive-rule);
-  border-radius: 4px;
+  border-radius: var(--skrive-radius-md);
   overflow: hidden;
 }
 
@@ -2744,7 +2790,7 @@ body {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
-  z-index: 150;
+  z-index: var(--skrive-z-modal-backdrop);
 }
 
 .search-palette {
@@ -2760,7 +2806,7 @@ body {
   display: flex;
   flex-direction: column;
   font-family: var(--skrive-ui-font);
-  z-index: 151;
+  z-index: var(--skrive-z-modal-content);
 }
 
 .search-query-row {
@@ -2802,7 +2848,7 @@ body {
   cursor: pointer;
   user-select: none;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
 }
 
 .search-case-toggle:hover {
@@ -2927,7 +2973,7 @@ body {
 .np-field input {
   background: transparent;
   border: 1px solid var(--skrive-rule);
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   padding: 0.4rem 0.6rem;
   color: var(--skrive-fg);
   font: inherit;
@@ -2974,7 +3020,7 @@ body {
   display: flex;
   flex-direction: column;
   font-family: var(--skrive-ui-font);
-  z-index: 151;
+  z-index: var(--skrive-z-modal-content);
 }
 
 .rename-modal .rename-title {
@@ -2998,7 +3044,7 @@ body {
   display: flex;
   align-items: stretch;
   border: 1px solid var(--skrive-rule);
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.875rem;
   margin-bottom: 0.625rem;
@@ -3037,7 +3083,7 @@ body {
 
 .rename-error,
 .rename-moves-to {
-  margin: 0 0 0.625rem;
+  margin: 0 0 0.75rem;
   font-size: 0.75rem;
   line-height: 1.4;
 }
@@ -3078,7 +3124,7 @@ body {
   overflow-y: auto;
   max-height: 30vh;
   border: 1px solid var(--skrive-rule);
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   margin-bottom: 0.875rem;
   flex: 1;
   min-height: 0;
@@ -3138,7 +3184,7 @@ body {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
-  z-index: 150;
+  z-index: var(--skrive-z-modal-backdrop);
 }
 
 .cmdk-palette {
@@ -3154,7 +3200,7 @@ body {
   display: flex;
   flex-direction: column;
   font-family: var(--skrive-ui-font);
-  z-index: 151;
+  z-index: var(--skrive-z-modal-content);
 }
 
 .cmdk-palette [cmdk-root] {
@@ -3269,16 +3315,16 @@ body {
   padding: 0 0.5rem;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   color: var(--skrive-muted);
   cursor: pointer;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   letter-spacing: 0.04em;
   transition:
-    border-color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-    color 0.12s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+    border-color var(--skrive-duration-quick) var(--skrive-easing),
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .hi-indicator:hover {
@@ -3329,7 +3375,7 @@ body {
   text-transform: uppercase;
   color: var(--skrive-muted);
   border: 1px solid var(--skrive-rule);
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   padding: 0 0.35rem;
   flex-shrink: 0;
 }
@@ -3391,7 +3437,7 @@ body {
   color: var(--skrive-fg);
   cursor: pointer;
   text-align: left;
-  transition: background-color 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .hi-row-button:hover,
@@ -3528,7 +3574,7 @@ body {
   color: var(--skrive-muted);
   background: var(--skrive-rule);
   padding: 0.05rem 0.4rem;
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
   border: 1px solid transparent;
 }
 
@@ -3547,7 +3593,7 @@ body {
   color: var(--skrive-fg);
   background: var(--skrive-rule);
   padding: 0.05rem 0.3rem;
-  border-radius: 3px;
+  border-radius: var(--skrive-radius-sm);
 }
 
 @media (max-width: 600px) {
