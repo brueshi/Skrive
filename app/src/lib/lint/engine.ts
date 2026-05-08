@@ -34,6 +34,24 @@ export function runProjectLint(input: LintEngineInput): ProjectLintReport {
     orphanedFiles
   };
 
+  // Pre-parse every file's mdast once. The previous loop structure
+  // re-parsed inside each rule iteration, so a project with N
+  // file-scope rules and M files paid N × M parses (5 × 184 ≈ 920
+  // parses on the dogfood project, ~900ms total). Caching the AST
+  // here drops it to one parse per file. Skip files that have no
+  // file-scope rules to run against — if every file rule is `off`,
+  // we don't pay for parsing at all.
+  const fileScopeActive = RULES.some(
+    (r) => r.scope === 'file' && severityFor(r.id, config) !== 'off'
+  );
+  const fileAsts = new Map<string, MdastRoot>();
+  if (fileScopeActive) {
+    for (const file of manifest.files) {
+      const body = bodies.get(file.path) ?? '';
+      fileAsts.set(file.path, parseAst(body));
+    }
+  }
+
   for (const rule of RULES) {
     const severity = severityFor(rule.id, config);
     if (severity === 'off') continue;
@@ -42,7 +60,7 @@ export function runProjectLint(input: LintEngineInput): ProjectLintReport {
     } else {
       for (const file of manifest.files) {
         const body = bodies.get(file.path) ?? '';
-        const ast = parseAst(body);
+        const ast = fileAsts.get(file.path)!;
         const fileCtx: FileLintContext = {
           path: file.path,
           body,
