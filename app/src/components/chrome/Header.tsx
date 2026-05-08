@@ -11,7 +11,7 @@
 // toggle hides — DiffView carries its own diff-raw / diff-preview
 // toggle and exit affordance.
 
-import { useEffect, useMemo, type CSSProperties } from 'react';
+import { useMemo, type CSSProperties } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   selectActiveTab,
@@ -104,7 +104,7 @@ export function Header() {
             className="header-icon-button sidebar-toggle"
             aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
             aria-pressed={sidebarVisible}
-            title="Toggle sidebar  ⌘B"
+            title="Toggle sidebar  ⌘["
             onClick={() => toggleSidebar()}
           >
             <IconSidebarToggle size={16} shown={sidebarVisible} />
@@ -297,42 +297,3 @@ function TabPill({ tab, active, onSelect, onClose }: TabPillProps) {
   );
 }
 
-// Hook helper: register window-level chrome shortcuts that aren't
-// covered by the editor's CM6 keymap. ⌘W closes the active tab,
-// ⌘⌥← / ⌘⌥→ navigate tabs (Notion-flavored).
-export function useChromeShortcuts() {
-  const closeTab = useProjectStore((s) => s.closeTab);
-  const switchTab = useProjectStore((s) => s.switchTab);
-  const activeTabIndex = useProjectStore((s) => s.activeTabIndex);
-  const tabs = useProjectStore((s) => s.tabs);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
-      if (e.key === 'w' || e.key === 'W') {
-        if (e.shiftKey || e.altKey) return;
-        if (activeTabIndex < 0) return;
-        e.preventDefault();
-        void closeTab(activeTabIndex);
-        return;
-      }
-      // ⌘⇧[ / ⌘⇧] — macOS-standard previous/next tab (iTerm, Safari).
-      // We match `e.code` (BracketLeft / BracketRight) instead of `e.key`
-      // because the latter resolves to `{` / `}` when shift is held and
-      // is layout-dependent — `e.code` is keyboard-position-based and
-      // stable across layouts.
-      if (e.shiftKey && e.code === 'BracketLeft') {
-        e.preventDefault();
-        if (tabs.length === 0) return;
-        switchTab((activeTabIndex - 1 + tabs.length) % tabs.length);
-      } else if (e.shiftKey && e.code === 'BracketRight') {
-        e.preventDefault();
-        if (tabs.length === 0) return;
-        switchTab((activeTabIndex + 1) % tabs.length);
-      }
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [closeTab, switchTab, activeTabIndex, tabs.length]);
-}

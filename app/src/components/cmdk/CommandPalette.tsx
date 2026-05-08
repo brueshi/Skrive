@@ -51,7 +51,8 @@ export function CommandPalette({ open, onClose, deps }: Props) {
     Tabs: [],
     View: [],
     Project: [],
-    Settings: []
+    Settings: [],
+    Help: []
   };
   for (const cmd of available) grouped[cmd.group].push(cmd);
 

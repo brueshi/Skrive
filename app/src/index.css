@@ -3456,3 +3456,102 @@ body {
   flex-shrink: 0;
   opacity: 0.85;
 }
+
+/* ============================ Cheat sheet (⌘/) ============================
+ *
+ * Reuses the .modal-dialog frame so the chrome harmonizes with Rename /
+ * Delete / NewProject dialogs. Wider than the default 26rem because the
+ * shortcut grid wants two columns of breathing room, and capped at the
+ * viewport so it stays usable on narrow windows.
+ */
+
+.cheatsheet-modal {
+  width: 32rem;
+  max-height: calc(100vh - 4rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.cheatsheet-body {
+  margin-top: 0.5rem;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem 1.5rem;
+  padding-right: 0.25rem;
+}
+
+.cheatsheet-group {
+  break-inside: avoid;
+}
+
+.cheatsheet-group-heading {
+  margin: 0 0 0.375rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--skrive-muted);
+}
+
+.cheatsheet-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.cheatsheet-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--skrive-fg);
+  line-height: 1.4;
+}
+
+.cheatsheet-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cheatsheet-chord {
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--skrive-muted);
+  background: var(--skrive-rule);
+  padding: 0.05rem 0.4rem;
+  border-radius: 3px;
+  border: 1px solid transparent;
+}
+
+.cheatsheet-foot {
+  margin: 1rem 0 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--skrive-rule);
+  font-size: 0.75rem;
+  color: var(--skrive-muted);
+  text-align: right;
+}
+
+.cheatsheet-foot kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+}
+
+@media (max-width: 600px) {
+  .cheatsheet-body {
+    grid-template-columns: 1fr;
+  }
+}

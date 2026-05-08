@@ -7,8 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
 import { SplitView } from './components/editor/SplitView';
 import { DiffView } from './components/editor/DiffView';
-import { matchLayoutShortcut } from './components/editor/keys';
-import { Header, useChromeShortcuts } from './components/chrome/Header';
+import { Header } from './components/chrome/Header';
 import { BacklinksPanel } from './components/panels/BacklinksPanel';
 import { FrontmatterPanel } from './components/panels/FrontmatterPanel';
 import { HistoryPanel } from './components/panels/HistoryPanel';
@@ -17,9 +16,14 @@ import { Sidebar } from './components/sidebar/Sidebar';
 import { SearchModal } from './components/modals/SearchModal';
 import { RenameModal } from './components/modals/RenameModal';
 import { NewProjectDialog } from './components/modals/NewProjectDialog';
+import { CheatSheetModal } from './components/modals/CheatSheetModal';
 import { CommandPalette } from './components/cmdk/CommandPalette';
 import { FileSwitcher } from './components/cmdk/FileSwitcher';
-import type { CommandDeps } from './lib/commands/registry';
+import {
+  buildRegistry,
+  dispatchKey,
+  type CommandDeps
+} from './lib/commands/registry';
 import {
   logProjectError,
   selectActiveTab,
@@ -38,20 +42,10 @@ export function App() {
   const activeTabIndex = useProjectStore((s) => s.activeTabIndex);
   const setTabBody = useProjectStore((s) => s.setTabBody);
   const setTabSplitRatio = useProjectStore((s) => s.setTabSplitRatio);
-  const setTabLayoutMode = useProjectStore((s) => s.setTabLayoutMode);
-  const saveActiveTab = useProjectStore((s) => s.saveActiveTab);
   const saveAllDirty = useProjectStore((s) => s.saveAllDirty);
   const openProjectFromDialog = useProjectStore(
     (s) => s.openProjectFromDialog
   );
-  const toggleSidebar = useProjectStore((s) => s.toggleSidebar);
-  const toggleFrontmatterPanel = useProjectStore(
-    (s) => s.toggleFrontmatterPanel
-  );
-  const toggleBacklinksPanel = useProjectStore(
-    (s) => s.toggleBacklinksPanel
-  );
-  const toggleHistoryPanel = useProjectStore((s) => s.toggleHistoryPanel);
   const setTabDiffMode = useProjectStore((s) => s.setTabDiffMode);
   const setTabDiffDividerRatio = useProjectStore(
     (s) => s.setTabDiffDividerRatio
@@ -69,7 +63,6 @@ export function App() {
   );
   const openProject = useProjectStore((s) => s.openProject);
   const activeView = useProjectStore((s) => s.activeView);
-  const toggleSettings = useProjectStore((s) => s.toggleSettings);
   const hydratePreferences = usePreferencesStore((s) => s.hydrate);
   const persistPreferencesNow = usePreferencesStore((s) => s.persistNow);
   const preferencesHydrated = usePreferencesStore((s) => s.hydrated);
@@ -84,7 +77,6 @@ export function App() {
     return lintReport.findings.filter((f) => f.path === activeTab.path);
   }, [activeTab, lintReport]);
 
-  useChromeShortcuts();
   useTypographyVars();
 
   // Phase-12b cold-open measurement. Logs the time from React mount
@@ -175,11 +167,25 @@ export function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [cheatSheetOpen, setCheatSheetOpen] = useState(false);
 
+  // Toggle helpers honour mutual exclusion: opening one cmdk-class
+  // modal closes its sibling so the modal stack stays one-deep.
+  // Pre-13a these closures lived inline in the giant App-level keydown
+  // switch; they're hoisted into deps so the central registry can
+  // call them directly.
   const commandDeps: CommandDeps = useMemo(
     () => ({
-      openFileSwitcher: () => setSwitcherOpen(true),
-      openSearch: () => setSearchOpen(true),
+      toggleFileSwitcher: () => {
+        setPaletteOpen(false);
+        setSwitcherOpen((o) => !o);
+      },
+      toggleCommandPalette: () => {
+        setSwitcherOpen(false);
+        setPaletteOpen((o) => !o);
+      },
+      toggleSearch: () => setSearchOpen((o) => !o),
+      toggleCheatSheet: () => setCheatSheetOpen((o) => !o),
       openRename: (path: string) => openRenameModal(path),
       openNewProject: () => setNewProjectOpen(true)
     }),
@@ -188,156 +194,41 @@ export function App() {
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Window-level shortcuts: ⌘1/⌘2/⌘3 layout (per-tab), ⌘B sidebar,
-  // ⌘O open project, ⌘S explicit save.
+  // Cancel the auto-save debounce when the user fires ⌘S explicitly —
+  // the binding's own save covers it. Captured in a ref so the
+  // registry binding can reach it without remounting on every render.
+  const cancelSaveTimerRef = useRef(() => {});
+  useEffect(() => {
+    cancelSaveTimerRef.current = () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Single window-level keydown listener. Reads from the registry's
+  // bindings table. The 200-line per-binding switch this replaced
+  // lived here through phase 11 — see planning/react-electron-phase-13-audit.md.
+  const { bindings } = useMemo(() => buildRegistry(commandDeps), [commandDeps]);
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      const layout = matchLayoutShortcut(e);
-      if (layout) {
-        e.preventDefault();
-        if (activeTabIndex >= 0) setTabLayoutMode(activeTabIndex, layout);
-        return;
-      }
-      // ⌘⇧F — toggle frontmatter panel.
+      // ⌘S has a debounce-cancel side-effect that the registry runner
+      // doesn't know about. Cancel here before delegating; the registry's
+      // run() then performs the save itself.
       if (
+        e.code === 'KeyS' &&
         (e.metaKey || e.ctrlKey) &&
-        e.shiftKey &&
-        !e.altKey &&
-        (e.key === 'f' || e.key === 'F')
-      ) {
-        e.preventDefault();
-        toggleFrontmatterPanel();
-        return;
-      }
-      // ⌘⇧B — toggle the backlinks panel. Requires an active tab —
-      // backlinks are contextual to the file being viewed.
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        e.shiftKey &&
-        !e.altKey &&
-        (e.key === 'b' || e.key === 'B')
-      ) {
-        if (activeTab) {
-          e.preventDefault();
-          toggleBacklinksPanel();
-        }
-        return;
-      }
-      // ⌘⇧H — toggle the version-history panel. Same posture as the
-      // other top-right panels.
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        e.shiftKey &&
-        !e.altKey &&
-        (e.key === 'h' || e.key === 'H')
-      ) {
-        if (activeTab) {
-          e.preventDefault();
-          toggleHistoryPanel();
-        }
-        return;
-      }
-      // F2 — rename the active tab's file. No modifier keys; fires
-      // straight from the keymap. Gated on an active tab so we don't
-      // open an empty modal.
-      if (
-        e.key === 'F2' &&
-        !e.metaKey &&
-        !e.ctrlKey &&
         !e.shiftKey &&
         !e.altKey
       ) {
-        if (activeTab) {
-          e.preventDefault();
-          openRenameModal(activeTab.path);
-        }
-        return;
+        cancelSaveTimerRef.current();
       }
-      // ⌘F — toggle the project-wide search modal. Skrive's "find" is
-      // project-wide; in-document navigation is by scroll. Overrides
-      // CodeMirror's built-in find binding intentionally — same posture
-      // as v0.1.6.
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        !e.shiftKey &&
-        !e.altKey &&
-        (e.key === 'f' || e.key === 'F')
-      ) {
-        if (manifest) {
-          e.preventDefault();
-          setSearchOpen((open) => !open);
-        }
-        return;
-      }
-      // ⌘P / ⌘⇧P — file switcher / command palette. Both gated on a
-      // project being open. They're mutually exclusive — opening one
-      // closes the other so the modal stack stays one-deep.
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        !e.altKey &&
-        (e.key === 'p' || e.key === 'P')
-      ) {
-        if (!manifest) return;
-        e.preventDefault();
-        if (e.shiftKey) {
-          setSwitcherOpen(false);
-          setPaletteOpen((open) => !open);
-        } else {
-          setPaletteOpen(false);
-          setSwitcherOpen((open) => !open);
-        }
-        return;
-      }
-      // ⌘, — toggle the settings view in the workspace area.
-      // Only effective when a project is open; settings live inside
-      // the project shell so they can't render without one.
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        !e.shiftKey &&
-        !e.altKey &&
-        e.key === ','
-      ) {
-        e.preventDefault();
-        if (manifest) toggleSettings();
-        return;
-      }
-      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
-      if (e.key === 'b' || e.key === 'B') {
-        e.preventDefault();
-        toggleSidebar();
-      } else if (e.key === 'o' || e.key === 'O') {
-        e.preventDefault();
-        void openProjectFromDialog().catch((err) =>
-          logProjectError('openProjectFromDialog', err)
-        );
-      } else if (e.key === 's' || e.key === 'S') {
-        e.preventDefault();
-        if (saveTimerRef.current) {
-          clearTimeout(saveTimerRef.current);
-          saveTimerRef.current = null;
-        }
-        void saveActiveTab().catch((err) => {
-          logProjectError('saveActiveTab', err);
-          notify.error('Failed to save', err);
-        });
-      }
+      dispatchKey(e, bindings);
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [
-    activeTabIndex,
-    activeTab,
-    setTabLayoutMode,
-    toggleSidebar,
-    openProjectFromDialog,
-    saveActiveTab,
-    toggleFrontmatterPanel,
-    toggleBacklinksPanel,
-    toggleHistoryPanel,
-    openRenameModal,
-    manifest,
-    toggleSettings
-  ]);
+  }, [bindings]);
 
   // Debounced auto-save flushes any dirty tabs.
   const dirtyTabHash = useProjectStore((s) =>
@@ -535,6 +426,11 @@ export function App() {
       <FileSwitcher
         open={switcherOpen}
         onClose={() => setSwitcherOpen(false)}
+      />
+      <CheatSheetModal
+        open={cheatSheetOpen}
+        onClose={() => setCheatSheetOpen(false)}
+        bindings={bindings}
       />
 
       <Toaster
