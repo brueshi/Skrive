@@ -5,6 +5,14 @@ copyright: Copyright © 2026 Minas Technologies / Silmaril Studio
 directories:
   output: dist
   buildResources: build
+  # electron-builder's auto-detection picks `./app/` as the app root
+  # whenever an `app/` directory exists — the legacy "two package.json"
+  # layout. Skrive uses `app/` as one of several workspace packages
+  # (alongside shell/, shared/, native/diff), with the real app entry
+  # point at out/main/index.js (root package.json's `main` field). We
+  # override to the workspace root so the asar packer doesn't trip on
+  # workspace siblings like shared/package.json being "outside" app/.
+  app: .
 
 files:
   - out/**
