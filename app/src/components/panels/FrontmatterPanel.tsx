@@ -37,6 +37,7 @@ import {
   type FieldInfo
 } from '../../lib/frontmatter';
 import { FrontmatterChipInput } from './FrontmatterChipInput';
+import { PanelShell } from './PanelShell';
 import { SuggestionList } from './SuggestionList';
 
 type Row = { id: string; key: string };
@@ -373,18 +374,14 @@ export function FrontmatterPanel() {
   const activePathLabel = activeTab?.path ?? '';
 
   return (
-    <div
-      className={`fm-panel-wrapper${open ? ' fm-panel-open' : ''}`}
-      aria-hidden={!open}
+    <PanelShell
+      open={open}
+      ariaLabel="Frontmatter editor"
+      panelRef={panelRef}
+      className="fm-panel"
+      width="32rem"
     >
-      <div
-        ref={panelRef}
-        className="fm-panel"
-        role="dialog"
-        tabIndex={-1}
-        aria-label="Frontmatter editor"
-        onKeyDown={handleRootKeydown}
-      >
+      <div onKeyDown={handleRootKeydown}>
         <header className="fm-panel-header">
           <span className="fm-panel-title">Frontmatter</span>
           <span className="fm-panel-path" title={activePathLabel}>
@@ -547,6 +544,6 @@ export function FrontmatterPanel() {
           </button>
         </div>
       </div>
-    </div>
+    </PanelShell>
   );
 }

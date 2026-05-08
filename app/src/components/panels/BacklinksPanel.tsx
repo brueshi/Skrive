@@ -13,6 +13,7 @@ import {
   useProjectStore
 } from '../../stores/project';
 import type { Backlink } from '@skrive/shared';
+import { PanelShell } from './PanelShell';
 
 export function BacklinksPanel() {
   const open = useProjectStore((s) => s.backlinksPanelOpen);
@@ -85,18 +86,14 @@ export function BacklinksPanel() {
   const activePath = activeTab?.path ?? '';
 
   return (
-    <div
-      className={`bl-panel-wrapper${open ? ' bl-panel-open' : ''}`}
-      aria-hidden={!open}
+    <PanelShell
+      open={open}
+      ariaLabel="Backlinks"
+      panelRef={panelRef}
+      className="bl-panel"
+      width="26rem"
     >
-      <div
-        ref={panelRef}
-        className="bl-panel"
-        role="dialog"
-        tabIndex={-1}
-        aria-label="Backlinks"
-      >
-        <header className="bl-panel-header">
+      <header className="bl-panel-header">
           <span className="bl-panel-title">Backlinks</span>
           <span className="bl-panel-target" title={activePath}>
             {activePath}
@@ -131,7 +128,6 @@ export function BacklinksPanel() {
             </ul>
           )}
         </div>
-      </div>
-    </div>
+    </PanelShell>
   );
 }

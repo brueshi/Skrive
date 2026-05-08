@@ -349,6 +349,114 @@ body {
 
 /* ===================== Modal (Radix Dialog) ===================== */
 
+@keyframes skrive-modal-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes skrive-modal-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes skrive-modal-content-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 8px));
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+
+@keyframes skrive-modal-content-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 4px));
+  }
+}
+
+@keyframes skrive-cmdk-content-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes skrive-cmdk-content-out {
+  from {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+}
+
+/* Backdrop fade. Drives both the dimmed overlay behind .modal-dialog
+   and the cmdk / search palette overlays — they all share the same
+   data-state contract from Radix Dialog. */
+.modal-backdrop,
+.cmdk-backdrop,
+.search-backdrop {
+  animation: skrive-modal-fade-in 140ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.modal-backdrop[data-state='closed'],
+.cmdk-backdrop[data-state='closed'],
+.search-backdrop[data-state='closed'] {
+  animation: skrive-modal-fade-out 120ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.modal-dialog,
+.rename-modal {
+  animation: skrive-modal-content-in 160ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.modal-dialog[data-state='closed'],
+.rename-modal[data-state='closed'] {
+  animation: skrive-modal-content-out 120ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.cmdk-palette,
+.search-palette {
+  animation: skrive-cmdk-content-in 160ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.cmdk-palette[data-state='closed'],
+.search-palette[data-state='closed'] {
+  animation: skrive-cmdk-content-out 120ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-backdrop,
+  .cmdk-backdrop,
+  .search-backdrop,
+  .modal-dialog,
+  .rename-modal,
+  .cmdk-palette,
+  .search-palette,
+  .modal-backdrop[data-state='closed'],
+  .cmdk-backdrop[data-state='closed'],
+  .search-backdrop[data-state='closed'],
+  .modal-dialog[data-state='closed'],
+  .rename-modal[data-state='closed'],
+  .cmdk-palette[data-state='closed'],
+  .search-palette[data-state='closed'] {
+    animation: none;
+  }
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1759,49 +1867,26 @@ body {
   user-select: none;
 }
 
-/* ===================== Backlinks panel ===================== */
+/* ===================== Floating panels (shared shell) ===================== */
 
-.bl-panel-wrapper {
+/* Position + frame for the top-right floating panels (FM / BL / HI).
+   Width is set per-panel by PanelShell; the height + max-height + flex
+   chrome lives here so the inner panel content scrolls correctly. The
+   enter/exit transition is owned by framer-motion (see PanelShell). */
+.panel-shell {
   position: absolute;
   top: 48px;
   right: 12px;
-  width: 26rem;
   max-width: calc(100vw - 24px);
+  max-height: 50vh;
   z-index: 100;
-
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 180ms cubic-bezier(0.4, 0, 0.2, 1);
-  pointer-events: none;
-}
-
-.bl-panel-wrapper.bl-panel-open {
-  grid-template-rows: 1fr;
-  pointer-events: auto;
-}
-
-.bl-panel {
-  overflow: hidden;
   background: var(--skrive-bg);
   border: 1px solid var(--skrive-fg);
   border-radius: 4px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
-  opacity: 0;
-  transition: opacity 180ms cubic-bezier(0.4, 0, 0.2, 1);
-  max-height: 50vh;
   display: flex;
   flex-direction: column;
-}
-
-.bl-panel-wrapper.bl-panel-open .bl-panel {
-  opacity: 1;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .bl-panel-wrapper,
-  .bl-panel {
-    transition: none;
-  }
+  overflow: hidden;
 }
 
 .bl-panel-header {
@@ -1925,49 +2010,6 @@ body {
 }
 
 /* ===================== Frontmatter panel ===================== */
-
-.fm-panel-wrapper {
-  position: absolute;
-  top: 48px;
-  right: 12px;
-  width: 32rem;
-  max-width: calc(100vw - 24px);
-  z-index: 100;
-
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 180ms cubic-bezier(0.4, 0, 0.2, 1);
-  pointer-events: none;
-}
-
-.fm-panel-wrapper.fm-panel-open {
-  grid-template-rows: 1fr;
-  pointer-events: auto;
-}
-
-.fm-panel {
-  overflow: hidden;
-  background: var(--skrive-bg);
-  border: 1px solid var(--skrive-fg);
-  border-radius: 4px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
-  opacity: 0;
-  transition: opacity 180ms cubic-bezier(0.4, 0, 0.2, 1);
-  max-height: 50vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.fm-panel-wrapper.fm-panel-open .fm-panel {
-  opacity: 1;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .fm-panel-wrapper,
-  .fm-panel {
-    transition: none;
-  }
-}
 
 .fm-panel-header {
   display: flex;
@@ -3222,48 +3264,6 @@ body {
   color: var(--skrive-fg);
   border-color: var(--skrive-fg);
   background: var(--skrive-rule);
-}
-
-.hi-panel-wrapper {
-  position: absolute;
-  top: 48px;
-  right: 12px;
-  width: 26rem;
-  max-width: calc(100vw - 24px);
-  z-index: 100;
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 180ms cubic-bezier(0.4, 0, 0.2, 1);
-  pointer-events: none;
-}
-
-.hi-panel-wrapper.hi-panel-open {
-  grid-template-rows: 1fr;
-  pointer-events: auto;
-}
-
-.hi-panel {
-  overflow: hidden;
-  background: var(--skrive-bg);
-  border: 1px solid var(--skrive-fg);
-  border-radius: 4px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
-  opacity: 0;
-  transition: opacity 180ms cubic-bezier(0.4, 0, 0.2, 1);
-  max-height: 50vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.hi-panel-wrapper.hi-panel-open .hi-panel {
-  opacity: 1;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .hi-panel-wrapper,
-  .hi-panel {
-    transition: none;
-  }
 }
 
 .hi-panel-header {

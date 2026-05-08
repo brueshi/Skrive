@@ -19,6 +19,7 @@ import {
   selectActiveTab,
   useProjectStore
 } from '../../stores/project';
+import { PanelShell } from './PanelShell';
 
 function entryId(entry: HistoryEntry): string {
   return entry.source === 'git' ? entry.sha : entry.id;
@@ -149,18 +150,14 @@ export function HistoryPanel() {
   }
 
   return (
-    <div
-      className={`hi-panel-wrapper${open ? ' hi-panel-open' : ''}`}
-      aria-hidden={!open}
+    <PanelShell
+      open={open}
+      ariaLabel="Version history"
+      panelRef={panelRef}
+      className="hi-panel"
+      width="26rem"
     >
-      <div
-        ref={panelRef}
-        className="hi-panel"
-        role="dialog"
-        tabIndex={-1}
-        aria-label="Version history"
-      >
-        <header className="hi-panel-header">
+      <header className="hi-panel-header">
           <span className="hi-panel-title">History</span>
           <span className="hi-panel-target" title={activePath}>
             {activePath}
@@ -235,7 +232,6 @@ export function HistoryPanel() {
             </ul>
           )}
         </div>
-      </div>
-    </div>
+    </PanelShell>
   );
 }
