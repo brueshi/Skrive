@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeImage, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { registerProjectHandlers } from '../ipc/project';
@@ -14,6 +14,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const isDev = !app.isPackaged;
 
+// Dev-only window icon. In packaged builds the OS reads the icon from
+// the bundle/exe metadata that electron-builder embeds (mac.icon /
+// win.icon), so the BrowserWindow `icon` prop is redundant. In dev
+// (electron-vite) the binary is plain Electron with no bundled icon,
+// so we point BrowserWindow at the project-root build/icon.png to make
+// the dock + Alt-Tab thumbnail show the Skrive mark instead of the
+// generic Electron diamond.
+function devIconPath(): string {
+  return join(__dirname, '../../../build/icon.png');
+}
+
 function createWindow(): void {
   const window = new BrowserWindow({
     width: 1200,
@@ -22,6 +33,9 @@ function createWindow(): void {
     minHeight: 480,
     show: false,
     backgroundColor: '#1a1a1a',
+    ...(isDev
+      ? { icon: nativeImage.createFromPath(devIconPath()) }
+      : {}),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     trafficLightPosition: { x: 16, y: 16 },
     webPreferences: {

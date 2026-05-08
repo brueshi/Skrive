@@ -29,6 +29,10 @@ mac:
     - target: dmg
       arch: [arm64]
   category: public.app-category.productivity
+  # electron-builder also defaults to build/icon.icns when buildResources
+  # is set, but naming it explicitly survives a future buildResources
+  # rename.
+  icon: build/icon.icns
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
@@ -44,6 +48,7 @@ win:
   target:
     - target: nsis
       arch: [x64]
+  icon: build/icon.ico
   # v0.2 ships unsigned on Windows; signing is a post-port roadmap item.
 
 # Drop the space from electron-builder's default NSIS filename
