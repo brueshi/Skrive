@@ -18,6 +18,7 @@
     "package:mac": "electron-vite build && electron-builder --mac",
     "package:win": "electron-vite build && electron-builder --win",
     "typecheck": "tsc -p shared/tsconfig.json && tsc -p app/tsconfig.json && tsc -p shell/tsconfig.json",
+    "perf:fixture": "bun scripts/build-perf-fixture.ts",
     "legacy:dev": "vite dev",
     "legacy:dev:web": "VITE_TARGET=web vite dev",
     "legacy:build": "vite build",

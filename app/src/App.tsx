@@ -28,6 +28,7 @@ import {
 import { usePreferencesStore } from './stores/preferences';
 import { useTypographyVars } from './lib/typography-css';
 import { notify } from './lib/notify';
+import { logDuration, perfEnabled } from './lib/perf';
 
 const SAVE_DEBOUNCE_MS = 500;
 
@@ -85,6 +86,25 @@ export function App() {
 
   useChromeShortcuts();
   useTypographyVars();
+
+  // Phase-12b cold-open measurement. Logs the time from React mount
+  // (recorded in main.tsx via window.__skriveMountStart) to the first
+  // render where `manifest` is non-null — i.e. an auto-opened project
+  // is loaded and ready to write into. Logs once per cold start.
+  const coldOpenLoggedRef = useRef(false);
+  useEffect(() => {
+    if (!perfEnabled) return;
+    if (coldOpenLoggedRef.current) return;
+    if (!manifest) return;
+    const start = (window as unknown as { __skriveMountStart?: number })
+      .__skriveMountStart;
+    if (typeof start !== 'number') return;
+    coldOpenLoggedRef.current = true;
+    logDuration(
+      `cold-open (manifest with ${manifest.files.length} files)`,
+      start
+    );
+  }, [manifest]);
 
   const [appVersion, setAppVersion] = useState('0.0.0');
 

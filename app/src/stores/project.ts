@@ -36,6 +36,7 @@ import {
 } from '../lib/frontmatter';
 import { runProjectLint } from '../lib/lint';
 import { notify } from '../lib/notify';
+import { logDuration, now as perfNow } from '../lib/perf';
 import { usePreferencesStore } from './preferences';
 
 export const SIDEBAR_MIN_WIDTH = 180;
@@ -645,12 +646,17 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const tabs = get().tabs;
     const existingIndex = tabs.findIndex((t) => t.path === path);
     if (existingIndex !== -1) {
+      // Bare switch (file already open) — measured separately because
+      // it skips the disk read and is the much faster path.
+      const start = perfNow();
       set({ activeTabIndex: existingIndex });
+      logDuration(`file-switch (cached) ${path}`, start);
       return;
     }
     // Read body fresh from disk for the new tab. Parse the leading
     // frontmatter so the editor sees the body sans-fence and the panel
     // sees the structured map. The full file is reassembled at save time.
+    const start = perfNow();
     const content = await window.skrive.fs.readFile(manifest.root, path);
     const parsed = parseFrontmatter(content.body);
     const newTab: Tab = {
@@ -679,6 +685,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       // default; including session-restore openings would noise it up.
       usePreferencesStore.getState().recordRecentFile(manifest.root, path);
     }
+    logDuration(`file-switch (cold) ${path}`, start);
   },
 
   async closeTab(index: number) {
@@ -1229,6 +1236,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       if (get().lintReport !== null) set({ lintReport: null });
       return;
     }
+    const start = perfNow();
     try {
       const [deadLinks, orphanedFiles] = await Promise.all([
         window.skrive.linkGraph.getDeadLinks(),
@@ -1268,6 +1276,10 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       // If the project changed underneath us, drop this report.
       if (get().manifest?.root !== manifest.root) return;
       set({ lintReport: report });
+      logDuration(
+        `lint (${manifest.files.length} files, ${report.findings.length} findings)`,
+        start
+      );
     } catch (err) {
       logProjectError('refreshLint', err);
     }
