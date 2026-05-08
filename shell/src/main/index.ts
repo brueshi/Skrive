@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { registerProjectHandlers } from '../ipc/project';
 import { registerFsHandlers } from '../ipc/fs';
 import { registerDiffHandlers } from '../ipc/diff';
+import { registerHistoryHandlers } from '../ipc/history';
 import { registerLinksHandlers } from '../ipc/links';
 import { registerPersistenceHandlers } from '../ipc/persistence';
 import { registerSearchHandlers } from '../ipc/search';
@@ -68,6 +69,7 @@ function registerIpcHandlers(): void {
   registerLinksHandlers();
   registerPersistenceHandlers();
   registerSearchHandlers();
+  registerHistoryHandlers();
 }
 
 void app.whenReady().then(() => {

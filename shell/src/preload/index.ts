@@ -5,6 +5,8 @@ import type {
   DeadLink,
   DiffOp,
   FileContent,
+  HistoryEntry,
+  HistoryMode,
   LineDiffRow,
   OutgoingLink,
   ProjectChange,
@@ -86,6 +88,37 @@ const api: SkriveIpc = {
         query,
         options
       ) as Promise<SearchHit[]>
+  },
+  history: {
+    getMode: () => ipcRenderer.invoke('history:getMode') as Promise<HistoryMode>,
+    listForFile: (relPath: string) =>
+      ipcRenderer.invoke(
+        'history:listForFile',
+        relPath
+      ) as Promise<HistoryEntry[]>,
+    readGitBlobAt: (relPath: string, sha: string) =>
+      ipcRenderer.invoke(
+        'history:readGitBlobAt',
+        relPath,
+        sha
+      ) as Promise<string>,
+    readCheckpointAt: (relPath: string, id: string) =>
+      ipcRenderer.invoke(
+        'history:readCheckpointAt',
+        relPath,
+        id
+      ) as Promise<string>,
+    createManualCheckpoint: (
+      relPath: string,
+      name: string,
+      content: string
+    ) =>
+      ipcRenderer.invoke(
+        'history:createManualCheckpoint',
+        relPath,
+        name,
+        content
+      ) as Promise<void>
   },
   linkGraph: {
     getBacklinks: (target: string) =>

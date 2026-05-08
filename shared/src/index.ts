@@ -14,6 +14,11 @@ export type {
   OutgoingLink,
   ProjectChange,
   ProjectManifest,
+  CheckpointKind,
+  CheckpointVersion,
+  GitVersion,
+  HistoryEntry,
+  HistoryMode,
   Reference,
   RenamePreview,
   RenameReport,
@@ -40,6 +45,7 @@ export {
 } from './frontmatter';
 
 export type {
+  CheckpointsConfig,
   DictionaryConfig,
   LintConfig,
   LintRuleId,
@@ -50,6 +56,7 @@ export type {
 } from './skrive-toml';
 
 export {
+  DEFAULT_CHECKPOINTS_CONFIG,
   DEFAULT_LINT_CONFIG,
   DEFAULT_PROJECT_CONFIG,
   LINT_RULE_IDS,

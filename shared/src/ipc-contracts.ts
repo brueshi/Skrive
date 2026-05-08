@@ -251,6 +251,59 @@ export type SearchHit = {
   snippet: string;
 };
 
+// ============================ History types ============================
+// Mirrors src-tauri/src/history.rs but split across two providers:
+//
+//   - Git: project root contains .git/. We shell out to `git log` /
+//     `git show` for the read side; never mutate the repo.
+//   - Checkpoint: every other project. Auto-checkpoints fire from the
+//     fs:writeFile path; manual ("pinned") checkpoints fire from a UI
+//     action. Storage layout matches the Rust path on disk so an
+//     existing v0.1.6 user keeps their history under v0.2.
+
+export type HistoryMode = 'git' | 'checkpoint';
+
+export type CheckpointKind = 'auto' | 'manual';
+
+/** One commit that touched a file. `sha`/`shortSha` identify the
+ *  commit; `parentSha` lets the diff view compute "this commit vs its
+ *  parent" without a second round-trip. `subject` and `body` follow
+ *  the conventional `subject\n\nbody` layout. */
+export type GitVersion = {
+  sha: string;
+  shortSha: string;
+  parentSha: string | null;
+  authorName: string;
+  authorEmail: string;
+  /** Unix milliseconds. `git log` reports seconds; the boundary
+   *  converts so the rest of the IPC surface is uniform. */
+  timestampMs: number;
+  subject: string;
+  body: string;
+};
+
+/** One Skrive-managed checkpoint on disk. `id` is the opaque key for
+ *  `readCheckpointAt` — in practice the filename stem, but callers
+ *  should not depend on the shape. `name` is populated from the
+ *  sidecar for manual checkpoints when present; null for autos and
+ *  for sidecar-less manuals (legacy / failed sidecar write). */
+export type CheckpointVersion = {
+  id: string;
+  timestampMs: number;
+  kind: CheckpointKind;
+  name: string | null;
+  /** Hex SHA-256 of the on-disk content. Drives the writer's dedup
+   *  check; the panel can use it to grey out consecutive identical
+   *  rows if dogfooding asks. */
+  contentHash: string;
+};
+
+/** Discriminated row type the HistoryPanel renders. `source` switches
+ *  on whether the file lives in a git repo or a checkpoint store. */
+export type HistoryEntry =
+  | ({ source: 'git' } & GitVersion)
+  | ({ source: 'checkpoint' } & CheckpointVersion);
+
 // ============================ The IPC surface ============================
 
 export interface SkriveIpc {
@@ -334,6 +387,34 @@ export interface SkriveIpc {
      *  column. Capped at 500 hits; pathological queries (`.`, single
      *  letters) return the cap and stop scanning. */
     searchProject(query: string, options: SearchOptions): Promise<SearchHit[]>;
+  };
+  history: {
+    /** Mode for the open project — git when the root has a `.git/`
+     *  directory, checkpoint otherwise. Decided at project:open and
+     *  stable for the project's session. */
+    getMode(): Promise<HistoryMode>;
+    /** Every history entry that touches `relPath`, newest-first. In
+     *  git mode entries source from `git log -- <relpath>`; in
+     *  checkpoint mode they source from the on-disk checkpoint store.
+     *  An unborn HEAD (brand-new repo, zero commits) returns []. */
+    listForFile(relPath: string): Promise<HistoryEntry[]>;
+    /** Read a file's contents from a specific git commit. Errors when
+     *  the commit doesn't exist, the file isn't in that commit's tree,
+     *  or the blob bytes aren't valid UTF-8. */
+    readGitBlobAt(relPath: string, sha: string): Promise<string>;
+    /** Read a checkpoint's contents by its opaque `id`. Errors when
+     *  the id doesn't match the filename shape (escape attempts) or
+     *  the file is missing. */
+    readCheckpointAt(relPath: string, id: string): Promise<string>;
+    /** Pin the current contents as a manual checkpoint. Never dedups
+     *  — pinning is an explicit act. Applies the project's
+     *  `[checkpoints].manual_cap` retention afterwards. No-op in git
+     *  mode. */
+    createManualCheckpoint(
+      relPath: string,
+      name: string,
+      content: string
+    ): Promise<void>;
   };
   linkGraph: {
     /** Sources that link to `target` (project-relative path). Wiki

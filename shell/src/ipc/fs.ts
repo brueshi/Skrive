@@ -5,11 +5,12 @@
 // project root before touching the filesystem. This is the only place
 // disk operations cross the IPC boundary, so containment lives here.
 
-import { ipcMain, shell } from 'electron';
+import { app, ipcMain, shell } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { FileContent } from '@skrive/shared';
 import { projectState } from '../state/project-state';
+import { maybeWriteAutoCheckpoint } from '../lib/checkpoint';
 
 const MARKDOWN_EXT = /\.(md|markdown)$/i;
 
@@ -69,6 +70,24 @@ export function registerFsHandlers(): void {
       // without waiting for awaitWriteFinish.
       if (MARKDOWN_EXT.test(relPath)) {
         projectState.upsertFile(toForwardSlash(relPath), content);
+      }
+      // Phase 10. In checkpoint history mode, every successful save is
+      // a candidate for an auto-checkpoint. The writer enforces its own
+      // 5-min interval + content-hash dedup, so calling it on every
+      // save is cheap when the user is editing fast. Best-effort:
+      // checkpoint failures don't propagate.
+      if (
+        MARKDOWN_EXT.test(relPath) &&
+        projectState.historyMode === 'checkpoint' &&
+        projectState.root
+      ) {
+        await maybeWriteAutoCheckpoint(
+          app.getPath('userData'),
+          projectState.root,
+          toForwardSlash(relPath),
+          content,
+          projectState.checkpointsConfig.autoCap
+        );
       }
     }
   );

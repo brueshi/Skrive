@@ -67,10 +67,56 @@ export function parseSkriveToml(source: string | null): ParseResult {
   if (parsed.dictionary !== undefined) {
     applyDictionary(config, parsed.dictionary, warnings);
   }
-  // [export.*] and [checkpoints] are accepted but not consumed yet.
-  // Their presence is allowed without warning per the schema reference.
+  if (parsed.checkpoints !== undefined) {
+    applyCheckpoints(config, parsed.checkpoints, warnings);
+  }
+  // [export.*] is accepted but not consumed yet — exporters land in v0.5.
+  // Its presence is allowed without warning per the schema reference.
 
   return { config, warnings };
+}
+
+function applyCheckpoints(
+  config: SkriveProjectConfig,
+  raw: unknown,
+  warnings: string[]
+): void {
+  if (!isPlainObject(raw)) {
+    warnings.push('.skrive.toml: [checkpoints] is not a table (ignored)');
+    return;
+  }
+  for (const [key, value] of Object.entries(raw)) {
+    if (key === 'auto_cap') {
+      const n = coerceNonNegativeInt(value);
+      if (n === null) {
+        warnings.push(
+          `.skrive.toml: [checkpoints].auto_cap must be a non-negative integer (got ${formatScalar(value)}; using default)`
+        );
+        continue;
+      }
+      config.checkpoints.autoCap = n;
+    } else if (key === 'manual_cap') {
+      const n = coerceNonNegativeInt(value);
+      if (n === null) {
+        warnings.push(
+          `.skrive.toml: [checkpoints].manual_cap must be a non-negative integer (got ${formatScalar(value)}; using default)`
+        );
+        continue;
+      }
+      config.checkpoints.manualCap = n;
+    } else {
+      warnings.push(
+        `.skrive.toml: unknown key [checkpoints].${key} (ignored)`
+      );
+    }
+  }
+}
+
+function coerceNonNegativeInt(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    return null;
+  }
+  return value;
 }
 
 function applyProject(
@@ -214,7 +260,8 @@ function cloneDefault(): SkriveProjectConfig {
     },
     dictionary: {
       projectWords: [...DEFAULT_PROJECT_CONFIG.dictionary.projectWords]
-    }
+    },
+    checkpoints: { ...DEFAULT_PROJECT_CONFIG.checkpoints }
   };
 }
 

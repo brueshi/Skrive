@@ -84,6 +84,15 @@ async function readSkriveToml(root: string): Promise<string | null> {
   }
 }
 
+async function detectHistoryMode(root: string): Promise<'git' | 'checkpoint'> {
+  try {
+    const stat = await fs.stat(path.join(root, '.git'));
+    return stat.isDirectory() ? 'git' : 'checkpoint';
+  } catch {
+    return 'checkpoint';
+  }
+}
+
 async function scanProject(root: string): Promise<ProjectManifest> {
   const canonicalRoot = path.resolve(root);
   const files: FileEntry[] = [];
@@ -91,10 +100,12 @@ async function scanProject(root: string): Promise<ProjectManifest> {
   // Reset link-graph state for the new project. Files get added to
   // the graph as we walk, with their edges extracted from disk.
   projectState.reset(canonicalRoot);
+  projectState.historyMode = await detectHistoryMode(canonicalRoot);
 
   // `.skrive.toml` lives at the project root; absent → defaults.
   const tomlSource = await readSkriveToml(canonicalRoot);
   const { config, warnings } = parseSkriveToml(tomlSource);
+  projectState.checkpointsConfig = config.checkpoints;
 
   for await (const { fullPath, isMarkdown } of walk(
     canonicalRoot,

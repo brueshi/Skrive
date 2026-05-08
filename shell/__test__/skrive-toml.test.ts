@@ -177,15 +177,30 @@ project_words = [" Skrive ", "", "  ", "atticus"]
     ]);
   });
 
-  it('accepts but does not consume [export.*] and [checkpoints]', () => {
+  it('accepts [export.*] without consuming and parses [checkpoints]', () => {
     const src = `
 [export.astro]
 target_dir = "../site/src/content"
 
 [checkpoints]
 auto_cap = 25
+manual_cap = 10
     `;
     const result = parseSkriveToml(src);
     expect(result.warnings).toEqual([]);
+    expect(result.config.checkpoints.autoCap).toBe(25);
+    expect(result.config.checkpoints.manualCap).toBe(10);
+  });
+
+  it('warns when [checkpoints] keys are not non-negative integers', () => {
+    const src = `
+[checkpoints]
+auto_cap = "fifty"
+manual_cap = -1
+    `;
+    const result = parseSkriveToml(src);
+    expect(result.warnings.length).toBe(2);
+    expect(result.config.checkpoints.autoCap).toBe(50);
+    expect(result.config.checkpoints.manualCap).toBe(0);
   });
 });

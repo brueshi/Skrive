@@ -42,10 +42,26 @@ export type ProjectMeta = {
   name: string | null;
 };
 
+/** Retention caps for the Skrive-managed checkpoint history (Phase 10).
+ *  Only consulted when the project is in checkpoint history mode (no
+ *  `.git/` at the root). `autoCap` bounds the auto-checkpoint stack
+ *  per file; `manualCap == 0` means unbounded — the historical
+ *  default for explicit pins. */
+export type CheckpointsConfig = {
+  autoCap: number;
+  manualCap: number;
+};
+
 export type SkriveProjectConfig = {
   project: ProjectMeta;
   lint: LintConfig;
   dictionary: DictionaryConfig;
+  checkpoints: CheckpointsConfig;
+};
+
+export const DEFAULT_CHECKPOINTS_CONFIG: CheckpointsConfig = {
+  autoCap: 50,
+  manualCap: 0
 };
 
 export const DEFAULT_LINT_CONFIG: LintConfig = {
@@ -60,7 +76,8 @@ export const DEFAULT_LINT_CONFIG: LintConfig = {
 export const DEFAULT_PROJECT_CONFIG: SkriveProjectConfig = {
   project: { name: null },
   lint: DEFAULT_LINT_CONFIG,
-  dictionary: { projectWords: [] }
+  dictionary: { projectWords: [] },
+  checkpoints: DEFAULT_CHECKPOINTS_CONFIG
 };
 
 /** Mapping between the TOML on-disk key (snake_case) and the JS-side rule id.

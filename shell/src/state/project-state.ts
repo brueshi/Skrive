@@ -16,6 +16,11 @@
 
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
+import {
+  DEFAULT_CHECKPOINTS_CONFIG,
+  type CheckpointsConfig,
+  type HistoryMode
+} from '@skrive/shared';
 import { extract } from '../lib/link-graph/extract';
 import { LinkGraph } from '../lib/link-graph/graph';
 
@@ -30,12 +35,23 @@ class ProjectState {
    *  them present — they aren't markdown sources, so they have no
    *  graph entry and can't be "orphaned." */
   nonMarkdownPaths = new Set<string>();
+  /** Phase 10. Decided at project:open: 'git' when a `.git/` directory
+   *  sits at the root, 'checkpoint' otherwise. The IPC layer reads it;
+   *  fs:writeFile reads it to decide whether to fire an auto-checkpoint
+   *  after a write. */
+  historyMode: HistoryMode = 'checkpoint';
+  /** Retention caps from `[checkpoints]` in `.skrive.toml`. Only
+   *  meaningful in checkpoint mode; threaded through to the writer so
+   *  the cap moves when the user retunes the config. */
+  checkpointsConfig: CheckpointsConfig = { ...DEFAULT_CHECKPOINTS_CONFIG };
 
   reset(root: string | null): void {
     this.root = root;
     this.linkGraph = new LinkGraph();
     this.filePaths = new Set();
     this.nonMarkdownPaths = new Set();
+    this.historyMode = 'checkpoint';
+    this.checkpointsConfig = { ...DEFAULT_CHECKPOINTS_CONFIG };
   }
 
   /** Add a file to the canonical path set and re-extract its edges. */
