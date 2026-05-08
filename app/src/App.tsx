@@ -15,6 +15,9 @@ import { HistoryPanel } from './components/panels/HistoryPanel';
 import { SettingsView } from './components/settings/SettingsView';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { SearchModal } from './components/modals/SearchModal';
+import { CommandPalette } from './components/cmdk/CommandPalette';
+import { FileSwitcher } from './components/cmdk/FileSwitcher';
+import type { CommandDeps } from './lib/commands/registry';
 import {
   logProjectError,
   selectActiveTab,
@@ -117,6 +120,24 @@ export function App() {
   }, [preferencesHydrated, manifest, lastOpenedProject, openProject]);
 
   const [searchOpen, setSearchOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+
+  const commandDeps: CommandDeps = useMemo(
+    () => ({
+      openFileSwitcher: () => setSwitcherOpen(true),
+      openSearch: () => setSearchOpen(true),
+      openRename: (_path: string) => {
+        // 11b lands the rename modal; for 11a the command is wired
+        // but inert. The palette's `when` keeps it visible only when
+        // a tab is active, which is the right gate for both phases.
+      },
+      openNewProject: () => {
+        // 11c lands the new-project dialog.
+      }
+    }),
+    []
+  );
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -182,6 +203,25 @@ export function App() {
         if (manifest) {
           e.preventDefault();
           setSearchOpen((open) => !open);
+        }
+        return;
+      }
+      // ⌘P / ⌘⇧P — file switcher / command palette. Both gated on a
+      // project being open. They're mutually exclusive — opening one
+      // closes the other so the modal stack stays one-deep.
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.altKey &&
+        (e.key === 'p' || e.key === 'P')
+      ) {
+        if (!manifest) return;
+        e.preventDefault();
+        if (e.shiftKey) {
+          setSwitcherOpen(false);
+          setPaletteOpen((open) => !open);
+        } else {
+          setPaletteOpen(false);
+          setSwitcherOpen((open) => !open);
         }
         return;
       }
@@ -409,6 +449,15 @@ export function App() {
       <HistoryPanel />
 
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        deps={commandDeps}
+      />
+      <FileSwitcher
+        open={switcherOpen}
+        onClose={() => setSwitcherOpen(false)}
+      />
 
       <Toaster
         position="bottom-right"

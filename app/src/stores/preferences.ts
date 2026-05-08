@@ -15,10 +15,12 @@ import {
   DEFAULT_RECENT_PROJECTS_CAP,
   type AppUiState,
   type EditorFontId,
+  type RecentFile,
   type RecentProject
 } from '@skrive/shared';
 
 const SAVE_DEBOUNCE_MS = 300;
+const RECENT_FILES_CAP = 30;
 
 type PreferencesState = AppUiState & {
   hydrated: boolean;
@@ -41,6 +43,11 @@ type PreferencesActions = {
   setLastOpenedProject(path: string | null): void;
   recordRecentProject(path: string, name: string): void;
   removeRecentProject(path: string): void;
+
+  /** LRU bookkeeping for the file switcher (Phase 11). Most recent
+   *  open lives at index 0; entries dedupe by `(projectPath, filePath)`
+   *  and the list caps at RECENT_FILES_CAP. */
+  recordRecentFile(projectPath: string, filePath: string): void;
 
   resetEditorDefaults(): void;
 };
@@ -189,6 +196,19 @@ export const usePreferencesStore = create<
     const next = get().recentProjects.filter((r) => r.path !== p);
     if (next.length === get().recentProjects.length) return;
     set({ recentProjects: next });
+    scheduleSave(get);
+  },
+
+  recordRecentFile(projectPath, filePath) {
+    const now = Date.now();
+    const existing = get().recentFiles.filter(
+      (r) => !(r.projectPath === projectPath && r.filePath === filePath)
+    );
+    const next: RecentFile[] = [
+      { projectPath, filePath, openedMs: now },
+      ...existing
+    ].slice(0, RECENT_FILES_CAP);
+    set({ recentFiles: next });
     scheduleSave(get);
   },
 

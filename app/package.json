@@ -18,6 +18,7 @@
     "@lezer/markdown": "^1.4.0",
     "@radix-ui/react-dialog": "^1.1.4",
     "@skrive/shared": "workspace:*",
+    "cmdk": "^1.1.1",
     "marked": "^18.0.0",
     "mdast-util-from-markdown": "^2.0.3",
     "react": "^19.0.0",

@@ -660,6 +660,10 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     set({ tabs: nextTabs, activeTabIndex: nextTabs.length - 1 });
     if (!hydrate?.applyOverrides) {
       scheduleImmediateSave(get);
+      // Record in the LRU only on user-driven opens (not session
+      // restore). The switcher reads this list as the empty-query
+      // default; including session-restore openings would noise it up.
+      usePreferencesStore.getState().recordRecentFile(manifest.root, path);
     }
   },
 
