@@ -127,6 +127,28 @@ function SectionHeader({
   );
 }
 
+const THEME_OPTIONS: {
+  id: 'system' | 'light' | 'dark';
+  label: string;
+  desc: string;
+}[] = [
+  {
+    id: 'system',
+    label: 'System',
+    desc: 'Match the OS theme automatically.'
+  },
+  {
+    id: 'light',
+    label: 'Light',
+    desc: 'Warm paper-like palette.'
+  },
+  {
+    id: 'dark',
+    label: 'Dark',
+    desc: 'Original Skrive dark palette.'
+  }
+];
+
 const PANEL_BEHAVIOR_OPTIONS: {
   id: 'push' | 'float';
   label: string;
@@ -175,6 +197,8 @@ function GeneralSection() {
   );
   const shellTone = usePreferencesStore((s) => s.shellTone);
   const setShellTone = usePreferencesStore((s) => s.setShellTone);
+  const theme = usePreferencesStore((s) => s.theme);
+  const setTheme = usePreferencesStore((s) => s.setTheme);
   return (
     <>
       <SectionHeader
@@ -208,8 +232,15 @@ function GeneralSection() {
       </header>
 
       <LayoutFork
+        label="Theme"
+        blurb="System follows the OS color scheme. Light and Dark pin Skrive's palette."
+        options={THEME_OPTIONS}
+        value={theme}
+        onChange={setTheme}
+      />
+      <LayoutFork
         label="Shell tone"
-        blurb="Color relationship between the shell and the editor card."
+        blurb="Color relationship between the shell and the editor card. Dark-mode only — light mode ships a single fixed palette."
         options={SHELL_TONE_OPTIONS}
         value={shellTone}
         onChange={setShellTone}

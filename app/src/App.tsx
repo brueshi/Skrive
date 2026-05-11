@@ -66,6 +66,7 @@ export function App() {
   const setActiveView = useProjectStore((s) => s.setActiveView);
   const panelOpenBehavior = usePreferencesStore((s) => s.panelOpenBehavior);
   const shellTone = usePreferencesStore((s) => s.shellTone);
+  const theme = usePreferencesStore((s) => s.theme);
   const backlinksPanelOpen = useProjectStore((s) => s.backlinksPanelOpen);
   const frontmatterPanelOpen = useProjectStore(
     (s) => s.frontmatterPanelOpen
@@ -86,6 +87,19 @@ export function App() {
   }, [activeTab, lintReport]);
 
   useTypographyVars();
+
+  // Theme. 'system' clears data-theme so the CSS color-scheme: light dark
+  // declaration follows the OS via prefers-color-scheme. 'light' / 'dark'
+  // pin color-scheme explicitly; the light-dark() tokens in :root pick up
+  // the override automatically.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'system') {
+      root.removeAttribute('data-theme');
+    } else {
+      root.setAttribute('data-theme', theme);
+    }
+  }, [theme]);
 
   // Phase-12b cold-open measurement. Logs the time from React mount
   // (recorded in main.tsx via window.__skriveMountStart) to the first

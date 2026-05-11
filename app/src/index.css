@@ -8,16 +8,35 @@
  */
 
 :root {
-  color-scheme: dark;
+  /* Themes ride on color-scheme: data-theme='light'/'dark' override the
+     scheme; absent attribute means "follow OS via prefers-color-scheme".
+     light-dark() resolves against the active scheme automatically. */
+  color-scheme: light dark;
 
-  /* Surface palette — dark mode default, the only theme at v0.2. */
-  --skrive-bg: #1a1a1a;
-  --skrive-fg: #e8e6e1;
-  --skrive-muted: #8a857d;
-  --skrive-rule: #2a2a2a;
-  --skrive-link: #8db8d8;
-  --skrive-selection: rgba(141, 184, 216, 0.18);
-  --skrive-focus-ring: #8db8d8;
+  /* Surface palette. Light values first, dark second. New installs default
+     to light; legacy users without a stored theme migrate to dark in
+     shell/persistence.ts so they don't get whiplash on upgrade. */
+  --skrive-bg: light-dark(#fefcf7, #1a1a1a);
+  --skrive-fg: light-dark(#1f1d1a, #e8e6e1);
+  --skrive-muted: light-dark(#7a756d, #8a857d);
+  --skrive-rule: light-dark(#ebe7df, #2a2a2a);
+  --skrive-link: light-dark(#1a5d8e, #8db8d8);
+  --skrive-selection: light-dark(
+    rgba(26, 93, 142, 0.14),
+    rgba(141, 184, 216, 0.18)
+  );
+  --skrive-focus-ring: light-dark(#1a5d8e, #8db8d8);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+:root {
 
   /* Inset-design tokens — driven by data-shell-tone on .app-root.
      The card is always var(--skrive-bg); shell bg shifts per tone.
@@ -136,30 +155,36 @@ body {
  * fork live. Once a winner settles, this block goes away.
  */
 
-/* Fork 5 — Shell tone. The card is always --skrive-bg; only the shell
-   bg shifts. "same" puts a subtle shadow on the card to keep it
-   distinct from the shell when both are the same color. */
+/* Shell tone. The toggle only varies the dark-mode palette; light mode
+   ships one tasteful fixed palette regardless of the picked variant
+   (per the v0.2.2 scope decision — light shell-tone variants deferred).
+   Each rule uses light-dark() to switch on color-scheme, so light mode
+   resolves to the same values in all three rules. */
 .app-root[data-shell-tone='dark'] {
-  --skrive-shell-bg: #0e0e0e;
-  --skrive-card-bg: #1a1a1a;
-  --skrive-card-shadow: none;
+  --skrive-shell-bg: light-dark(#e8e4dc, #0e0e0e);
+  --skrive-card-bg: light-dark(#fefcf7, #1a1a1a);
+  --skrive-card-shadow: light-dark(
+    0 1px 0 rgba(0, 0, 0, 0.04),
+    none
+  );
 }
 
 .app-root[data-shell-tone='same'] {
-  --skrive-shell-bg: #1a1a1a;
-  --skrive-card-bg: #1a1a1a;
-  /* Lighter shadow than v1 — the 0 8px 24px blur was repainting
-     the card on every CodeMirror line scroll. The crisp 1px highlight
-     + a tighter spread give the same "card floats" cue at a fraction
-     of the paint cost. */
-  --skrive-card-shadow: 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 4px 12px rgba(0, 0, 0, 0.28);
+  --skrive-shell-bg: light-dark(#e8e4dc, #1a1a1a);
+  --skrive-card-bg: light-dark(#fefcf7, #1a1a1a);
+  --skrive-card-shadow: light-dark(
+    0 4px 12px rgba(0, 0, 0, 0.06),
+    0 4px 12px rgba(0, 0, 0, 0.28)
+  );
 }
 
 .app-root[data-shell-tone='light'] {
-  --skrive-shell-bg: #2a2a2a;
-  --skrive-card-bg: #141414;
-  --skrive-card-shadow: 0 1px 0 rgba(255, 255, 255, 0.03);
+  --skrive-shell-bg: light-dark(#e8e4dc, #2a2a2a);
+  --skrive-card-bg: light-dark(#fefcf7, #141414);
+  --skrive-card-shadow: light-dark(
+    0 1px 0 rgba(0, 0, 0, 0.03),
+    0 1px 0 rgba(255, 255, 255, 0.03)
+  );
 }
 
 /* The header picks up the shell bg so it reads as part of the shell

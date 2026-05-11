@@ -74,6 +74,12 @@ export type EditorFontId =
 export type PanelOpenBehaviorId = 'push' | 'float';
 export type ShellToneId = 'dark' | 'same' | 'light';
 
+/** Color theme. 'system' follows the OS via prefers-color-scheme;
+ *  'light' / 'dark' override. Default for new installs is 'light';
+ *  legacy users without a stored theme migrate to 'dark' (the only
+ *  theme that existed before v0.2.2) so they don't get whiplash. */
+export type ThemeId = 'system' | 'light' | 'dark';
+
 export type AppUiState = {
   schemaVersion: 1;
   lastOpenedProject: string | null;
@@ -96,6 +102,7 @@ export type AppUiState = {
   autoUpdateOnLaunch: boolean;
   panelOpenBehavior: PanelOpenBehaviorId;
   shellTone: ShellToneId;
+  theme: ThemeId;
 };
 
 export const DEFAULT_RECENT_PROJECTS_CAP = 10;
@@ -115,7 +122,8 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   editorLineHeightX100: 170,
   autoUpdateOnLaunch: true,
   panelOpenBehavior: 'push',
-  shellTone: 'light'
+  shellTone: 'light',
+  theme: 'light'
 };
 
 export const DEFAULT_SIDEBAR_WIDTH = 260;

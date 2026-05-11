@@ -1,4 +1,11 @@
-import { app, BrowserWindow, ipcMain, nativeImage, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  nativeImage,
+  nativeTheme,
+  shell
+} from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { registerProjectHandlers } from '../ipc/project';
@@ -32,7 +39,12 @@ function createWindow(): void {
     minWidth: 720,
     minHeight: 480,
     show: false,
-    backgroundColor: '#1a1a1a',
+    // Pre-paint flash color. We default to the OS theme rather than
+    // hardcoding dark — the renderer's CSS picks the final palette via
+    // light-dark() and the user's stored theme pref, but the window
+    // background paints first. A theme-aware default keeps the launch
+    // flash close to whatever the renderer will end up showing.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1a1a1a' : '#fefcf7',
     ...(isDev
       ? { icon: nativeImage.createFromPath(devIconPath()) }
       : {}),

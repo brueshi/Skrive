@@ -231,6 +231,19 @@ function sanitizeAppState(raw: Record<string, unknown>): Partial<AppUiState> {
   ) {
     out.shellTone = raw.shellTone;
   }
+  // Theme: explicit stored value wins; an existing app.json without
+  // any theme field is a pre-v0.2.2 user who only ever knew dark mode,
+  // so we migrate them to 'dark' rather than the new-install default
+  // ('light') to avoid theme whiplash on upgrade.
+  if (
+    raw.theme === 'system' ||
+    raw.theme === 'light' ||
+    raw.theme === 'dark'
+  ) {
+    out.theme = raw.theme;
+  } else {
+    out.theme = 'dark';
+  }
   return out;
 }
 

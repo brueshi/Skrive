@@ -18,7 +18,8 @@ import {
   type PanelOpenBehaviorId,
   type RecentFile,
   type RecentProject,
-  type ShellToneId
+  type ShellToneId,
+  type ThemeId
 } from '@skrive/shared';
 
 const SAVE_DEBOUNCE_MS = 300;
@@ -40,6 +41,7 @@ type PreferencesActions = {
   setAutoUpdateOnLaunch(value: boolean): void;
   setPanelOpenBehavior(value: PanelOpenBehaviorId): void;
   setShellTone(value: ShellToneId): void;
+  setTheme(value: ThemeId): void;
 
   addDictionaryWord(word: string): void;
   removeDictionaryWord(word: string): void;
@@ -75,7 +77,8 @@ function snapshot(state: PreferencesState): AppUiState {
     editorLineHeightX100: state.editorLineHeightX100,
     autoUpdateOnLaunch: state.autoUpdateOnLaunch,
     panelOpenBehavior: state.panelOpenBehavior,
-    shellTone: state.shellTone
+    shellTone: state.shellTone,
+    theme: state.theme
   };
 }
 
@@ -170,6 +173,11 @@ export const usePreferencesStore = create<
   setShellTone(value) {
     if (get().shellTone === value) return;
     set({ shellTone: value });
+    scheduleSave(get);
+  },
+  setTheme(value) {
+    if (get().theme === value) return;
+    set({ theme: value });
     scheduleSave(get);
   },
 

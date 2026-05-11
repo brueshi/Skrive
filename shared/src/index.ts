@@ -77,7 +77,8 @@ export type {
   RecentProject,
   ShellToneId,
   SidebarState,
-  TabState
+  TabState,
+  ThemeId
 } from './persistence';
 
 export {
