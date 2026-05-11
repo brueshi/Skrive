@@ -33,8 +33,15 @@ asarUnpack:
   - "**/*.node"
 
 mac:
+  # DMG is the install medium (drag-to-Applications); zip is what
+  # Squirrel.Mac (electron-updater) actually downloads + unpacks for
+  # auto-updates. Shipping only DMG breaks autoUpdater with
+  # "ZIP file not provided" against latest-mac.yml, since the updater
+  # rejects the .dmg URL as an unsupported update package.
   target:
     - target: dmg
+      arch: [arm64]
+    - target: zip
       arch: [arm64]
   category: public.app-category.productivity
   # electron-builder also defaults to build/icon.icns when buildResources
