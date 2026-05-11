@@ -28,3 +28,7 @@ planning/
 # alone; committing the 100 generated files would just be log noise on
 # any future content tweak.
 /docs/fixtures/perf-100/
+
+# Working scratch dir for reference screenshots, paste-board grabs,
+# and other workflow artifacts that shouldn't enter history.
+/attachments/
