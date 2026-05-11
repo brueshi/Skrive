@@ -1,6 +1,6 @@
 {
   "name": "skrive",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A Markdown IDE for people who write seriously and ship to the web.",
   "type": "module",
   "main": "out/main/index.js",

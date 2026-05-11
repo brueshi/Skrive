@@ -59,9 +59,10 @@ export function BacklinksPanel() {
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
-        // stopImmediatePropagation so the HistoryPanel / SettingsView
-        // document-level handlers don't also fire and close themselves —
-        // Escape should dismiss one layer at a time.
+        // stopImmediatePropagation so the HistoryPanel's document-level
+        // handler doesn't also fire and close itself — Escape should
+        // dismiss one layer at a time. (Settings used to have an Escape
+        // handler too; now Radix Dialog handles that natively.)
         e.preventDefault();
         e.stopImmediatePropagation();
         setOpen(false);

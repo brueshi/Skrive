@@ -50,6 +50,12 @@ type TreeFolder = {
   files: FileEntry[];
 };
 
+function projectName(root: string | null | undefined): string {
+  if (!root) return '';
+  const parts = root.split(/[/\\]/).filter(Boolean);
+  return parts[parts.length - 1] ?? root;
+}
+
 function buildTree(files: FileEntry[]): TreeFolder {
   const root: TreeFolder = { name: '', path: '', folders: [], files: [] };
   const byPath = new Map<string, TreeFolder>();
@@ -324,9 +330,14 @@ type DeleteTarget = { kind: 'file' | 'directory'; path: string; name: string };
 
 export function Sidebar() {
   const manifest = useProjectStore((s) => s.manifest);
+  const openProjectFromDialog = useProjectStore(
+    (s) => s.openProjectFromDialog
+  );
+  const closeProject = useProjectStore((s) => s.closeProject);
   const sidebarVisible = useProjectStore((s) => s.sidebarVisible);
   const sidebarWidth = useProjectStore((s) => s.sidebarWidth);
   const setSidebarWidth = useProjectStore((s) => s.setSidebarWidth);
+  const setSidebarVisible = useProjectStore((s) => s.setSidebarVisible);
   const createFile = useProjectStore((s) => s.createFile);
   const createDirectory = useProjectStore((s) => s.createDirectory);
   const deleteFile = useProjectStore((s) => s.deleteFile);
@@ -474,12 +485,28 @@ export function Sidebar() {
     [sidebarWidth]
   );
 
+  // When the toggle button was retired (Phase 13c), we lost the chrome
+  // affordance for collapsing the sidebar. Drag-to-collapse fills the
+  // gap: pulling the resize handle below this threshold snaps the
+  // sidebar shut. The stored width stays put, so a subsequent ⌘[ to
+  // re-open returns to whatever size it was at before.
+  const COLLAPSE_THRESHOLD_PX = 100;
+
   useEffect(() => {
     if (!isDragging) return;
     function onMove(e: globalThis.PointerEvent) {
       const start = dragStartRef.current;
       if (!start) return;
-      setSidebarWidth(start.w + (e.clientX - start.x));
+      const next = start.w + (e.clientX - start.x);
+      if (next < COLLAPSE_THRESHOLD_PX) {
+        setSidebarVisible(false);
+        setIsDragging(false);
+        dragStartRef.current = null;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        return;
+      }
+      setSidebarWidth(next);
     }
     function onUp() {
       setIsDragging(false);
@@ -493,7 +520,7 @@ export function Sidebar() {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
-  }, [isDragging, setSidebarWidth]);
+  }, [isDragging, setSidebarWidth, setSidebarVisible]);
 
   const resetWidth = useCallback(() => {
     setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
@@ -517,7 +544,48 @@ export function Sidebar() {
         inert={!sidebarVisible ? '' : undefined}
       >
         <header className="section-header">
-          <span className="title">Files</span>
+          {manifest ? (
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  type="button"
+                  className="project-name"
+                  title={manifest.root}
+                >
+                  <span className="project-name-text">
+                    {projectName(manifest.root)}
+                  </span>
+                  <span className="project-name-caret" aria-hidden="true">
+                    ▾
+                  </span>
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="ctx-menu"
+                  align="start"
+                  sideOffset={4}
+                >
+                  <DropdownMenu.Item
+                    className="ctx-item"
+                    onSelect={() => void openProjectFromDialog()}
+                  >
+                    <span className="ctx-label">Open project…</span>
+                    <span className="ctx-shortcut">⌘O</span>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    className="ctx-item"
+                    onSelect={() => void closeProject()}
+                  >
+                    <span className="ctx-label">Close project</span>
+                    <span className="ctx-shortcut">⌘⇧W</span>
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          ) : (
+            <span className="title">Files</span>
+          )}
           <div className="section-header__actions">
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>

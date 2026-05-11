@@ -11,7 +11,7 @@ import { Header } from './components/chrome/Header';
 import { BacklinksPanel } from './components/panels/BacklinksPanel';
 import { FrontmatterPanel } from './components/panels/FrontmatterPanel';
 import { HistoryPanel } from './components/panels/HistoryPanel';
-import { SettingsView } from './components/settings/SettingsView';
+import { SettingsModal } from './components/settings/SettingsModal';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { SearchModal } from './components/modals/SearchModal';
 import { RenameModal } from './components/modals/RenameModal';
@@ -63,6 +63,14 @@ export function App() {
   );
   const openProject = useProjectStore((s) => s.openProject);
   const activeView = useProjectStore((s) => s.activeView);
+  const setActiveView = useProjectStore((s) => s.setActiveView);
+  const panelOpenBehavior = usePreferencesStore((s) => s.panelOpenBehavior);
+  const shellTone = usePreferencesStore((s) => s.shellTone);
+  const backlinksPanelOpen = useProjectStore((s) => s.backlinksPanelOpen);
+  const frontmatterPanelOpen = useProjectStore(
+    (s) => s.frontmatterPanelOpen
+  );
+  const historyPanelOpen = useProjectStore((s) => s.historyPanelOpen);
   const hydratePreferences = usePreferencesStore((s) => s.hydrate);
   const persistPreferencesNow = usePreferencesStore((s) => s.persistNow);
   const preferencesHydrated = usePreferencesStore((s) => s.hydrated);
@@ -277,8 +285,28 @@ export function App() {
   // blocks the very first paint.
   void preferencesHydrated;
 
+  const anyPanelOpen =
+    backlinksPanelOpen || frontmatterPanelOpen || historyPanelOpen;
+
+  // Width reserved next to the editor card when push-behavior is on.
+  // FM is 32rem; BL and HI are 26rem. Setting this as a CSS variable
+  // on the root keeps the margin-right in sync with whichever panel is
+  // actually open instead of always reserving the widest case.
+  const panelReserve =
+    panelOpenBehavior !== 'push' || !anyPanelOpen
+      ? '0px'
+      : frontmatterPanelOpen
+        ? '32rem'
+        : '26rem';
+
   return (
-    <div className="app-root">
+    <div
+      className="app-root"
+      data-panel-behavior={panelOpenBehavior}
+      data-shell-tone={shellTone}
+      data-panels-open={anyPanelOpen ? 'true' : 'false'}
+      style={{ '--skrive-panel-reserve': panelReserve } as React.CSSProperties}
+    >
       <Header />
 
       <main className="app-body">
@@ -286,9 +314,7 @@ export function App() {
           <>
             <Sidebar />
             <section className="workspace">
-              {activeView === 'settings' ? (
-                <SettingsView appVersion={appVersion} />
-              ) : activeTab && activeTab.diff ? (
+              {activeTab && activeTab.diff ? (
                 <DiffView
                   mode={activeTab.diff.diffMode}
                   before={{
@@ -431,6 +457,11 @@ export function App() {
         open={cheatSheetOpen}
         onClose={() => setCheatSheetOpen(false)}
         bindings={bindings}
+      />
+      <SettingsModal
+        open={activeView === 'settings'}
+        onClose={() => setActiveView('editor')}
+        appVersion={appVersion}
       />
 
       <Toaster

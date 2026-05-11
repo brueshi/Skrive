@@ -68,6 +68,12 @@ export type EditorFontId =
   | 'mono'
   | 'custom';
 
+/** Inset-design forks that remain user-toggleable. The losers (topbar
+ *  layout variants, inset coverage, sidebar style) are now hardcoded
+ *  to their chosen defaults. */
+export type PanelOpenBehaviorId = 'push' | 'float';
+export type ShellToneId = 'dark' | 'same' | 'light';
+
 export type AppUiState = {
   schemaVersion: 1;
   lastOpenedProject: string | null;
@@ -88,6 +94,8 @@ export type AppUiState = {
    *  integer-valued and round-trips don't drift on common values. */
   editorLineHeightX100: number;
   autoUpdateOnLaunch: boolean;
+  panelOpenBehavior: PanelOpenBehaviorId;
+  shellTone: ShellToneId;
 };
 
 export const DEFAULT_RECENT_PROJECTS_CAP = 10;
@@ -105,7 +113,9 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   editorCustomFontFamily: '',
   editorFontSize: 17,
   editorLineHeightX100: 170,
-  autoUpdateOnLaunch: true
+  autoUpdateOnLaunch: true,
+  panelOpenBehavior: 'push',
+  shellTone: 'light'
 };
 
 export const DEFAULT_SIDEBAR_WIDTH = 260;

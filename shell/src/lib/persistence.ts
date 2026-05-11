@@ -221,6 +221,16 @@ function sanitizeAppState(raw: Record<string, unknown>): Partial<AppUiState> {
   if (typeof raw.autoUpdateOnLaunch === 'boolean') {
     out.autoUpdateOnLaunch = raw.autoUpdateOnLaunch;
   }
+  if (raw.panelOpenBehavior === 'push' || raw.panelOpenBehavior === 'float') {
+    out.panelOpenBehavior = raw.panelOpenBehavior;
+  }
+  if (
+    raw.shellTone === 'dark' ||
+    raw.shellTone === 'same' ||
+    raw.shellTone === 'light'
+  ) {
+    out.shellTone = raw.shellTone;
+  }
   return out;
 }
 

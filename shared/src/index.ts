@@ -71,9 +71,11 @@ export type {
   CursorPosition,
   EditorFontId,
   LayoutMode,
+  PanelOpenBehaviorId,
   ProjectUiState,
   RecentFile,
   RecentProject,
+  ShellToneId,
   SidebarState,
   TabState
 } from './persistence';

@@ -15,8 +15,10 @@ import {
   DEFAULT_RECENT_PROJECTS_CAP,
   type AppUiState,
   type EditorFontId,
+  type PanelOpenBehaviorId,
   type RecentFile,
-  type RecentProject
+  type RecentProject,
+  type ShellToneId
 } from '@skrive/shared';
 
 const SAVE_DEBOUNCE_MS = 300;
@@ -36,6 +38,8 @@ type PreferencesActions = {
   setEditorLineHeightX100(value: number): void;
   setSkipDeleteConfirmation(skip: boolean): void;
   setAutoUpdateOnLaunch(value: boolean): void;
+  setPanelOpenBehavior(value: PanelOpenBehaviorId): void;
+  setShellTone(value: ShellToneId): void;
 
   addDictionaryWord(word: string): void;
   removeDictionaryWord(word: string): void;
@@ -69,7 +73,9 @@ function snapshot(state: PreferencesState): AppUiState {
     editorCustomFontFamily: state.editorCustomFontFamily,
     editorFontSize: state.editorFontSize,
     editorLineHeightX100: state.editorLineHeightX100,
-    autoUpdateOnLaunch: state.autoUpdateOnLaunch
+    autoUpdateOnLaunch: state.autoUpdateOnLaunch,
+    panelOpenBehavior: state.panelOpenBehavior,
+    shellTone: state.shellTone
   };
 }
 
@@ -154,6 +160,16 @@ export const usePreferencesStore = create<
   setAutoUpdateOnLaunch(value) {
     if (get().autoUpdateOnLaunch === value) return;
     set({ autoUpdateOnLaunch: value });
+    scheduleSave(get);
+  },
+  setPanelOpenBehavior(value) {
+    if (get().panelOpenBehavior === value) return;
+    set({ panelOpenBehavior: value });
+    scheduleSave(get);
+  },
+  setShellTone(value) {
+    if (get().shellTone === value) return;
+    set({ shellTone: value });
     scheduleSave(get);
   },
 

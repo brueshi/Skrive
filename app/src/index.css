@@ -19,6 +19,21 @@
   --skrive-selection: rgba(141, 184, 216, 0.18);
   --skrive-focus-ring: #8db8d8;
 
+  /* Inset-design tokens — driven by data-shell-tone on .app-root.
+     The card is always var(--skrive-bg); shell bg shifts per tone.
+     Defaults below match data-shell-tone="dark" (legacy/flush feel);
+     the App overrides them at runtime via the data-attribute. */
+  --skrive-shell-bg: var(--skrive-bg);
+  --skrive-card-bg: var(--skrive-bg);
+  --skrive-card-shadow: none;
+  /* Outer shell pad = window edge → outermost card; gap = between
+     adjacent cards (sidebar↔editor). Gap is wider than pad so the
+     space between cards reads as deliberate breathing room rather
+     than a 1px divider line. */
+  --skrive-shell-pad: 8px;
+  --skrive-shell-gap: 16px;
+  --skrive-card-radius: 8px;
+
   /* Editor typography — the curated default. Phase 9 rewrites these. */
   --skrive-editor-font:
     'Iowan Old Style', 'Charter', 'Source Serif Pro', 'Source Serif 4',
@@ -62,13 +77,15 @@
 
   /* Motion. Quick = chrome state changes; standard = modal entrance/
      exit; slow = sidebar collapse (the heaviest weight that animates).
-     Easing is a single curve everywhere — uniform feel beats per-
-     component bespoke timing. The 60ms suggestion-list highlight is
-     intentionally faster than `quick` for keyboard-nav snappiness. */
-  --skrive-duration-quick: 120ms;
-  --skrive-duration-standard: 160ms;
-  --skrive-duration-slow: 180ms;
+     Easing-default is symmetric Material; easing-out is for entrance
+     animations where a fast start reads as responsiveness. The 60ms
+     suggestion-list highlight is intentionally faster than `quick`
+     for keyboard-nav snappiness. */
+  --skrive-duration-quick: 110ms;
+  --skrive-duration-standard: 150ms;
+  --skrive-duration-slow: 160ms;
   --skrive-easing: cubic-bezier(0.4, 0, 0.2, 1);
+  --skrive-easing-out: cubic-bezier(0.16, 1, 0.3, 1);
 
   font-family: var(--skrive-ui-font);
   font-size: 14px;
@@ -107,6 +124,152 @@ body {
   flex-direction: column;
   height: 100vh;
   min-height: 0;
+  background: var(--skrive-shell-bg);
+}
+
+/* ============ Inset design forks (experimental) ============
+ *
+ * Five independently-toggleable forks driven by data-attributes on
+ * .app-root. Defaults wire up to the user's picks: full inset, sidebar
+ * as its own card, tabs on the editor card, panels push the card
+ * narrower, light shell. Settings → General → Shell + chrome flips any
+ * fork live. Once a winner settles, this block goes away.
+ */
+
+/* Fork 5 — Shell tone. The card is always --skrive-bg; only the shell
+   bg shifts. "same" puts a subtle shadow on the card to keep it
+   distinct from the shell when both are the same color. */
+.app-root[data-shell-tone='dark'] {
+  --skrive-shell-bg: #0e0e0e;
+  --skrive-card-bg: #1a1a1a;
+  --skrive-card-shadow: none;
+}
+
+.app-root[data-shell-tone='same'] {
+  --skrive-shell-bg: #1a1a1a;
+  --skrive-card-bg: #1a1a1a;
+  /* Lighter shadow than v1 — the 0 8px 24px blur was repainting
+     the card on every CodeMirror line scroll. The crisp 1px highlight
+     + a tighter spread give the same "card floats" cue at a fraction
+     of the paint cost. */
+  --skrive-card-shadow: 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 4px 12px rgba(0, 0, 0, 0.28);
+}
+
+.app-root[data-shell-tone='light'] {
+  --skrive-shell-bg: #2a2a2a;
+  --skrive-card-bg: #141414;
+  --skrive-card-shadow: 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+/* The header picks up the shell bg so it reads as part of the shell
+   rather than the card. Header rules live in their own section
+   (line ~120); this is the override. The 1px chrome divider from the
+   flush legacy layout is also killed here — the inset gap between
+   shell and card is the visual separator now. */
+.app-root .header {
+  background: var(--skrive-shell-bg);
+  border-bottom: none;
+}
+
+/* Soft color transitions on the layout surfaces so flipping shell-tone
+   fades rather than snaps. Limited to background + shadow to avoid
+   animating typography weight or text color (those re-render every
+   keystroke and would feel sluggish). */
+.app-root,
+.app-body,
+.app-root .workspace,
+.app-root .sidebar,
+.app-root .header {
+  transition:
+    background-color var(--skrive-duration-standard) var(--skrive-easing),
+    box-shadow var(--skrive-duration-standard) var(--skrive-easing);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-root,
+  .app-body,
+  .app-root .workspace,
+  .app-root .sidebar,
+  .app-root .header {
+    transition: none;
+  }
+}
+
+/* The app-body is "the shell" — full 4-side inset wrapping the two
+   floating cards. Gap separates the sidebar card from the workspace
+   card. */
+.app-body {
+  background: var(--skrive-shell-bg);
+  gap: var(--skrive-shell-gap);
+  padding: var(--skrive-shell-pad);
+}
+
+/* The editor card. Always rounded; bg + shadow come from the tone
+   tokens. `contain: paint` isolates inner scroll repaints (CodeMirror
+   line virtualization) from re-rasterizing the card's border-radius
+   mask + box-shadow on every frame. */
+.app-root .workspace {
+  background: var(--skrive-card-bg);
+  border-radius: var(--skrive-card-radius);
+  box-shadow: var(--skrive-card-shadow);
+  overflow: hidden;
+  min-width: 0;
+  flex-direction: column;
+  contain: paint;
+}
+
+/* The sidebar is always its own card alongside the workspace card. */
+.app-root .sidebar {
+  background: var(--skrive-card-bg);
+  border-radius: var(--skrive-card-radius);
+  box-shadow: var(--skrive-card-shadow);
+  border-right: none;
+  /* Keep the base `.sidebar { overflow: hidden auto }` — horizontal
+     clips at the rounded corner; vertical scrolls when the file tree
+     overflows. */
+}
+
+/* The header's tabs slot — fills the middle of the topbar between the
+   left (sidebar toggle) and right (panel + mode toggle) clusters. */
+.header-tabs {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+
+.header-tabs > .tabs {
+  flex: 1;
+}
+
+/* The sidebar resize handle has a 1px decorative line via ::before
+   for the flush legacy layout. In the inset design the gap between
+   cards is the affordance — hide the line until hover / drag. */
+.app-root .resize-handle::before {
+  background: transparent;
+}
+
+.app-root .resize-handle:hover::before,
+.app-root .resize-handle.dragging::before {
+  background: var(--skrive-fg);
+}
+
+/* Side panels — push behavior reserves room on the right of the editor
+   card so the floating panel sits beside (not over) the card. Reserve
+   width is set per-render in App.tsx via --skrive-panel-reserve so we
+   match the actually-open panel (FM 32rem, BL/HI 26rem). Float keeps
+   the legacy overlay behavior. */
+.app-root[data-panel-behavior='push'] .workspace {
+  margin-right: calc(
+    var(--skrive-panel-reserve, 0px) + 12px + var(--skrive-shell-pad)
+  );
+  transition: margin-right var(--skrive-duration-standard)
+    var(--skrive-easing);
+}
+
+.app-root[data-panel-behavior='push'][data-panels-open='false']
+  .workspace {
+  margin-right: 0;
 }
 
 /* ===================== Header (overlay title bar) ===================== */
@@ -123,33 +286,46 @@ body {
   border-bottom: 1px solid var(--skrive-rule);
 }
 
-/* Clear the macOS traffic-light cluster (~78px wide). With
-   titleBarStyle: hiddenInset, the chrome extends under the lights so
-   they sit on the same surface as the rest of the chrome. */
+/* Clear the macOS traffic-light cluster (~78px wide) with a Notion-
+   style gap before the sidebar toggle starts. With titleBarStyle:
+   hiddenInset, the chrome extends under the lights so they sit on the
+   same surface as the rest of the chrome. The 96px is calibrated so
+   the toggle reads as deliberate first-class chrome rather than a
+   button squeezed against the traffic lights. */
 .header.is-macos {
-  padding-left: 78px;
+  padding-left: 96px;
 }
 
 .header-left {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
   flex-shrink: 0;
   min-width: 0;
+  /* Mirror the .header .tabs top inset so the sidebar toggle's top
+     edge sits at the same y as the tab strip's top edge. Without this
+     the toggle reads as floating above the tabs. */
+  padding-top: 6px;
 }
 
-.header .project-name {
+/* Project menu trigger. Lives in the sidebar's section header now —
+   used to be in the topbar. The font reads as the section heading it
+   replaces (uppercase, letter-spaced) so the affordance integrates
+   with the file tree rather than reading as a stray button. */
+.project-name {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
   background: transparent;
   border: none;
   padding: 0.125rem 0.375rem;
+  margin: -0.125rem -0.375rem;
   border-radius: var(--skrive-radius-sm);
-  font: inherit;
-  font-size: 0.6875rem;
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   color: var(--skrive-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: nowrap;
   overflow: hidden;
   max-width: 14rem;
@@ -159,23 +335,25 @@ body {
     background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
-.header .project-name:hover,
-.header .project-name[aria-expanded='true'] {
+.project-name:hover,
+.project-name[aria-expanded='true'] {
   color: var(--skrive-fg);
   background: var(--skrive-rule);
 }
 
-.header .project-name-text {
+.project-name-text {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.header .project-name-caret {
+.project-name-caret {
   font-size: 0.625rem;
   opacity: 0.6;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
-.header .header-icon-button {
+.header-icon-button {
   background: transparent;
   border: none;
   color: var(--skrive-muted);
@@ -187,18 +365,29 @@ body {
   justify-content: center;
   border-radius: var(--skrive-radius-sm);
   padding: 0;
+  position: relative;
   transition:
     color var(--skrive-duration-quick) var(--skrive-easing),
     background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
-.header .header-icon-button:hover {
+.header-icon-button:hover {
   color: var(--skrive-fg);
   background: var(--skrive-rule);
 }
 
-.header .header-icon-button[aria-pressed='true'] {
+.header-icon-button[aria-pressed='true'] {
   color: var(--skrive-fg);
+}
+
+/* Sidebar toggle gets a bigger hit target than other header icon
+   buttons — Notion-style first-class chrome rather than a utility
+   icon. Sits in its own column with deliberate space from the traffic
+   lights (see .header.is-macos padding) and aligned with the tab
+   strip's top inset (see .header-left padding-top). */
+.sidebar-toggle {
+  width: 32px;
+  height: 32px;
 }
 
 /* Tab strip hugs the bottom edge of the chrome row so the active tab
@@ -364,6 +553,7 @@ body {
   justify-content: space-between;
   gap: 1.5rem;
   width: 100%;
+  box-sizing: border-box;
   padding: 0.375rem 0.75rem;
   background: transparent;
   border: none;
@@ -474,7 +664,10 @@ body {
 .modal-backdrop,
 .cmdk-backdrop,
 .search-backdrop {
-  animation: skrive-modal-fade-in 140ms var(--skrive-easing);
+  /* easing-out on entrance — backdrop reaches near-full opacity early
+     so the dialog lifts onto an already-dimmed stage rather than both
+     fading at the same rate. */
+  animation: skrive-modal-fade-in 130ms var(--skrive-easing-out);
 }
 
 .modal-backdrop[data-state='closed'],
@@ -485,7 +678,7 @@ body {
 
 .modal-dialog,
 .rename-modal {
-  animation: skrive-modal-content-in var(--skrive-duration-standard) var(--skrive-easing);
+  animation: skrive-modal-content-in var(--skrive-duration-standard) var(--skrive-easing-out);
 }
 
 .modal-dialog[data-state='closed'],
@@ -495,7 +688,7 @@ body {
 
 .cmdk-palette,
 .search-palette {
-  animation: skrive-cmdk-content-in var(--skrive-duration-standard) var(--skrive-easing);
+  animation: skrive-cmdk-content-in var(--skrive-duration-standard) var(--skrive-easing-out);
 }
 
 .cmdk-palette[data-state='closed'],
@@ -844,9 +1037,15 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Paint isolation — file-tree updates (rename, expand) won't
+     repaint the editor card next door. */
+  contain: layout style paint;
+  /* ease-out for collapse feels noticeably snappier than the symmetric
+     curve at the same duration: the user gets visible motion within
+     the first 50ms instead of waiting for the curve's mid-point. */
   transition:
-    width var(--skrive-duration-slow) var(--skrive-easing),
-    opacity var(--skrive-duration-slow) var(--skrive-easing);
+    width var(--skrive-duration-slow) var(--skrive-easing-out),
+    opacity var(--skrive-duration-slow) var(--skrive-easing-out);
 }
 
 .sidebar.collapsed {
@@ -855,7 +1054,10 @@ body {
 }
 
 .sidebar.dragging {
-  transition: opacity var(--skrive-duration-slow) var(--skrive-easing);
+  /* Mid-drag the user is moving the handle pixel-by-pixel; killing the
+     width transition keeps the sidebar stuck to the cursor. Opacity
+     still transitions so the drag-to-collapse snap fades smoothly. */
+  transition: opacity var(--skrive-duration-slow) var(--skrive-easing-out);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2363,56 +2565,113 @@ body {
   color: var(--skrive-fg);
 }
 
-/* ===================== Header FM indicator ===================== */
+/* ===================== Panel menu ===================== */
+/* The single "Panels" trigger that replaces FM/Backlinks/HI in the
+   collapsed topbar. A small dot in the corner tells you at least one
+   panel is open. */
 
-.fm-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  height: 22px;
-  padding: 0 0.5rem;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--skrive-radius-sm);
+.panel-menu-trigger {
+  position: relative;
+}
+
+.panel-menu-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--skrive-fg);
+  pointer-events: none;
+}
+
+/* Wider than a default context menu — checkbox items + meta labels +
+   shortcut hints all need room without crowding the border. */
+.panel-menu {
+  min-width: 15rem;
+  padding: 0.375rem 0;
+}
+
+.panel-menu .ctx-item {
+  padding: 0.5rem 1rem;
+  gap: 1.25rem;
+}
+
+/* Meta text on a panel-menu row (e.g. "· git", "· 3"). Sits between
+   the label and the shortcut, in muted weight. */
+.ctx-meta {
   color: var(--skrive-muted);
-  cursor: pointer;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
-  letter-spacing: 0.04em;
-  transition:
-    border-color var(--skrive-duration-quick) var(--skrive-easing),
-    color var(--skrive-duration-quick) var(--skrive-easing),
-    background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
-.fm-indicator:hover {
-  color: var(--skrive-fg);
-  border-color: var(--skrive-rule);
+/* ===================== Settings — topbar layout tiles ===================== */
+
+.settings-inline-blurb {
+  margin-top: 0.25rem;
+  margin-bottom: 0.5rem;
+  max-width: 30rem;
 }
 
-.fm-indicator[aria-pressed='true'] {
-  color: var(--skrive-fg);
-  border-color: var(--skrive-fg);
-  background: var(--skrive-rule);
+.settings-layout-grid {
+  display: grid;
+  /* auto-fit minmax lets the grid choose 2 or 3 columns based on the
+     pane's actual width: 2-option forks always read as 2 stretched
+     tiles; 3-option forks fit in 3 cols on a wide pane and only fall
+     back to 2 + 1 if the pane is too narrow for three tile widths. */
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.5rem;
 }
 
-.fm-indicator-count {
-  color: var(--skrive-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.fm-indicator[aria-pressed='true'] .fm-indicator-count {
-  color: var(--skrive-fg);
-}
-
-/* ============================ Settings view ============================ */
-
-.settings-view {
+.settings-layout-tile {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-  background: var(--skrive-bg);
+  gap: 0.2rem;
+  align-items: flex-start;
+  padding: 0.55rem 0.75rem;
+  background: transparent;
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-md);
+  cursor: pointer;
+  text-align: left;
+  color: var(--skrive-fg);
+  font: inherit;
+}
+
+.settings-layout-tile:hover {
+  border-color: var(--skrive-fg);
+}
+
+.settings-layout-tile.active {
+  border-color: var(--skrive-fg);
+  background: color-mix(in srgb, var(--skrive-bg) 90%, var(--skrive-fg) 10%);
+}
+
+.settings-layout-tile-label {
+  font-size: 0.95rem;
+  letter-spacing: -0.005em;
+}
+
+.settings-layout-tile-desc {
+  font-size: 0.72rem;
+  color: var(--skrive-muted);
+  font-family: var(--skrive-ui-font);
+  line-height: 1.4;
+}
+
+/* ============================ Settings modal ============================ */
+/* Settings runs as a Dialog.Content modal — sized larger than the
+   default modal-dialog so the nav + pane shell has room. The default
+   modal-dialog padding is zeroed so the inner sections can flush to
+   the modal edges. */
+
+.settings-modal {
+  width: min(58rem, calc(100vw - 4rem));
+  height: min(44rem, calc(100vh - 4rem));
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   font-family: var(--skrive-ui-font);
 }
 
@@ -2422,6 +2681,7 @@ body {
   justify-content: space-between;
   padding: 0.75rem 1.25rem;
   border-bottom: 1px solid var(--skrive-rule);
+  flex-shrink: 0;
 }
 
 .settings-view-title {
@@ -2446,7 +2706,11 @@ body {
 
 .settings-close:hover {
   color: var(--skrive-fg);
-  background: color-mix(in srgb, var(--skrive-bg) 85%, var(--skrive-fg) 15%);
+  background: color-mix(
+    in srgb,
+    var(--skrive-card-bg) 85%,
+    var(--skrive-fg) 15%
+  );
 }
 
 .settings-shell {
@@ -2459,7 +2723,11 @@ body {
 .settings-nav {
   border-right: 1px solid var(--skrive-rule);
   padding: 0.5rem 0;
-  background: color-mix(in srgb, var(--skrive-bg) 96%, var(--skrive-fg) 4%);
+  background: color-mix(
+    in srgb,
+    var(--skrive-card-bg) 96%,
+    var(--skrive-fg) 4%
+  );
 }
 
 .settings-nav-list {
@@ -2490,14 +2758,22 @@ body {
 .settings-nav-item.active {
   color: var(--skrive-fg);
   border-left-color: var(--skrive-fg);
-  background: color-mix(in srgb, var(--skrive-bg) 90%, var(--skrive-fg) 10%);
+  background: color-mix(
+    in srgb,
+    var(--skrive-card-bg) 90%,
+    var(--skrive-fg) 10%
+  );
 }
 
 .settings-pane {
   padding: 1.5rem 2rem;
   overflow-y: auto;
-  max-width: 56rem;
+  /* box-sizing: border-box keeps the 2rem horizontal padding inside the
+     grid cell — without it, the pane's content edge sits 4rem past its
+     1fr column and clips inner grids (font tiles, layout tiles). */
+  box-sizing: border-box;
   width: 100%;
+  min-width: 0;
 }
 
 .settings-pane-header {
@@ -3315,37 +3591,6 @@ body {
 }
 
 /* ===================== History panel (Phase 10) ===================== */
-
-.hi-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  height: 22px;
-  padding: 0 0.5rem;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--skrive-radius-sm);
-  color: var(--skrive-muted);
-  cursor: pointer;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  transition:
-    border-color var(--skrive-duration-quick) var(--skrive-easing),
-    color var(--skrive-duration-quick) var(--skrive-easing),
-    background-color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.hi-indicator:hover {
-  color: var(--skrive-fg);
-  border-color: var(--skrive-rule);
-}
-
-.hi-indicator[aria-pressed='true'] {
-  color: var(--skrive-fg);
-  border-color: var(--skrive-fg);
-  background: var(--skrive-rule);
-}
 
 .hi-panel-header {
   display: flex;

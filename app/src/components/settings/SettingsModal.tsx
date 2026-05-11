@@ -1,6 +1,7 @@
-// Settings as an in-workspace view (Phase 9). Lives where the
-// SplitView normally lives; the header + sidebar stay put. Invoked
-// only via ⌘, — no chrome affordance.
+// Settings as a Radix Dialog modal. Editor stays mounted underneath
+// so layout-affecting prefs (shell tone, inset coverage, panel push,
+// etc.) preview live against an actual document instead of fighting
+// the workspace for the same slot.
 //
 // Sections: General, Editor, Personal dictionary, Updates, About.
 // Saves are debounced through the preferences store; this component
@@ -8,11 +9,16 @@
 //
 // The Updates section drives electron-updater (wired in Phase 12c):
 // status subscription, manual check, and download/install affordances.
+//
+// Was an in-workspace view through Phase 13c; modal swap landed when
+// the inset-design experiment surfaced too many layout-shift bugs in
+// the swap-with-editor model.
 
+import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useState } from 'react';
 import type { UpdaterStatus } from '@skrive/shared';
 import { usePreferencesStore } from '../../stores/preferences';
-import { logProjectError, useProjectStore } from '../../stores/project';
+import { logProjectError } from '../../stores/project';
 import {
   EDITOR_FONT_PRESETS,
   FONT_SIZE_STEPS,
@@ -35,72 +41,74 @@ const SECTIONS: { id: SectionId; label: string }[] = [
 const APP_LICENSE_LABEL = 'PolyForm Noncommercial 1.0.0';
 
 type Props = {
+  open: boolean;
+  onClose: () => void;
   appVersion: string;
 };
 
-export function SettingsView({ appVersion }: Props) {
+export function SettingsModal({ open, onClose, appVersion }: Props) {
   const [section, setSection] = useState<SectionId>('general');
-  const closeSettings = useProjectStore((s) => s.setActiveView);
-
-  // Escape returns to the editor. Keystroke is captured here rather
-  // than at app-level so it doesn't fight other modals' Escape
-  // handlers when they're open. stopImmediatePropagation guards
-  // against double-close when stacked under a panel that also
-  // handles Escape at the document level.
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        closeSettings('editor');
-      }
-    }
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [closeSettings]);
 
   return (
-    <section className="settings-view" aria-label="Settings">
-      <header className="settings-view-header">
-        <h1 className="settings-view-title">Settings</h1>
-        <button
-          type="button"
-          className="settings-close"
-          aria-label="Close settings"
-          title="Close settings  Esc"
-          onClick={() => closeSettings('editor')}
+    <Dialog.Root
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className="modal-backdrop" />
+        <Dialog.Content
+          className="modal-dialog settings-modal"
+          aria-label="Settings"
         >
-          <IconX size={16} />
-        </button>
-      </header>
-      <div className="settings-shell">
-        <nav className="settings-nav" aria-label="Settings sections">
-          <ul className="settings-nav-list">
-            {SECTIONS.map((s) => (
-              <li key={s.id}>
-                <button
-                  type="button"
-                  className={`settings-nav-item${
-                    section === s.id ? ' active' : ''
-                  }`}
-                  onClick={() => setSection(s.id)}
-                  aria-current={section === s.id ? 'page' : undefined}
-                >
-                  {s.label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
-        <div className="settings-pane">
-          {section === 'general' && <GeneralSection />}
-          {section === 'editor' && <EditorSection />}
-          {section === 'dictionary' && <DictionarySection />}
-          {section === 'updates' && <UpdatesSection appVersion={appVersion} />}
-          {section === 'about' && <AboutSection appVersion={appVersion} />}
-        </div>
-      </div>
-    </section>
+          <header className="settings-view-header">
+            <Dialog.Title className="settings-view-title">
+              Settings
+            </Dialog.Title>
+            <Dialog.Close asChild>
+              <button
+                type="button"
+                className="settings-close"
+                aria-label="Close settings"
+                title="Close settings  Esc"
+              >
+                <IconX size={16} />
+              </button>
+            </Dialog.Close>
+          </header>
+          <div className="settings-shell">
+            <nav className="settings-nav" aria-label="Settings sections">
+              <ul className="settings-nav-list">
+                {SECTIONS.map((s) => (
+                  <li key={s.id}>
+                    <button
+                      type="button"
+                      className={`settings-nav-item${
+                        section === s.id ? ' active' : ''
+                      }`}
+                      onClick={() => setSection(s.id)}
+                      aria-current={section === s.id ? 'page' : undefined}
+                    >
+                      {s.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+            <div className="settings-pane">
+              {section === 'general' && <GeneralSection />}
+              {section === 'editor' && <EditorSection />}
+              {section === 'dictionary' && <DictionarySection />}
+              {section === 'updates' && (
+                <UpdatesSection appVersion={appVersion} />
+              )}
+              {section === 'about' && <AboutSection appVersion={appVersion} />}
+            </div>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -119,9 +127,54 @@ function SectionHeader({
   );
 }
 
+const PANEL_BEHAVIOR_OPTIONS: {
+  id: 'push' | 'float';
+  label: string;
+  desc: string;
+}[] = [
+  {
+    id: 'push',
+    label: 'Push',
+    desc: 'Editor card narrows; panel sits beside it.'
+  },
+  {
+    id: 'float',
+    label: 'Float',
+    desc: 'Panel overlays the editor card without resizing it.'
+  }
+];
+
+const SHELL_TONE_OPTIONS: {
+  id: 'dark' | 'same' | 'light';
+  label: string;
+  desc: string;
+}[] = [
+  {
+    id: 'dark',
+    label: 'Shell darker',
+    desc: 'Page glows on a darker desk (Linear-ish).'
+  },
+  {
+    id: 'same',
+    label: 'Same tone',
+    desc: 'Card matches shell; subtle shadow separates them.'
+  },
+  {
+    id: 'light',
+    label: 'Shell lighter',
+    desc: 'Darker page on a lighter desk (paper on inked desk).'
+  }
+];
+
 function GeneralSection() {
   const skipDelete = usePreferencesStore((s) => s.skipDeleteConfirmation);
   const setSkip = usePreferencesStore((s) => s.setSkipDeleteConfirmation);
+  const panelOpenBehavior = usePreferencesStore((s) => s.panelOpenBehavior);
+  const setPanelOpenBehavior = usePreferencesStore(
+    (s) => s.setPanelOpenBehavior
+  );
+  const shellTone = usePreferencesStore((s) => s.shellTone);
+  const setShellTone = usePreferencesStore((s) => s.setShellTone);
   return (
     <>
       <SectionHeader
@@ -146,7 +199,68 @@ function GeneralSection() {
           </span>
         </label>
       </div>
+
+      <header className="settings-pane-header">
+        <h2>Appearance</h2>
+        <p className="settings-pane-blurb">
+          Visual treatment of the workspace shell.
+        </p>
+      </header>
+
+      <LayoutFork
+        label="Shell tone"
+        blurb="Color relationship between the shell and the editor card."
+        options={SHELL_TONE_OPTIONS}
+        value={shellTone}
+        onChange={setShellTone}
+      />
+      <LayoutFork
+        label="Side panels"
+        blurb="What happens to the editor when a panel opens."
+        options={PANEL_BEHAVIOR_OPTIONS}
+        value={panelOpenBehavior}
+        onChange={setPanelOpenBehavior}
+      />
     </>
+  );
+}
+
+type LayoutForkProps<T extends string> = {
+  label: string;
+  blurb: string;
+  options: { id: T; label: string; desc: string }[];
+  value: T;
+  onChange: (value: T) => void;
+};
+
+function LayoutFork<T extends string>({
+  label,
+  blurb,
+  options,
+  value,
+  onChange
+}: LayoutForkProps<T>) {
+  return (
+    <div className="settings-group">
+      <label className="settings-label">{label}</label>
+      <p className="settings-pane-blurb settings-inline-blurb">{blurb}</p>
+      <div className="settings-layout-grid">
+        {options.map((opt) => (
+          <button
+            key={opt.id}
+            type="button"
+            className={`settings-layout-tile${
+              value === opt.id ? ' active' : ''
+            }`}
+            onClick={() => onChange(opt.id)}
+            aria-pressed={value === opt.id}
+          >
+            <span className="settings-layout-tile-label">{opt.label}</span>
+            <span className="settings-layout-tile-desc">{opt.desc}</span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
