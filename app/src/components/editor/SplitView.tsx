@@ -44,6 +44,10 @@ type Props = {
   onPendingSelectionApplied?: () => void;
   onCursorChange?: (line: number, column: number) => void;
   onScrollTopChange?: (top: number) => void;
+  /** User preference for the outline rail. Combined with preview mode
+   *  (the rail navigates the rendered document) to decide whether to
+   *  show it. */
+  showOutlineRail?: boolean;
 };
 
 const MIN_RATIO = 0.15;
@@ -68,7 +72,8 @@ export function SplitView({
   pendingSelection,
   onPendingSelectionApplied,
   onCursorChange,
-  onScrollTopChange
+  onScrollTopChange,
+  showOutlineRail = true
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const dragBoundsRef = useRef<{ left: number; width: number } | null>(null);
@@ -149,7 +154,11 @@ export function SplitView({
           className="pane preview-pane"
           style={{ flexGrow: mode === 'split' ? previewFlex : 1 }}
         >
-          <Preview body={body} onInternalLink={onInternalLink} />
+          <Preview
+            body={body}
+            onInternalLink={onInternalLink}
+            showRail={mode === 'preview' && showOutlineRail}
+          />
         </div>
       )}
     </div>

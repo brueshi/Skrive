@@ -1507,12 +1507,177 @@ body {
 
 /* ===================== Preview pane ===================== */
 
+/* Positioning context for the outline rail. Fills the preview pane so
+   the rail can overlay the scroller's right edge without scrolling away
+   with the content inside `.preview`. */
+.preview-host {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
 .preview {
   height: 100%;
   width: 100%;
   overflow-y: auto;
   background: var(--skrive-bg);
   color: var(--skrive-fg);
+}
+
+/* ----- Outline rail (preview-only) ----- */
+
+/* Slim column hugging the right edge. Captures the pointer (like a
+   scrollbar) so hovering anywhere in the strip reveals the popover and
+   the ticks/scrub gesture stay interactive; the strip sits in the empty
+   gutter beside the centered, max-width content. */
+.outline-rail {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 28px;
+  pointer-events: auto;
+  z-index: var(--skrive-z-sticky);
+  /* It's chrome, not text; never start a selection here, and let a
+     drag scrub rather than pan. */
+  user-select: none;
+  touch-action: none;
+}
+
+.outline-rail:focus {
+  outline: none;
+}
+
+/* Mid-scrub the pointer is captured by the rail; show the grab state. */
+.outline-rail[data-scrubbing] {
+  cursor: grabbing;
+}
+
+/* Keyboard focus lands on the whole rail; show it with a soft ring on
+   the strip rather than a hard browser outline. */
+.outline-rail:focus-visible {
+  box-shadow: inset -2px 0 0 var(--skrive-focus-ring);
+}
+
+.outline-tick {
+  position: absolute;
+  right: 10px;
+  height: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  appearance: none;
+  background: var(--skrive-muted);
+  opacity: 0.4;
+  /* The `top` is the tick's center; translate up by half so the bar
+     sits on its computed position. */
+  transform: translateY(-50%);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* Invisible, taller hit area so a 2px bar is comfortably clickable
+   without making the bar itself thick. */
+.outline-tick::before {
+  content: '';
+  position: absolute;
+  inset: -6px -6px;
+}
+
+/* Width encodes depth: top-level headings read as the longest bars,
+   nested ones taper in. */
+.outline-tick[data-depth='1'] { width: 16px; }
+.outline-tick[data-depth='2'] { width: 13px; }
+.outline-tick[data-depth='3'] { width: 10px; }
+.outline-tick[data-depth='4'] { width: 8px; }
+.outline-tick[data-depth='5'] { width: 7px; }
+.outline-tick[data-depth='6'] { width: 6px; }
+
+.outline-tick:hover {
+  opacity: 0.7;
+}
+
+/* The current section: a neutral bar at full strength, a hair taller and
+   a consistent width so it reads as "you are here" through weight and
+   contrast rather than colour. */
+.outline-tick[data-active] {
+  width: 18px;
+  height: 3px;
+  background: var(--skrive-fg);
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .outline-tick {
+    transition:
+      opacity var(--skrive-duration-quick) var(--skrive-easing),
+      width var(--skrive-duration-quick) var(--skrive-easing),
+      background-color var(--skrive-duration-quick) var(--skrive-easing);
+  }
+}
+
+/* ----- Outline popover (Image #2) ----- */
+
+/* The labeled card sits just left of the rail strip; its vertical `top`
+   is set inline by the rail (anchored to the pointer/selected tick and
+   clamped within the pane). It's a DOM child of the rail so hovering it
+   counts as hovering the rail and keeps it open. */
+.outline-popover {
+  position: absolute;
+  right: 100%;
+  transform: translateX(-6px);
+  width: 16rem;
+  max-height: 70%;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-card-radius);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  font-family: var(--skrive-ui-font);
+}
+
+.outline-popover-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 0.8125rem;
+  line-height: 1.3;
+  padding: 5px 8px;
+  border-radius: var(--skrive-radius-sm);
+  cursor: pointer;
+  /* One line with an ellipsis, like the design mock. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Indent by depth; the top level reads a touch heavier as the title. */
+.outline-popover-row[data-depth='1'] { padding-left: 8px; font-weight: 600; }
+.outline-popover-row[data-depth='2'] { padding-left: 18px; }
+.outline-popover-row[data-depth='3'] { padding-left: 28px; }
+.outline-popover-row[data-depth='4'] { padding-left: 38px; }
+.outline-popover-row[data-depth='5'] { padding-left: 48px; }
+.outline-popover-row[data-depth='6'] { padding-left: 58px; }
+
+.outline-popover-row:hover {
+  background: color-mix(in srgb, var(--skrive-fg) 6%, transparent);
+}
+
+/* The selected row: keyboard cursor, or the active section by default. */
+.outline-popover-row[data-selected] {
+  background: color-mix(in srgb, var(--skrive-fg) 10%, transparent);
+}
+
+/* The section actually being read, marked even when the keyboard cursor
+   has moved elsewhere, via a subtle left rule. */
+.outline-popover-row[aria-current='true'] {
+  box-shadow: inset 2px 0 0 var(--skrive-muted);
 }
 
 .preview-inner {

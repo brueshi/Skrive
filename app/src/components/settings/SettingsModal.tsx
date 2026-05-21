@@ -191,6 +191,8 @@ const SHELL_TONE_OPTIONS: {
 function GeneralSection() {
   const skipDelete = usePreferencesStore((s) => s.skipDeleteConfirmation);
   const setSkip = usePreferencesStore((s) => s.setSkipDeleteConfirmation);
+  const showOutlineRail = usePreferencesStore((s) => s.showOutlineRail);
+  const setShowOutlineRail = usePreferencesStore((s) => s.setShowOutlineRail);
   const panelOpenBehavior = usePreferencesStore((s) => s.panelOpenBehavior);
   const setPanelOpenBehavior = usePreferencesStore(
     (s) => s.setPanelOpenBehavior
@@ -219,6 +221,20 @@ function GeneralSection() {
             <span className="settings-toggle-desc">
               Move files and folders straight to trash without the confirmation
               modal. Trash is reversible from Finder/Explorer.
+            </span>
+          </span>
+        </label>
+        <label className="settings-toggle-row">
+          <input
+            type="checkbox"
+            checked={showOutlineRail}
+            onChange={(e) => setShowOutlineRail(e.target.checked)}
+          />
+          <span className="settings-toggle-text">
+            <span className="settings-toggle-label">Outline rail</span>
+            <span className="settings-toggle-desc">
+              Show a column of section ticks down the right edge of the preview.
+              Hover it for a labeled outline; drag it to scrub the document.
             </span>
           </span>
         </label>

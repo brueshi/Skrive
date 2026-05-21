@@ -103,6 +103,8 @@ export type AppUiState = {
   panelOpenBehavior: PanelOpenBehaviorId;
   shellTone: ShellToneId;
   theme: ThemeId;
+  /** Show the outline rail down the right edge of the preview. */
+  showOutlineRail: boolean;
 };
 
 export const DEFAULT_RECENT_PROJECTS_CAP = 10;
@@ -123,7 +125,8 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   autoUpdateOnLaunch: true,
   panelOpenBehavior: 'push',
   shellTone: 'light',
-  theme: 'light'
+  theme: 'light',
+  showOutlineRail: true
 };
 
 export const DEFAULT_SIDEBAR_WIDTH = 260;

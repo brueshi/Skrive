@@ -20,6 +20,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { renderMarkdown } from '../../lib/preview/markdown';
+import { PreviewOutlineRail } from './PreviewOutlineRail';
 
 type Props = {
   body: string;
@@ -29,19 +30,24 @@ type Props = {
    * Phase 2 leaves it as a no-op default.
    */
   onInternalLink?: (href: string) => void;
+  /**
+   * Show the outline rail down the right edge. Only enabled in
+   * preview-only layout (the rail navigates the rendered document, not
+   * the editor); the caller gates this on layout mode + preference.
+   */
+  showRail?: boolean;
 };
 
 const DEBOUNCE_MS = 150;
 
+// `#fragment` links are handled separately (scroll within the preview),
+// so they are intentionally *not* treated as external here — the caller
+// checks for them first.
 function isExternalHref(href: string): boolean {
-  return (
-    /^[a-z][a-z0-9+.-]*:/i.test(href) ||
-    href.startsWith('//') ||
-    href.startsWith('#')
-  );
+  return /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//');
 }
 
-export function Preview({ body, onInternalLink }: Props) {
+export function Preview({ body, onInternalLink, showRail = false }: Props) {
   const [debouncedBody, setDebouncedBody] = useState(body);
   const mountedRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -66,6 +72,31 @@ export function Preview({ body, onInternalLink }: Props) {
   }, []);
 
   const html = useMemo(() => renderMarkdown(debouncedBody), [debouncedBody]);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const innerRef = useRef<HTMLDivElement | null>(null);
+
+  // Scroll the preview to a same-document heading. An empty fragment
+  // ("#") is the conventional "back to top". Fragments may be percent-
+  // encoded by the renderer for non-ASCII slugs, so decode before
+  // matching the `id` we assigned in markdown.ts.
+  function scrollToFragment(rawFragment: string) {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    if (rawFragment === '') {
+      scroller.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    let id = rawFragment;
+    try {
+      id = decodeURIComponent(rawFragment);
+    } catch {
+      // Malformed escape — fall back to the raw fragment.
+    }
+    const target = scroller.querySelector(`#${CSS.escape(id)}`);
+    if (target instanceof HTMLElement) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
 
   function handleClick(e: React.MouseEvent<HTMLDivElement>) {
     // Modifier-clicks (open in new window etc.) aren't meaningful in a
@@ -78,6 +109,13 @@ export function Preview({ body, onInternalLink }: Props) {
 
     const href = anchor.getAttribute('href');
     if (!href) return;
+
+    // Same-document anchor: scroll the preview, never leave the app.
+    if (href.startsWith('#')) {
+      e.preventDefault();
+      scrollToFragment(href.slice(1));
+      return;
+    }
 
     if (isExternalHref(href)) {
       e.preventDefault();
@@ -97,8 +135,26 @@ export function Preview({ body, onInternalLink }: Props) {
   }
 
   return (
-    <div className="preview" role="document" onClick={handleClick}>
-      <div className="preview-inner" dangerouslySetInnerHTML={{ __html: html }} />
+    <div className="preview-host">
+      <div
+        className="preview"
+        role="document"
+        onClick={handleClick}
+        ref={scrollerRef}
+      >
+        <div
+          className="preview-inner"
+          ref={innerRef}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      </div>
+      {showRail && (
+        <PreviewOutlineRail
+          scrollerRef={scrollerRef}
+          contentRef={innerRef}
+          renderKey={html}
+        />
+      )}
     </div>
   );
 }

@@ -67,6 +67,7 @@ export function App() {
   const panelOpenBehavior = usePreferencesStore((s) => s.panelOpenBehavior);
   const shellTone = usePreferencesStore((s) => s.shellTone);
   const theme = usePreferencesStore((s) => s.theme);
+  const showOutlineRail = usePreferencesStore((s) => s.showOutlineRail);
   const backlinksPanelOpen = useProjectStore((s) => s.backlinksPanelOpen);
   const frontmatterPanelOpen = useProjectStore(
     (s) => s.frontmatterPanelOpen
@@ -371,6 +372,7 @@ export function App() {
                   onScrollTopChange={(top) =>
                     setTabScrollTop(activeTabIndex, top)
                   }
+                  showOutlineRail={showOutlineRail}
                 />
               ) : (
                 <div className="empty-pane">

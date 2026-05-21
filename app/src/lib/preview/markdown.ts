@@ -15,7 +15,8 @@
 // decoration default). Phase 6 swaps both for a project-aware resolver.
 
 import { marked } from 'marked';
-import type { Tokens } from 'marked';
+import type { Token, Tokens } from 'marked';
+import { SlugDeduper } from './slugify';
 
 export type ImageContext = {
   projectRoot: string;
@@ -33,9 +34,38 @@ marked.setOptions({
 
 let currentContext: ImageContext = { projectRoot: '', filePath: null };
 let currentResolver: ImageResolver = identityResolver;
+// Reset at the top of every `renderMarkdown` call. The heading renderer
+// reads it to assign de-duplicated `id` slugs in document order; a fresh
+// deduper per render keeps the counter scoped to one document.
+let currentDeduper = new SlugDeduper();
+
+/**
+ * Plain-text content of inline tokens, used to slug a heading. Prefers a
+ * token's children (`tokens`) over its raw `text` so that, e.g., a link
+ * in a heading slugs from its label rather than its URL, matching how
+ * rehype-slug derives ids from rendered text content.
+ */
+function inlineText(tokens: Token[]): string {
+  let out = '';
+  for (const token of tokens) {
+    const children = (token as { tokens?: Token[] }).tokens;
+    if (Array.isArray(children) && children.length > 0) {
+      out += inlineText(children);
+    } else if (typeof (token as { text?: unknown }).text === 'string') {
+      out += (token as { text: string }).text;
+    }
+  }
+  return out;
+}
 
 marked.use({
   renderer: {
+    heading({ tokens, depth }: Tokens.Heading): string {
+      const inner = this.parser.parseInline(tokens);
+      const slug = currentDeduper.next(inlineText(tokens));
+      const idAttr = slug ? ` id="${escapeAttr(slug)}"` : '';
+      return `<h${depth}${idAttr}>${inner}</h${depth}>\n`;
+    },
     image({ href, title, text }: Tokens.Image): string {
       const resolved = currentResolver(href, currentContext);
       const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
@@ -91,6 +121,7 @@ export function renderMarkdown(
 ): string {
   currentContext = options?.context ?? { projectRoot: '', filePath: '' };
   currentResolver = options?.resolver ?? identityResolver;
+  currentDeduper = new SlugDeduper();
   try {
     const stripped = stripLeadingFrontmatter(body);
     return marked.parse(stripped) as string;

@@ -42,6 +42,7 @@ type PreferencesActions = {
   setPanelOpenBehavior(value: PanelOpenBehaviorId): void;
   setShellTone(value: ShellToneId): void;
   setTheme(value: ThemeId): void;
+  setShowOutlineRail(value: boolean): void;
 
   addDictionaryWord(word: string): void;
   removeDictionaryWord(word: string): void;
@@ -78,7 +79,8 @@ function snapshot(state: PreferencesState): AppUiState {
     autoUpdateOnLaunch: state.autoUpdateOnLaunch,
     panelOpenBehavior: state.panelOpenBehavior,
     shellTone: state.shellTone,
-    theme: state.theme
+    theme: state.theme,
+    showOutlineRail: state.showOutlineRail
   };
 }
 
@@ -178,6 +180,11 @@ export const usePreferencesStore = create<
   setTheme(value) {
     if (get().theme === value) return;
     set({ theme: value });
+    scheduleSave(get);
+  },
+  setShowOutlineRail(value) {
+    if (get().showOutlineRail === value) return;
+    set({ showOutlineRail: value });
     scheduleSave(get);
   },
 

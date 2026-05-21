@@ -244,6 +244,9 @@ function sanitizeAppState(raw: Record<string, unknown>): Partial<AppUiState> {
   } else {
     out.theme = 'dark';
   }
+  if (typeof raw.showOutlineRail === 'boolean') {
+    out.showOutlineRail = raw.showOutlineRail;
+  }
   return out;
 }
 
