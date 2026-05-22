@@ -4,7 +4,8 @@
  * The CSS variables here are the single source of typography + color the
  * editor and preview panes consume. Phase 9 (settings) will rewrite the
  * editor-font / size / line-height variables from the preferences store.
- * Light-mode palette swap lands when a third theme exists.
+ * Colors resolve per active scheme via light-dark(); light and dark each
+ * ship a full palette, including the shell-tone variants below.
  */
 
 :root {
@@ -45,6 +46,7 @@
   --skrive-shell-bg: var(--skrive-bg);
   --skrive-card-bg: var(--skrive-bg);
   --skrive-card-shadow: none;
+  --skrive-card-border: transparent;
   /* Outer shell pad = window edge → outermost card; gap = between
      adjacent cards (sidebar↔editor). Gap is wider than pad so the
      space between cards reads as deliberate breathing room rather
@@ -155,11 +157,20 @@ body {
  * fork live. Once a winner settles, this block goes away.
  */
 
-/* Shell tone. The toggle only varies the dark-mode palette; light mode
-   ships one tasteful fixed palette regardless of the picked variant
-   (per the v0.2.2 scope decision — light shell-tone variants deferred).
-   Each rule uses light-dark() to switch on color-scheme, so light mode
-   resolves to the same values in all three rules. */
+/* Shell tone. Varies the relationship between the desk (shell), the
+   sidebar/tab card (card), and the editor paper — which is the fixed
+   warm cream var(--skrive-bg). Each rule lists its light value first,
+   dark second via light-dark(); both color schemes resolve a distinct
+   palette per variant.
+
+   Light mode has little headroom above the cream paper and soft shadows
+   barely read on near-white, so the light variants separate cards with
+   tone and a hairline border rather than glow/float:
+     - darker: strong beige desk, cream cards (high tonal contrast)
+     - same:   one cream across desk + cards, hairline border separates
+     - soft:   cream cards on a softly tinted beige desk (low contrast)
+   The 'soft' variant is the dark-mode 'shell lighter' slot; light has no
+   room above cream for a lighter desk, so it reads as a gentle tint. */
 .app-root[data-shell-tone='dark'] {
   --skrive-shell-bg: light-dark(#e8e4dc, #0e0e0e);
   --skrive-card-bg: light-dark(#fefcf7, #1a1a1a);
@@ -167,24 +178,27 @@ body {
     0 1px 0 rgba(0, 0, 0, 0.04),
     none
   );
+  --skrive-card-border: transparent;
 }
 
 .app-root[data-shell-tone='same'] {
-  --skrive-shell-bg: light-dark(#e8e4dc, #1a1a1a);
+  --skrive-shell-bg: light-dark(#fefcf7, #1a1a1a);
   --skrive-card-bg: light-dark(#fefcf7, #1a1a1a);
   --skrive-card-shadow: light-dark(
     0 4px 12px rgba(0, 0, 0, 0.06),
     0 4px 12px rgba(0, 0, 0, 0.28)
   );
+  --skrive-card-border: light-dark(var(--skrive-rule), transparent);
 }
 
 .app-root[data-shell-tone='light'] {
-  --skrive-shell-bg: light-dark(#e8e4dc, #2a2a2a);
+  --skrive-shell-bg: light-dark(#f4f0e8, #2a2a2a);
   --skrive-card-bg: light-dark(#fefcf7, #141414);
   --skrive-card-shadow: light-dark(
     0 1px 0 rgba(0, 0, 0, 0.03),
     0 1px 0 rgba(255, 255, 255, 0.03)
   );
+  --skrive-card-border: transparent;
 }
 
 /* The header picks up the shell bg so it reads as part of the shell
@@ -238,6 +252,7 @@ body {
   background: var(--skrive-card-bg);
   border-radius: var(--skrive-card-radius);
   box-shadow: var(--skrive-card-shadow);
+  border: 1px solid var(--skrive-card-border);
   overflow: hidden;
   min-width: 0;
   flex-direction: column;
@@ -249,7 +264,7 @@ body {
   background: var(--skrive-card-bg);
   border-radius: var(--skrive-card-radius);
   box-shadow: var(--skrive-card-shadow);
-  border-right: none;
+  border: 1px solid var(--skrive-card-border);
   /* Keep the base `.sidebar { overflow: hidden auto }` — horizontal
      clips at the rounded corner; vertical scrolls when the file tree
      overflows. */

@@ -179,12 +179,12 @@ const SHELL_TONE_OPTIONS: {
   {
     id: 'same',
     label: 'Same tone',
-    desc: 'Card matches shell; subtle shadow separates them.'
+    desc: 'Card matches the shell; a subtle edge separates them.'
   },
   {
     id: 'light',
-    label: 'Shell lighter',
-    desc: 'Darker page on a lighter desk (paper on inked desk).'
+    label: 'Soft contrast',
+    desc: 'A gentle desk tint — soft beige in light, a lifted desk in dark.'
   }
 ];
 
@@ -256,7 +256,7 @@ function GeneralSection() {
       />
       <LayoutFork
         label="Shell tone"
-        blurb="Color relationship between the shell and the editor card. Dark-mode only — light mode ships a single fixed palette."
+        blurb="Color relationship between the shell and the editor card. Applies in both light and dark."
         options={SHELL_TONE_OPTIONS}
         value={shellTone}
         onChange={setShellTone}
