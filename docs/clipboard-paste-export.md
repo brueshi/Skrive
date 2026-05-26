@@ -133,7 +133,9 @@ is stripped to match what the preview shows. Verified clean into Google Docs.
   (falls back to `writeText` if a rich write is refused). Hidden when the
   document is empty.
 - `IconCopy` / `IconCheck` — new icons on the stroke/dual-size convention; the
-  success state is a check (shape change, neutral colour).
+  success state is a check (shape change, neutral colour). The copy → check
+  swap is a blur crossfade (stacked glyphs, ~220ms ease-out, blur bridging the
+  gap between states), disabled under `prefers-reduced-motion`.
 - `.preview-copy` in `index.css` — top-right ambient button, quiet by default
   and sharper on hover; shifts left of the outline rail via
   `.preview-host.has-rail`.

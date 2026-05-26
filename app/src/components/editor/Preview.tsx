@@ -202,7 +202,13 @@ export function Preview({ body, onInternalLink, showRail = false }: Props) {
           }
           onClick={copyDocument}
         >
-          {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+          {/* Both glyphs are stacked and crossfaded in CSS; a brief blur
+              bridges the copy -> check swap so it reads as one continuous
+              state change rather than a hard cut. */}
+          <span className="preview-copy-glyphs">
+            <IconCopy size={16} className="preview-copy-glyph is-copy" />
+            <IconCheck size={16} className="preview-copy-glyph is-check" />
+          </span>
         </button>
       )}
       {showRail && (
