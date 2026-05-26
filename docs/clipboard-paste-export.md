@@ -194,15 +194,20 @@ bytes to a sibling `assets/` folder via Electron main, insert a relative
   (`File` → base64 via `FileReader`). Project root + doc path read from the
   store at paste time. Failures surface as a toast.
 
-#### Stage 3b — render local images (in progress)
+#### Stage 3b — render local images (done)
 
-Pasted (and all local) images don't render yet — the preview/editor image
-resolver is still identity. Wire it up:
+Local images — pasted or otherwise — now render in the editor and preview.
 
-- Register a privileged `skrive-asset` scheme + `protocol.handle` in main that
-  resolves a project-relative path against the active project root
-  (`projectState.root`), confined like `resolveSafe`, content-type by
+- `shell/main/asset-protocol.ts` — registers a privileged `skrive-asset`
+  scheme (before app-ready) and `protocol.handle` (after) that resolves a
+  project-relative path against the active project root (`projectState.root`),
+  refuses escapes (like `resolveSafe`), and serves bytes with a content-type by
   extension.
-- A renderer resolver rewrites doc-relative image URLs to `skrive-asset://…`
-  (http/https/data pass through), wired into the preview (`renderMarkdown`) and
-  editor (`setImageResolver` + image context), threading the active doc path in.
+- `lib/preview/imageResolver.ts` — `skriveAssetResolver` rewrites a
+  doc-relative image URL to `skrive-asset://asset/<project-relative>`; external
+  and absolute URLs pass through. Wired into the preview (`renderMarkdown`
+  context + resolver) and the editor (`setImageResolver` + `setImageContext` at
+  mount). The active doc path + project root thread App → SplitView →
+  Editor/Preview.
+- No CSP in the renderer HTML, so the privileged scheme loads in `<img>`
+  without further config.

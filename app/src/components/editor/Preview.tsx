@@ -20,6 +20,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { renderMarkdown, stripLeadingFrontmatter } from '../../lib/preview/markdown';
+import { skriveAssetResolver } from '../../lib/preview/imageResolver';
 import { buildClipboardPayload } from '../../lib/clipboard/copyOut';
 import { IconCopy } from '../icons/IconCopy';
 import { IconCheck } from '../icons/IconCheck';
@@ -29,6 +30,13 @@ const COPIED_FEEDBACK_MS = 1600;
 
 type Props = {
   body: string;
+  /**
+   * Active document's project-relative path, used to resolve relative image
+   * URLs against the project (via the skrive-asset protocol).
+   */
+  filePath?: string | null;
+  /** Project root, forwarded into the image resolver's context. */
+  projectRoot?: string;
   /**
    * Called when the user clicks an internal (relative) link in the
    * rendered HTML. Phase 6 wires this through to the project store;
@@ -52,7 +60,13 @@ function isExternalHref(href: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//');
 }
 
-export function Preview({ body, onInternalLink, showRail = false }: Props) {
+export function Preview({
+  body,
+  filePath = null,
+  projectRoot = '',
+  onInternalLink,
+  showRail = false
+}: Props) {
   const [debouncedBody, setDebouncedBody] = useState(body);
   const mountedRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -76,7 +90,14 @@ export function Preview({ body, onInternalLink, showRail = false }: Props) {
     };
   }, []);
 
-  const html = useMemo(() => renderMarkdown(debouncedBody), [debouncedBody]);
+  const html = useMemo(
+    () =>
+      renderMarkdown(debouncedBody, {
+        context: { projectRoot, filePath },
+        resolver: skriveAssetResolver
+      }),
+    [debouncedBody, projectRoot, filePath]
+  );
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const innerRef = useRef<HTMLDivElement | null>(null);
 

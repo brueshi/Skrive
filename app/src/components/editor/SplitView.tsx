@@ -29,6 +29,10 @@ type Props = {
   mode: LayoutMode;
   ratio: number;
   body: string;
+  /** Active document's project-relative path + project root, forwarded to the
+   *  editor and preview for project-aware image resolution. */
+  filePath?: string | null;
+  projectRoot?: string;
   onChange: (next: string) => void;
   onRatioChange: (ratio: number) => void;
   onInternalLink?: (href: string) => void;
@@ -62,6 +66,8 @@ export function SplitView({
   mode,
   ratio,
   body,
+  filePath = null,
+  projectRoot = '',
   onChange,
   onRatioChange,
   onInternalLink,
@@ -123,6 +129,8 @@ export function SplitView({
         >
           <Editor
             value={body}
+            filePath={filePath}
+            projectRoot={projectRoot}
             onChange={onChange}
             lintFindings={lintFindings}
             initialCursorLine={initialCursorLine}
@@ -156,6 +164,8 @@ export function SplitView({
         >
           <Preview
             body={body}
+            filePath={filePath}
+            projectRoot={projectRoot}
             onInternalLink={onInternalLink}
             showRail={mode === 'preview' && showOutlineRail}
           />
