@@ -145,12 +145,28 @@ Still deferred: clean copy of a *manual selection* inside the preview (needs
 the selection→source map). The button is the clean route in preview mode;
 manual preview selections keep the browser's native behaviour.
 
-### Stage 2 — Paste in (HTML → Markdown)
+### Stage 2 — Paste in (HTML → Markdown) (done)
 
-CodeMirror `paste` handler: if the clipboard has `text/html`, run
-`htmlToMarkdown` and dispatch a transaction inserting at the selection;
-otherwise fall back to the default plain-text paste. This is where the
-real-world smoke testing (paste a live web page) lives.
+A CodeMirror `paste` handler converts the clipboard's `text/html` through the
+Stage 0 core and inserts the result; with no rich HTML it declines so CM's
+default plain-text paste runs (typed or pasted plain Markdown lands verbatim,
+never round-tripped). Verified against live web pages and Google Docs,
+including the fake-bold cruft cleanup.
+
+- `markdownForPaste(html)` in `htmlToMarkdown.ts` — the pure decision: returns
+  the converted Markdown, or null (defer to default paste) for blank HTML or a
+  conversion that yields nothing.
+- `clipboardPasteImport()` in `components/editor/clipboard.ts` — thin handler;
+  reads `text/html`, dispatches a `replaceSelection` with
+  `userEvent: 'input.paste'`, declines on `readOnly` or absent clipboardData.
+- Wired into `Editor.tsx` alongside `clipboardCopyExport()`.
+- Tests cover the decision (blank / no-content / real HTML); conversion
+  fidelity is covered by the Stage 0 fixtures.
+
+Known behaviours (by design): pasting Skrive's own dual-write back in
+round-trips through the converter, normalising to house style rather than
+landing byte-identical; pasting a binary image does nothing yet (no
+`text/html`) — that's Stage 3.
 
 ### Stage 3 — Paste in (binary images)
 

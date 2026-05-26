@@ -7,7 +7,7 @@
 // of agreement on the house conventions.
 
 import { describe, expect, it } from 'vitest';
-import { htmlToMarkdown } from '../../src/lib/clipboard/htmlToMarkdown';
+import { htmlToMarkdown, markdownForPaste } from '../../src/lib/clipboard/htmlToMarkdown';
 import { renderMarkdown } from '../../src/lib/preview/markdown';
 
 describe('htmlToMarkdown structural conversion', () => {
@@ -75,6 +75,22 @@ describe('htmlToMarkdown drops unrepresentable formatting', () => {
   it('keeps genuine bold alongside cancelled bold', () => {
     const html = '<p><b style="font-weight:normal">plain </b><b>real</b></p>';
     expect(htmlToMarkdown(html)).toBe('plain **real**');
+  });
+});
+
+describe('markdownForPaste decision', () => {
+  it('returns null for blank or whitespace HTML so plain paste runs', () => {
+    expect(markdownForPaste('')).toBeNull();
+    expect(markdownForPaste('   \n ')).toBeNull();
+  });
+
+  it('returns null when HTML carries no convertible content', () => {
+    // A bare clipboard prefix that yields nothing once converted.
+    expect(markdownForPaste('<meta charset="utf-8">')).toBeNull();
+  });
+
+  it('returns the converted Markdown for real rich HTML', () => {
+    expect(markdownForPaste('<p>a <b>bold</b> word</p>')).toBe('a **bold** word');
   });
 });
 

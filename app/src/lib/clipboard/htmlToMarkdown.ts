@@ -57,3 +57,16 @@ export function htmlToMarkdown(html: string): string {
   if (html.trim() === '') return '';
   return String(processor.processSync(html)).trim();
 }
+
+/**
+ * Decide what a paste carrying `html` should insert. Returns the converted
+ * Markdown, or null when there's nothing worth converting — blank HTML, or a
+ * conversion that yields nothing (e.g. a bare `<meta>` prefix). On null the
+ * caller defers to the editor's default plain-text paste, so text that arrived
+ * without a rich representation lands verbatim instead of being round-tripped.
+ */
+export function markdownForPaste(html: string): string | null {
+  if (html.trim() === '') return null;
+  const md = htmlToMarkdown(html);
+  return md === '' ? null : md;
+}

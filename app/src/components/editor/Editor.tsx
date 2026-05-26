@@ -35,7 +35,7 @@ import type { LintFinding } from '@skrive/shared';
 import { skriveTheme } from './skrive-theme';
 import { inlinePreview } from './decorations';
 import { skriveLintExtension } from './lint-extension';
-import { clipboardCopyExport } from './clipboard';
+import { clipboardCopyExport, clipboardPasteImport } from './clipboard';
 import type { PendingSelection } from '../../stores/project';
 
 type Props = {
@@ -181,6 +181,7 @@ export function Editor({
           highlightActiveLine(),
           markdown({ extensions: GFM }),
           clipboardCopyExport(),
+          clipboardPasteImport(),
           ...inlinePreview(),
           // Hand spellcheck off to the OS / webview. The system runs a
           // grade spellchecker on contenteditable surfaces; the

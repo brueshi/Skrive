@@ -2,12 +2,13 @@
 // off to the pure copy-out logic in `lib/clipboard`, and writes the result to
 // the DOM clipboard event. No conversion logic lives here.
 //
-// Scope (Stage 1): copy and cut from the editor surface. Paste-in (Stage 2)
-// and the read-only preview pane are handled elsewhere.
+// Scope: copy and cut from the editor surface (Stage 1) and paste-in
+// conversion (Stage 2). The read-only preview pane is handled elsewhere.
 
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 import { buildClipboardPayload, selectionMarkdown } from '../../lib/clipboard/copyOut';
+import { markdownForPaste } from '../../lib/clipboard/htmlToMarkdown';
 
 // Write both representations and claim the event. Returns false (declining the
 // event) when the environment exposes no clipboardData, so the editor's
@@ -37,6 +38,26 @@ export function clipboardCopyExport(): Extension {
       // delete the selection — do it ourselves through a transaction.
       if (handled) view.dispatch(view.state.replaceSelection(''));
       return handled;
+    }
+  });
+}
+
+export function clipboardPasteImport(): Extension {
+  return EditorView.domEventHandlers({
+    paste(event, view) {
+      if (view.state.readOnly) return false;
+      const data = event.clipboardData;
+      if (!data) return false;
+      const md = markdownForPaste(data.getData('text/html'));
+      // No rich HTML to convert: decline so CM's default plain-text paste runs.
+      if (md === null) return false;
+      view.dispatch({
+        ...view.state.replaceSelection(md),
+        userEvent: 'input.paste',
+        scrollIntoView: true
+      });
+      event.preventDefault();
+      return true;
     }
   });
 }
