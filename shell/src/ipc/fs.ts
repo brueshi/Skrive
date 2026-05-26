@@ -93,6 +93,25 @@ export function registerFsHandlers(): void {
   );
 
   ipcMain.handle(
+    'fs:writeBinaryFile',
+    async (
+      _event,
+      projectRoot: string,
+      relPath: string,
+      base64: string
+    ): Promise<void> => {
+      if (typeof base64 !== 'string') {
+        throw new Error('fs:writeBinaryFile requires base64 string content');
+      }
+      const target = resolveSafe(projectRoot, relPath);
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      // Binary assets (pasted images) are not markdown, so they bypass the
+      // link-graph and checkpoint bookkeeping that fs:writeFile performs.
+      await fs.writeFile(target, Buffer.from(base64, 'base64'));
+    }
+  );
+
+  ipcMain.handle(
     'fs:newFile',
     async (_event, projectRoot: string, relPath: string): Promise<void> => {
       const target = resolveSafe(projectRoot, relPath);

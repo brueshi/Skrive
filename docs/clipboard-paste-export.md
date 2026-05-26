@@ -172,14 +172,37 @@ landing byte-identical; pasting a binary image does nothing yet (no
 
 ### Stage 3 — Paste in (binary images)
 
-Detect `image/*` on the clipboard, write the bytes to a sibling `assets/`
-folder via Electron main, insert a relative `![](assets/…)` link.
+Investigation resolved two of the deferred questions: there are **no untitled
+buffers** (every open document has an on-disk path, so a sibling `assets/`
+always exists), and the `fs` IPC was **text-only** (so a binary write had to be
+added). Split into two commits.
 
-Deferred to this stage (do not affect earlier stages):
+#### Stage 3a — write the bytes + insert the link (done)
 
-- **Filename scheme** for pasted images — leaning timestamp + short hash to
-  avoid collisions.
-- **Unsaved-document case** — no sibling directory exists until the doc is
-  saved; likely prompt to save first.
-- **Verify** the existing `fs` IPC handles binary writes before committing the
-  approach.
+Detect an image on the clipboard with no usable HTML (a screenshot or
+"Copy Image"; rich HTML still wins so web images stay remote links), write the
+bytes to a sibling `assets/` folder via Electron main, insert a relative
+`![](assets/…)` link.
+
+- `fs.writeBinaryFile(projectRoot, relPath, base64)` — new IPC: contract
+  (`shared`), handler (`shell/ipc/fs.ts`, reusing `resolveSafe`, no
+  markdown graph/checkpoint side-effects), and preload bridge.
+- `lib/clipboard/pasteImage.ts` — pure helpers (extension map, sibling-`assets/`
+  placement, space-free `pasted-image-{timestamp}.{ext}` name, link), tested.
+- `clipboardPasteImport()` extended: picks the image off the clipboard
+  synchronously, `preventDefault`s, then writes + inserts asynchronously
+  (`File` → base64 via `FileReader`). Project root + doc path read from the
+  store at paste time. Failures surface as a toast.
+
+#### Stage 3b — render local images (in progress)
+
+Pasted (and all local) images don't render yet — the preview/editor image
+resolver is still identity. Wire it up:
+
+- Register a privileged `skrive-asset` scheme + `protocol.handle` in main that
+  resolves a project-relative path against the active project root
+  (`projectState.root`), confined like `resolveSafe`, content-type by
+  extension.
+- A renderer resolver rewrites doc-relative image URLs to `skrive-asset://…`
+  (http/https/data pass through), wired into the preview (`renderMarkdown`) and
+  editor (`setImageResolver` + image context), threading the active doc path in.

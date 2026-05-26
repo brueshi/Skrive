@@ -65,6 +65,13 @@ const api: SkriveIpc = {
         relPath,
         content
       ) as Promise<void>,
+    writeBinaryFile: (projectRoot: string, relPath: string, base64: string) =>
+      ipcRenderer.invoke(
+        'fs:writeBinaryFile',
+        projectRoot,
+        relPath,
+        base64
+      ) as Promise<void>,
     newFile: (projectRoot: string, relPath: string) =>
       ipcRenderer.invoke('fs:newFile', projectRoot, relPath) as Promise<void>,
     mkdir: (projectRoot: string, relPath: string) =>

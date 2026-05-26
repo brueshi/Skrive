@@ -375,6 +375,15 @@ export interface SkriveIpc {
     /** Write a project-relative file. Creates parents as needed. */
     writeFile(projectRoot: string, relPath: string, content: string): Promise<void>;
     /**
+     * Write a project-relative binary file from base64-encoded bytes (used for
+     * pasted images). Creates parents as needed.
+     */
+    writeBinaryFile(
+      projectRoot: string,
+      relPath: string,
+      base64: string
+    ): Promise<void>;
+    /**
      * Create a new empty markdown file at the given relative path. Fails
      * if a file already exists at that path.
      */
