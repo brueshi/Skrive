@@ -114,6 +114,37 @@ project-aware resolver lands (Phase 6), copy-out inherits it for free.
 selection→source map that does not exist today). Embedding local images as
 data URIs so they render in web targets is a possible future enhancement.
 
+Verified in a live test: editor copy emits clean HTML (our handler beats CM's
+built-in and prevents the browser's native copy). Copy from the rendered
+preview goes through the browser's native copy, which inlines the theme's
+`background-color` and bleeds it into rich targets (Google Docs). Addressed by
+Stage 1.1 below.
+
+### Stage 1.1 — Preview copy button (done)
+
+A copy button in the preview copies the **whole document** as a clean
+dual-write payload — `buildClipboardPayload(stripLeadingFrontmatter(body))`
+written via `navigator.clipboard.write` (a click is a user gesture, so the
+async Clipboard API is allowed). The payload comes from `renderMarkdown`, not
+DOM serialization, so there is structurally no background to bleed; frontmatter
+is stripped to match what the preview shows. Verified clean into Google Docs.
+
+- `Preview.tsx` — the button, `copied` state, and the `copyDocument` handler
+  (falls back to `writeText` if a rich write is refused). Hidden when the
+  document is empty.
+- `IconCopy` / `IconCheck` — new icons on the stroke/dual-size convention; the
+  success state is a check (shape change, neutral colour).
+- `.preview-copy` in `index.css` — top-right ambient button, quiet by default
+  and sharper on hover; shifts left of the outline rail via
+  `.preview-host.has-rail`.
+- Whole-document copy, not selection-aware: the button metaphor implies "copy
+  all" and it sidesteps the preview mapping problem.
+- Always visible but quiet (muted → fg on hover), favouring discoverability.
+
+Still deferred: clean copy of a *manual selection* inside the preview (needs
+the selection→source map). The button is the clean route in preview mode;
+manual preview selections keep the browser's native behaviour.
+
 ### Stage 2 — Paste in (HTML → Markdown)
 
 CodeMirror `paste` handler: if the clipboard has `text/html`, run

@@ -1539,6 +1539,54 @@ body {
   color: var(--skrive-fg);
 }
 
+/* ----- Preview copy button ----- */
+
+/* Ambient action in the top-right gutter. Copies the whole document as a
+   clean dual-write payload (see Preview.tsx) rather than letting the browser
+   serialize the styled DOM. Solid background so it reads cleanly over text;
+   quiet by default, full-strength on hover/focus. Shifts left of the outline
+   rail when that's shown. */
+.preview-copy {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: var(--skrive-z-sticky);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 7px;
+  background: var(--skrive-bg);
+  color: var(--skrive-muted);
+  cursor: pointer;
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    border-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.preview-host.has-rail .preview-copy {
+  /* Clear the 28px outline rail hugging the right edge. */
+  right: 42px;
+}
+
+.preview-copy:hover {
+  color: var(--skrive-fg);
+  border-color: var(--skrive-muted);
+}
+
+.preview-copy:focus-visible {
+  outline: none;
+  color: var(--skrive-fg);
+  box-shadow: 0 0 0 2px var(--skrive-focus-ring);
+}
+
+.preview-copy.copied {
+  color: var(--skrive-fg);
+}
+
 /* ----- Outline rail (preview-only) ----- */
 
 /* Slim column hugging the right edge. Captures the pointer (like a
