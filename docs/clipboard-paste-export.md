@@ -86,12 +86,33 @@ Dependencies added to `@skrive/app`: `unified`, `rehype-parse`,
 `rehype-remark`, `remark-gfm`, `remark-stringify`, `unist-util-visit`, and
 `@types/hast` (dev).
 
-### Stage 1 — Copy / cut out (dual-write), editor surface only
+### Stage 1 — Copy / cut out (dual-write), editor surface only (done)
 
-CodeMirror `domEventHandlers` for `copy`/`cut`: set `text/plain` to the
-selection's source and `text/html` to `renderMarkdown(selection)` with an
-absolute-URL image resolver. Copy-out from the read-only preview pane is out of
-scope (it needs a selection→source map that does not exist today).
+CodeMirror `domEventHandlers` for `copy`/`cut`: `text/plain` gets the
+selection's raw Markdown, `text/html` gets `renderMarkdown(selection)`.
+
+- `app/src/lib/clipboard/copyOut.ts` — pure, DOM-free: `selectionMarkdown(state)`
+  joins non-empty ranges (null when nothing is selected, so the editor's
+  copy-the-current-line default still runs), and `buildClipboardPayload(md)`
+  returns `{ text, html }`.
+- `app/src/components/editor/clipboard.ts` — thin extension wiring the DOM
+  events to those functions; `cut` additionally deletes the selection via a
+  transaction (we called `preventDefault`, so the browser won't).
+- Wired into `Editor.tsx` as `clipboardCopyExport()`.
+- Tests (`app/__test__/clipboard/copyOut.test.ts`): selection gathering
+  (single, multi-range, mixed empty) and the dual-write payload.
+
+**Image resolver.** Copy-out calls `renderMarkdown(md)` with no options — the
+identity resolver, exactly as the preview does today. So the copied HTML is
+byte-identical to the preview, remote (`http(s)`) image URLs render in rich
+targets, and relative paths behave as they do in-app. The originally-floated
+absolute-`file://` resolver was dropped: web targets won't load `file://`
+images, so it would add path logic without making local images render. When a
+project-aware resolver lands (Phase 6), copy-out inherits it for free.
+
+**Out of scope.** Copy-out from the read-only preview pane (needs a
+selection→source map that does not exist today). Embedding local images as
+data URIs so they render in web targets is a possible future enhancement.
 
 ### Stage 2 — Paste in (HTML → Markdown)
 
