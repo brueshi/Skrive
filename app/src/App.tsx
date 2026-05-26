@@ -354,6 +354,8 @@ export function App() {
                   mode={activeTab.layoutMode}
                   ratio={activeTab.splitDividerRatio}
                   body={activeTab.body}
+                  filePath={activeTab.path}
+                  projectRoot={manifest.root}
                   onChange={(next) => setTabBody(activeTabIndex, next)}
                   onRatioChange={(next) =>
                     setTabSplitRatio(activeTabIndex, next)

@@ -8,6 +8,7 @@ import {
 } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { registerAssetProtocol, registerAssetScheme } from './asset-protocol';
 import { registerProjectHandlers } from '../ipc/project';
 import { registerFsHandlers } from '../ipc/fs';
 import { registerDiffHandlers } from '../ipc/diff';
@@ -20,6 +21,9 @@ import { registerUpdaterHandlers } from '../ipc/updater';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const isDev = !app.isPackaged;
+
+// Privileged scheme registration must happen before the app is ready.
+registerAssetScheme();
 
 // Dev-only window icon. In packaged builds the OS reads the icon from
 // the bundle/exe metadata that electron-builder embeds (mac.icon /
@@ -101,6 +105,7 @@ function registerIpcHandlers(): void {
 }
 
 void app.whenReady().then(() => {
+  registerAssetProtocol();
   registerIpcHandlers();
   createWindow();
 

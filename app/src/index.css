@@ -1539,6 +1539,103 @@ body {
   color: var(--skrive-fg);
 }
 
+/* ----- Preview copy button ----- */
+
+/* Ambient action in the top-right gutter. Copies the whole document as a
+   clean dual-write payload (see Preview.tsx) rather than letting the browser
+   serialize the styled DOM. Solid background so it reads cleanly over text;
+   quiet by default, full-strength on hover/focus. Shifts left of the outline
+   rail when that's shown. */
+.preview-copy {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: var(--skrive-z-sticky);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 7px;
+  background: var(--skrive-bg);
+  color: var(--skrive-muted);
+  cursor: pointer;
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    border-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.preview-host.has-rail .preview-copy {
+  /* Clear the 28px outline rail hugging the right edge. */
+  right: 42px;
+}
+
+.preview-copy:hover {
+  color: var(--skrive-fg);
+  border-color: var(--skrive-muted);
+}
+
+.preview-copy:focus-visible {
+  outline: none;
+  color: var(--skrive-fg);
+  box-shadow: 0 0 0 2px var(--skrive-focus-ring);
+}
+
+.preview-copy.copied {
+  color: var(--skrive-fg);
+}
+
+/* Stacked copy/check glyphs that crossfade on the copied state. Both rest
+   sharp; the blur exists only mid-transition, bridging the swap so it reads
+   as one continuous change. ease-out + standard duration matches how the app
+   animates other entering elements. */
+.preview-copy-glyphs {
+  position: relative;
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+
+.preview-copy-glyph {
+  position: absolute;
+  inset: 0;
+  /* 220ms rather than the 150ms standard token: a low-frequency feedback
+     moment, and the blur needs room to read as "filling the gap" rather than
+     a hard cut. */
+  transition:
+    opacity 220ms var(--skrive-easing-out),
+    filter 220ms var(--skrive-easing-out),
+    transform 220ms var(--skrive-easing-out);
+}
+
+/* Resting: copy shown sharp, check waiting blurred behind it. */
+.preview-copy-glyph.is-check {
+  opacity: 0;
+  filter: blur(5px);
+  transform: scale(0.8);
+}
+
+/* Copied: the two swap, each passing through blur on the way. */
+.preview-copy.copied .preview-copy-glyph.is-copy {
+  opacity: 0;
+  filter: blur(5px);
+  transform: scale(0.8);
+}
+
+.preview-copy.copied .preview-copy-glyph.is-check {
+  opacity: 1;
+  filter: blur(0);
+  transform: scale(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preview-copy-glyph {
+    transition: none;
+  }
+}
+
 /* ----- Outline rail (preview-only) ----- */
 
 /* Slim column hugging the right edge. Captures the pointer (like a

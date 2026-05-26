@@ -33,13 +33,20 @@ import { forceLinting } from '@codemirror/lint';
 import { GFM } from '@lezer/markdown';
 import type { LintFinding } from '@skrive/shared';
 import { skriveTheme } from './skrive-theme';
-import { inlinePreview } from './decorations';
+import { inlinePreview, setImageContext, setImageResolver } from './decorations';
 import { skriveLintExtension } from './lint-extension';
+import { clipboardCopyExport, clipboardPasteImport } from './clipboard';
+import { skriveAssetResolver } from '../../lib/preview/imageResolver';
 import type { PendingSelection } from '../../stores/project';
 
 type Props = {
   value: string;
   onChange: (next: string) => void;
+  /** Active document's project-relative path and the project root, used to
+   *  resolve relative image URLs through the skrive-asset protocol. Set once
+   *  at mount; the editor remounts per file (keyed on path upstream). */
+  filePath?: string | null;
+  projectRoot?: string;
   /** Lint findings for the active file. Empty array when lint hasn't
    *  run yet or the file is clean. CM6 reads them via a closure that's
    *  re-pointed on every render so reconfigure isn't needed. */
@@ -104,6 +111,8 @@ const shiftTabOutdentListItem: Command = (v) => {
 export function Editor({
   value,
   onChange,
+  filePath = null,
+  projectRoot = '',
   lintFindings = [],
   initialCursorLine,
   initialCursorColumn,
@@ -179,6 +188,8 @@ export function Editor({
           drawSelection(),
           highlightActiveLine(),
           markdown({ extensions: GFM }),
+          clipboardCopyExport(),
+          clipboardPasteImport(),
           ...inlinePreview(),
           // Hand spellcheck off to the OS / webview. The system runs a
           // grade spellchecker on contenteditable surfaces; the
@@ -204,6 +215,15 @@ export function Editor({
     });
 
     viewRef.current = view;
+
+    // Project-aware image resolution. Set once here; the editor remounts on
+    // file switch (keyed on path upstream), so the context stays correct.
+    view.dispatch({
+      effects: [
+        setImageResolver.of(skriveAssetResolver),
+        setImageContext.of({ projectRoot, filePath })
+      ]
+    });
 
     // Apply initial cursor + scroll once the view exists. Cursor lives
     // in EditorState; scroll is a DOM property of `view.scrollDOM`.
