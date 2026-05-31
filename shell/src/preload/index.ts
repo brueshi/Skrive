@@ -65,6 +65,13 @@ const api: SkriveIpc = {
         relPath,
         content
       ) as Promise<void>,
+    detectExternalChange: (projectRoot: string, relPath: string, knownHash: string) =>
+      ipcRenderer.invoke(
+        'fs:detectExternalChange',
+        projectRoot,
+        relPath,
+        knownHash
+      ) as Promise<boolean>,
     writeBinaryFile: (projectRoot: string, relPath: string, base64: string) =>
       ipcRenderer.invoke(
         'fs:writeBinaryFile',
