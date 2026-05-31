@@ -19,6 +19,7 @@ import {
   type RecentFile,
   type RecentProject,
   type ShellToneId,
+  type SurfaceId,
   type ThemeId
 } from '@skrive/shared';
 
@@ -43,6 +44,7 @@ type PreferencesActions = {
   setShellTone(value: ShellToneId): void;
   setTheme(value: ThemeId): void;
   setShowOutlineRail(value: boolean): void;
+  setDefaultSurface(value: SurfaceId): void;
 
   addDictionaryWord(word: string): void;
   removeDictionaryWord(word: string): void;
@@ -80,7 +82,8 @@ function snapshot(state: PreferencesState): AppUiState {
     panelOpenBehavior: state.panelOpenBehavior,
     shellTone: state.shellTone,
     theme: state.theme,
-    showOutlineRail: state.showOutlineRail
+    showOutlineRail: state.showOutlineRail,
+    defaultSurface: state.defaultSurface
   };
 }
 
@@ -185,6 +188,11 @@ export const usePreferencesStore = create<
   setShowOutlineRail(value) {
     if (get().showOutlineRail === value) return;
     set({ showOutlineRail: value });
+    scheduleSave(get);
+  },
+  setDefaultSurface(value) {
+    if (get().defaultSurface === value) return;
+    set({ defaultSurface: value });
     scheduleSave(get);
   },
 
