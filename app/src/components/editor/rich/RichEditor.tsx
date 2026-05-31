@@ -21,9 +21,11 @@ import { history, undo, redo } from 'prosemirror-history';
 import {
   inputRules,
   wrappingInputRule,
-  textblockTypeInputRule
+  textblockTypeInputRule,
+  InputRule
 } from 'prosemirror-inputrules';
 import { splitListItem, liftListItem, sinkListItem } from 'prosemirror-schema-list';
+import type { MarkType } from 'prosemirror-model';
 import { schema, parseDoc, serializeDoc, dirtyPlugin } from '../../../lib/projection';
 import 'prosemirror-view/style/prosemirror.css';
 import './RichEditor.css';
@@ -41,12 +43,40 @@ type RichEditorProps = {
   onChange: (next: string) => void;
 };
 
+// Convert a typed inline-markup span (e.g. `**bold**`) into the corresponding
+// mark, the moment the closing delimiter is typed. This is what makes the Rich
+// surface feel right for a Markdown-literate writer whose muscle memory types
+// the syntax: the delimiters are removed and the content carries the mark,
+// rather than sitting there as literal asterisks. (Applying marks via ⌘B/⌘I or
+// a future affordance is the other path; both land on the same mark.)
+function markInputRule(regexp: RegExp, markType: MarkType): InputRule {
+  return new InputRule(regexp, (state, match, start, end) => {
+    const captured = match[1];
+    if (!captured) return null;
+    const tr = state.tr;
+    const contentStart = start + match[0].indexOf(captured);
+    const contentEnd = contentStart + captured.length;
+    // Delete the trailing delimiter first so the leading-delete offsets hold.
+    tr.delete(contentEnd, end);
+    tr.delete(start, contentStart);
+    tr.addMark(start, start + captured.length, markType.create());
+    // Don't let the mark bleed into whatever the writer types next.
+    tr.removeStoredMark(markType);
+    return tr;
+  });
+}
+
 function buildPlugins() {
   const listItem = schema.nodes.list_item;
   return [
     history(),
     inputRules({
       rules: [
+        // Inline marks. strong before em so `**x**` matches the double rule
+        // first; the em rule's lookbehind keeps it from firing on a `**` pair.
+        markInputRule(/\*\*([^*]+)\*\*$/, schema.marks.strong),
+        markInputRule(/(?<!\*)\*([^*\s][^*]*)\*$/, schema.marks.em),
+        markInputRule(/`([^`]+)`$/, schema.marks.code),
         wrappingInputRule(/^\s*([-+*])\s$/, schema.nodes.bullet_list),
         wrappingInputRule(
           /^\s*(\d+)([.)])\s$/,
