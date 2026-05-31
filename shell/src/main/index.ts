@@ -117,3 +117,29 @@ void app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
+
+// Pre-quit flush. The renderer's debounced saves and the Rich surface's pending
+// PM->text snapshot may not have reached disk when the user quits. Pause the
+// quit once, ask the renderer to flush synchronously, and proceed when it acks
+// (or after a short timeout, so a wedged renderer can never trap the app).
+let quitFlushed = false;
+let quitFlushing = false;
+app.on('before-quit', (event) => {
+  if (quitFlushed) return;
+  const win = BrowserWindow.getAllWindows()[0];
+  if (!win || win.webContents.isDestroyed()) return;
+  event.preventDefault();
+  if (quitFlushing) return;
+  quitFlushing = true;
+
+  const proceed = () => {
+    quitFlushed = true;
+    app.quit();
+  };
+  const timer = setTimeout(proceed, 2000);
+  ipcMain.once('app:flush-complete', () => {
+    clearTimeout(timer);
+    proceed();
+  });
+  win.webContents.send('app:flush-before-quit');
+});

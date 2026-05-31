@@ -328,6 +328,15 @@ export interface SkriveIpc {
   app: {
     version(): Promise<string>;
     platform(): Promise<SkrivePlatform>;
+    /**
+     * Fires when the app is about to quit and has paused to let the renderer
+     * persist work. The handler must flush pending writes and then call
+     * `flushComplete()` so the quit proceeds (a timeout in main is the backstop).
+     * Returns an unsubscribe function.
+     */
+    onFlushBeforeQuit(handler: () => void): () => void;
+    /** Tell main the pre-quit flush is done and it may proceed to quit. */
+    flushComplete(): void;
   };
   links: {
     /**

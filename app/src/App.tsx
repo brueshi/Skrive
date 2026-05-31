@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
 import { SplitView } from './components/editor/SplitView';
 import { RichEditor } from './components/editor/rich/RichEditor';
+import { flushActiveRich } from './components/editor/rich/flush-registry';
 import { DiffView } from './components/editor/DiffView';
 import { Header } from './components/chrome/Header';
 import { BacklinksPanel } from './components/panels/BacklinksPanel';
@@ -294,6 +295,31 @@ export function App() {
     }
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [saveAllDirty, persistProjectStateNow, persistPreferencesNow]);
+
+  // Pre-quit flush. Unlike beforeunload, this can await: main pauses the quit
+  // until we ack. We drain the Rich surface's pending PM->text snapshot into the
+  // store first, then write everything, so quitting mid-debounce never loses the
+  // last edits.
+  useEffect(() => {
+    return window.skrive.app.onFlushBeforeQuit(() => {
+      void (async () => {
+        try {
+          flushActiveRich();
+          if (saveTimerRef.current) {
+            clearTimeout(saveTimerRef.current);
+            saveTimerRef.current = null;
+          }
+          await saveAllDirty();
+          await persistProjectStateNow();
+          await persistPreferencesNow();
+        } catch (err) {
+          logProjectError('flush-before-quit', err);
+        } finally {
+          window.skrive.app.flushComplete();
+        }
+      })();
+    });
   }, [saveAllDirty, persistProjectStateNow, persistPreferencesNow]);
 
   // Suppress the empty-state flash while preferences haven't loaded —
