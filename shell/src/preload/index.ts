@@ -64,7 +64,7 @@ const api: SkriveIpc = {
         projectRoot,
         relPath,
         content
-      ) as Promise<void>,
+      ) as Promise<string>,
     detectExternalChange: (projectRoot: string, relPath: string, knownHash: string) =>
       ipcRenderer.invoke(
         'fs:detectExternalChange',

@@ -72,7 +72,7 @@ export function registerFsHandlers(): void {
       projectRoot: string,
       relPath: string,
       content: string
-    ): Promise<void> => {
+    ): Promise<string> => {
       if (typeof content !== 'string') {
         throw new Error('fs:writeFile requires string content');
       }
@@ -104,6 +104,7 @@ export function registerFsHandlers(): void {
           projectState.checkpointsConfig.autoCap
         );
       }
+      return contentHash(content);
     }
   );
 

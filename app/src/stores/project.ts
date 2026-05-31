@@ -96,6 +96,14 @@ export type Tab = {
    *  by the FrontmatterPanel; auto-stamped fields refreshed on save. */
   frontmatter: FrontmatterMap;
   dirty: boolean;
+  /** SHA-256 of the file as last loaded or saved. Baseline for external-change
+   *  detection — compared against the on-disk file before an auto-save so we
+   *  don't silently clobber an edit made outside Skrive. Not persisted. */
+  diskHash: string;
+  /** Set when an auto-save found the file changed on disk. Auto-save then skips
+   *  this tab (keeping it dirty) until the writer resolves it via Overwrite or
+   *  an explicit ⌘S. Not persisted. */
+  conflict: boolean;
   layoutMode: LayoutMode;
   splitDividerRatio: number;
   /** Cursor + scroll persisted in the per-project state (Phase 9).
@@ -197,6 +205,9 @@ type Actions = {
 
   saveActiveTab(): Promise<void>;
   saveAllDirty(): Promise<void>;
+  /** Overwrite the on-disk file with the editor's version, resolving an
+   *  external-change conflict. Invoked from the Overwrite prompt. */
+  forceSaveTab(path: string): Promise<void>;
 
   createFile(relPath: string): Promise<void>;
   createDirectory(relPath: string): Promise<void>;
@@ -664,6 +675,8 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       body: parsed.body,
       frontmatter: parsed.frontmatter,
       dirty: false,
+      diskHash: content.hash,
+      conflict: false,
       layoutMode: hydrate?.applyOverrides
         ? hydrate.layoutMode
         : DEFAULT_LAYOUT_MODE,
@@ -812,39 +825,93 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   },
 
   async saveActiveTab() {
+    // The explicit-save path (⌘S). Explicit intent overwrites: it does not
+    // run the external-change guard, and it clears any standing conflict.
     const { manifest, tabs, activeTabIndex } = get();
     const tab = tabs[activeTabIndex];
     if (!manifest || !tab || !tab.dirty) return;
     // Clone before stamping so the live tab object isn't mutated mid-render.
     const writable: Tab = { ...tab, frontmatter: { ...tab.frontmatter } };
     const payload = buildSavePayload(writable);
-    await window.skrive.fs.writeFile(manifest.root, tab.path, payload);
+    const hash = await window.skrive.fs.writeFile(manifest.root, tab.path, payload);
     const nextTabs = tabs.slice();
     nextTabs[activeTabIndex] = {
       ...writable,
-      dirty: false
+      dirty: false,
+      conflict: false,
+      diskHash: hash
     };
     set({ tabs: nextTabs });
   },
 
   async saveAllDirty() {
+    // The auto-save path. Non-destructive: before writing a tab it checks
+    // whether the on-disk file drifted from our baseline and, if so, marks the
+    // tab conflicted and surfaces an Overwrite prompt instead of clobbering.
     const { manifest, tabs } = get();
     if (!manifest) return;
-    const dirtyIndices: number[] = [];
     const writes: Array<Promise<void>> = [];
     const updatedTabs = tabs.slice();
+    const conflicted: Tab[] = [];
     for (let i = 0; i < tabs.length; i++) {
       const t = tabs[i];
-      if (!t || !t.dirty) continue;
+      if (!t || !t.dirty || t.conflict) continue;
+      const changed = await window.skrive.fs.detectExternalChange(
+        manifest.root,
+        t.path,
+        t.diskHash
+      );
+      if (changed) {
+        updatedTabs[i] = { ...t, conflict: true };
+        conflicted.push(t);
+        continue;
+      }
       const writable: Tab = { ...t, frontmatter: { ...t.frontmatter } };
       const payload = buildSavePayload(writable);
-      dirtyIndices.push(i);
-      updatedTabs[i] = { ...writable, dirty: false };
-      writes.push(window.skrive.fs.writeFile(manifest.root, t.path, payload));
+      const idx = i;
+      writes.push(
+        window.skrive.fs.writeFile(manifest.root, t.path, payload).then((hash) => {
+          updatedTabs[idx] = { ...writable, dirty: false, diskHash: hash };
+        })
+      );
     }
-    if (writes.length === 0) return;
+    if (writes.length === 0 && conflicted.length === 0) return;
     await Promise.all(writes);
     set({ tabs: updatedTabs });
+    for (const t of conflicted) {
+      const name = t.path.split('/').pop() ?? t.path;
+      notify.prompt(
+        `"${name}" changed on disk outside Skrive — your edits are kept here.`,
+        'Overwrite',
+        () => useProjectStore.getState().forceSaveTab(t.path)
+      );
+    }
+  },
+
+  async forceSaveTab(path: string) {
+    // Overwrite the on-disk file with the editor's version, resolving a
+    // conflict. Invoked from the Overwrite prompt.
+    const { manifest, tabs } = get();
+    if (!manifest) return;
+    const tab = tabs.find((t) => t.path === path);
+    if (!tab) return;
+    const writable: Tab = { ...tab, frontmatter: { ...tab.frontmatter } };
+    const payload = buildSavePayload(writable);
+    const hash = await window.skrive.fs.writeFile(manifest.root, path, payload);
+    const nextTabs = get().tabs.slice();
+    const j = nextTabs.findIndex((t) => t.path === path);
+    const existing = nextTabs[j];
+    if (existing) {
+      nextTabs[j] = {
+        ...existing,
+        body: writable.body,
+        frontmatter: writable.frontmatter,
+        dirty: false,
+        conflict: false,
+        diskHash: hash
+      };
+      set({ tabs: nextTabs });
+    }
   },
 
   // ============================ File CRUD ============================

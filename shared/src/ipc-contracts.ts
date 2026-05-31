@@ -377,8 +377,10 @@ export interface SkriveIpc {
     /** Read a project-relative file. Path is resolved against the active project root. */
     readFile(projectRoot: string, relPath: string): Promise<FileContent>;
     /** Write a project-relative file atomically (temp + fsync + rename), so an
-     *  interrupted write never corrupts the document. Creates parents as needed. */
-    writeFile(projectRoot: string, relPath: string, content: string): Promise<void>;
+     *  interrupted write never corrupts the document. Creates parents as needed.
+     *  Resolves with the SHA-256 of the written content, so the caller can update
+     *  its external-change baseline without a re-read. */
+    writeFile(projectRoot: string, relPath: string, content: string): Promise<string>;
     /**
      * Whether the on-disk file differs from the hash the renderer last loaded
      * or saved. True means an external edit happened and a save would clobber
