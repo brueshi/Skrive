@@ -11,6 +11,7 @@ import path from 'node:path';
 import type { FileContent } from '@skrive/shared';
 import { projectState } from '../state/project-state';
 import { maybeWriteAutoCheckpoint } from '../lib/checkpoint';
+import { atomicWriteFile, contentHash, detectExternalChange } from '../lib/atomic-write';
 
 const MARKDOWN_EXT = /\.(md|markdown)$/i;
 
@@ -45,8 +46,22 @@ export function registerFsHandlers(): void {
       return {
         path: relPath,
         body,
-        modifiedMs: stat.mtimeMs ?? null
+        modifiedMs: stat.mtimeMs ?? null,
+        hash: contentHash(body)
       };
+    }
+  );
+
+  ipcMain.handle(
+    'fs:detectExternalChange',
+    async (
+      _event,
+      projectRoot: string,
+      relPath: string,
+      knownHash: string
+    ): Promise<boolean> => {
+      const target = resolveSafe(projectRoot, relPath);
+      return detectExternalChange(target, knownHash);
     }
   );
 
@@ -63,7 +78,7 @@ export function registerFsHandlers(): void {
       }
       const target = resolveSafe(projectRoot, relPath);
       await fs.mkdir(path.dirname(target), { recursive: true });
-      await fs.writeFile(target, content, 'utf8');
+      await atomicWriteFile(target, content);
       // Update link graph from the body we just persisted. Cheaper
       // than the watcher's disk-read path, and the renderer's
       // immediate follow-up backlinks query sees the new state

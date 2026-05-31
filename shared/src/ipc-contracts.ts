@@ -61,6 +61,10 @@ export type FileContent = {
   path: string;
   body: string;
   modifiedMs: number | null;
+  /** SHA-256 of the body as read from disk. Baseline for external-change
+   *  detection: the renderer keeps this and asks the shell, before a save,
+   *  whether the on-disk file still matches it. */
+  hash: string;
 };
 
 /**
@@ -372,8 +376,19 @@ export interface SkriveIpc {
   fs: {
     /** Read a project-relative file. Path is resolved against the active project root. */
     readFile(projectRoot: string, relPath: string): Promise<FileContent>;
-    /** Write a project-relative file. Creates parents as needed. */
+    /** Write a project-relative file atomically (temp + fsync + rename), so an
+     *  interrupted write never corrupts the document. Creates parents as needed. */
     writeFile(projectRoot: string, relPath: string, content: string): Promise<void>;
+    /**
+     * Whether the on-disk file differs from the hash the renderer last loaded
+     * or saved. True means an external edit happened and a save would clobber
+     * it; false also covers a missing file (nothing to conflict with).
+     */
+    detectExternalChange(
+      projectRoot: string,
+      relPath: string,
+      knownHash: string
+    ): Promise<boolean>;
     /**
      * Write a project-relative binary file from base64-encoded bytes (used for
      * pasted images). Creates parents as needed.
