@@ -247,6 +247,9 @@ function sanitizeAppState(raw: Record<string, unknown>): Partial<AppUiState> {
   if (typeof raw.showOutlineRail === 'boolean') {
     out.showOutlineRail = raw.showOutlineRail;
   }
+  if (raw.defaultSurface === 'text' || raw.defaultSurface === 'rich') {
+    out.defaultSurface = raw.defaultSurface;
+  }
   return out;
 }
 

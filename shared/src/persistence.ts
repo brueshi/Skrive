@@ -80,6 +80,12 @@ export type ShellToneId = 'dark' | 'same' | 'light';
  *  theme that existed before v0.2.2) so they don't get whiplash. */
 export type ThemeId = 'system' | 'light' | 'dark';
 
+/** Default editing surface. 'text' is the CodeMirror Source/Recessed surface
+ *  (the shipped default); 'rich' is the ProseMirror projection surface. The
+ *  projection editor (planning/projection-editor-master-plan.md) will make
+ *  'rich' the default once surface switching lands; until then 'rich' is opt-in. */
+export type SurfaceId = 'text' | 'rich';
+
 export type AppUiState = {
   schemaVersion: 1;
   lastOpenedProject: string | null;
@@ -105,6 +111,8 @@ export type AppUiState = {
   theme: ThemeId;
   /** Show the outline rail down the right edge of the preview. */
   showOutlineRail: boolean;
+  /** Which editing surface new tabs open in. */
+  defaultSurface: SurfaceId;
 };
 
 export const DEFAULT_RECENT_PROJECTS_CAP = 10;
@@ -126,7 +134,8 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   panelOpenBehavior: 'push',
   shellTone: 'light',
   theme: 'light',
-  showOutlineRail: true
+  showOutlineRail: true,
+  defaultSurface: 'text'
 };
 
 export const DEFAULT_SIDEBAR_WIDTH = 260;

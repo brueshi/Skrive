@@ -193,6 +193,8 @@ function GeneralSection() {
   const setSkip = usePreferencesStore((s) => s.setSkipDeleteConfirmation);
   const showOutlineRail = usePreferencesStore((s) => s.showOutlineRail);
   const setShowOutlineRail = usePreferencesStore((s) => s.setShowOutlineRail);
+  const defaultSurface = usePreferencesStore((s) => s.defaultSurface);
+  const setDefaultSurface = usePreferencesStore((s) => s.setDefaultSurface);
   const panelOpenBehavior = usePreferencesStore((s) => s.panelOpenBehavior);
   const setPanelOpenBehavior = usePreferencesStore(
     (s) => s.setPanelOpenBehavior
@@ -235,6 +237,23 @@ function GeneralSection() {
             <span className="settings-toggle-desc">
               Show a column of section ticks down the right edge of the preview.
               Hover it for a labeled outline; drag it to scrub the document.
+            </span>
+          </span>
+        </label>
+        <label className="settings-toggle-row">
+          <input
+            type="checkbox"
+            checked={defaultSurface === 'rich'}
+            onChange={(e) => setDefaultSurface(e.target.checked ? 'rich' : 'text')}
+          />
+          <span className="settings-toggle-text">
+            <span className="settings-toggle-label">
+              Rich editing surface (experimental)
+            </span>
+            <span className="settings-toggle-desc">
+              Edit a rich, no-syntax projection of your Markdown instead of the
+              text surface. The file on disk stays plain Markdown. Early preview:
+              constructs like tables and blockquotes show as raw source for now.
             </span>
           </span>
         </label>

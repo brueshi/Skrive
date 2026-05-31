@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
 import { SplitView } from './components/editor/SplitView';
+import { RichEditor } from './components/editor/rich/RichEditor';
 import { DiffView } from './components/editor/DiffView';
 import { Header } from './components/chrome/Header';
 import { BacklinksPanel } from './components/panels/BacklinksPanel';
@@ -68,6 +69,7 @@ export function App() {
   const shellTone = usePreferencesStore((s) => s.shellTone);
   const theme = usePreferencesStore((s) => s.theme);
   const showOutlineRail = usePreferencesStore((s) => s.showOutlineRail);
+  const defaultSurface = usePreferencesStore((s) => s.defaultSurface);
   const backlinksPanelOpen = useProjectStore((s) => s.backlinksPanelOpen);
   const frontmatterPanelOpen = useProjectStore(
     (s) => s.frontmatterPanelOpen
@@ -347,6 +349,12 @@ export function App() {
                     setTabDiffDividerRatio(activeTabIndex, ratio)
                   }
                   onClose={closeDiff}
+                />
+              ) : activeTab && defaultSurface === 'rich' ? (
+                <RichEditor
+                  key={activeTab.path}
+                  body={activeTab.body}
+                  onChange={(next) => setTabBody(activeTabIndex, next)}
                 />
               ) : activeTab ? (
                 <SplitView
