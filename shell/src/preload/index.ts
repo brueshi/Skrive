@@ -25,7 +25,15 @@ const api: SkriveIpc = {
   app: {
     version: () => ipcRenderer.invoke('app:version') as Promise<string>,
     platform: () =>
-      ipcRenderer.invoke('app:platform') as Promise<SkrivePlatform>
+      ipcRenderer.invoke('app:platform') as Promise<SkrivePlatform>,
+    onFlushBeforeQuit: (handler: () => void) => {
+      const wrapped = () => handler();
+      ipcRenderer.on('app:flush-before-quit', wrapped);
+      return () => {
+        ipcRenderer.removeListener('app:flush-before-quit', wrapped);
+      };
+    },
+    flushComplete: () => ipcRenderer.send('app:flush-complete')
   },
   links: {
     openExternal: (url: string) =>

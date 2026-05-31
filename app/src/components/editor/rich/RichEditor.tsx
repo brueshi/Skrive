@@ -27,6 +27,7 @@ import {
 import { splitListItem, liftListItem, sinkListItem } from 'prosemirror-schema-list';
 import type { MarkType } from 'prosemirror-model';
 import { schema, parseDoc, serializeDoc, dirtyPlugin } from '../../../lib/projection';
+import { setActiveRichFlush } from './flush-registry';
 import 'prosemirror-view/style/prosemirror.css';
 import './RichEditor.css';
 
@@ -156,8 +157,13 @@ export function RichEditor({ body, onChange }: RichEditorProps): React.ReactElem
       }
     });
 
+    // Expose this surface's flush so the pre-quit handler can drain a pending
+    // snapshot into the store before saves run.
+    setActiveRichFlush(flush);
+
     return () => {
       flush(); // persist pending edits before teardown (tab / file switch)
+      setActiveRichFlush(null);
       view.destroy();
     };
   }, []);
