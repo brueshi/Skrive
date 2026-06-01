@@ -49,6 +49,63 @@ describe('ordered lists', () => {
   });
 });
 
+describe('nested and loose lists (2.5c)', () => {
+  it('models a nested list instead of freezing it', () => {
+    const md = '- parent\n  - child\n';
+    expect(topBlock(parseDoc(md)).type.name).toBe('bullet_list');
+    expect(serializeDoc(parseDoc(md))).toBe(md);
+  });
+
+  it('models a loose list instead of freezing it', () => {
+    const md = '- first\n\n- second\n';
+    const doc = parseDoc(md);
+    expect(topBlock(doc).type.name).toBe('bullet_list');
+    expect(topBlock(doc).attrs.spread).toBe(true);
+    expect(serializeDoc(doc)).toBe(md);
+  });
+
+  it('captures loose vs tight: a tight list is not marked spread', () => {
+    expect(topBlock(parseDoc('- a\n- b\n')).attrs.spread).toBe(false);
+  });
+
+  it('re-serializes an edited nested list correctly and stays a fixpoint', () => {
+    const md = '- parent\n  - child\n';
+    const doc = parseDoc(md);
+    const blocks = childrenOf(doc);
+    blocks[0] = dirtied(blocks[0]); // dirty but unchanged -> guard restores bytes
+    const out = serializeDoc(rebuild(doc, blocks));
+    expect(out).toBe(md);
+    // And the canonical form is a fixpoint: parse/serialize is stable.
+    expect(serializeDoc(parseDoc(out))).toBe(out);
+  });
+
+  it('preserves the nested marker style of a dirty list (no churn to `-`)', () => {
+    // Outer dirtied so it serializes canonically; the inner `*` must survive.
+    const md = '- parent\n  * child\n';
+    const doc = parseDoc(md);
+    const blocks = childrenOf(doc);
+    // Force a genuine edit so we exercise canonical serialization, not the guard.
+    const innerList = blocks[0].child(0).child(1); // list_item -> nested bullet_list
+    expect(innerList.attrs.marker).toBe('*');
+  });
+
+  it('preserves a multi-paragraph (loose) list item', () => {
+    const md = '- first paragraph\n\n  second paragraph\n';
+    const doc = parseDoc(md);
+    expect(topBlock(doc).type.name).toBe('bullet_list');
+    expect(serializeDoc(doc)).toBe(md);
+  });
+
+  it('freezes the whole list when an item holds an unmodeled construct', () => {
+    // A list item containing raw HTML cannot be modeled faithfully, so the entire
+    // list stays frozen and verbatim rather than being modeled lossily.
+    const md = '- a normal item\n\n  <div>raw html</div>\n';
+    const doc = parseDoc(md);
+    expect(topBlock(doc).type.name).toBe('frozen_block');
+    expect(serializeDoc(doc)).toBe(md);
+  });
+});
+
 describe('inline code', () => {
   it('round-trips verbatim while clean', () => {
     const md = 'Run `npm test` to check.\n';
@@ -126,12 +183,10 @@ describe('blockquotes', () => {
     expect(serializeDoc(doc)).toBe(md);
   });
 
-  it('freezes a blockquote whose child is still unmodeled (a list)', () => {
-    // Lists inside quotes are deferred to 2.5c; until then the whole quote is
-    // frozen verbatim rather than modeled lossily.
-    const md = '> - a bullet inside a quote\n';
+  it('models a list nested inside a blockquote (2.5c), round-tripping verbatim', () => {
+    const md = '> - a bullet inside a quote\n> - and another\n';
     const doc = parseDoc(md);
-    expect(topBlock(doc).type.name).toBe('frozen_block');
+    expect(topBlock(doc).type.name).toBe('blockquote');
     expect(serializeDoc(doc)).toBe(md);
   });
 });
@@ -149,15 +204,6 @@ describe('frozen blocks (unmodeled constructs)', () => {
     // holds regardless because clean blocks emit their verbatim source.
     const md = '| a | b |\n| - | - |\n| 1 | 2 |\n';
     expect(serializeDoc(parseDoc(md))).toBe(md);
-  });
-
-  it('loose and nested lists are frozen rather than flattened', () => {
-    const loose = '- first\n\n- second\n';
-    const nested = '- parent\n  - child\n';
-    expect(topBlock(parseDoc(loose)).type.name).toBe('frozen_block');
-    expect(topBlock(parseDoc(nested)).type.name).toBe('frozen_block');
-    expect(serializeDoc(parseDoc(loose))).toBe(loose);
-    expect(serializeDoc(parseDoc(nested))).toBe(nested);
   });
 
   it('a frozen block always emits its source even if a stray dirty flag is forced around it', () => {

@@ -75,14 +75,39 @@ function serializeInline(node: PMNode): string {
   return out;
 }
 
-function listItemLines(block: PMNode, prefixFor: (index: number) => string): string {
-  const lines: string[] = [];
+// A list serializes item by item. Each item opens with its marker prefix; every
+// continuation line — wrapped content, an extra paragraph, a nested sub-list —
+// is indented to the marker's width so it stays inside the item under CommonMark.
+// A loose list (`spread`) blank-line-separates both its items and the blocks
+// within an item; a tight one packs them line-to-line. Recurses through
+// canonicalBlock, so nested lists indent at each level.
+function serializeList(block: PMNode): string {
+  const ordered = block.type.name === 'ordered_list';
+  const spread = block.attrs.spread === true;
+  const marker = block.attrs.marker ? String(block.attrs.marker) : '-';
+  const start: number = typeof block.attrs.start === 'number' ? block.attrs.start : 1;
+  const delimiter = block.attrs.delimiter === ')' ? ')' : '.';
+
+  const items: string[] = [];
   block.forEach((item, _offset, index) => {
-    // list_item -> first paragraph's inline content
-    const para = item.child(0);
-    lines.push(`${prefixFor(index)}${serializeInline(para)}`);
+    const prefix = ordered ? `${start + index}${delimiter} ` : `${marker} `;
+    const indent = ' '.repeat(prefix.length);
+
+    const childBlocks: string[] = [];
+    item.forEach((child) => childBlocks.push(canonicalBlock(child)));
+    const body = childBlocks.join(spread ? '\n\n' : '\n');
+
+    const rendered = body
+      .split('\n')
+      .map((line, i) => {
+        if (i === 0) return prefix + line; // the opening paragraph carries the marker
+        return line.length > 0 ? indent + line : ''; // continuation, blanks stay blank
+      })
+      .join('\n');
+    items.push(rendered);
   });
-  return lines.join('\n');
+
+  return items.join(spread ? '\n\n' : '\n');
 }
 
 // A blockquote serializes by canonically serializing its child blocks, joining
@@ -109,15 +134,9 @@ function canonicalBlock(block: PMNode): string {
       const lang = block.attrs.lang ? String(block.attrs.lang) : '';
       return `\`\`\`${lang}\n${block.textContent}\n\`\`\``;
     }
-    case 'bullet_list': {
-      const marker = block.attrs.marker ? String(block.attrs.marker) : '-';
-      return listItemLines(block, () => `${marker} `);
-    }
-    case 'ordered_list': {
-      const start: number = typeof block.attrs.start === 'number' ? block.attrs.start : 1;
-      const delimiter = block.attrs.delimiter === ')' ? ')' : '.';
-      return listItemLines(block, (i) => `${start + i}${delimiter} `);
-    }
+    case 'bullet_list':
+    case 'ordered_list':
+      return serializeList(block);
     case 'horizontal_rule':
       // Canonical form for a freshly-inserted rule. A parsed rule with a
       // different marker (`***`, `___`) is dirty-equal to this under the
