@@ -11,15 +11,16 @@
 // canonicalized, so it cannot be corrupted by an edit.
 
 import type { Node as PMNode, Mark } from 'prosemirror-model';
-import { fromMarkdown } from 'mdast-util-from-markdown';
 import type {
   Root,
   RootContent,
   PhrasingContent,
   List,
-  ListItem
+  ListItem,
+  Table
 } from 'mdast';
 import { schema } from './schema';
+import { parseMarkdown } from './mdast';
 
 type WithOffsets = { position?: { start: { offset?: number }; end: { offset?: number } } };
 
@@ -169,6 +170,32 @@ function mapChildBlocks(children: RootContent[], md: string): PMNode[] | null {
   return out.length > 0 ? out : null;
 }
 
+// mdast table -> PM table. The first row is the header (table_header cells), the
+// rest are body rows (table_cell). GFM column alignment lives on the mdast
+// table's `align` array; we stamp it onto each cell so the serializer can rebuild
+// the delimiter row. Rows are forced rectangular to the header's column count —
+// short rows pad with empty cells, long rows truncate — because prosemirror-tables
+// requires a rectangular grid. Returns null (freeze) for a degenerate empty table.
+function tableToPM(node: Table, base?: Record<string, unknown>): PMNode | null {
+  const rowsM = node.children ?? [];
+  if (rowsM.length === 0) return null;
+  const colCount = (rowsM[0]?.children ?? []).length;
+  if (colCount === 0) return null;
+  const align = node.align ?? [];
+
+  const rows = rowsM.map((row, rowIndex) => {
+    const cellType = rowIndex === 0 ? 'table_header' : 'table_cell';
+    const cells: PMNode[] = [];
+    for (let col = 0; col < colCount; col++) {
+      const cell = row.children?.[col];
+      const inline = cell ? inlineToPM(cell.children, []) : [];
+      cells.push(schema.node(cellType, { align: align[col] ?? null }, inline));
+    }
+    return schema.node('table_row', {}, cells);
+  });
+  return schema.node('table', base ?? {}, rows);
+}
+
 function blockToPM(node: RootContent, src: string, gapBefore: string, md: string): PMNode {
   const base = { src, gapBefore, dirty: false };
   switch (node.type) {
@@ -191,15 +218,18 @@ function blockToPM(node: RootContent, src: string, gapBefore: string, md: string
     }
     case 'list':
       return listToPM(node, md, base) ?? frozen(src, gapBefore);
+    case 'table':
+      return tableToPM(node, base) ?? frozen(src, gapBefore);
     default:
-      // Table, html, definition, footnote, etc.: preserved verbatim, never
-      // canonicalized.
+      // HTML, definition, footnote, etc.: preserved verbatim, never
+      // canonicalized. (A table nested inside a quote/list still freezes its
+      // container via childBlockToPM's default — out of 2.5d scope.)
       return frozen(src, gapBefore);
   }
 }
 
 export function parseDoc(md: string): PMNode {
-  const root = fromMarkdown(md) as Root;
+  const root = parseMarkdown(md);
   const children = root.children ?? [];
 
   const blocks: PMNode[] = [];
