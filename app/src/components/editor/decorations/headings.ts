@@ -6,14 +6,17 @@
 // the trailing space between them and the heading text. We replace that
 // whole range so the text flows left to the line's content padding.
 
-import { Decoration } from '@codemirror/view';
+import { pushMarker } from './shared';
 import type { HandlerMap } from './shared';
 
 const headingHandler: HandlerMap[string] = (node, ctx) => {
-  if (ctx.isOnCursorLine(node.from, node.to)) return;
+  if (ctx.mode === 'raw') return;
   const first = node.node.firstChild;
   if (!first || first.name !== 'HeaderMark') return;
-  ctx.decorations.push(Decoration.replace({}).range(first.from, first.to));
+  if (ctx.mode === 'concealed' && ctx.isOnCursorLine(node.from, node.to)) {
+    return;
+  }
+  pushMarker(ctx, first.from, first.to);
 };
 
 export const headingHandlers: HandlerMap = {

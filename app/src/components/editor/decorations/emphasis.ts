@@ -15,6 +15,7 @@
 // entirely. The raw `**word**` shows through so the user can edit it.
 
 import { Decoration } from '@codemirror/view';
+import { pushMarker } from './shared';
 import type { HandlerMap, NodeHandler } from './shared';
 
 const CLASS_BOLD = 'cm-md-bold';
@@ -48,18 +49,22 @@ function findBoundaryMarks(
 
 function makeHandler(className: string): NodeHandler {
   return (node, ctx) => {
-    if (ctx.isOnCursorLine(node.from, node.to)) return;
+    // Raw shows the markup verbatim; concealed reveals it on the cursor line.
+    if (ctx.mode === 'raw') return;
     const bounds = findBoundaryMarks(node);
     if (!bounds) return;
+    if (ctx.mode === 'concealed' && ctx.isOnCursorLine(node.from, node.to)) {
+      return;
+    }
     const { openFrom, openTo, closeFrom, closeTo } = bounds;
 
-    ctx.decorations.push(Decoration.replace({}).range(openFrom, openTo));
+    pushMarker(ctx, openFrom, openTo);
     if (closeFrom > openTo) {
       ctx.decorations.push(
         Decoration.mark({ class: className }).range(openTo, closeFrom)
       );
     }
-    ctx.decorations.push(Decoration.replace({}).range(closeFrom, closeTo));
+    pushMarker(ctx, closeFrom, closeTo);
   };
 }
 

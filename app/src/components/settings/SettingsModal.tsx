@@ -188,6 +188,28 @@ const SHELL_TONE_OPTIONS: {
   }
 ];
 
+const MARKER_MODE_OPTIONS: {
+  id: 'raw' | 'recessed' | 'concealed';
+  label: string;
+  desc: string;
+}[] = [
+  {
+    id: 'raw',
+    label: 'Raw',
+    desc: 'Every Markdown marker shown at full strength — an honest source view.'
+  },
+  {
+    id: 'recessed',
+    label: 'Recessed',
+    desc: 'Markers stay visible but dimmed, so prose leads and syntax recedes.'
+  },
+  {
+    id: 'concealed',
+    label: 'Concealed',
+    desc: 'Markers hidden except on the line being edited — a live-preview feel.'
+  }
+];
+
 function GeneralSection() {
   const skipDelete = usePreferencesStore((s) => s.skipDeleteConfirmation);
   const setSkip = usePreferencesStore((s) => s.setSkipDeleteConfirmation);
@@ -201,6 +223,8 @@ function GeneralSection() {
   const setSurfaceSwitchingEnabled = usePreferencesStore(
     (s) => s.setSurfaceSwitchingEnabled
   );
+  const markerMode = usePreferencesStore((s) => s.markerMode);
+  const setMarkerMode = usePreferencesStore((s) => s.setMarkerMode);
   const panelOpenBehavior = usePreferencesStore((s) => s.panelOpenBehavior);
   const setPanelOpenBehavior = usePreferencesStore(
     (s) => s.setPanelOpenBehavior
@@ -282,6 +306,14 @@ function GeneralSection() {
           </span>
         </label>
       </div>
+
+      <LayoutFork
+        label="Markdown syntax"
+        blurb="How the text surface shows Markdown markers. The rich surface hides syntax entirely; this only affects the text surface."
+        options={MARKER_MODE_OPTIONS}
+        value={markerMode}
+        onChange={setMarkerMode}
+      />
 
       <header className="settings-pane-header">
         <h2>Appearance</h2>

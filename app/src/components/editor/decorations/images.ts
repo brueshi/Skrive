@@ -109,6 +109,11 @@ function sliceUrl(
 }
 
 const imageHandler: NodeHandler = (node, ctx) => {
+  // Raw shows the literal `![alt](src)`. In recessed and concealed alike the
+  // image widget stands in for the markup, but the cursor line always reveals
+  // the raw syntax so the URL stays editable — receding an image to faint
+  // brackets would help no one.
+  if (ctx.mode === 'raw') return;
   if (ctx.isOnCursorLine(node.from, node.to)) return;
 
   const container = node.node;

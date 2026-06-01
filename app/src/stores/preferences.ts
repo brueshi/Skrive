@@ -17,6 +17,7 @@ import {
   type EditorFontId,
   type PanelOpenBehaviorId,
   type RecentFile,
+  type MarkerMode,
   type RecentProject,
   type ShellToneId,
   type SurfaceId,
@@ -50,6 +51,7 @@ type PreferencesActions = {
    *  the incoming surface re-parses from the fully-flushed canonical body. */
   toggleDefaultSurface(): void;
   setSurfaceSwitchingEnabled(value: boolean): void;
+  setMarkerMode(value: MarkerMode): void;
 
   addDictionaryWord(word: string): void;
   removeDictionaryWord(word: string): void;
@@ -89,7 +91,8 @@ function snapshot(state: PreferencesState): AppUiState {
     theme: state.theme,
     showOutlineRail: state.showOutlineRail,
     defaultSurface: state.defaultSurface,
-    surfaceSwitchingEnabled: state.surfaceSwitchingEnabled
+    surfaceSwitchingEnabled: state.surfaceSwitchingEnabled,
+    markerMode: state.markerMode
   };
 }
 
@@ -208,6 +211,11 @@ export const usePreferencesStore = create<
   setSurfaceSwitchingEnabled(value) {
     if (get().surfaceSwitchingEnabled === value) return;
     set({ surfaceSwitchingEnabled: value });
+    scheduleSave(get);
+  },
+  setMarkerMode(value) {
+    if (get().markerMode === value) return;
+    set({ markerMode: value });
     scheduleSave(get);
   },
 

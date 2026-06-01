@@ -253,6 +253,13 @@ function sanitizeAppState(raw: Record<string, unknown>): Partial<AppUiState> {
   if (typeof raw.surfaceSwitchingEnabled === 'boolean') {
     out.surfaceSwitchingEnabled = raw.surfaceSwitchingEnabled;
   }
+  if (
+    raw.markerMode === 'raw' ||
+    raw.markerMode === 'recessed' ||
+    raw.markerMode === 'concealed'
+  ) {
+    out.markerMode = raw.markerMode;
+  }
   return out;
 }
 

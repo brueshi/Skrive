@@ -86,6 +86,14 @@ export type ThemeId = 'system' | 'light' | 'dark';
  *  'rich' the default once surface switching lands; until then 'rich' is opt-in. */
 export type SurfaceId = 'text' | 'rich';
 
+/** How the Text (CodeMirror) surface treats Markdown syntax markers. A
+ *  Text-surface nicety, independent of which surface is default:
+ *   - 'raw'       — every marker shown at full strength (honest source).
+ *   - 'recessed'  — markers visible but dimmed; prose leads, syntax recedes.
+ *   - 'concealed' — markers hidden except on the line being edited (live-preview).
+ *  The Rich surface hides syntax entirely, so this only affects Text. */
+export type MarkerMode = 'raw' | 'recessed' | 'concealed';
+
 export type AppUiState = {
   schemaVersion: 1;
   lastOpenedProject: string | null;
@@ -118,6 +126,8 @@ export type AppUiState = {
    *  for a never-seen-Markdown writer who should never be one keystroke from
    *  raw syntax, and for anyone who wants a single, stable editing model. */
   surfaceSwitchingEnabled: boolean;
+  /** How the Text surface renders Markdown markers (raw / recessed / concealed). */
+  markerMode: MarkerMode;
 };
 
 export const DEFAULT_RECENT_PROJECTS_CAP = 10;
@@ -141,7 +151,8 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   theme: 'light',
   showOutlineRail: true,
   defaultSurface: 'text',
-  surfaceSwitchingEnabled: true
+  surfaceSwitchingEnabled: true,
+  markerMode: 'recessed'
 };
 
 export const DEFAULT_SIDEBAR_WIDTH = 260;

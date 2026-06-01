@@ -4,7 +4,7 @@
 // list. The returned array bundles every per-feature decoration module
 // registered in `HANDLERS` below.
 
-import { createInlinePlugin } from './shared';
+import { createInlinePlugin, markerModeField } from './shared';
 import type { HandlerMap } from './shared';
 import { codeHandlers } from './code';
 import { emphasisHandlers } from './emphasis';
@@ -29,6 +29,7 @@ export {
   type ImageResolver
 } from './images';
 export { setPersonalDictionary } from './spellcheck';
+export { setMarkerMode, markerModeField } from './shared';
 
 const HANDLERS: HandlerMap = {
   ...emphasisHandlers,
@@ -42,6 +43,7 @@ const HANDLERS: HandlerMap = {
 export function inlinePreview() {
   return [
     createInlinePlugin(HANDLERS),
+    markerModeField,
     stableEmphasisField,
     spellcheckFrontmatterPlugin,
     personalDictionaryField,

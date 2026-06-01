@@ -13,11 +13,26 @@
 // everywhere else we hide the syntax. Handlers get this as a precomputed
 // helper (`ctx.isOnCursorLine`) so they don't each reimplement it.
 
+import { StateEffect, StateField } from '@codemirror/state';
 import type { Range } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, ViewPlugin } from '@codemirror/view';
 import type { DecorationSet, EditorView, ViewUpdate } from '@codemirror/view';
 import type { SyntaxNodeRef } from '@lezer/common';
+import type { MarkerMode } from '@skrive/shared';
+
+// The active marker treatment for the surface, held in editor state so the
+// decoration plugin can rebuild when it changes. Editor.tsx dispatches
+// `setMarkerMode` from the preferences store (initial value + live changes).
+export const setMarkerMode = StateEffect.define<MarkerMode>();
+
+export const markerModeField = StateField.define<MarkerMode>({
+  create: () => 'recessed',
+  update(value, tr) {
+    for (const e of tr.effects) if (e.is(setMarkerMode)) return e.value;
+    return value;
+  }
+});
 
 /**
  * Context passed to every handler. Handlers push decorations into the
@@ -27,6 +42,10 @@ import type { SyntaxNodeRef } from '@lezer/common';
 export type DecorationContext = {
   view: EditorView;
   decorations: Range<Decoration>[];
+  /** The active marker treatment. Handlers read this to decide whether to
+   *  show markers verbatim ('raw'), dim them ('recessed'), or hide them off
+   *  the cursor line ('concealed'). */
+  mode: MarkerMode;
   /**
    * True if any line between `from` and `to` (inclusive) contains a
    * cursor or selection range. Used to exclude the current editing
@@ -34,6 +53,29 @@ export type DecorationContext = {
    */
   isOnCursorLine(from: number, to: number): boolean;
 };
+
+/**
+ * Decorate a syntax-marker range (`**`, `#`, `](url)`, backticks, ...) for
+ * the active mode. Callers must already have returned early for 'raw' and,
+ * where cursor-aware reveal applies, for the on-cursor-line case — so this
+ * only handles the two decorating modes:
+ *   - 'recessed' → a muted `cm-md-marker` mark (marker stays, receded).
+ *   - 'concealed' → a replace that hides the marker entirely.
+ */
+export function pushMarker(
+  ctx: DecorationContext,
+  from: number,
+  to: number
+): void {
+  if (from >= to) return;
+  if (ctx.mode === 'recessed') {
+    ctx.decorations.push(
+      Decoration.mark({ class: 'cm-md-marker' }).range(from, to)
+    );
+  } else {
+    ctx.decorations.push(Decoration.replace({}).range(from, to));
+  }
+}
 
 /**
  * Return `false` from a handler to tell the tree walker to skip this
@@ -76,6 +118,7 @@ export function buildDecorations(
   const ctx: DecorationContext = {
     view,
     decorations,
+    mode: view.state.field(markerModeField, false) ?? 'recessed',
     isOnCursorLine(from, to) {
       const startLine = doc.lineAt(from).number;
       const endLine = doc.lineAt(to).number;
@@ -119,7 +162,15 @@ export function createInlinePlugin(handlers: HandlerMap) {
       }
 
       update(update: ViewUpdate) {
-        if (update.docChanged || update.viewportChanged || update.selectionSet) {
+        const modeChanged =
+          update.startState.field(markerModeField, false) !==
+          update.state.field(markerModeField, false);
+        if (
+          update.docChanged ||
+          update.viewportChanged ||
+          update.selectionSet ||
+          modeChanged
+        ) {
           this.decorations = buildDecorations(update.view, handlers);
         }
       }
