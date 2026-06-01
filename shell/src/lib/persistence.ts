@@ -250,6 +250,9 @@ function sanitizeAppState(raw: Record<string, unknown>): Partial<AppUiState> {
   if (raw.defaultSurface === 'text' || raw.defaultSurface === 'rich') {
     out.defaultSurface = raw.defaultSurface;
   }
+  if (typeof raw.surfaceSwitchingEnabled === 'boolean') {
+    out.surfaceSwitchingEnabled = raw.surfaceSwitchingEnabled;
+  }
   return out;
 }
 

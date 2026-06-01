@@ -180,6 +180,17 @@ describe('migrateAppState', () => {
     expect(out.editorFont).toBe(DEFAULT_APP_UI_STATE.editorFont);
     expect(out.editorFontSize).toBe(DEFAULT_APP_UI_STATE.editorFontSize);
     expect(out.recentProjects).toEqual([]);
+    // A file written before surface switching existed has no flag; it must
+    // default to enabled rather than locking the writer out of switching.
+    expect(out.surfaceSwitchingEnabled).toBe(true);
+  });
+
+  it('preserves an explicit surfaceSwitchingEnabled: false', () => {
+    const out = migrateAppState({
+      schemaVersion: 1,
+      surfaceSwitchingEnabled: false
+    });
+    expect(out.surfaceSwitchingEnabled).toBe(false);
   });
 
   it('falls back to defaults when schemaVersion is from the future', () => {

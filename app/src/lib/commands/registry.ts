@@ -17,6 +17,8 @@
 // catalogue them so the cheat-sheet has one place to look.
 
 import type { LayoutMode } from '../../components/editor/SplitView';
+import { flushActiveEditor } from '../../components/editor/active-editor';
+import { usePreferencesStore } from '../../stores/preferences';
 import { useProjectStore, logProjectError } from '../../stores/project';
 import { notify } from '../notify';
 
@@ -116,6 +118,11 @@ const whenActiveTabDirty = () => {
   );
 };
 const whenMultipleTabs = () => useProjectStore.getState().tabs.length > 1;
+/** The surface toggle is runnable only when switching is enabled (the
+ *  disable-switching escape hatch) and a tab is open to switch. */
+const whenSurfaceSwitchable = () =>
+  usePreferencesStore.getState().surfaceSwitchingEnabled &&
+  useProjectStore.getState().activeTabIndex >= 0;
 
 // ============================ Match + dispatch ============================
 
@@ -341,6 +348,23 @@ export function buildRegistry(deps: CommandDeps): {
       commandId: 'view.toggleHistory',
       when: whenActiveTab,
       run: () => useProjectStore.getState().toggleHistoryPanel()
+    },
+    {
+      chord: { code: 'KeyE', mod: true, shift: true },
+      display: '⌘⇧E',
+      scope: 'window',
+      group: 'View',
+      label: 'Toggle editing surface',
+      commandId: 'view.toggleSurface',
+      when: whenSurfaceSwitchable,
+      // Flush-then-flip: drain the outgoing surface's pending edits into the
+      // canonical body, then flip. Both are synchronous store writes inside one
+      // keydown handler, so React re-renders once and the incoming surface
+      // mounts reading the fully-flushed body — zero pending-edit loss.
+      run: () => {
+        flushActiveEditor();
+        usePreferencesStore.getState().toggleDefaultSurface();
+      }
     },
 
     // ============ Project ============
@@ -576,6 +600,17 @@ export function buildRegistry(deps: CommandDeps): {
       shortcut: get('view.toggleHistory'),
       when: whenActiveTab,
       run: () => useProjectStore.getState().toggleHistoryPanel()
+    },
+    {
+      id: 'view.toggleSurface',
+      label: 'Toggle editing surface',
+      group: 'View',
+      shortcut: get('view.toggleSurface'),
+      when: whenSurfaceSwitchable,
+      run: () => {
+        flushActiveEditor();
+        usePreferencesStore.getState().toggleDefaultSurface();
+      }
     },
 
     // ============ Project ============
