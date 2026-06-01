@@ -41,3 +41,50 @@ describe('renderMarkdown heading ids', () => {
     expect(html).toMatch(/<h2>!!!<\/h2>/);
   });
 });
+
+describe('renderMarkdown GFM + content', () => {
+  it('renders a GFM table', () => {
+    const html = renderMarkdown('| a | b |\n| - | - |\n| 1 | 2 |');
+    expect(html).toContain('<table>');
+    expect(html).toContain('<th>a</th>');
+    expect(html).toContain('<td>1</td>');
+  });
+
+  it('renders strikethrough', () => {
+    expect(renderMarkdown('~~gone~~')).toContain('<del>gone</del>');
+  });
+
+  it('renders a task list with checkbox inputs', () => {
+    const html = renderMarkdown('- [x] done\n- [ ] todo');
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain('checked');
+  });
+
+  it('passes raw HTML through untouched (trusted local files)', () => {
+    const html = renderMarkdown('before\n\n<div class="callout">hi</div>\n\nafter');
+    expect(html).toContain('<div class="callout">hi</div>');
+  });
+});
+
+describe('renderMarkdown image resolution', () => {
+  it('rewrites a Markdown image src through the resolver', () => {
+    const html = renderMarkdown('![alt](pic.png)', {
+      context: { projectRoot: '/proj', filePath: 'doc.md' },
+      resolver: (raw, ctx) => `resolved://${ctx.projectRoot}/${raw}`
+    });
+    expect(html).toContain('src="resolved:///proj/pic.png"');
+    expect(html).toContain('alt="alt"');
+  });
+
+  it('leaves the src as-is with the default identity resolver', () => {
+    expect(renderMarkdown('![a](pic.png)')).toContain('src="pic.png"');
+  });
+
+  it('does not run the resolver on a raw HTML <img> (matches marked)', () => {
+    const html = renderMarkdown('<img src="raw.png">', {
+      resolver: () => 'SHOULD_NOT_APPLY'
+    });
+    expect(html).toContain('src="raw.png"');
+    expect(html).not.toContain('SHOULD_NOT_APPLY');
+  });
+});
