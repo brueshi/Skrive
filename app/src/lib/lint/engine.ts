@@ -1,7 +1,12 @@
 // Lint engine. Runs the rule registry against a project snapshot or a
-// single file. Pure function — no IPC, no React. The store is
-// responsible for assembling the inputs (manifest, deadLinks, orphans,
-// bodies) and shuttling the report to consumers.
+// single file. Output-pure — no IPC, no React; same inputs yield the same
+// report. The store is responsible for assembling the inputs (manifest,
+// deadLinks, orphans, bodies) and shuttling the report to consumers.
+//
+// Internally it memoizes parsed ASTs across calls (see `astCache`). The engine
+// is re-run on every editing pause, but typically only one file's body changed;
+// without the memo, all N files re-parse each pass, which was the dominant lint
+// cost (≈5ms × N). The memo makes a pass re-parse only the file that changed.
 
 import {
   LINT_RULE_TOML_KEYS,
@@ -48,8 +53,9 @@ export function runProjectLint(input: LintEngineInput): ProjectLintReport {
   if (fileScopeActive) {
     for (const file of manifest.files) {
       const body = bodies.get(file.path) ?? '';
-      fileAsts.set(file.path, parseAst(body));
+      fileAsts.set(file.path, parseAstCached(file.path, body));
     }
+    pruneAstCache(manifest.files);
   }
 
   for (const rule of RULES) {
@@ -92,6 +98,33 @@ export function severityFor(rule: LintRuleId, config: LintConfig): LintSeverity 
 
 function parseAst(body: string): MdastRoot {
   return fromMarkdown(body);
+}
+
+// Path-keyed parsed-AST memo, carried across engine calls. A hit requires the
+// body to be byte-identical to what was cached, so an edited file re-parses and
+// an untouched one is an O(1) lookup plus a string compare — far cheaper than a
+// re-parse. ASTs are treated as read-only by the rules (the per-pass `fileAsts`
+// map already shares one AST across every rule), so sharing across passes is
+// equally safe.
+const astCache = new Map<string, { body: string; ast: MdastRoot }>();
+
+function parseAstCached(path: string, body: string): MdastRoot {
+  const hit = astCache.get(path);
+  if (hit && hit.body === body) return hit.ast;
+  const ast = parseAst(body);
+  astCache.set(path, { body, ast });
+  return ast;
+}
+
+// Drop cache entries for files that left the project, so a long session editing
+// a churning file set doesn't grow the memo unbounded. Cheap-guarded: only walks
+// the cache when it has outgrown the live file set.
+function pruneAstCache(files: ReadonlyArray<{ path: string }>): void {
+  if (astCache.size <= files.length) return;
+  const live = new Set(files.map((f) => f.path));
+  for (const key of astCache.keys()) {
+    if (!live.has(key)) astCache.delete(key);
+  }
 }
 
 function pushAll<T>(target: T[], source: T[]): void {
