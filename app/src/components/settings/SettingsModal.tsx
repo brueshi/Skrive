@@ -188,6 +188,23 @@ const SHELL_TONE_OPTIONS: {
   }
 ];
 
+const SURFACE_OPTIONS: {
+  id: 'rich' | 'text';
+  label: string;
+  desc: string;
+}[] = [
+  {
+    id: 'rich',
+    label: 'Rich',
+    desc: 'A clean, no-syntax writing surface — write the document, not the markup.'
+  },
+  {
+    id: 'text',
+    label: 'Text',
+    desc: 'Edit the Markdown source directly, with the marker treatment chosen below.'
+  }
+];
+
 const MARKER_MODE_OPTIONS: {
   id: 'raw' | 'recessed' | 'concealed';
   label: string;
@@ -270,23 +287,17 @@ function GeneralSection() {
             </span>
           </span>
         </label>
-        <label className="settings-toggle-row">
-          <input
-            type="checkbox"
-            checked={defaultSurface === 'rich'}
-            onChange={(e) => setDefaultSurface(e.target.checked ? 'rich' : 'text')}
-          />
-          <span className="settings-toggle-text">
-            <span className="settings-toggle-label">
-              Rich editing surface (experimental)
-            </span>
-            <span className="settings-toggle-desc">
-              Edit a rich, no-syntax projection of your Markdown instead of the
-              text surface. The file on disk stays plain Markdown. Early preview:
-              constructs like tables and blockquotes show as raw source for now.
-            </span>
-          </span>
-        </label>
+      </div>
+
+      <LayoutFork
+        label="Default editing surface"
+        blurb="Where new documents open. Rich is the no-syntax surface; Text edits the Markdown source. The file on disk is plain Markdown either way."
+        options={SURFACE_OPTIONS}
+        value={defaultSurface}
+        onChange={setDefaultSurface}
+      />
+
+      <div className="settings-group">
         <label className="settings-toggle-row">
           <input
             type="checkbox"
@@ -299,7 +310,7 @@ function GeneralSection() {
             </span>
             <span className="settings-toggle-desc">
               Let ⌘⇧E (and the command palette) flip between the text and rich
-              surfaces. Turn this off to lock the editor to your default surface
+              surfaces. Turn this off to lock the editor to the default surface
               above — a single, stable editing model with no syntax a keystroke
               away.
             </span>

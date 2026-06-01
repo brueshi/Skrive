@@ -80,10 +80,10 @@ export type ShellToneId = 'dark' | 'same' | 'light';
  *  theme that existed before v0.2.2) so they don't get whiplash. */
 export type ThemeId = 'system' | 'light' | 'dark';
 
-/** Default editing surface. 'text' is the CodeMirror Source/Recessed surface
- *  (the shipped default); 'rich' is the ProseMirror projection surface. The
- *  projection editor (planning/projection-editor-master-plan.md) will make
- *  'rich' the default once surface switching lands; until then 'rich' is opt-in. */
+/** Default editing surface. 'rich' is the ProseMirror projection surface —
+ *  the no-syntax surface and the default a new user lands in. 'text' is the
+ *  CodeMirror surface (raw / recessed Markdown source) for the Markdown-literate.
+ *  Both edit the same canonical `.md`; see planning/projection-editor-master-plan.md. */
 export type SurfaceId = 'text' | 'rich';
 
 /** How the Text (CodeMirror) surface treats Markdown syntax markers. A
@@ -150,7 +150,7 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   shellTone: 'light',
   theme: 'light',
   showOutlineRail: true,
-  defaultSurface: 'text',
+  defaultSurface: 'rich',
   surfaceSwitchingEnabled: true,
   markerMode: 'recessed'
 };
