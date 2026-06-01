@@ -43,7 +43,17 @@ export default defineConfig({
     resolve: {
       alias: {
         '@skrive/shared': resolve(__dirname, 'shared/src/index.ts'),
-        '@app': resolve(__dirname, 'app/src')
+        '@app': resolve(__dirname, 'app/src'),
+        // The lint engine runs in a Web Worker (Stage 2.75). Its markdown
+        // parser (mdast-util-from-markdown → micromark) pulls in
+        // `decode-named-character-reference`, whose `browser` build calls
+        // `document.createElement` at load — fatal in a Worker, which has no
+        // `document`. Pin it to a shim mirroring the package's Node build (a
+        // pure character-entities lookup); see the shim for the full rationale.
+        'decode-named-character-reference': resolve(
+          __dirname,
+          'app/src/lib/lint/decode-named-character-reference.node-shim.ts'
+        )
       }
     }
   }
