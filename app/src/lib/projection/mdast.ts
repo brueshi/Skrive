@@ -14,9 +14,12 @@ import { gfmTable } from 'micromark-extension-gfm-table';
 import { gfmTableFromMarkdown } from 'mdast-util-gfm-table';
 import type { Root } from 'mdast';
 
+// Constructed once and reused — the extension factories return stateless config
+// that fromMarkdown only reads, so rebuilding them per parse was pure allocation
+// on a hot path (the serialize idempotence guard parses on every snapshot).
+const extensions = [gfmTable()];
+const mdastExtensions = [gfmTableFromMarkdown()];
+
 export function parseMarkdown(md: string): Root {
-  return fromMarkdown(md, {
-    extensions: [gfmTable()],
-    mdastExtensions: [gfmTableFromMarkdown()]
-  }) as Root;
+  return fromMarkdown(md, { extensions, mdastExtensions }) as Root;
 }

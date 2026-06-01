@@ -11,29 +11,65 @@
 //     whether the seam is known, never on whether the block's content changed.
 
 import type { Node as PMNode } from 'prosemirror-model';
+import type { Root } from 'mdast';
 import { parseMarkdown } from './mdast';
 
-function stripPositions(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stripPositions);
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (k === 'position') continue;
-      out[k] = stripPositions(v);
+// Structural mdast equality ignoring `position`. Short-circuits on the first
+// difference and allocates nothing. This replaces a
+// `JSON.stringify(stripPositions(tree))` compare that, per guard check, cloned a
+// whole position-stripped tree and serialized two trees to strings — three
+// tree-sized allocations that were the dominant GC fuel in a snapshot. Key order
+// is ignored, so it is at least as permissive as the old string compare (both
+// operands come from the same parser, so order matched anyway).
+function mdastEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
     }
-    return out;
+    for (let i = 0; i < a.length; i++) {
+      if (!mdastEqual(a[i], b[i])) return false;
+    }
+    return true;
   }
-  return value;
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    const ao = a as Record<string, unknown>;
+    const bo = b as Record<string, unknown>;
+    for (const k in ao) {
+      if (k === 'position') continue;
+      if (!mdastEqual(ao[k], bo[k])) return false;
+    }
+    for (const k in bo) {
+      if (k === 'position') continue;
+      if (!(k in ao)) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+// The `src` operand of the guard is a block's original bytes, stable while the
+// block is edited, so its parsed tree is cached by string and reused across
+// snapshots (mdastEqual only reads it, never mutates). The `canonical` operand
+// changes every keystroke and is parsed fresh. Bounded by a coarse clear so a
+// long session can't grow it without limit; it is a pure perf cache, so dropping
+// entries only costs a re-parse.
+const SRC_TREE_CACHE_LIMIT = 1024;
+const srcTreeCache = new Map<string, Root>();
+function srcTree(src: string): Root {
+  const hit = srcTreeCache.get(src);
+  if (hit !== undefined) return hit;
+  const tree = parseMarkdown(src);
+  if (srcTreeCache.size >= SRC_TREE_CACHE_LIMIT) srcTreeCache.clear();
+  srcTreeCache.set(src, tree);
+  return tree;
 }
 
 // Two Markdown strings are "semantically equal" when they parse to the same
 // mdast tree (ignoring source positions). This is what lets edit-then-revert
 // restore the original bytes instead of baking in normalization.
-function semanticallyEqual(a: string, b: string): boolean {
-  return (
-    JSON.stringify(stripPositions(parseMarkdown(a))) ===
-    JSON.stringify(stripPositions(parseMarkdown(b)))
-  );
+function semanticallyEqual(canonical: string, src: string): boolean {
+  return mdastEqual(parseMarkdown(canonical), srcTree(src));
 }
 
 type InlineRun = { text: string; code: boolean; strong: boolean; em: boolean; href: string | null };
@@ -195,7 +231,25 @@ function canonicalBlock(block: PMNode): string {
   }
 }
 
+// serializeBlock is a pure function of its (immutable) block node, so memoize it
+// by node identity. ProseMirror structurally shares unchanged nodes across
+// document versions, so across debounced snapshots only the block actually
+// edited since the last snapshot is a fresh reference and recomputes; every other
+// block — clean or dirty — is a cache hit. This bounds a snapshot to the one
+// changed block rather than re-running the parse-heavy idempotence guard for
+// every dirty block accumulated over a writing session. The WeakMap lets entries
+// for superseded node versions be collected on their own.
+const blockCache = new WeakMap<PMNode, string>();
+
 function serializeBlock(block: PMNode): string {
+  const cached = blockCache.get(block);
+  if (cached !== undefined) return cached;
+  const result = serializeBlockUncached(block);
+  blockCache.set(block, result);
+  return result;
+}
+
+function serializeBlockUncached(block: PMNode): string {
   // Frozen blocks are verbatim by construction and carry no `dirty` state.
   if (block.type.name === 'frozen_block') return String(block.attrs.src ?? '');
 
