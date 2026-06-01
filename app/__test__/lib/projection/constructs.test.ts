@@ -63,10 +63,38 @@ describe('inline code', () => {
   });
 });
 
+describe('dividers (thematic breaks)', () => {
+  it('round-trips verbatim while clean, in any marker style', () => {
+    for (const md of ['---\n', '***\n', '___\n']) {
+      expect(serializeDoc(parseDoc(md))).toBe(md);
+    }
+  });
+
+  it('is modeled as a horizontal_rule, not frozen', () => {
+    expect(topBlock(parseDoc('---\n')).type.name).toBe('horizontal_rule');
+  });
+
+  it('a dirty-but-unchanged rule restores its original marker via the guard', () => {
+    // `***` canonicalizes to `---`, but the two are semantically equal, so the
+    // idempotence guard hands back the writer's original bytes.
+    const md = '***\n';
+    const doc = parseDoc(md);
+    const blocks = childrenOf(doc);
+    blocks[0] = dirtied(blocks[0]);
+    expect(serializeDoc(rebuild(doc, blocks))).toBe(md);
+  });
+
+  it('a freshly-inserted rule (no src) serializes to the canonical ---', () => {
+    const hr = schema.node('horizontal_rule', { src: null, gapBefore: '', dirty: true });
+    const doc = schema.node('doc', { trailingGap: '' }, [hr]);
+    expect(serializeDoc(doc)).toBe('---');
+  });
+});
+
 describe('frozen blocks (unmodeled constructs)', () => {
-  it('blockquotes, thematic breaks, and HTML become frozen_block nodes', () => {
+  it('blockquotes and HTML become frozen_block nodes', () => {
     // CommonMark constructs the parser recognises but the schema does not model.
-    const cases = ['> a quote\n', '---\n', '<div>raw html</div>\n'];
+    const cases = ['> a quote\n', '<div>raw html</div>\n'];
     for (const md of cases) {
       const doc = parseDoc(md);
       expect(topBlock(doc).type.name).toBe('frozen_block');

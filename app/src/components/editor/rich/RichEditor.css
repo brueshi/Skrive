@@ -86,6 +86,17 @@
   margin-top: 0.25em;
 }
 
+/* Divider (thematic break). A quiet full-measure rule, not a heavy line. */
+.rich-editor .ProseMirror hr.pm-hr {
+  border: none;
+  border-top: 1px solid var(--skrive-rule-strong, var(--skrive-rule));
+  margin: 1.8em 0;
+}
+.rich-editor .ProseMirror hr.pm-hr.ProseMirror-selectednode {
+  border-top-color: var(--skrive-accent, var(--skrive-fg));
+  outline: none;
+}
+
 /* Frozen blocks: constructs the schema does not model richly (blockquotes,
    tables, HTML, loose/nested lists). They render as their raw Markdown source,
    visibly distinct so it is clear they are verbatim and not yet rich-editable. */
