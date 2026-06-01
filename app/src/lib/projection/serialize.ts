@@ -85,8 +85,24 @@ function listItemLines(block: PMNode, prefixFor: (index: number) => string): str
   return lines.join('\n');
 }
 
+// A blockquote serializes by canonically serializing its child blocks, joining
+// them with a blank line, then quoting every line: `> ` before content, a bare
+// `>` for the blank separators. Recurses through canonicalBlock, so a nested
+// blockquote or a heading inside the quote is quoted at each level.
+function quotedBlockquote(block: PMNode): string {
+  const parts: string[] = [];
+  block.forEach((child) => parts.push(canonicalBlock(child)));
+  return parts
+    .join('\n\n')
+    .split('\n')
+    .map((line) => (line.length > 0 ? `> ${line}` : '>'))
+    .join('\n');
+}
+
 function canonicalBlock(block: PMNode): string {
   switch (block.type.name) {
+    case 'blockquote':
+      return quotedBlockquote(block);
     case 'heading':
       return `${'#'.repeat(block.attrs.level)} ${serializeInline(block)}`;
     case 'code_block': {

@@ -19,7 +19,7 @@
 // refinement, not the mechanism.
 //
 // `frozen_block` is the honest home for any construct the schema does not model
-// richly (blockquotes, tables, HTML, complex/nested lists). It
+// richly (tables, HTML, loose/nested lists). It
 // is an atom holding its verbatim source; it always serializes byte-for-byte and
 // can never be canonicalized into something lossy. This is strictly safer than
 // projecting an unmodeled construct onto a paragraph, which would silently strip
@@ -83,6 +83,16 @@ export const schema = new Schema({
       content: 'paragraph+',
       defining: true,
       toDOM: () => ['li', 0]
+    },
+    blockquote: {
+      group: 'block',
+      // Holds any block content: prose, headings, dividers, nested quotes (lists
+      // join in 2.5c). The blockquote owns its verbatim `src` as a unit — its
+      // children carry no source map and are only emitted when the quote is
+      // dirtied, re-quoted line-by-line by the serializer.
+      content: 'block+',
+      attrs: { ...blockAttrs },
+      toDOM: () => ['blockquote', 0]
     },
     horizontal_rule: {
       group: 'block',
