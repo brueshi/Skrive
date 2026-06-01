@@ -80,34 +80,45 @@ function runKey(r: InlineRun): string {
 
 // Coalesce adjacent text nodes that carry the same mark set into one run, so
 // extending a bold span (which PM may represent as two adjacent strong text
-// nodes) serializes to `**bold word**`, not `**bold**** word**`.
+// nodes) serializes to `**bold word**`, not `**bold**** word**`. A hard_break
+// interrupts the run stream and emits a CommonMark backslash hard break.
 function serializeInline(node: PMNode): string {
-  const runs: InlineRun[] = [];
+  let out = '';
+  let runs: InlineRun[] = [];
+
+  const flush = () => {
+    for (const r of runs) {
+      let text = r.text;
+      if (r.code) text = `\`${text}\``;
+      if (r.strong) text = `**${text}**`;
+      if (r.em) text = `*${text}*`;
+      if (r.href != null) text = `[${text}](${r.href})`;
+      out += text;
+    }
+    runs = [];
+  };
+
   node.forEach((child) => {
-    if (!child.isText) return;
-    const names = new Set(child.marks.map((m) => m.type.name));
-    const link = child.marks.find((m) => m.type.name === 'link');
-    const run: InlineRun = {
-      text: child.text ?? '',
-      code: names.has('code'),
-      strong: names.has('strong'),
-      em: names.has('em'),
-      href: link ? String(link.attrs.href) : null
-    };
-    const prev = runs[runs.length - 1];
-    if (prev && runKey(prev) === runKey(run)) prev.text += run.text;
-    else runs.push(run);
+    if (child.isText) {
+      const names = new Set(child.marks.map((m) => m.type.name));
+      const link = child.marks.find((m) => m.type.name === 'link');
+      const run: InlineRun = {
+        text: child.text ?? '',
+        code: names.has('code'),
+        strong: names.has('strong'),
+        em: names.has('em'),
+        href: link ? String(link.attrs.href) : null
+      };
+      const prev = runs[runs.length - 1];
+      if (prev && runKey(prev) === runKey(run)) prev.text += run.text;
+      else runs.push(run);
+    } else if (child.type.name === 'hard_break') {
+      flush();
+      out += '\\\n';
+    }
   });
 
-  let out = '';
-  for (const r of runs) {
-    let text = r.text;
-    if (r.code) text = `\`${text}\``;
-    if (r.strong) text = `**${text}**`;
-    if (r.em) text = `*${text}*`;
-    if (r.href != null) text = `[${text}](${r.href})`;
-    out += text;
-  }
+  flush();
   return out;
 }
 

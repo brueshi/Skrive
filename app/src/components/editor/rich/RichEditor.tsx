@@ -12,11 +12,11 @@
 // that within a session (the master plan's event-bounded rule); a file switch
 // remounts via the `key` in App.tsx, re-parsing fresh.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { keymap } from 'prosemirror-keymap';
-import { baseKeymap, toggleMark, chainCommands } from 'prosemirror-commands';
+import { baseKeymap, toggleMark, chainCommands, newlineInCode } from 'prosemirror-commands';
 import { history, undo, redo } from 'prosemirror-history';
 import {
   inputRules,
@@ -28,8 +28,14 @@ import { splitListItem, liftListItem, sinkListItem } from 'prosemirror-schema-li
 import { tableEditing, columnResizing, goToNextCell } from 'prosemirror-tables';
 import 'prosemirror-tables/style/tables.css';
 import type { MarkType } from 'prosemirror-model';
-import { schema, parseDoc, serializeDoc, dirtyPlugin } from '../../../lib/projection';
-import { setActiveEditorFlush } from '../active-editor';
+import { schema, parseDoc, serializeDoc, dirtyPlugin, readSelectionSummary } from '../../../lib/projection';
+import { setActiveEditorFlush, setActiveRichView } from '../active-editor';
+import { RichToolbar } from './RichToolbar';
+import { SelectionBubble } from './SelectionBubble';
+import { LinkEditor } from './LinkEditor';
+import { SlashMenu } from './SlashMenu';
+import { slashPlugin } from './slash-plugin';
+import { selectionStatePlugin, useRichUiStore } from './selection-state';
 import { now, logDuration, perfEnabled } from '../../../lib/perf';
 import 'prosemirror-view/style/prosemirror.css';
 import './RichEditor.css';
@@ -89,6 +95,18 @@ function horizontalRuleInputRule(): InputRule {
   });
 }
 
+// Shift-Enter: a within-block line break. In a code block that is a literal
+// newline (newlineInCode); everywhere else it inserts a hard_break node, which
+// serializes to a CommonMark backslash hard break and renders as <br>.
+const insertHardBreak = chainCommands(newlineInCode, (state, dispatch) => {
+  if (dispatch) {
+    dispatch(
+      state.tr.replaceSelectionWith(schema.nodes.hard_break.create()).scrollIntoView()
+    );
+  }
+  return true;
+});
+
 function buildPlugins() {
   const listItem = schema.nodes.list_item;
   return [
@@ -113,7 +131,12 @@ function buildPlugins() {
         horizontalRuleInputRule()
       ]
     }),
+    // Before the editing keymaps: while the slash menu is open it must claim
+    // Enter / Arrow / Tab / Escape to drive the menu rather than split a list
+    // item or insert a newline.
+    slashPlugin(),
     keymap({
+      'Shift-Enter': insertHardBreak,
       Enter: splitListItem(listItem),
       // Tab / Shift-Tab move between cells inside a table, else nest / un-nest a
       // list item. goToNextCell returns false outside a table and sinkListItem
@@ -129,11 +152,23 @@ function buildPlugins() {
       'Mod-b': toggleMark(schema.marks.strong),
       'Mod-i': toggleMark(schema.marks.em),
       'Mod-`': toggleMark(schema.marks.code),
+      // Open the link affordance for the current selection (or the link under
+      // the cursor). Opens UI only — no document mutation until the writer
+      // commits — so an escaped ⌘K leaves the buffer untouched.
+      'Mod-k': (state) => {
+        const summary = readSelectionSummary(state);
+        if (summary.empty && !summary.link) return false;
+        useRichUiStore.getState().openLinkEditor(summary.linkHref ?? '', summary.link);
+        return true;
+      },
       'Mod-z': undo,
       'Mod-y': redo,
       'Shift-Mod-z': redo
     }),
     keymap(baseKeymap),
+    // Pushes a tiny, rAF-coalesced selection summary to the affordance store so
+    // the toolbar / bubble reflect live state without re-rendering the editor.
+    selectionStatePlugin(),
     // Cell selection, in-table arrow/Tab navigation, and the structural cell
     // commands (add/remove row/column). columnResizing adds drag-to-resize
     // handles; the resulting colwidth is visual-only and never serialized — GFM
@@ -147,6 +182,11 @@ function buildPlugins() {
 
 export function RichEditor({ body, onChange }: RichEditorProps): React.ReactElement {
   const mountRef = useRef<HTMLDivElement | null>(null);
+  // The mounted EditorView, surfaced to React once (after the mount effect runs)
+  // so the affordance components can dispatch into it. Setting this re-renders
+  // RichEditor a single time to mount those siblings; the `[]`-dep effect never
+  // re-runs, so the PM-managed editor div is created exactly once.
+  const [view, setView] = useState<EditorView | null>(null);
   // Keep the latest onChange without re-running the mount effect.
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -211,15 +251,27 @@ export function RichEditor({ body, onChange }: RichEditorProps): React.ReactElem
     });
 
     // Expose this surface's flush so the pre-quit / save paths can drain a
-    // pending snapshot into the store before saves run.
+    // pending snapshot into the store before saves run, and the view so the
+    // palette's Insert group can dispatch affordance commands into it.
     setActiveEditorFlush(flush);
+    setActiveRichView(view);
+    setView(view);
 
     return () => {
       flush(); // persist pending edits before teardown (tab / file switch)
       setActiveEditorFlush(null);
+      setActiveRichView(null);
       view.destroy();
     };
   }, []);
 
-  return <div className="rich-editor" ref={mountRef} />;
+  return (
+    <div className="rich-surface">
+      {view && <RichToolbar view={view} />}
+      <div className="rich-editor" ref={mountRef} />
+      {view && <SelectionBubble view={view} />}
+      {view && <LinkEditor view={view} />}
+      {view && <SlashMenu view={view} />}
+    </div>
+  );
 }

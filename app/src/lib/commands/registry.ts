@@ -17,7 +17,22 @@
 // catalogue them so the cheat-sheet has one place to look.
 
 import type { LayoutMode } from '../../components/editor/SplitView';
-import { flushActiveEditor } from '../../components/editor/active-editor';
+import {
+  flushActiveEditor,
+  runRichCommand,
+  getActiveRichView
+} from '../../components/editor/active-editor';
+import { useRichUiStore } from '../../components/editor/rich/selection-state';
+import {
+  setHeading,
+  setCodeBlock,
+  toggleBlockquote,
+  toggleBulletList,
+  toggleOrderedList,
+  insertDivider,
+  insertTable,
+  readSelectionSummary
+} from '../../lib/projection';
 import { usePreferencesStore } from '../../stores/preferences';
 import { useProjectStore, logProjectError } from '../../stores/project';
 import { notify } from '../notify';
@@ -28,6 +43,7 @@ export type CommandGroup =
   | 'File'
   | 'Tabs'
   | 'View'
+  | 'Insert'
   | 'Project'
   | 'Settings'
   | 'Help';
@@ -92,6 +108,7 @@ export const COMMAND_GROUP_ORDER: CommandGroup[] = [
   'File',
   'Tabs',
   'View',
+  'Insert',
   'Project',
   'Settings',
   'Help'
@@ -123,6 +140,28 @@ const whenMultipleTabs = () => useProjectStore.getState().tabs.length > 1;
 const whenSurfaceSwitchable = () =>
   usePreferencesStore.getState().surfaceSwitchingEnabled &&
   useProjectStore.getState().activeTabIndex >= 0;
+
+/** The Insert commands act on the Rich surface, so they're runnable only when
+ *  the Rich surface is the one showing an open document. */
+const whenRichSurface = () => {
+  const s = useProjectStore.getState();
+  return (
+    usePreferencesStore.getState().defaultSurface === 'rich' &&
+    s.activeView === 'editor' &&
+    s.activeTabIndex >= 0
+  );
+};
+
+/** Open the transient link affordance for the active Rich view's selection (or
+ *  the link under its cursor). No-op when there's nothing to link. */
+const openRichLink = () => {
+  const view = getActiveRichView();
+  if (!view) return;
+  const summary = readSelectionSummary(view.state);
+  if (summary.empty && !summary.link) return; // nothing to wrap
+  useRichUiStore.getState().openLinkEditor(summary.linkHref ?? '', summary.link);
+  view.focus();
+};
 
 // ============================ Match + dispatch ============================
 
@@ -611,6 +650,81 @@ export function buildRegistry(deps: CommandDeps): {
         flushActiveEditor();
         usePreferencesStore.getState().toggleDefaultSurface();
       }
+    },
+
+    // ============ Insert (Rich surface affordances) ============
+    // Palette twins of the toolbar / slash menu, gated to the Rich surface and
+    // dispatched into the active view. Block conversions act on the cursor's
+    // block; the divider/table insert relative to it.
+    ...[1, 2, 3].map<Command>((level) => ({
+      id: `insert.heading${level}`,
+      label: `Heading ${level}`,
+      group: 'Insert',
+      when: whenRichSurface,
+      run: () => {
+        runRichCommand(setHeading(level));
+      }
+    })),
+    {
+      id: 'insert.bulletList',
+      label: 'Bulleted list',
+      group: 'Insert',
+      when: whenRichSurface,
+      run: () => {
+        runRichCommand(toggleBulletList);
+      }
+    },
+    {
+      id: 'insert.orderedList',
+      label: 'Numbered list',
+      group: 'Insert',
+      when: whenRichSurface,
+      run: () => {
+        runRichCommand(toggleOrderedList);
+      }
+    },
+    {
+      id: 'insert.quote',
+      label: 'Quote',
+      group: 'Insert',
+      when: whenRichSurface,
+      run: () => {
+        runRichCommand(toggleBlockquote);
+      }
+    },
+    {
+      id: 'insert.codeBlock',
+      label: 'Code block',
+      group: 'Insert',
+      when: whenRichSurface,
+      run: () => {
+        runRichCommand(setCodeBlock);
+      }
+    },
+    {
+      id: 'insert.divider',
+      label: 'Divider',
+      group: 'Insert',
+      when: whenRichSurface,
+      run: () => {
+        runRichCommand(insertDivider);
+      }
+    },
+    {
+      id: 'insert.table',
+      label: 'Table',
+      group: 'Insert',
+      when: whenRichSurface,
+      run: () => {
+        runRichCommand(insertTable);
+      }
+    },
+    {
+      id: 'insert.link',
+      label: 'Link',
+      group: 'Insert',
+      when: whenRichSurface,
+      run: () => openRichLink()
     },
 
     // ============ Project ============

@@ -50,6 +50,7 @@ export function CommandPalette({ open, onClose, deps }: Props) {
     File: [],
     Tabs: [],
     View: [],
+    Insert: [],
     Project: [],
     Settings: [],
     Help: []

@@ -2,12 +2,231 @@
    (skrive-theme.ts) so the two surfaces read as the same document: same font
    variables, same 42rem measure, same generous margins. */
 
-.rich-editor {
+/* The surface wraps the fixed affordance bar and the scrolling editor column in
+   a flex stack: the bar stays put, the editor scrolls beneath it. */
+.rich-surface {
   height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--skrive-bg);
+}
+
+.rich-editor {
+  flex: 1 1 auto;
+  min-height: 0;
   width: 100%;
   overflow-y: auto;
   background: var(--skrive-bg);
   color: var(--skrive-fg);
+}
+
+/* The slim, fixed formatting bar. A quiet full-width band; its contents are
+   centred on the same 42rem measure as the prose so the first control lines up
+   with the text column. */
+.rich-toolbar {
+  flex: 0 0 auto;
+  background: var(--skrive-bg);
+  border-bottom: 1px solid var(--skrive-rule);
+}
+
+.rich-toolbar-inner {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 0.4rem 2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.rich-toolbar-button {
+  background: transparent;
+  border: none;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  width: 28px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: var(--skrive-radius-sm, 4px);
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.rich-toolbar-button:hover:not(:disabled) {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.rich-toolbar-button.active {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.rich-toolbar-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The "turn into" block-type trigger: a labelled pill on the left of the bar. */
+.rich-toolbar-blocktype {
+  background: transparent;
+  border: none;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0 0.4rem;
+  border-radius: var(--skrive-radius-sm, 4px);
+  font: inherit;
+  font-size: 0.85em;
+  white-space: nowrap;
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.rich-toolbar-blocktype:hover {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.rich-toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 0.25rem 0.35rem;
+  background: var(--skrive-rule);
+}
+
+.rich-blocktype-menu {
+  min-width: 9rem;
+}
+
+/* The floating selection bubble. Portalled to <body> and fixed-positioned from
+   the selection's viewport coordinates, so it floats free of the editor's
+   scroll/clip context. */
+.rich-bubble {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.2rem 0.3rem;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-md, 8px);
+  box-shadow:
+    0 6px 16px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.4)),
+    0 1px 3px light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.3));
+}
+
+/* The transient link input, floated below the selection. */
+.rich-link-editor {
+  position: fixed;
+  z-index: 1001;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-md, 8px);
+  box-shadow:
+    0 6px 16px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.4)),
+    0 1px 3px light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.3));
+}
+
+.rich-link-editor form {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem;
+}
+
+.rich-link-input {
+  width: 18rem;
+  max-width: 60vw;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 0.9em;
+  padding: 0.2rem 0.4rem;
+}
+
+.rich-link-input::placeholder {
+  color: var(--skrive-muted);
+}
+
+.rich-link-action {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--skrive-muted);
+  font: inherit;
+  font-size: 0.85em;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--skrive-radius-sm, 4px);
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.rich-link-action:hover {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.rich-link-remove:hover {
+  color: var(--skrive-danger, #c0392b);
+}
+
+/* The slash insert menu, dropped below the `/` trigger. */
+.rich-slash-menu {
+  position: fixed;
+  z-index: 1001;
+  min-width: 12rem;
+  max-height: 18rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-md, 8px);
+  box-shadow:
+    0 6px 16px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.4)),
+    0 1px 3px light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.3));
+}
+
+.rich-slash-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 0.9em;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--skrive-radius-sm, 4px);
+}
+
+.rich-slash-item:hover,
+.rich-slash-item.active {
+  background: var(--skrive-rule);
+}
+
+.rich-slash-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--skrive-muted);
+  flex: 0 0 auto;
 }
 
 .rich-editor .ProseMirror {
