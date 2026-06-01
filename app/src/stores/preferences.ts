@@ -45,6 +45,11 @@ type PreferencesActions = {
   setTheme(value: ThemeId): void;
   setShowOutlineRail(value: boolean): void;
   setDefaultSurface(value: SurfaceId): void;
+  /** Flip the active surface text<->rich. The ⌘⇧E binding calls this after
+   *  draining the outgoing surface's pending edits (see active-editor.ts), so
+   *  the incoming surface re-parses from the fully-flushed canonical body. */
+  toggleDefaultSurface(): void;
+  setSurfaceSwitchingEnabled(value: boolean): void;
 
   addDictionaryWord(word: string): void;
   removeDictionaryWord(word: string): void;
@@ -83,7 +88,8 @@ function snapshot(state: PreferencesState): AppUiState {
     shellTone: state.shellTone,
     theme: state.theme,
     showOutlineRail: state.showOutlineRail,
-    defaultSurface: state.defaultSurface
+    defaultSurface: state.defaultSurface,
+    surfaceSwitchingEnabled: state.surfaceSwitchingEnabled
   };
 }
 
@@ -193,6 +199,15 @@ export const usePreferencesStore = create<
   setDefaultSurface(value) {
     if (get().defaultSurface === value) return;
     set({ defaultSurface: value });
+    scheduleSave(get);
+  },
+  toggleDefaultSurface() {
+    set({ defaultSurface: get().defaultSurface === 'rich' ? 'text' : 'rich' });
+    scheduleSave(get);
+  },
+  setSurfaceSwitchingEnabled(value) {
+    if (get().surfaceSwitchingEnabled === value) return;
+    set({ surfaceSwitchingEnabled: value });
     scheduleSave(get);
   },
 

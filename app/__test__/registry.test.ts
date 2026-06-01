@@ -11,6 +11,8 @@ import {
   matchWindowBinding,
   type CommandDeps
 } from '../src/lib/commands/registry';
+import { usePreferencesStore } from '../src/stores/preferences';
+import { useProjectStore } from '../src/stores/project';
 
 const noop = () => {};
 const STUB_DEPS: CommandDeps = {
@@ -98,6 +100,45 @@ describe('command registry', () => {
     expect(closeProject?.scope).toBe('window');
     expect(closeProject?.display).toBe('⌘⇧W');
     expect(closeProject?.run).toBeTypeOf('function');
+  });
+});
+
+describe('surface toggle (⌘⇧E)', () => {
+  const { commands, bindings } = buildRegistry(STUB_DEPS);
+  const binding = bindings.find((b) => b.commandId === 'view.toggleSurface');
+  const command = commands.find((c) => c.id === 'view.toggleSurface');
+
+  it('binds ⌘⇧E in the View group, twinned with a palette command', () => {
+    expect(binding).toBeDefined();
+    expect(binding?.scope).toBe('window');
+    expect(binding?.group).toBe('View');
+    expect(binding?.display).toBe('⌘⇧E');
+    expect(binding?.run).toBeTypeOf('function');
+    expect(command).toBeDefined();
+    expect(command?.shortcut).toBe('⌘⇧E');
+  });
+
+  it('is runnable only when switching is enabled and a tab is open', () => {
+    useProjectStore.setState({ activeTabIndex: 0 });
+    usePreferencesStore.setState({ surfaceSwitchingEnabled: true });
+    expect(binding?.when?.()).toBe(true);
+
+    // The disable-switching escape hatch gates the verb off entirely.
+    usePreferencesStore.setState({ surfaceSwitchingEnabled: false });
+    expect(binding?.when?.()).toBe(false);
+
+    // No active tab → nothing to switch.
+    usePreferencesStore.setState({ surfaceSwitchingEnabled: true });
+    useProjectStore.setState({ activeTabIndex: -1 });
+    expect(binding?.when?.()).toBe(false);
+  });
+
+  it('flips the default surface text<->rich when run', () => {
+    usePreferencesStore.setState({ defaultSurface: 'text' });
+    binding?.run?.();
+    expect(usePreferencesStore.getState().defaultSurface).toBe('rich');
+    binding?.run?.();
+    expect(usePreferencesStore.getState().defaultSurface).toBe('text');
   });
 });
 

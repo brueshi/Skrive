@@ -113,6 +113,11 @@ export type AppUiState = {
   showOutlineRail: boolean;
   /** Which editing surface new tabs open in. */
   defaultSurface: SurfaceId;
+  /** Whether the writer may switch surfaces (⌘⇧E / the palette command).
+   *  When false the surface is locked to `defaultSurface` — the escape hatch
+   *  for a never-seen-Markdown writer who should never be one keystroke from
+   *  raw syntax, and for anyone who wants a single, stable editing model. */
+  surfaceSwitchingEnabled: boolean;
 };
 
 export const DEFAULT_RECENT_PROJECTS_CAP = 10;
@@ -135,7 +140,8 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   shellTone: 'light',
   theme: 'light',
   showOutlineRail: true,
-  defaultSurface: 'text'
+  defaultSurface: 'text',
+  surfaceSwitchingEnabled: true
 };
 
 export const DEFAULT_SIDEBAR_WIDTH = 260;

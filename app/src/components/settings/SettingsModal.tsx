@@ -195,6 +195,12 @@ function GeneralSection() {
   const setShowOutlineRail = usePreferencesStore((s) => s.setShowOutlineRail);
   const defaultSurface = usePreferencesStore((s) => s.defaultSurface);
   const setDefaultSurface = usePreferencesStore((s) => s.setDefaultSurface);
+  const surfaceSwitchingEnabled = usePreferencesStore(
+    (s) => s.surfaceSwitchingEnabled
+  );
+  const setSurfaceSwitchingEnabled = usePreferencesStore(
+    (s) => s.setSurfaceSwitchingEnabled
+  );
   const panelOpenBehavior = usePreferencesStore((s) => s.panelOpenBehavior);
   const setPanelOpenBehavior = usePreferencesStore(
     (s) => s.setPanelOpenBehavior
@@ -254,6 +260,24 @@ function GeneralSection() {
               Edit a rich, no-syntax projection of your Markdown instead of the
               text surface. The file on disk stays plain Markdown. Early preview:
               constructs like tables and blockquotes show as raw source for now.
+            </span>
+          </span>
+        </label>
+        <label className="settings-toggle-row">
+          <input
+            type="checkbox"
+            checked={surfaceSwitchingEnabled}
+            onChange={(e) => setSurfaceSwitchingEnabled(e.target.checked)}
+          />
+          <span className="settings-toggle-text">
+            <span className="settings-toggle-label">
+              Allow switching editing surfaces
+            </span>
+            <span className="settings-toggle-desc">
+              Let ⌘⇧E (and the command palette) flip between the text and rich
+              surfaces. Turn this off to lock the editor to your default surface
+              above — a single, stable editing model with no syntax a keystroke
+              away.
             </span>
           </span>
         </label>
