@@ -16,6 +16,7 @@
         "@tauri-apps/plugin-opener": "^2",
         "@tauri-apps/plugin-process": "^2",
         "@tauri-apps/plugin-updater": "^2",
+        "character-entities": "^2.0.2",
         "electron-updater": "^6.8.3",
         "marked": "^18.0.0",
         "yaml": "^2.6.1",
