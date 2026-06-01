@@ -16,7 +16,7 @@ import { useEffect, useRef } from 'react';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { keymap } from 'prosemirror-keymap';
-import { baseKeymap, toggleMark } from 'prosemirror-commands';
+import { baseKeymap, toggleMark, chainCommands } from 'prosemirror-commands';
 import { history, undo, redo } from 'prosemirror-history';
 import {
   inputRules,
@@ -25,6 +25,8 @@ import {
   InputRule
 } from 'prosemirror-inputrules';
 import { splitListItem, liftListItem, sinkListItem } from 'prosemirror-schema-list';
+import { tableEditing, columnResizing, goToNextCell } from 'prosemirror-tables';
+import 'prosemirror-tables/style/tables.css';
 import type { MarkType } from 'prosemirror-model';
 import { schema, parseDoc, serializeDoc, dirtyPlugin } from '../../../lib/projection';
 import { setActiveEditorFlush } from '../active-editor';
@@ -113,11 +115,13 @@ function buildPlugins() {
     }),
     keymap({
       Enter: splitListItem(listItem),
-      // Tab / Shift-Tab nest and un-nest the item; Mod-[ / Mod-] keep the
-      // explicit variant. sinkListItem returns false outside a list, so the
-      // binding is inert in prose rather than swallowing Tab everywhere.
-      Tab: sinkListItem(listItem),
-      'Shift-Tab': liftListItem(listItem),
+      // Tab / Shift-Tab move between cells inside a table, else nest / un-nest a
+      // list item. goToNextCell returns false outside a table and sinkListItem
+      // returns false outside a list, so the chain is inert in plain prose
+      // rather than swallowing Tab everywhere. Mod-[ / Mod-] keep the explicit
+      // list variant for when the cursor is in a list nested inside a cell.
+      Tab: chainCommands(goToNextCell(1), sinkListItem(listItem)),
+      'Shift-Tab': chainCommands(goToNextCell(-1), liftListItem(listItem)),
       'Mod-]': sinkListItem(listItem),
       'Mod-[': liftListItem(listItem)
     }),
@@ -130,6 +134,13 @@ function buildPlugins() {
       'Shift-Mod-z': redo
     }),
     keymap(baseKeymap),
+    // Cell selection, in-table arrow/Tab navigation, and the structural cell
+    // commands (add/remove row/column). columnResizing adds drag-to-resize
+    // handles; the resulting colwidth is visual-only and never serialized — GFM
+    // has no column widths, so a width-only change is semantically equal to the
+    // source and the idempotence guard restores the original bytes.
+    columnResizing(),
+    tableEditing(),
     dirtyPlugin
   ];
 }

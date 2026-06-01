@@ -109,6 +109,34 @@
   outline: none;
 }
 
+/* Tables. A quiet ruled grid that reads like prose, not a spreadsheet. The
+   prosemirror-tables base stylesheet handles cell selection and the resize
+   handle; this is the Skrive skin on top. */
+.rich-editor .ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0;
+  font-size: 0.95em;
+  overflow: hidden;
+}
+.rich-editor .ProseMirror th,
+.rich-editor .ProseMirror td {
+  border: 1px solid var(--skrive-rule-strong, var(--skrive-rule));
+  padding: 0.4em 0.7em;
+  vertical-align: top;
+  text-align: left;
+}
+.rich-editor .ProseMirror th {
+  font-weight: 600;
+  background: var(--skrive-rule);
+}
+/* prosemirror-tables marks the active cell selection; tint it with the brand
+   selection colour instead of the library default. */
+.rich-editor .ProseMirror .selectedCell::after {
+  background: var(--skrive-selection);
+  opacity: 0.4;
+}
+
 /* Frozen blocks: constructs the schema does not model richly (blockquotes,
    tables, HTML, loose/nested lists). They render as their raw Markdown source,
    visibly distinct so it is clear they are verbatim and not yet rich-editable. */

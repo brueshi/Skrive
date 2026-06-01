@@ -11,7 +11,7 @@
 //     whether the seam is known, never on whether the block's content changed.
 
 import type { Node as PMNode } from 'prosemirror-model';
-import { fromMarkdown } from 'mdast-util-from-markdown';
+import { parseMarkdown } from './mdast';
 
 function stripPositions(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripPositions);
@@ -31,8 +31,8 @@ function stripPositions(value: unknown): unknown {
 // restore the original bytes instead of baking in normalization.
 function semanticallyEqual(a: string, b: string): boolean {
   return (
-    JSON.stringify(stripPositions(fromMarkdown(a))) ===
-    JSON.stringify(stripPositions(fromMarkdown(b)))
+    JSON.stringify(stripPositions(parseMarkdown(a))) ===
+    JSON.stringify(stripPositions(parseMarkdown(b)))
   );
 }
 
@@ -124,10 +124,57 @@ function quotedBlockquote(block: PMNode): string {
     .join('\n');
 }
 
+// A pipe inside a GFM table cell must be escaped, and a cell is a single line —
+// any stray newline (from a hard break) would split the row, so collapse it.
+function escapeTableCell(text: string): string {
+  return text.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+}
+
+// PM table -> canonical GFM: a header row, an alignment delimiter row derived
+// from the header cells' `align` attr, then the body rows. Cells serialize their
+// inline content through serializeInline (so marks survive) with pipes escaped.
+// Minimal padding — `| a | b |` — which re-parses to the same table, so this is a
+// fixpoint; an untouched table is restored verbatim by the idempotence guard.
+function serializeTable(block: PMNode): string {
+  const rows: PMNode[] = [];
+  block.forEach((row) => rows.push(row));
+  const header = rows[0];
+  if (!header) return '';
+
+  const rowLine = (row: PMNode): string => {
+    const cells: string[] = [];
+    row.forEach((cell) => cells.push(escapeTableCell(serializeInline(cell))));
+    return `| ${cells.join(' | ')} |`;
+  };
+
+  const delimiters: string[] = [];
+  header.forEach((cell) => {
+    const align = cell.attrs.align;
+    delimiters.push(
+      align === 'left'
+        ? ':---'
+        : align === 'right'
+          ? '---:'
+          : align === 'center'
+            ? ':---:'
+            : '---'
+    );
+  });
+
+  const lines = [rowLine(header), `| ${delimiters.join(' | ')} |`];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (row) lines.push(rowLine(row));
+  }
+  return lines.join('\n');
+}
+
 function canonicalBlock(block: PMNode): string {
   switch (block.type.name) {
     case 'blockquote':
       return quotedBlockquote(block);
+    case 'table':
+      return serializeTable(block);
     case 'heading':
       return `${'#'.repeat(block.attrs.level)} ${serializeInline(block)}`;
     case 'code_block': {

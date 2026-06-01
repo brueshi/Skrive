@@ -19,19 +19,41 @@
 // refinement, not the mechanism.
 //
 // `frozen_block` is the honest home for any construct the schema does not model
-// richly (tables, HTML, loose/nested lists). It
+// richly (raw HTML, and constructs nested in a container we don't recurse into). It
 // is an atom holding its verbatim source; it always serializes byte-for-byte and
 // can never be canonicalized into something lossy. This is strictly safer than
 // projecting an unmodeled construct onto a paragraph, which would silently strip
 // its syntax the moment the writer edits it.
 
 import { Schema } from 'prosemirror-model';
+import { tableNodes } from 'prosemirror-tables';
 
 const blockAttrs = {
   src: { default: null as string | null },
   gapBefore: { default: null as string | null },
   dirty: { default: false }
 };
+
+// prosemirror-tables supplies the table / row / cell node specs (and, paired
+// with its `tableEditing` plugin in the Rich surface, the cell-selection and
+// navigation behaviour). GFM table cells are inline-only, so `cellContent` is
+// `inline*`. `align` carries the GFM column alignment: set per cell from the
+// source's delimiter row at parse time, read back from the header row when
+// serializing. The `table` node additionally takes the projection blockAttrs so
+// it owns its verbatim `src` as a unit, exactly like every other top-level block.
+const tableSpecs = tableNodes({
+  tableGroup: 'block',
+  cellContent: 'inline*',
+  cellAttributes: {
+    align: {
+      default: null,
+      getFromDOM: (dom) => (dom as HTMLElement).style.textAlign || null,
+      setDOMAttr: (value, attrs) => {
+        if (value) attrs.style = `text-align: ${String(value)}`;
+      }
+    }
+  }
+});
 
 export const schema = new Schema({
   nodes: {
@@ -123,6 +145,10 @@ export const schema = new Schema({
       attrs: { src: { default: '' }, gapBefore: { default: null as string | null } },
       toDOM: (node) => ['div', { class: 'pm-frozen-block', 'data-frozen': '' }, String(node.attrs.src)]
     },
+    table: { ...tableSpecs.table, attrs: { ...blockAttrs } },
+    table_row: tableSpecs.table_row,
+    table_cell: tableSpecs.table_cell,
+    table_header: tableSpecs.table_header,
     text: { group: 'inline' }
   },
   marks: {

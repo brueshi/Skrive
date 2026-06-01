@@ -191,19 +191,91 @@ describe('blockquotes', () => {
   });
 });
 
+describe('tables (2.5d)', () => {
+  const canonical = '| a | b |\n| --- | --- |\n| 1 | 2 |\n';
+
+  // list_item -> first paragraph; table cells -> inline. The dirtied() helper
+  // rebuilds a block dirty; for a genuine content edit we rebuild one cell.
+  function editFirstBodyCell(table: PMNode, text: string): PMNode {
+    const rows = childrenOf(table).map((row, ri) => {
+      if (ri !== 1) return row;
+      const cells = childrenOf(row).map((cell, ci) =>
+        ci === 0
+          ? schema.node(cell.type.name, cell.attrs, [schema.text(text)])
+          : cell
+      );
+      return schema.node('table_row', row.attrs, cells);
+    });
+    return schema.node('table', { ...table.attrs, dirty: true }, rows);
+  }
+
+  it('is modeled as a table, not frozen', () => {
+    expect(topBlock(parseDoc(canonical)).type.name).toBe('table');
+  });
+
+  it('round-trips verbatim while clean', () => {
+    expect(serializeDoc(parseDoc(canonical))).toBe(canonical);
+    // A non-canonical-but-clean table is also restored byte-for-byte.
+    const loose = '|a|b|\n|-|-|\n|1|2|\n';
+    expect(serializeDoc(parseDoc(loose))).toBe(loose);
+  });
+
+  it('the first row is a header, the rest are body cells', () => {
+    const table = topBlock(parseDoc(canonical));
+    const rows = childrenOf(table);
+    expect(childrenOf(rows[0]).every((c) => c.type.name === 'table_header')).toBe(true);
+    expect(childrenOf(rows[1]).every((c) => c.type.name === 'table_cell')).toBe(true);
+  });
+
+  it('captures GFM column alignment on the header cells', () => {
+    const md = '| l | c | r |\n| :--- | :---: | ---: |\n| 1 | 2 | 3 |\n';
+    const header = childrenOf(topBlock(parseDoc(md)))[0];
+    expect(childrenOf(header).map((c) => c.attrs.align)).toEqual([
+      'left',
+      'center',
+      'right'
+    ]);
+  });
+
+  it('canonical form is a fixpoint (parse/serialize is stable)', () => {
+    expect(serializeDoc(parseDoc(canonical))).toBe(canonical);
+    const aligned = '| l | r |\n| :--- | ---: |\n| 1 | 2 |\n';
+    expect(serializeDoc(parseDoc(aligned))).toBe(aligned);
+  });
+
+  it('a genuinely edited table re-serializes to canonical GFM and round-trips', () => {
+    // Start from a non-canonical (single-dash) source so the edit forces the
+    // canonical three-dash delimiter, proving we serialize rather than echo src.
+    const doc = parseDoc('|a|b|\n|-|-|\n|1|2|\n');
+    const blocks = childrenOf(doc);
+    blocks[0] = editFirstBodyCell(blocks[0], 'X');
+    const out = serializeDoc(rebuild(doc, blocks));
+    expect(out).toBe('| a | b |\n| --- | --- |\n| X | 2 |\n');
+    expect(serializeDoc(parseDoc(out))).toBe(out); // fixpoint after edit
+  });
+
+  it('escapes a pipe inside an edited cell', () => {
+    const doc = parseDoc('|a|b|\n|-|-|\n|1|2|\n');
+    const blocks = childrenOf(doc);
+    blocks[0] = editFirstBodyCell(blocks[0], 'x|y');
+    const out = serializeDoc(rebuild(doc, blocks));
+    expect(out).toContain('| x\\|y | 2 |');
+  });
+
+  it('a dirty-but-unchanged table restores its original bytes via the guard', () => {
+    const doc = parseDoc(canonical);
+    const blocks = childrenOf(doc);
+    blocks[0] = dirtied(blocks[0]);
+    expect(serializeDoc(rebuild(doc, blocks))).toBe(canonical);
+  });
+});
+
 describe('frozen blocks (unmodeled constructs)', () => {
   it('raw HTML becomes a frozen_block node', () => {
     const md = '<div>raw html</div>\n';
     const doc = parseDoc(md);
     expect(topBlock(doc).type.name).toBe('frozen_block');
     expect(serializeDoc(doc)).toBe(md);
-  });
-
-  it('a GFM table round-trips verbatim (parsed as plain text under CommonMark)', () => {
-    // We parse bare CommonMark, so a table tiles as ordinary blocks; byte-fidelity
-    // holds regardless because clean blocks emit their verbatim source.
-    const md = '| a | b |\n| - | - |\n| 1 | 2 |\n';
-    expect(serializeDoc(parseDoc(md))).toBe(md);
   });
 
   it('a frozen block always emits its source even if a stray dirty flag is forced around it', () => {
