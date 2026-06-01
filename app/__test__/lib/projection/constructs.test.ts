@@ -91,15 +91,57 @@ describe('dividers (thematic breaks)', () => {
   });
 });
 
+describe('blockquotes', () => {
+  it('round-trips verbatim while clean', () => {
+    const md = '> a quote\n> spanning two lines\n';
+    expect(serializeDoc(parseDoc(md))).toBe(md);
+  });
+
+  it('is modeled as a blockquote, not frozen', () => {
+    expect(topBlock(parseDoc('> a quote\n')).type.name).toBe('blockquote');
+  });
+
+  it('canonicalizes by re-quoting each line when edited', () => {
+    const doc = parseDoc('> first\n>\n> second\n');
+    const blocks = childrenOf(doc);
+    // Replace the inner content so the block is genuinely dirty, not guard-equal.
+    const para = schema.node('paragraph', {}, [schema.text('edited line')]);
+    blocks[0] = schema.node('blockquote', { ...blocks[0].attrs, dirty: true }, [para]);
+    // The trailing newline lives in the doc's trailingGap, preserved verbatim.
+    expect(serializeDoc(rebuild(doc, blocks))).toBe('> edited line\n');
+  });
+
+  it('a dirty-but-unchanged quote restores its original bytes via the guard', () => {
+    const md = '> kept verbatim\n';
+    const doc = parseDoc(md);
+    const blocks = childrenOf(doc);
+    blocks[0] = dirtied(blocks[0]);
+    expect(serializeDoc(rebuild(doc, blocks))).toBe(md);
+  });
+
+  it('models a nested blockquote, round-tripping verbatim while clean', () => {
+    const md = '> outer\n>\n> > inner\n';
+    const doc = parseDoc(md);
+    expect(topBlock(doc).type.name).toBe('blockquote');
+    expect(serializeDoc(doc)).toBe(md);
+  });
+
+  it('freezes a blockquote whose child is still unmodeled (a list)', () => {
+    // Lists inside quotes are deferred to 2.5c; until then the whole quote is
+    // frozen verbatim rather than modeled lossily.
+    const md = '> - a bullet inside a quote\n';
+    const doc = parseDoc(md);
+    expect(topBlock(doc).type.name).toBe('frozen_block');
+    expect(serializeDoc(doc)).toBe(md);
+  });
+});
+
 describe('frozen blocks (unmodeled constructs)', () => {
-  it('blockquotes and HTML become frozen_block nodes', () => {
-    // CommonMark constructs the parser recognises but the schema does not model.
-    const cases = ['> a quote\n', '<div>raw html</div>\n'];
-    for (const md of cases) {
-      const doc = parseDoc(md);
-      expect(topBlock(doc).type.name).toBe('frozen_block');
-      expect(serializeDoc(doc)).toBe(md);
-    }
+  it('raw HTML becomes a frozen_block node', () => {
+    const md = '<div>raw html</div>\n';
+    const doc = parseDoc(md);
+    expect(topBlock(doc).type.name).toBe('frozen_block');
+    expect(serializeDoc(doc)).toBe(md);
   });
 
   it('a GFM table round-trips verbatim (parsed as plain text under CommonMark)', () => {
@@ -120,10 +162,10 @@ describe('frozen blocks (unmodeled constructs)', () => {
 
   it('a frozen block always emits its source even if a stray dirty flag is forced around it', () => {
     // Editing elsewhere must never canonicalize a frozen construct.
-    const md = 'A paragraph.\n\n> a quote that must survive\n';
+    const md = 'A paragraph.\n\n<div>raw html that must survive</div>\n';
     const doc = parseDoc(md);
     const blocks = childrenOf(doc);
-    blocks[0] = dirtied(blocks[0]); // dirty the paragraph, not the quote
+    blocks[0] = dirtied(blocks[0]); // dirty the paragraph, not the HTML
     expect(serializeDoc(rebuild(doc, blocks))).toBe(md);
   });
 });

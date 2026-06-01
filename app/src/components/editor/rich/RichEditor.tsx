@@ -106,6 +106,7 @@ function buildPlugins() {
         textblockTypeInputRule(/^(#{1,6})\s$/, schema.nodes.heading, (match) => ({
           level: (match[1] ?? '#').length
         })),
+        wrappingInputRule(/^\s*>\s$/, schema.nodes.blockquote),
         horizontalRuleInputRule()
       ]
     }),

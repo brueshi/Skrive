@@ -6,9 +6,9 @@
 // structure is mapped faithfully so a *dirty* block can serialize canonically,
 // but for a *clean* block the inline tree is never consulted — `src` wins.
 //
-// Anything the schema does not model richly (blockquotes, tables, HTML, loose
-// or nested lists) becomes a `frozen_block`: it round-trips verbatim and is
-// never canonicalized, so it cannot be corrupted by an edit.
+// Anything the schema does not model richly (tables, HTML, loose or nested
+// lists) becomes a `frozen_block`: it round-trips verbatim and is never
+// canonicalized, so it cannot be corrupted by an edit.
 
 import type { Node as PMNode, Mark } from 'prosemirror-model';
 import { fromMarkdown } from 'mdast-util-from-markdown';
@@ -93,6 +93,46 @@ function frozen(src: string, gapBefore: string): PMNode {
   return schema.node('frozen_block', { src, gapBefore });
 }
 
+// Map an mdast block for use INSIDE a modeled container (a blockquote; later,
+// list items). No per-block source map: the container owns the verbatim `src`
+// and only re-serializes its children canonically when the container is dirtied.
+// Returns null for any construct we cannot canonically reproduce, which tells
+// the caller to freeze the whole container verbatim rather than model it lossily.
+function childBlockToPM(node: RootContent): PMNode | null {
+  switch (node.type) {
+    case 'paragraph':
+      return schema.node('paragraph', {}, inlineToPM(node.children, []));
+    case 'heading':
+      return schema.node('heading', { level: node.depth }, inlineToPM(node.children, []));
+    case 'code':
+      return schema.node(
+        'code_block',
+        { lang: node.lang ?? '' },
+        node.value ? [schema.text(node.value)] : []
+      );
+    case 'thematicBreak':
+      return schema.node('horizontal_rule', {});
+    case 'blockquote': {
+      const kids = mapChildBlocks(node.children);
+      return kids ? schema.node('blockquote', {}, kids) : null;
+    }
+    default:
+      // Lists are deferred to Stage 2.5c (the list overhaul); tables to 2.5d.
+      // Until then a container holding one is frozen as a whole, never lossy.
+      return null;
+  }
+}
+
+function mapChildBlocks(children: RootContent[]): PMNode[] | null {
+  const out: PMNode[] = [];
+  for (const child of children) {
+    const pm = childBlockToPM(child);
+    if (!pm) return null;
+    out.push(pm);
+  }
+  return out.length > 0 ? out : null;
+}
+
 function blockToPM(node: RootContent, src: string, gapBefore: string): PMNode {
   const base = { src, gapBefore, dirty: false };
   switch (node.type) {
@@ -108,6 +148,11 @@ function blockToPM(node: RootContent, src: string, gapBefore: string): PMNode {
       return schema.node('paragraph', base, inlineToPM(node.children, []));
     case 'thematicBreak':
       return schema.node('horizontal_rule', base);
+    case 'blockquote': {
+      const kids = mapChildBlocks(node.children);
+      if (!kids) return frozen(src, gapBefore);
+      return schema.node('blockquote', base, kids);
+    }
     case 'list': {
       if (!isSimpleList(node)) return frozen(src, gapBefore);
       if (node.ordered) {
@@ -119,8 +164,8 @@ function blockToPM(node: RootContent, src: string, gapBefore: string): PMNode {
       return schema.node('bullet_list', { ...base, marker }, listItemsToPM(node));
     }
     default:
-      // Blockquote, table, html, definition, footnote, etc.: preserved
-      // verbatim, never canonicalized.
+      // Table, html, definition, footnote, etc.: preserved verbatim, never
+      // canonicalized.
       return frozen(src, gapBefore);
   }
 }
