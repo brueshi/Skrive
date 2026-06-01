@@ -69,28 +69,62 @@ function inlineToPM(nodes: PhrasingContent[] | undefined, marks: readonly Mark[]
   return out;
 }
 
-// A list is "simple" — safe to model as an editable PM list — only when every
-// item is a single paragraph and the list is tight. Loose or nested lists are
-// frozen so an edit can never flatten their structure.
-function isSimpleList(node: List): boolean {
-  if (node.spread) return false;
-  return (node.children ?? []).every((item: ListItem) => {
-    if (item.spread) return false;
-    const kids = item.children ?? [];
-    return kids.length === 1 && kids[0]?.type === 'paragraph';
-  });
-}
-
-function listItemsToPM(node: List): PMNode[] {
-  return (node.children ?? []).map((item: ListItem) => {
-    const para = item.children.find((c) => c.type === 'paragraph');
-    const inline = para && para.type === 'paragraph' ? inlineToPM(para.children, []) : [];
-    return schema.node('list_item', {}, [schema.node('paragraph', {}, inline)]);
-  });
-}
-
 function frozen(src: string, gapBefore: string): PMNode {
   return schema.node('frozen_block', { src, gapBefore });
+}
+
+// The literal marker style is not on the mdast node, so we read it back from the
+// source at the list's byte offset. `md.slice` from there begins at the first
+// item's marker (after any nesting indent, which the `\s*` absorbs). This keeps
+// a dirty nested list in the writer's own `*`/`+`/`)` rather than churning it to
+// one canonical form — the same style-fidelity rule top-level lists already get.
+function bulletMarker(node: List, md: string): string {
+  const off = offsetStart(node, 0);
+  return md.slice(off, off + 8).match(/^\s*([-*+])/)?.[1] ?? '-';
+}
+function orderedDelimiter(node: List, md: string): string {
+  const off = offsetStart(node, 0);
+  return md.slice(off, off + 16).match(/^\s*\d+([.)])/)?.[1] ?? '.';
+}
+
+// A list item's children: an opening paragraph followed by any further blocks
+// (nested sub-lists, extra paragraphs in a loose item). Returns null — freezing
+// the whole list — if the item is empty, does not open with a paragraph (PM's
+// `paragraph block*` rule), or holds a child we cannot model.
+function mapListItemChildren(item: ListItem, md: string): PMNode[] | null {
+  const kids: PMNode[] = [];
+  for (const child of item.children ?? []) {
+    const pm = childBlockToPM(child, md);
+    if (!pm) return null;
+    kids.push(pm);
+  }
+  if (kids.length === 0 || kids[0]?.type.name !== 'paragraph') return null;
+  return kids;
+}
+
+// Map an mdast list (top-level or nested) to a PM list node, preserving marker
+// style, ordinal start, delimiter, and loose/tight rhythm. `base` carries the
+// source map for a top-level list; nested lists pass none (they ride their
+// container's verbatim `src`). Returns null if any item is unmappable.
+function listToPM(node: List, md: string, base?: Record<string, unknown>): PMNode | null {
+  const items: PMNode[] = [];
+  for (const item of node.children ?? []) {
+    const kids = mapListItemChildren(item, md);
+    if (!kids) return null;
+    items.push(schema.node('list_item', {}, kids));
+  }
+  if (items.length === 0) return null;
+
+  const common = base ?? {};
+  const spread = node.spread === true;
+  if (node.ordered) {
+    return schema.node(
+      'ordered_list',
+      { ...common, start: node.start ?? 1, delimiter: orderedDelimiter(node, md), spread },
+      items
+    );
+  }
+  return schema.node('bullet_list', { ...common, marker: bulletMarker(node, md), spread }, items);
 }
 
 // Map an mdast block for use INSIDE a modeled container (a blockquote; later,
@@ -98,7 +132,7 @@ function frozen(src: string, gapBefore: string): PMNode {
 // and only re-serializes its children canonically when the container is dirtied.
 // Returns null for any construct we cannot canonically reproduce, which tells
 // the caller to freeze the whole container verbatim rather than model it lossily.
-function childBlockToPM(node: RootContent): PMNode | null {
+function childBlockToPM(node: RootContent, md: string): PMNode | null {
   switch (node.type) {
     case 'paragraph':
       return schema.node('paragraph', {}, inlineToPM(node.children, []));
@@ -112,28 +146,30 @@ function childBlockToPM(node: RootContent): PMNode | null {
       );
     case 'thematicBreak':
       return schema.node('horizontal_rule', {});
+    case 'list':
+      return listToPM(node, md);
     case 'blockquote': {
-      const kids = mapChildBlocks(node.children);
+      const kids = mapChildBlocks(node.children, md);
       return kids ? schema.node('blockquote', {}, kids) : null;
     }
     default:
-      // Lists are deferred to Stage 2.5c (the list overhaul); tables to 2.5d.
-      // Until then a container holding one is frozen as a whole, never lossy.
+      // Tables are deferred to Stage 2.5d; raw HTML stays frozen by design.
+      // A container holding one is frozen as a whole, never modeled lossily.
       return null;
   }
 }
 
-function mapChildBlocks(children: RootContent[]): PMNode[] | null {
+function mapChildBlocks(children: RootContent[], md: string): PMNode[] | null {
   const out: PMNode[] = [];
   for (const child of children) {
-    const pm = childBlockToPM(child);
+    const pm = childBlockToPM(child, md);
     if (!pm) return null;
     out.push(pm);
   }
   return out.length > 0 ? out : null;
 }
 
-function blockToPM(node: RootContent, src: string, gapBefore: string): PMNode {
+function blockToPM(node: RootContent, src: string, gapBefore: string, md: string): PMNode {
   const base = { src, gapBefore, dirty: false };
   switch (node.type) {
     case 'heading':
@@ -149,20 +185,12 @@ function blockToPM(node: RootContent, src: string, gapBefore: string): PMNode {
     case 'thematicBreak':
       return schema.node('horizontal_rule', base);
     case 'blockquote': {
-      const kids = mapChildBlocks(node.children);
+      const kids = mapChildBlocks(node.children, md);
       if (!kids) return frozen(src, gapBefore);
       return schema.node('blockquote', base, kids);
     }
-    case 'list': {
-      if (!isSimpleList(node)) return frozen(src, gapBefore);
-      if (node.ordered) {
-        const start = node.start ?? 1;
-        const delimiter = src.match(/^\s*\d+([.)])/)?.[1] ?? '.';
-        return schema.node('ordered_list', { ...base, start, delimiter }, listItemsToPM(node));
-      }
-      const marker = src.match(/^\s*([-*+])/)?.[1] ?? '-';
-      return schema.node('bullet_list', { ...base, marker }, listItemsToPM(node));
-    }
+    case 'list':
+      return listToPM(node, md, base) ?? frozen(src, gapBefore);
     default:
       // Table, html, definition, footnote, etc.: preserved verbatim, never
       // canonicalized.
@@ -181,7 +209,7 @@ export function parseDoc(md: string): PMNode {
     const end = offsetEnd(child, start);
     const gapBefore = md.slice(prevEnd, start);
     const src = md.slice(start, end);
-    blocks.push(blockToPM(child, src, gapBefore));
+    blocks.push(blockToPM(child, src, gapBefore, md));
     prevEnd = end;
   }
   const trailingGap = md.slice(prevEnd);

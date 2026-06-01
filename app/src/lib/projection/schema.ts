@@ -66,30 +66,40 @@ export const schema = new Schema({
       content: 'list_item+',
       // `marker` (`*`, `-`, or `+`) is a style hint captured from the source so a
       // dirty list re-serializes in the writer's own marker, not one canonical
-      // form. Style-aware serialization keeps editing from churning bytes the
-      // writer never chose.
-      attrs: { ...blockAttrs, marker: { default: '-' } },
+      // form. `spread` records whether the list is loose (blank lines between
+      // items) so it re-serializes with the same rhythm. Style-aware
+      // serialization keeps editing from churning bytes the writer never chose.
+      attrs: { ...blockAttrs, marker: { default: '-' }, spread: { default: false } },
       toDOM: () => ['ul', 0]
     },
     ordered_list: {
       group: 'block',
       content: 'list_item+',
-      // `start` is the first ordinal; `delimiter` is `.` or `)`. Both captured
-      // from source for style-aware re-serialization.
-      attrs: { ...blockAttrs, start: { default: 1 }, delimiter: { default: '.' } },
+      // `start` is the first ordinal; `delimiter` is `.` or `)`; `spread` records
+      // loose vs tight. All captured from source for style-aware re-serialization.
+      attrs: {
+        ...blockAttrs,
+        start: { default: 1 },
+        delimiter: { default: '.' },
+        spread: { default: false }
+      },
       toDOM: (node) => ['ol', { start: node.attrs.start }, 0]
     },
     list_item: {
-      content: 'paragraph+',
+      // `paragraph block*` (the prosemirror-schema-list shape): an item opens
+      // with a paragraph and may carry further blocks — nested sub-lists, extra
+      // paragraphs for a loose item. This is what lets nested and loose lists be
+      // modeled instead of frozen.
+      content: 'paragraph block*',
       defining: true,
       toDOM: () => ['li', 0]
     },
     blockquote: {
       group: 'block',
-      // Holds any block content: prose, headings, dividers, nested quotes (lists
-      // join in 2.5c). The blockquote owns its verbatim `src` as a unit — its
-      // children carry no source map and are only emitted when the quote is
-      // dirtied, re-quoted line-by-line by the serializer.
+      // Holds any block content: prose, headings, dividers, lists, nested
+      // quotes. The blockquote owns its verbatim `src` as a unit — its children
+      // carry no source map and are only emitted when the quote is dirtied,
+      // re-quoted line-by-line by the serializer.
       content: 'block+',
       attrs: { ...blockAttrs },
       toDOM: () => ['blockquote', 0]

@@ -28,6 +28,7 @@ import { splitListItem, liftListItem, sinkListItem } from 'prosemirror-schema-li
 import type { MarkType } from 'prosemirror-model';
 import { schema, parseDoc, serializeDoc, dirtyPlugin } from '../../../lib/projection';
 import { setActiveEditorFlush } from '../active-editor';
+import { now, logDuration, perfEnabled } from '../../../lib/perf';
 import 'prosemirror-view/style/prosemirror.css';
 import './RichEditor.css';
 
@@ -112,9 +113,13 @@ function buildPlugins() {
     }),
     keymap({
       Enter: splitListItem(listItem),
-      'Mod-[': liftListItem(listItem),
+      // Tab / Shift-Tab nest and un-nest the item; Mod-[ / Mod-] keep the
+      // explicit variant. sinkListItem returns false outside a list, so the
+      // binding is inert in prose rather than swallowing Tab everywhere.
+      Tab: sinkListItem(listItem),
+      'Shift-Tab': liftListItem(listItem),
       'Mod-]': sinkListItem(listItem),
-      'Shift-Tab': liftListItem(listItem)
+      'Mod-[': liftListItem(listItem)
     }),
     keymap({
       'Mod-b': toggleMark(schema.marks.strong),
@@ -148,7 +153,10 @@ export function RichEditor({ body, onChange }: RichEditorProps): React.ReactElem
         clearTimeout(timer);
         timer = null;
       }
-      onChangeRef.current(serializeDoc(view.state.doc));
+      const t0 = now();
+      const md = serializeDoc(view.state.doc);
+      logDuration(`rich serializeDoc (${md.length} chars)`, t0);
+      onChangeRef.current(md);
     };
     const scheduleSnapshot = () => {
       if (timer) clearTimeout(timer);
@@ -166,8 +174,21 @@ export function RichEditor({ body, onChange }: RichEditorProps): React.ReactElem
       // Uncontrolled: PM applies the transaction to its own state; the only
       // outward effect is the debounced snapshot. No per-keystroke React write.
       dispatchTransaction(tr) {
+        const t0 = now();
         const next = view.state.apply(tr);
         view.updateState(next);
+        // Per-keystroke cost: transaction apply (incl. the dirty plugin's
+        // appendTransaction) plus the DOM update. Only the slow ones are logged
+        // so a steady stream of fast keystrokes doesn't drown the signal.
+        if (perfEnabled && tr.docChanged) {
+          const dt = performance.now() - t0;
+          if (dt > 4) {
+            // eslint-disable-next-line no-console
+            console.log(
+              `[skrive-perf] rich keystroke (doc size=${next.doc.nodeSize}): ${dt.toFixed(1)}ms`
+            );
+          }
+        }
         if (tr.docChanged) scheduleSnapshot();
       },
       handleDOMEvents: {
