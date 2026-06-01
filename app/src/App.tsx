@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
 import { SplitView } from './components/editor/SplitView';
 import { RichEditor } from './components/editor/rich/RichEditor';
-import { flushActiveRich } from './components/editor/rich/flush-registry';
+import { flushActiveEditor } from './components/editor/active-editor';
 import { DiffView } from './components/editor/DiffView';
 import { Header } from './components/chrome/Header';
 import { BacklinksPanel } from './components/panels/BacklinksPanel';
@@ -239,9 +239,10 @@ export function App() {
   const { bindings } = useMemo(() => buildRegistry(commandDeps), [commandDeps]);
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      // ⌘S has a debounce-cancel side-effect that the registry runner
-      // doesn't know about. Cancel here before delegating; the registry's
-      // run() then performs the save itself.
+      // ⌘S has side-effects the registry runner doesn't know about: cancel
+      // the auto-save debounce, and drain the editor's pending debounced
+      // snapshot into the store so the save writes the latest bytes, not what
+      // the surface last synced. The registry's run() then performs the save.
       if (
         e.code === 'KeyS' &&
         (e.metaKey || e.ctrlKey) &&
@@ -249,6 +250,7 @@ export function App() {
         !e.altKey
       ) {
         cancelSaveTimerRef.current();
+        flushActiveEditor();
       }
       dispatchKey(e, bindings);
     }
@@ -305,7 +307,7 @@ export function App() {
     return window.skrive.app.onFlushBeforeQuit(() => {
       void (async () => {
         try {
-          flushActiveRich();
+          flushActiveEditor();
           if (saveTimerRef.current) {
             clearTimeout(saveTimerRef.current);
             saveTimerRef.current = null;

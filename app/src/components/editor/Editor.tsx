@@ -37,7 +37,15 @@ import { inlinePreview, setImageContext, setImageResolver } from './decorations'
 import { skriveLintExtension } from './lint-extension';
 import { clipboardCopyExport, clipboardPasteImport } from './clipboard';
 import { skriveAssetResolver } from '../../lib/preview/imageResolver';
+import { setActiveEditorFlush } from './active-editor';
 import type { PendingSelection } from '../../stores/project';
+
+// The Text surface owns its state; the store gets debounced snapshots, never a
+// per-keystroke write. Typing into the store on every keystroke re-rendered the
+// whole workspace (Preview included) each keystroke — the controlled-component
+// lag the projection work made law to avoid. A short idle delay coalesces a
+// typing burst into one sync; ⌘S / blur / quit / unmount flush immediately.
+const SYNC_DEBOUNCE_MS = 250;
 
 type Props = {
   value: string;
@@ -133,6 +141,18 @@ export function Editor({
     line: initialCursorLine ?? 1,
     column: initialCursorColumn ?? 0
   });
+  // Debounced store sync. `pending` holds the latest body / cursor not yet
+  // pushed to the store; the timer flushes them after a typing pause.
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRef = useRef<{
+    body: string | null;
+    cursor: { line: number; column: number } | null;
+  }>({ body: null, cursor: null });
+  // The last body we pushed to the store. Because the push is debounced, the
+  // `value` prop lags the live doc; when it catches up it equals this, and the
+  // write-back effect must treat that as our own echo (not an external change)
+  // — otherwise it would replace newer keystrokes with the stale flushed value.
+  const lastEmittedRef = useRef<string>(value);
 
   // Keep callback refs fresh without re-creating the editor.
   useEffect(() => {
@@ -160,10 +180,33 @@ export function Editor({
     const container = containerRef.current;
     if (!container) return;
 
+    // Push buffered body / cursor into the store. Synchronous; safe to call
+    // from blur, ⌘S, quit, and unmount.
+    const flushSync = () => {
+      if (syncTimerRef.current) {
+        clearTimeout(syncTimerRef.current);
+        syncTimerRef.current = null;
+      }
+      const pending = pendingRef.current;
+      if (pending.body !== null) {
+        lastEmittedRef.current = pending.body;
+        onChangeRef.current(pending.body);
+      }
+      if (pending.cursor) {
+        onCursorChangeRef.current?.(pending.cursor.line, pending.cursor.column);
+      }
+      pendingRef.current = { body: null, cursor: null };
+    };
+    const scheduleSync = () => {
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = setTimeout(flushSync, SYNC_DEBOUNCE_MS);
+    };
+
     const updateListener = EditorView.updateListener.of((update) => {
+      let dirty = false;
       if (update.docChanged) {
-        const next = update.state.doc.toString();
-        onChangeRef.current(next);
+        pendingRef.current.body = update.state.doc.toString();
+        dirty = true;
       }
       if (update.selectionSet || update.docChanged) {
         const head = update.state.selection.main.head;
@@ -172,8 +215,19 @@ export function Editor({
         const last = lastCursorRef.current;
         if (last.line !== line.number || last.column !== column) {
           lastCursorRef.current = { line: line.number, column };
-          onCursorChangeRef.current?.(line.number, column);
+          pendingRef.current.cursor = { line: line.number, column };
+          dirty = true;
         }
+      }
+      if (dirty) scheduleSync();
+    });
+
+    // Persist immediately when the surface loses focus, so clicking away or
+    // tabbing out never strands the last keystrokes in the debounce window.
+    const blurHandler = EditorView.domEventHandlers({
+      blur: () => {
+        flushSync();
+        return false;
       }
     });
 
@@ -205,6 +259,7 @@ export function Editor({
           ]),
           skriveTheme,
           updateListener,
+          blurHandler,
           EditorView.lineWrapping,
           lintCompartment.of(
             skriveLintExtension(() => lintFindingsRef.current)
@@ -215,6 +270,10 @@ export function Editor({
     });
 
     viewRef.current = view;
+
+    // Expose this surface's flush so ⌘S and the pre-quit handler drain the
+    // pending snapshot into the store before saves read it.
+    setActiveEditorFlush(flushSync);
 
     // Project-aware image resolution. Set once here; the editor remounts on
     // file switch (keyed on path upstream), so the context stays correct.
@@ -251,6 +310,8 @@ export function Editor({
     view.scrollDOM.addEventListener('scroll', handleScroll, { passive: true });
 
     return () => {
+      flushSync(); // persist the last edits before teardown (file/tab switch)
+      setActiveEditorFlush(null);
       view.scrollDOM.removeEventListener('scroll', handleScroll);
       view.destroy();
       viewRef.current = null;
@@ -265,12 +326,19 @@ export function Editor({
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
+    // A `value` equal to what we last emitted is our own (debounce-lagged)
+    // edit echoing back — ignore it, even if the live doc has since moved on.
+    if (value === lastEmittedRef.current) return;
+    // Otherwise it's an external change (file reload, rename): apply it and let
+    // it supersede any buffered local body.
     const current = view.state.doc.toString();
     if (value !== current) {
       view.dispatch({
         changes: { from: 0, to: current.length, insert: value }
       });
     }
+    lastEmittedRef.current = value;
+    pendingRef.current.body = null;
   }, [value]);
 
   // Apply a pending selection request (search-jump, backlink-click).
