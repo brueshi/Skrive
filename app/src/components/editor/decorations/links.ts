@@ -14,11 +14,11 @@
 // closing `]` through the end of the Link node. That hides `](url)` in one
 // contiguous replace range and leaves the label alone.
 
-import { Decoration } from '@codemirror/view';
+import { pushMarker } from './shared';
 import type { HandlerMap, NodeHandler } from './shared';
 
 const linkHandler: NodeHandler = (node, ctx) => {
-  if (ctx.isOnCursorLine(node.from, node.to)) return;
+  if (ctx.mode === 'raw') return;
 
   const container = node.node;
   const first = container.firstChild;
@@ -35,8 +35,14 @@ const linkHandler: NodeHandler = (node, ctx) => {
   }
   if (closeStart === null) return;
 
-  ctx.decorations.push(Decoration.replace({}).range(first.from, first.to));
-  ctx.decorations.push(Decoration.replace({}).range(closeStart, container.to));
+  if (ctx.mode === 'concealed' && ctx.isOnCursorLine(node.from, node.to)) {
+    return;
+  }
+
+  // Opening `[` and the trailing `](url)` are markers; the label between
+  // them stays (link-styled by the highlighter).
+  pushMarker(ctx, first.from, first.to);
+  pushMarker(ctx, closeStart, container.to);
 };
 
 export const linkHandlers: HandlerMap = {

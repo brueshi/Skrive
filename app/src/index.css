@@ -1498,6 +1498,13 @@ body {
   text-decoration-thickness: 1px;
 }
 
+/* Recessed mode: Markdown markers stay real and editable but recede, so the
+   prose leads and the syntax is a quiet presence rather than noise. */
+.cm-content .cm-md-marker {
+  color: var(--skrive-muted);
+  opacity: 0.5;
+}
+
 /* Inline code: the grammar doesn't tag the content of an InlineCode
    span with `t.monospace` (only the `CodeMark` backticks are tagged),
    so we apply the monospace font here via decoration class. */

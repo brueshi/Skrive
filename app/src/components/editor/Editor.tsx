@@ -33,7 +33,13 @@ import { forceLinting } from '@codemirror/lint';
 import { GFM } from '@lezer/markdown';
 import type { LintFinding } from '@skrive/shared';
 import { skriveTheme } from './skrive-theme';
-import { inlinePreview, setImageContext, setImageResolver } from './decorations';
+import {
+  inlinePreview,
+  setImageContext,
+  setImageResolver,
+  setMarkerMode
+} from './decorations';
+import { usePreferencesStore } from '../../stores/preferences';
 import { skriveLintExtension } from './lint-extension';
 import { clipboardCopyExport, clipboardPasteImport } from './clipboard';
 import { skriveAssetResolver } from '../../lib/preview/imageResolver';
@@ -132,6 +138,9 @@ export function Editor({
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
+  // The Text surface's Markdown marker treatment (raw / recessed / concealed).
+  // Seeded into editor state at mount and pushed live on change.
+  const markerMode = usePreferencesStore((s) => s.markerMode);
   const onChangeRef = useRef(onChange);
   const onCursorChangeRef = useRef(onCursorChange);
   const onScrollTopChangeRef = useRef(onScrollTopChange);
@@ -285,7 +294,10 @@ export function Editor({
     view.dispatch({
       effects: [
         setImageResolver.of(skriveAssetResolver),
-        setImageContext.of({ projectRoot, filePath })
+        setImageContext.of({ projectRoot, filePath }),
+        // Seed from the live pref, not the captured render value, so the
+        // initial paint already matches the writer's choice (no flash).
+        setMarkerMode.of(usePreferencesStore.getState().markerMode)
       ]
     });
 
@@ -345,6 +357,13 @@ export function Editor({
     lastEmittedRef.current = value;
     pendingRef.current.body = null;
   }, [value]);
+
+  // Push marker-mode changes (Settings) into the live editor. The decoration
+  // plugin rebuilds when the field changes, so this re-renders the markers
+  // without remounting the surface.
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: setMarkerMode.of(markerMode) });
+  }, [markerMode]);
 
   // Apply a pending selection request (search-jump, backlink-click).
   // We track the last-applied nonce so the same selection request

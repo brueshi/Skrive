@@ -23,9 +23,13 @@
 // a separate feature parked for a later mini-phase.
 
 import { Decoration } from '@codemirror/view';
+import { pushMarker } from './shared';
 import type { HandlerMap, NodeHandler } from './shared';
 
 const inlineCodeHandler: NodeHandler = (node, ctx) => {
+  // Raw leaves inline code as bare source (backticks and all).
+  if (ctx.mode === 'raw') return;
+
   const container = node.node;
   let first = container.firstChild;
   let last = container.lastChild;
@@ -45,11 +49,13 @@ const inlineCodeHandler: NodeHandler = (node, ctx) => {
     );
   }
 
-  // Hide the backticks on non-cursor lines.
-  if (!ctx.isOnCursorLine(node.from, node.to)) {
-    ctx.decorations.push(Decoration.replace({}).range(first.from, first.to));
-    ctx.decorations.push(Decoration.replace({}).range(last.from, last.to));
+  // Recede or hide the backticks. Concealed keeps them visible on the cursor
+  // line so the boundaries stay editable.
+  if (ctx.mode === 'concealed' && ctx.isOnCursorLine(node.from, node.to)) {
+    return;
   }
+  pushMarker(ctx, first.from, first.to);
+  pushMarker(ctx, last.from, last.to);
 };
 
 export const codeHandlers: HandlerMap = {

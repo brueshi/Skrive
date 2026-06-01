@@ -193,6 +193,17 @@ describe('migrateAppState', () => {
     expect(out.surfaceSwitchingEnabled).toBe(false);
   });
 
+  it('defaults markerMode to recessed and preserves a valid stored value', () => {
+    expect(migrateAppState({ schemaVersion: 1 }).markerMode).toBe('recessed');
+    expect(
+      migrateAppState({ schemaVersion: 1, markerMode: 'concealed' }).markerMode
+    ).toBe('concealed');
+    // A bogus value falls back to the default rather than leaking through.
+    expect(
+      migrateAppState({ schemaVersion: 1, markerMode: 'sideways' }).markerMode
+    ).toBe('recessed');
+  });
+
   it('falls back to defaults when schemaVersion is from the future', () => {
     const out = migrateAppState({
       schemaVersion: 99,

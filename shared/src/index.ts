@@ -71,6 +71,7 @@ export type {
   CursorPosition,
   EditorFontId,
   LayoutMode,
+  MarkerMode,
   PanelOpenBehaviorId,
   ProjectUiState,
   RecentFile,
