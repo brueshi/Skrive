@@ -314,6 +314,37 @@ function clampSidebarWidth(w: number): number {
 let debouncedSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let lastImmediateSave: Promise<void> = Promise.resolve();
 
+// The file watcher fires on every change in the project tree — including the
+// app's own debounced autosaves. Coalesce a burst of events into a single
+// manifest+lint refresh, with the window set wider than the autosave cadence
+// (SAVE_DEBOUNCE_MS in App.tsx, 500ms) so nothing re-lints while the writer is
+// mid-keystroke. An external edit reflects ~one debounce window later, which is
+// imperceptible for a writing app.
+const WATCH_REFRESH_DEBOUNCE_MS = 750;
+let watchRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+// refreshLint reads every project file and runs the cross-file engine — a few
+// hundred ms on a large project. Single-flight it so coalesced or rapid triggers
+// cannot stack overlapping passes that saturate the main thread; a request that
+// arrives mid-pass schedules exactly one rerun when the current pass finishes.
+let lintInFlight = false;
+let lintRerunQueued = false;
+
+// Closed-file body cache for lint. Open tabs always supply their live in-memory
+// body; the bodies of *closed* files change only via the watcher, which hands us
+// the exact path. So we read each closed file once, cache it, and re-read only
+// the paths the watcher reports dirty — during editing no closed file changes,
+// so the per-pass disk reads (the cost the AST memo didn't cover) drop to zero.
+// Keyed by project-relative path; cleared on project switch since paths can
+// collide across projects.
+const closedBodyCache = new Map<string, string>();
+const watchDirtyPaths = new Set<string>();
+
+function resetLintReadCache(): void {
+  closedBodyCache.clear();
+  watchDirtyPaths.clear();
+}
+
 // Monotonic counter so each openTabAtLine call produces a fresh nonce.
 // The Editor effect tracks this; identical line/column requests still
 // re-fire because the nonce always advances.
@@ -374,6 +405,24 @@ function scheduleDebouncedSave(getState: () => State): void {
     debouncedSaveTimer = null;
     scheduleImmediateSave(getState);
   }, DEBOUNCED_SAVE_MS);
+}
+
+// Coalesce watcher-driven manifest+lint refreshes. Each new file event resets
+// the timer, so a run of autosaves (or any burst) collapses into one refresh
+// once the tree settles.
+function scheduleWatchRefresh(getState: () => State & Actions): void {
+  if (watchRefreshTimer) clearTimeout(watchRefreshTimer);
+  watchRefreshTimer = setTimeout(() => {
+    watchRefreshTimer = null;
+    void getState().refreshManifest();
+  }, WATCH_REFRESH_DEBOUNCE_MS);
+}
+
+function cancelWatchRefresh(): void {
+  if (watchRefreshTimer) {
+    clearTimeout(watchRefreshTimer);
+    watchRefreshTimer = null;
+  }
 }
 
 function clampRatio(r: number): number {
@@ -505,12 +554,21 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       const prev = get().unsubscribeWatch;
       if (prev) prev();
       await window.skrive.project.unwatch();
+      cancelWatchRefresh();
+      resetLintReadCache();
 
       const manifest = await window.skrive.project.open(path);
 
       const unsubscribe = window.skrive.project.onChange((event) => {
         if (event.kind === 'ready') return;
-        void get().refreshManifest();
+        // Record which path changed so the next lint re-reads only that file
+        // and serves the rest from the closed-body cache. (Dir events carry a
+        // path too; tracking it is harmless — it just isn't a lintable file.)
+        if ('path' in event) watchDirtyPaths.add(event.path);
+        // Debounced: the app's own autosaves fire watcher events too, and an
+        // undebounced full re-lint per event stacks passes on the main thread
+        // and stutters typing. Coalesce to one refresh once edits settle.
+        scheduleWatchRefresh(get);
       });
       await window.skrive.project.watch(manifest.root);
 
@@ -601,6 +659,8 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const prev = get().unsubscribeWatch;
     if (prev) prev();
     await window.skrive.project.unwatch();
+    cancelWatchRefresh();
+    resetLintReadCache();
     // Flush dirty tabs + persist project UI state before clearing.
     await get().saveAllDirty();
     await get().persistProjectStateNow();
@@ -1303,6 +1363,13 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       if (get().lintReport !== null) set({ lintReport: null });
       return;
     }
+    // Single-flight: a trigger that lands while a pass is running queues exactly
+    // one rerun for when it finishes, so passes never overlap on the main thread.
+    if (lintInFlight) {
+      lintRerunQueued = true;
+      return;
+    }
+    lintInFlight = true;
     const start = perfNow();
     try {
       const [deadLinks, orphanedFiles] = await Promise.all([
@@ -1319,15 +1386,18 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       for (const tab of get().tabs) {
         bodies.set(tab.path, tab.body);
       }
-      // For files not in tabs, read from disk so per-file rules
-      // (heading hierarchy, duplicate headings) cover the whole project.
-      // Reads run in parallel — the previous serial `await` inside the
-      // loop made lint ~5ms × N files (one IPC round-trip each), which
-      // blew the <100ms budget on any project past ~20 files. Promise.all
-      // brings 184 files from ~900ms to roughly the slowest single read.
-      // No concurrency cap: even at thousands of files the OS file
-      // descriptor budget is comfortably above what this saturates.
-      const toRead = manifest.files.filter((f) => !bodies.has(f.path));
+      // Drop cached bodies for paths the watcher flagged dirty since the last
+      // pass, so an externally-changed (or just-saved-then-closed) file re-reads.
+      for (const p of watchDirtyPaths) closedBodyCache.delete(p);
+      watchDirtyPaths.clear();
+      // Closed files: serve from cache, read only the misses. During editing no
+      // closed file changes, so this reads nothing and the pass stays cheap.
+      // Reads run in parallel — a serial await per file made cold lint ~5ms × N
+      // (one IPC round-trip each), blowing the budget past ~20 files.
+      const readStart = perfNow();
+      const toRead = manifest.files.filter(
+        (f) => !bodies.has(f.path) && !closedBodyCache.has(f.path)
+      );
       const reads = await Promise.all(
         toRead.map(async (file) => {
           try {
@@ -1344,7 +1414,14 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         })
       );
       for (const r of reads) {
-        if (r) bodies.set(r[0], r[1]);
+        if (r) closedBodyCache.set(r[0], r[1]);
+      }
+      logDuration(`lint reads (${toRead.length} files)`, readStart);
+      // Fold cached closed-file bodies into the map the engine reads from.
+      for (const file of manifest.files) {
+        if (bodies.has(file.path)) continue;
+        const cached = closedBodyCache.get(file.path);
+        if (cached !== undefined) bodies.set(file.path, cached);
       }
       const report = runProjectLint({
         manifest,
@@ -1361,6 +1438,12 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       );
     } catch (err) {
       logProjectError('refreshLint', err);
+    } finally {
+      lintInFlight = false;
+      if (lintRerunQueued) {
+        lintRerunQueued = false;
+        void get().refreshLint();
+      }
     }
   },
 
