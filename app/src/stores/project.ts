@@ -35,6 +35,7 @@ import {
   stampAutoFields
 } from '../lib/frontmatter';
 import { runProjectLint } from '../lib/lint';
+import type { LintWorkerResponse } from '../lib/lint/lint-worker-protocol';
 import { notify } from '../lib/notify';
 import { logDuration, now as perfNow } from '../lib/perf';
 import { usePreferencesStore } from './preferences';
@@ -345,6 +346,152 @@ function resetLintReadCache(): void {
   watchDirtyPaths.clear();
 }
 
+// The lint engine runs in a dedicated Worker (Stage 2.75) so a pass never
+// blocks the typing thread — the engine is ~37ms on a large project with
+// periodic GC spikes, and even debounced that micro-stutters the editor when
+// it lands on the typing thread. The worker owns the file-body map across
+// passes; the store posts inputs and applies the report it sends back. Its
+// lifecycle mirrors the watcher/read-cache teardown: spawned on project open,
+// torn down + reset on project switch and close. If worker construction ever
+// fails, refreshLint falls back to running the (pure) engine on the main
+// thread so lint still works, degraded.
+let lintWorker: Worker | null = null;
+// Monotonic request id, echoed by the worker. With single-flight there is only
+// ever one outstanding request, so a result whose seq doesn't match the latest
+// is a leftover from a torn-down worker and is dropped.
+let lintSeq = 0;
+// Project root + perf clock captured at post time, read when the result lands.
+let lintRequestRoot: string | null = null;
+let lintRequestStart = 0;
+// Mirror of the body map the worker currently holds. Each pass ships only the
+// diff against this (changed/new bodies + dropped paths), so a keystroke posts
+// one entry rather than re-cloning the whole project across postMessage. Reset
+// whenever the worker is replaced, since a fresh worker starts with no bodies.
+let sentBodies = new Map<string, string>();
+
+// The manifest the worker currently holds. The worker caches it across passes,
+// so we ship the (heavy, ~95-entry) manifest only when its identity changes —
+// during prose typing it doesn't, so we send `null` and skip the structured
+// clone entirely. Identity is stable because refreshManifest only swaps in a new
+// manifest object when its lint-relevant version actually changed (below).
+let sentManifest: ProjectManifest | null = null;
+
+// Last manifest version the store has applied, from project:getManifest. The
+// main process bumps it only on lint/structure-relevant changes (file-set or
+// frontmatter), never on content-only saves — so a watcher refresh during
+// typing is a no-op here and never churns the manifest or the sidebar.
+let lastManifestVersion = -1;
+
+// Lint is driven directly off edits (debounced), decoupled from the watcher /
+// manifest rescan path: typing schedules a pass that reads in-memory bodies, so
+// findings refresh on a pause without waiting for autosave -> watcher. The
+// debounce coalesces a typing burst (and any watcher echo of our own save) into
+// a single off-thread pass; single-flight handles overlap.
+const LINT_DEBOUNCE_MS = 500;
+let lintDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleLint(): void {
+  if (lintDebounceTimer) clearTimeout(lintDebounceTimer);
+  lintDebounceTimer = setTimeout(() => {
+    lintDebounceTimer = null;
+    void useProjectStore.getState().refreshLint();
+  }, LINT_DEBOUNCE_MS);
+}
+
+function spawnLintWorker(): void {
+  terminateLintWorker();
+  try {
+    lintWorker = new Worker(
+      new URL('../lib/lint/lint.worker.ts', import.meta.url),
+      { type: 'module' }
+    );
+    lintWorker.onmessage = (event: MessageEvent<LintWorkerResponse>) => {
+      handleLintResult(event.data);
+    };
+    lintWorker.onerror = (event) => {
+      logProjectError('lint worker', event.message || event);
+      // Unwedge the pipeline so the next watcher event can retrigger lint.
+      lintInFlight = false;
+      lintRerunQueued = false;
+    };
+  } catch (err) {
+    logProjectError('spawn lint worker', err);
+    lintWorker = null;
+  }
+}
+
+function terminateLintWorker(): void {
+  if (lintWorker) {
+    lintWorker.terminate();
+    lintWorker = null;
+  }
+}
+
+function resetLintPipeline(): void {
+  terminateLintWorker();
+  if (lintDebounceTimer) {
+    clearTimeout(lintDebounceTimer);
+    lintDebounceTimer = null;
+  }
+  lintInFlight = false;
+  lintRerunQueued = false;
+  lintRequestRoot = null;
+  sentBodies = new Map();
+  sentManifest = null;
+  lastManifestVersion = -1;
+}
+
+// Cheap structural equality on two finding sets. Findings arrive sorted +
+// deduped from the engine, so a positional walk is sufficient. Used to suppress
+// no-op lintReport updates: most editing passes re-derive the *same* findings,
+// and pushing a new report each time re-renders every consumer (App's memo, the
+// editor, the CM6 lint decorations) on the typing thread for nothing — which is
+// the GC pressure that was spiking serializeDoc.
+function lintFindingsEqual(
+  a: ProjectLintReport | null,
+  b: ProjectLintReport
+): boolean {
+  if (!a) return false;
+  if (a.findings.length !== b.findings.length) return false;
+  for (let i = 0; i < a.findings.length; i++) {
+    const x = a.findings[i]!;
+    const y = b.findings[i]!;
+    if (
+      x.rule !== y.rule ||
+      x.path !== y.path ||
+      x.line !== y.line ||
+      x.column !== y.column ||
+      x.message !== y.message ||
+      x.severity !== y.severity
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Worker → store. Applies the report (unless a project switch has obsoleted it)
+// and releases the single-flight latch, draining any rerun queued mid-pass.
+function handleLintResult(msg: LintWorkerResponse): void {
+  if (msg.seq !== lintSeq) return;
+  const store = useProjectStore.getState();
+  if (store.manifest?.root === lintRequestRoot) {
+    // Only publish when the findings actually changed — see lintFindingsEqual.
+    if (!lintFindingsEqual(store.lintReport, msg.report)) {
+      useProjectStore.setState({ lintReport: msg.report });
+    }
+    logDuration(
+      `lint (${msg.report.findings.length} findings, worker ${msg.workerMs.toFixed(1)}ms)`,
+      lintRequestStart
+    );
+  }
+  lintInFlight = false;
+  if (lintRerunQueued) {
+    lintRerunQueued = false;
+    void store.refreshLint();
+  }
+}
+
 // Monotonic counter so each openTabAtLine call produces a fresh nonce.
 // The Editor effect tracks this; identical line/column requests still
 // re-fire because the nonce always advances.
@@ -556,6 +703,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       await window.skrive.project.unwatch();
       cancelWatchRefresh();
       resetLintReadCache();
+      resetLintPipeline();
 
       const manifest = await window.skrive.project.open(path);
 
@@ -648,6 +796,8 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       for (const warning of manifest.warnings) {
         notify.warn(warning);
       }
+      // Stand up the off-thread engine before the first pass.
+      spawnLintWorker();
       void get().refreshLint();
     } catch (err) {
       set({ loading: false });
@@ -661,6 +811,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     await window.skrive.project.unwatch();
     cancelWatchRefresh();
     resetLintReadCache();
+    resetLintPipeline();
     // Flush dirty tabs + persist project UI state before clearing.
     await get().saveAllDirty();
     await get().persistProjectStateNow();
@@ -682,11 +833,22 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   async refreshManifest() {
     const manifest = get().manifest;
     if (!manifest) return;
-    const next = await window.skrive.project.open(manifest.root);
+    // Cheap O(1) read of the main process's incrementally-maintained manifest —
+    // no full rescan. `version` bumps only on lint/structure-relevant changes
+    // (file-set or frontmatter), so a content-only save (the common watcher
+    // event while typing) returns the same version and we skip the swap-in
+    // entirely: no new manifest object, no sidebar re-render, no manifest
+    // re-ship to the worker.
+    const result = await window.skrive.project.getManifest();
+    // Always re-lint — a content change to a closed file bumps no version but
+    // can still move cross-file findings; the debounce coalesces this with any
+    // edit-driven pass.
+    scheduleLint();
+    if (!result) return;
+    if (result.version === lastManifestVersion) return;
+    lastManifestVersion = result.version;
+    const next = result.manifest;
     set({ manifest: next });
-    // Re-run lint after any manifest refresh — covers save events
-    // (which trigger the watcher) and direct fs operations.
-    void get().refreshLint();
     // Drop tabs whose files vanished from disk.
     const { tabs, activeTabIndex } = get();
     const survivingTabs = tabs.filter((t) =>
@@ -835,6 +997,10 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const nextTabs = tabs.slice();
     nextTabs[index] = updated;
     set({ tabs: nextTabs });
+    // Drive lint off the edit (debounced, off-thread) rather than waiting for
+    // autosave -> watcher -> manifest refresh — findings follow a typing pause
+    // directly, and the body is read live from this tab.
+    scheduleLint();
   },
 
   setTabLayoutMode(index: number, mode: LayoutMode) {
@@ -1371,11 +1537,16 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     }
     lintInFlight = true;
     const start = perfNow();
+    // True once the worker post succeeds — ownership of the single-flight latch
+    // transfers to handleLintResult, so `finally` must not clear it.
+    let posted = false;
     try {
+      const ipcStart = perfNow();
       const [deadLinks, orphanedFiles] = await Promise.all([
         window.skrive.linkGraph.getDeadLinks(),
         window.skrive.linkGraph.getOrphanedFiles()
       ]);
+      logDuration('lint ipc (deadlinks+orphans)', ipcStart);
       // Build the body map from open tabs so unsaved edits are linted
       // against the editor content, not the on-disk version. Files not
       // currently open fall back to disk during the engine's per-file
@@ -1423,26 +1594,84 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         const cached = closedBodyCache.get(file.path);
         if (cached !== undefined) bodies.set(file.path, cached);
       }
-      const report = runProjectLint({
-        manifest,
-        bodies,
-        deadLinks,
-        orphanedFiles
-      });
-      // If the project changed underneath us, drop this report.
+      // If the project changed underneath us mid-gather, drop this pass.
       if (get().manifest?.root !== manifest.root) return;
-      set({ lintReport: report });
-      logDuration(
-        `lint (${manifest.files.length} files, ${report.findings.length} findings)`,
-        start
-      );
+      if (lintWorker) {
+        // Diff the desired body map against what the worker already holds, so
+        // only changed bodies cross postMessage. String identity short-circuits
+        // the common case: an untouched tab or closed-file body is the same
+        // reference as last pass and is excluded, so a keystroke ships one
+        // entry. The first pass after a (re)spawn sees an empty mirror and
+        // ships everything once.
+        const delta: Array<[string, string]> = [];
+        for (const [path, body] of bodies) {
+          if (sentBodies.get(path) !== body) delta.push([path, body]);
+        }
+        const removed: string[] = [];
+        for (const path of sentBodies.keys()) {
+          if (!bodies.has(path)) removed.push(path);
+        }
+        // Ship the manifest only when its identity changed since the worker's
+        // last pass — the worker caches it, so during prose typing (manifest
+        // unchanged) we send null and skip cloning ~95 entries. Identity is
+        // stable because refreshManifest only swaps a new manifest in on a real
+        // version bump.
+        const manifestToSend = manifest === sentManifest ? null : manifest;
+        // Hand the engine off-thread. The result lands in handleLintResult,
+        // which sets lintReport and releases the single-flight latch — so we
+        // do NOT clear lintInFlight in `finally` once the post succeeds.
+        lintSeq += 1;
+        lintRequestRoot = manifest.root;
+        lintRequestStart = start;
+        // postMessage clones its payload synchronously on the main thread, so
+        // time it: this is the only part of an off-thread pass that can still
+        // stutter typing. With the manifest cached worker-side, a typing pass
+        // now clones only the one-entry body delta.
+        const postStart = perfNow();
+        lintWorker.postMessage({
+          type: 'run',
+          seq: lintSeq,
+          manifest: manifestToSend,
+          deadLinks,
+          orphanedFiles,
+          delta,
+          removed
+        });
+        logDuration(
+          `lint post (manifest ${manifestToSend ? 'sent' : 'cached'}, delta ${delta.length}, removed ${removed.length})`,
+          postStart
+        );
+        // The worker now holds exactly `bodies` + this manifest; adopt both as
+        // the new mirror.
+        sentBodies = bodies;
+        sentManifest = manifest;
+        posted = true;
+      } else {
+        // Degraded fallback: worker never came up, run the pure engine here.
+        const report = runProjectLint({
+          manifest,
+          bodies,
+          deadLinks,
+          orphanedFiles
+        });
+        if (get().manifest?.root !== manifest.root) return;
+        set({ lintReport: report });
+        logDuration(
+          `lint (${manifest.files.length} files, ${report.findings.length} findings)`,
+          start
+        );
+      }
     } catch (err) {
       logProjectError('refreshLint', err);
     } finally {
-      lintInFlight = false;
-      if (lintRerunQueued) {
-        lintRerunQueued = false;
-        void get().refreshLint();
+      // When a worker pass is in flight its result handler owns the latch;
+      // only the synchronous paths (fallback, error, early return) release it.
+      if (!posted) {
+        lintInFlight = false;
+        if (lintRerunQueued) {
+          lintRerunQueued = false;
+          void get().refreshLint();
+        }
       }
     }
   },
