@@ -12,3 +12,4 @@ export { schema } from './schema';
 export { parseDoc } from './parse';
 export { serializeDoc } from './serialize';
 export { dirtyPlugin } from './dirty';
+export * from './commands';

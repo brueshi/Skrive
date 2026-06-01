@@ -57,7 +57,9 @@ function inlineToPM(nodes: PhrasingContent[] | undefined, marks: readonly Mark[]
         );
         break;
       case 'break':
-        out.push(schema.text('\n', marks as Mark[]));
+        // A hard line break -> the dedicated node (renders as <br>), not a bare
+        // `\n` text (which would render as a space). Marks don't apply to it.
+        out.push(schema.nodes.hard_break.create());
         break;
       default:
         // Anything else with children (e.g. delete/strikethrough we don't model

@@ -149,7 +149,17 @@ export const schema = new Schema({
     table_row: tableSpecs.table_row,
     table_cell: tableSpecs.table_cell,
     table_header: tableSpecs.table_header,
-    text: { group: 'inline' }
+    text: { group: 'inline' },
+    // A within-block line break (Shift-Enter), distinct from a soft break (a bare
+    // `\n` in the source, which renders as a space). Serializes to a CommonMark
+    // backslash hard break; renders as <br>.
+    hard_break: {
+      group: 'inline',
+      inline: true,
+      selectable: false,
+      parseDOM: [{ tag: 'br' }],
+      toDOM: () => ['br']
+    }
   },
   marks: {
     // Order matters only for default nesting; serialization coalesces runs.
