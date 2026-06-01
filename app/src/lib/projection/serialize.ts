@@ -102,6 +102,11 @@ function canonicalBlock(block: PMNode): string {
       const delimiter = block.attrs.delimiter === ')' ? ')' : '.';
       return listItemLines(block, (i) => `${start + i}${delimiter} `);
     }
+    case 'horizontal_rule':
+      // Canonical form for a freshly-inserted rule. A parsed rule with a
+      // different marker (`***`, `___`) is dirty-equal to this under the
+      // idempotence guard, so its original bytes are restored.
+      return '---';
     case 'paragraph':
     default:
       return serializeInline(block);

@@ -13,7 +13,7 @@
 // remounts via the `key` in App.tsx, re-parsing fresh.
 
 import { useEffect, useRef } from 'react';
-import { EditorState } from 'prosemirror-state';
+import { EditorState, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { keymap } from 'prosemirror-keymap';
 import { baseKeymap, toggleMark } from 'prosemirror-commands';
@@ -67,6 +67,25 @@ function markInputRule(regexp: RegExp, markType: MarkType): InputRule {
   });
 }
 
+// Turn a line that is exactly `---`, `***`, or `___` into a divider the moment
+// the third character lands, then drop a fresh paragraph below it for the cursor
+// so the writer keeps typing past the rule rather than landing on an atom.
+function horizontalRuleInputRule(): InputRule {
+  return new InputRule(/^(?:---|\*\*\*|___)$/, (state, _match, start) => {
+    const tr = state.tr;
+    const $start = tr.doc.resolve(start);
+    const hr = schema.nodes.horizontal_rule.create();
+    const para = schema.nodes.paragraph.create();
+    // Replace the whole textblock (its `---` content and all) with the rule,
+    // then insert the trailing paragraph just after the rule's single position.
+    tr.replaceRangeWith($start.before(), $start.after(), hr);
+    const afterRule = $start.before() + hr.nodeSize;
+    tr.insert(afterRule, para);
+    tr.setSelection(TextSelection.create(tr.doc, afterRule + 1));
+    return tr;
+  });
+}
+
 function buildPlugins() {
   const listItem = schema.nodes.list_item;
   return [
@@ -86,7 +105,8 @@ function buildPlugins() {
         ),
         textblockTypeInputRule(/^(#{1,6})\s$/, schema.nodes.heading, (match) => ({
           level: (match[1] ?? '#').length
-        }))
+        })),
+        horizontalRuleInputRule()
       ]
     }),
     keymap({

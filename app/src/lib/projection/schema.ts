@@ -19,7 +19,7 @@
 // refinement, not the mechanism.
 //
 // `frozen_block` is the honest home for any construct the schema does not model
-// richly (blockquotes, tables, thematic breaks, HTML, complex/nested lists). It
+// richly (blockquotes, tables, HTML, complex/nested lists). It
 // is an atom holding its verbatim source; it always serializes byte-for-byte and
 // can never be canonicalized into something lossy. This is strictly safer than
 // projecting an unmodeled construct onto a paragraph, which would silently strip
@@ -83,6 +83,17 @@ export const schema = new Schema({
       content: 'paragraph+',
       defining: true,
       toDOM: () => ['li', 0]
+    },
+    horizontal_rule: {
+      group: 'block',
+      // An atom: no content to edit, only inserted or deleted. It still carries
+      // the block attrs so a parsed rule round-trips its own marker style (`---`
+      // vs `***` vs `___`) verbatim while clean, and a freshly-inserted one
+      // serializes to the canonical `---`.
+      atom: true,
+      selectable: true,
+      attrs: { ...blockAttrs },
+      toDOM: () => ['hr', { class: 'pm-hr' }]
     },
     frozen_block: {
       group: 'block',

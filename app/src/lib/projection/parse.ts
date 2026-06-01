@@ -6,9 +6,9 @@
 // structure is mapped faithfully so a *dirty* block can serialize canonically,
 // but for a *clean* block the inline tree is never consulted — `src` wins.
 //
-// Anything the schema does not model richly (blockquotes, tables, thematic
-// breaks, HTML, loose or nested lists) becomes a `frozen_block`: it round-trips
-// verbatim and is never canonicalized, so it cannot be corrupted by an edit.
+// Anything the schema does not model richly (blockquotes, tables, HTML, loose
+// or nested lists) becomes a `frozen_block`: it round-trips verbatim and is
+// never canonicalized, so it cannot be corrupted by an edit.
 
 import type { Node as PMNode, Mark } from 'prosemirror-model';
 import { fromMarkdown } from 'mdast-util-from-markdown';
@@ -106,6 +106,8 @@ function blockToPM(node: RootContent, src: string, gapBefore: string): PMNode {
       );
     case 'paragraph':
       return schema.node('paragraph', base, inlineToPM(node.children, []));
+    case 'thematicBreak':
+      return schema.node('horizontal_rule', base);
     case 'list': {
       if (!isSimpleList(node)) return frozen(src, gapBefore);
       if (node.ordered) {
@@ -117,8 +119,8 @@ function blockToPM(node: RootContent, src: string, gapBefore: string): PMNode {
       return schema.node('bullet_list', { ...base, marker }, listItemsToPM(node));
     }
     default:
-      // Blockquote, table, thematicBreak, html, definition, footnote, etc.:
-      // preserved verbatim, never canonicalized.
+      // Blockquote, table, html, definition, footnote, etc.: preserved
+      // verbatim, never canonicalized.
       return frozen(src, gapBefore);
   }
 }
