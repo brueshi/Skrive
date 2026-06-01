@@ -44,6 +44,11 @@ const api: SkriveIpc = {
       ipcRenderer.invoke('project:openDialog') as Promise<string | null>,
     open: (root: string) =>
       ipcRenderer.invoke('project:open', root) as Promise<ProjectManifest>,
+    getManifest: () =>
+      ipcRenderer.invoke('project:getManifest') as Promise<{
+        manifest: ProjectManifest;
+        version: number;
+      } | null>,
     watch: (root: string) =>
       ipcRenderer.invoke('project:watch', root) as Promise<void>,
     unwatch: () => ipcRenderer.invoke('project:unwatch') as Promise<void>,

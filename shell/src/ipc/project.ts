@@ -94,7 +94,65 @@ async function detectHistoryMode(root: string): Promise<'git' | 'checkpoint'> {
   }
 }
 
-async function scanProject(root: string): Promise<ProjectManifest> {
+// Build the manifest FileEntry for a single project-relative markdown
+// file by reading it from disk. The single source of truth for a
+// FileEntry's shape: scanProject's full walk and the watcher's
+// incremental patch both go through here, so the two paths can never
+// diverge. Returns null if the file vanished (stat failed) — the caller
+// drops it rather than synthesizing an entry. A file that stats but
+// can't be read (rare) still gets an entry with empty frontmatter, the
+// same lenient behavior the original full scan had. The body is returned
+// alongside the entry so callers can populate the link graph from the
+// same read (null when the read failed but the stat succeeded).
+export async function buildFileEntry(
+  root: string,
+  relPath: string
+): Promise<{ entry: FileEntry; body: string | null } | null> {
+  const fullPath = path.join(root, relPath);
+
+  let stat;
+  try {
+    stat = await fs.stat(fullPath);
+  } catch {
+    return null;
+  }
+
+  let body: string | null = null;
+  try {
+    body = await fs.readFile(fullPath, 'utf8');
+  } catch {
+    // Stat succeeded but the read didn't — keep the entry, no frontmatter.
+  }
+
+  const fm = body === null ? {} : parseFrontmatter(body).frontmatter;
+  const entry: FileEntry = {
+    path: relPath,
+    name: path.basename(fullPath),
+    sizeBytes: stat.size,
+    modifiedMs: stat.mtimeMs ?? null,
+    frontmatter: fm,
+    outgoingLinks: []
+  };
+  return { entry, body };
+}
+
+// Build a FileEntry from disk and hand it to the cached manifest +
+// graph patch. Fire-and-forget from the watcher (the renderer debounces
+// ~750ms, so the patch lands before any follow-up read). If the file
+// vanished between the watcher event and the read, drop it from both
+// the manifest and the graph instead.
+async function patchManifestFromDisk(relPath: string): Promise<void> {
+  const root = projectState.root;
+  if (!root) return;
+  const built = await buildFileEntry(root, relPath);
+  if (built === null) {
+    projectState.removeManifestFile(relPath);
+    return;
+  }
+  projectState.patchManifestFile(relPath, built.body ?? '', built.entry);
+}
+
+export async function scanProject(root: string): Promise<ProjectManifest> {
   const canonicalRoot = path.resolve(root);
   const files: FileEntry[] = [];
 
@@ -123,47 +181,30 @@ async function scanProject(root: string): Promise<ProjectManifest> {
       continue;
     }
 
-    let stat;
-    try {
-      stat = await fs.stat(fullPath);
-    } catch {
-      continue;
-    }
+    const built = await buildFileEntry(canonicalRoot, rel);
+    if (built === null) continue;
 
-    let body: string | null = null;
-    try {
-      body = await fs.readFile(fullPath, 'utf8');
-    } catch {
-      // A file that disappeared mid-scan still belongs in the
-      // manifest from the stat above; just don't add edges for it.
-    }
-
-    if (body === null) {
+    // Feed the graph from the same read buildFileEntry used.
+    if (built.body === null) {
       projectState.addEmpty(rel);
     } else {
-      projectState.upsertFile(rel, body);
+      projectState.upsertFile(rel, built.body);
     }
 
-    const fm = body === null ? {} : parseFrontmatter(body).frontmatter;
-    files.push({
-      path: rel,
-      name: path.basename(fullPath),
-      sizeBytes: stat.size,
-      modifiedMs: stat.mtimeMs ?? null,
-      frontmatter: fm,
-      outgoingLinks: []
-    });
+    files.push(built.entry);
   }
 
   files.sort((a, b) => a.path.localeCompare(b.path));
 
-  return {
+  const manifest: ProjectManifest = {
     root: canonicalRoot,
     files,
     schema: inferSchema(files),
     config,
     warnings
   };
+  projectState.setManifest(manifest);
+  return manifest;
 }
 
 function relPath(root: string, abs: string): string {
@@ -177,11 +218,19 @@ function startWatcher(
   const watcher = chokidar.watch(root, {
     ignored: (target, stats) => {
       // Reject any segment in NOISE_DIRS; reject hidden directories;
-      // accept only markdown files.
+      // accept markdown files, plus `.skrive.toml` at the root so config
+      // edits can trigger a rescan (the callback handles it specially and
+      // never forwards it to the renderer as a file change).
       const base = path.basename(target);
       if (NOISE_DIRS.has(base)) return true;
       if (base.startsWith('.') && stats?.isDirectory()) return true;
-      if (stats?.isFile() && !MARKDOWN_EXT.test(base)) return true;
+      if (
+        stats?.isFile() &&
+        !MARKDOWN_EXT.test(base) &&
+        path.resolve(target) !== path.resolve(root, '.skrive.toml')
+      ) {
+        return true;
+      }
       return false;
     },
     ignoreInitial: true,
@@ -236,6 +285,17 @@ export function registerProjectHandlers(): void {
     }
   );
 
+  ipcMain.handle(
+    'project:getManifest',
+    async (): Promise<{ manifest: ProjectManifest; version: number } | null> => {
+      // O(1): hand back the cached manifest kept fresh by the watcher.
+      // No rescan. Null when no project is open / nothing cached yet.
+      const manifest = projectState.manifest;
+      if (!manifest) return null;
+      return { manifest, version: projectState.manifestVersion };
+    }
+  );
+
   ipcMain.handle('project:watch', async (event, root: string): Promise<void> => {
     if (typeof root !== 'string' || root.length === 0) {
       throw new Error('project:watch requires a non-empty root path');
@@ -246,13 +306,29 @@ export function registerProjectHandlers(): void {
     }
     const sender = event.sender;
     activeWatcher = startWatcher(root, (e) => {
-      // Keep the link graph in sync with disk before the renderer
-      // hears about the change — that way the renderer's follow-up
-      // backlinks query sees the up-to-date graph.
+      // A `.skrive.toml` edit changes config (and therefore lint
+      // behavior) without being a markdown file change. It's rare, so the
+      // simplest correct response is a full rescan — that re-reads the
+      // toml, rebuilds the manifest, and bumps the version. We don't
+      // forward it to the renderer as a file change: it isn't one.
+      if (
+        (e.kind === 'add' || e.kind === 'change' || e.kind === 'unlink') &&
+        e.path === '.skrive.toml' &&
+        projectState.root
+      ) {
+        void scanProject(projectState.root);
+        return;
+      }
+
+      // Keep the link graph AND the cached manifest in sync with disk
+      // before the renderer hears about the change — that way the
+      // renderer's follow-up backlinks query and getManifest read both
+      // see up-to-date state. patchManifestFile handles both the graph
+      // upsert and the manifest patch so they can't drift apart.
       if (e.kind === 'add' || e.kind === 'change') {
-        void projectState.refreshFromDisk(e.path);
+        void patchManifestFromDisk(e.path);
       } else if (e.kind === 'unlink') {
-        projectState.removeFile(e.path);
+        projectState.removeManifestFile(e.path);
       }
 
       // The webContents may have been destroyed if the renderer

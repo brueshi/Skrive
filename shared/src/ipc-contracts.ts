@@ -358,6 +358,16 @@ export interface SkriveIpc {
      */
     open(path: string): Promise<ProjectManifest>;
     /**
+     * Return the cached manifest for the open project plus a monotonic
+     * version, or null when no project is open. O(1) — the watcher keeps
+     * the manifest incrementally fresh, so this never rescans. The
+     * version bumps only on structure-relevant changes (the set of
+     * markdown paths changing, or a file's frontmatter changing), letting
+     * the renderer/worker skip re-shipping the manifest on content-only
+     * edits.
+     */
+    getManifest(): Promise<{ manifest: ProjectManifest; version: number } | null>;
+    /**
      * Start watching the project root for changes. Subsequent calls
      * replace the previous watcher.
      */
