@@ -241,6 +241,11 @@ export function Editor({
           history(),
           drawSelection(),
           highlightActiveLine(),
+          // Lezer is the Text surface's LOCAL incremental highlighter only — it
+          // feeds CM6 syntax coloring and the decoration tree-walk, nothing more.
+          // mdast (mdast-util-from-markdown) is the single structural authority
+          // for the projection, lint, and link graph; the preview renders via
+          // remark->rehype. Do not grow a document model out of this tree.
           markdown({ extensions: GFM }),
           clipboardCopyExport(),
           clipboardPasteImport(),
