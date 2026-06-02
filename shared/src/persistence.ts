@@ -68,12 +68,6 @@ export type EditorFontId =
   | 'mono'
   | 'custom';
 
-/** Inset-design forks that remain user-toggleable. The losers (topbar
- *  layout variants, inset coverage, sidebar style) are now hardcoded
- *  to their chosen defaults. */
-export type PanelOpenBehaviorId = 'push' | 'float';
-export type ShellToneId = 'dark' | 'same' | 'light';
-
 /** Color theme. 'system' follows the OS via prefers-color-scheme;
  *  'light' / 'dark' override. Default for new installs is 'light';
  *  legacy users without a stored theme migrate to 'dark' (the only
@@ -131,8 +125,6 @@ export type AppUiState = {
    *  integer-valued and round-trips don't drift on common values. */
   editorLineHeightX100: number;
   autoUpdateOnLaunch: boolean;
-  panelOpenBehavior: PanelOpenBehaviorId;
-  shellTone: ShellToneId;
   theme: ThemeId;
   /** Show the outline rail down the right edge of the preview. */
   showOutlineRail: boolean;
@@ -188,8 +180,6 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   editorFontSize: 17,
   editorLineHeightX100: 170,
   autoUpdateOnLaunch: true,
-  panelOpenBehavior: 'push',
-  shellTone: 'light',
   theme: 'light',
   showOutlineRail: true,
   defaultSurface: 'rich',

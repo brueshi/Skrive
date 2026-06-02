@@ -66,15 +66,9 @@ export function App() {
   );
   const openProject = useProjectStore((s) => s.openProject);
   const activeView = useProjectStore((s) => s.activeView);
-  const panelOpenBehavior = usePreferencesStore((s) => s.panelOpenBehavior);
   const theme = usePreferencesStore((s) => s.theme);
   const showOutlineRail = usePreferencesStore((s) => s.showOutlineRail);
   const defaultSurface = usePreferencesStore((s) => s.defaultSurface);
-  const backlinksPanelOpen = useProjectStore((s) => s.backlinksPanelOpen);
-  const frontmatterPanelOpen = useProjectStore(
-    (s) => s.frontmatterPanelOpen
-  );
-  const historyPanelOpen = useProjectStore((s) => s.historyPanelOpen);
   const hydratePreferences = usePreferencesStore((s) => s.hydrate);
   const persistPreferencesNow = usePreferencesStore((s) => s.persistNow);
   const preferencesHydrated = usePreferencesStore((s) => s.hydrated);
@@ -329,27 +323,8 @@ export function App() {
   // blocks the very first paint.
   void preferencesHydrated;
 
-  const anyPanelOpen =
-    backlinksPanelOpen || frontmatterPanelOpen || historyPanelOpen;
-
-  // Width reserved next to the editor card when push-behavior is on.
-  // FM is 32rem; BL and HI are 26rem. Setting this as a CSS variable
-  // on the root keeps the margin-right in sync with whichever panel is
-  // actually open instead of always reserving the widest case.
-  const panelReserve =
-    panelOpenBehavior !== 'push' || !anyPanelOpen
-      ? '0px'
-      : frontmatterPanelOpen
-        ? '32rem'
-        : '26rem';
-
   return (
-    <div
-      className="app-root"
-      data-panel-behavior={panelOpenBehavior}
-      data-panels-open={anyPanelOpen ? 'true' : 'false'}
-      style={{ '--skrive-panel-reserve': panelReserve } as React.CSSProperties}
-    >
+    <div className="app-root">
       <Header />
 
       <main className="app-body">
@@ -421,6 +396,9 @@ export function App() {
                 </div>
               )}
             </section>
+            <BacklinksPanel />
+            <FrontmatterPanel />
+            <HistoryPanel />
           </>
         ) : (
           <div className="empty-state">
@@ -490,10 +468,6 @@ export function App() {
           </div>
         )}
       </main>
-
-      <BacklinksPanel />
-      <FrontmatterPanel />
-      <HistoryPanel />
 
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
       <RenameModal />

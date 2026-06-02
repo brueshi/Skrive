@@ -221,16 +221,6 @@ function sanitizeAppState(raw: Record<string, unknown>): Partial<AppUiState> {
   if (typeof raw.autoUpdateOnLaunch === 'boolean') {
     out.autoUpdateOnLaunch = raw.autoUpdateOnLaunch;
   }
-  if (raw.panelOpenBehavior === 'push' || raw.panelOpenBehavior === 'float') {
-    out.panelOpenBehavior = raw.panelOpenBehavior;
-  }
-  if (
-    raw.shellTone === 'dark' ||
-    raw.shellTone === 'same' ||
-    raw.shellTone === 'light'
-  ) {
-    out.shellTone = raw.shellTone;
-  }
   // Theme: explicit stored value wins; an existing app.json without
   // any theme field is a pre-v0.2.2 user who only ever knew dark mode,
   // so we migrate them to 'dark' rather than the new-install default

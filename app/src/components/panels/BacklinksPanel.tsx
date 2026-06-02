@@ -42,43 +42,21 @@ export function BacklinksPanel() {
     };
   }, [open, activeTab?.path]);
 
-  // Click-outside dismissal. Skip the toggle button itself so it can
-  // close-via-click without racing the outside-click handler.
+  // Escape-to-close. Docked panels stay put on outside clicks so you can
+  // keep editing alongside them; only Escape and the toggle dismiss.
   useEffect(() => {
     if (!open) return;
-    function onMouseDown(e: MouseEvent) {
-      const root = panelRef.current;
-      if (!root) return;
-      const target = e.target as Node | null;
-      if (target && root.contains(target)) return;
-      const hit = (target as Element | null)?.closest?.(
-        '[data-panel-toggle="backlinks"]'
-      );
-      if (hit) return;
-      setOpen(false);
-    }
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
-        // stopImmediatePropagation so the HistoryPanel's document-level
-        // handler doesn't also fire and close itself — Escape should
-        // dismiss one layer at a time. (Settings used to have an Escape
-        // handler too; now Radix Dialog handles that natively.)
+        // stopImmediatePropagation so a sibling panel's document-level
+        // handler doesn't also fire — Escape dismisses one layer at a time.
         e.preventDefault();
         e.stopImmediatePropagation();
         setOpen(false);
       }
     }
-    // Defer to the next tick so the click that opened the panel
-    // doesn't immediately close it.
-    const timer = setTimeout(() => {
-      document.addEventListener('mousedown', onMouseDown);
-    }, 0);
     document.addEventListener('keydown', onKey);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('mousedown', onMouseDown);
-      document.removeEventListener('keydown', onKey);
-    };
+    return () => document.removeEventListener('keydown', onKey);
   }, [open, setOpen]);
 
   function handleRowClick(row: Backlink) {
@@ -96,7 +74,7 @@ export function BacklinksPanel() {
       ariaLabel="Backlinks"
       panelRef={panelRef}
       className="bl-panel"
-      width="26rem"
+      widthRem={26}
     >
       <header className="bl-panel-header">
           <span className="bl-panel-title">Backlinks</span>

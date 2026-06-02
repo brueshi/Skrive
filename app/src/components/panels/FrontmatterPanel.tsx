@@ -349,27 +349,8 @@ export function FrontmatterPanel() {
     }
   }
 
-  useEffect(() => {
-    if (!open) return;
-    function onMouseDown(e: MouseEvent) {
-      const root = panelRef.current;
-      if (!root) return;
-      const target = e.target as Node | null;
-      if (target && root.contains(target)) return;
-      const hit = (target as Element | null)?.closest?.(
-        '[data-panel-toggle="frontmatter"]'
-      );
-      if (hit) return;
-      close();
-    }
-    const timer = setTimeout(() => {
-      document.addEventListener('mousedown', onMouseDown);
-    }, 0);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('mousedown', onMouseDown);
-    };
-  }, [open, close]);
+  // Docked panels stay put on outside clicks so you can keep editing
+  // alongside them; Escape (handleRootKeydown) and the toggle dismiss.
 
   const activePathLabel = activeTab?.path ?? '';
 
@@ -379,7 +360,7 @@ export function FrontmatterPanel() {
       ariaLabel="Frontmatter editor"
       panelRef={panelRef}
       className="fm-panel"
-      width="32rem"
+      widthRem={32}
     >
       <div onKeyDown={handleRootKeydown}>
         <header className="fm-panel-header">

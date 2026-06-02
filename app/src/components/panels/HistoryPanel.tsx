@@ -102,21 +102,10 @@ export function HistoryPanel() {
     return () => clearInterval(t);
   }, [open]);
 
-  // Click-outside dismissal. Skip the toggle button itself so it can
-  // close-via-click without racing the outside-click handler.
+  // Escape-to-close. Docked panels stay put on outside clicks so you can
+  // keep editing alongside them; only Escape and the toggle dismiss.
   useEffect(() => {
     if (!open) return;
-    function onMouseDown(e: MouseEvent) {
-      const root = panelRef.current;
-      if (!root) return;
-      const target = e.target as Node | null;
-      if (target && root.contains(target)) return;
-      const hit = (target as Element | null)?.closest?.(
-        '[data-panel-toggle="history"]'
-      );
-      if (hit) return;
-      setOpen(false);
-    }
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -124,16 +113,9 @@ export function HistoryPanel() {
         closePanel();
       }
     }
-    const timer = setTimeout(() => {
-      document.addEventListener('mousedown', onMouseDown);
-    }, 0);
     document.addEventListener('keydown', onKey);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('mousedown', onMouseDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open, setOpen, closePanel]);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, closePanel]);
 
   function handleRowClick(entry: HistoryEntry, event: React.MouseEvent) {
     if (splitBlocksDiff) return;
@@ -156,7 +138,7 @@ export function HistoryPanel() {
       ariaLabel="Version history"
       panelRef={panelRef}
       className="hi-panel"
-      width="26rem"
+      widthRem={26}
     >
       <header className="hi-panel-header">
           <span className="hi-panel-title">History</span>
