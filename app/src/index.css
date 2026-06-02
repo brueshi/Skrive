@@ -4306,7 +4306,10 @@ body {
   max-width: calc(100vw - 2rem);
   max-height: 70vh;
   background: var(--skrive-bg);
-  border: 2px solid var(--skrive-fg);
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-card-radius);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   font-family: var(--skrive-ui-font);
@@ -4370,7 +4373,9 @@ body {
   display: flex;
   align-items: baseline;
   gap: 0.75rem;
-  padding: 0.375rem 1rem;
+  margin: 0 0.375rem;
+  padding: 0.4rem 0.625rem;
+  border-radius: var(--skrive-radius-sm);
   font-size: 0.8125rem;
   color: var(--skrive-fg);
   cursor: pointer;
