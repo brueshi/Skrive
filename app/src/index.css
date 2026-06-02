@@ -17,16 +17,22 @@
   /* Surface palette. Light values first, dark second. New installs default
      to light; legacy users without a stored theme migrate to dark in
      shell/persistence.ts so they don't get whiplash on upgrade. */
-  --skrive-bg: light-dark(#fefcf7, #1a1a1a);
-  --skrive-fg: light-dark(#1f1d1a, #e8e6e1);
-  --skrive-muted: light-dark(#7a756d, #8a857d);
-  --skrive-rule: light-dark(#ebe7df, #2a2a2a);
-  --skrive-link: light-dark(#1a5d8e, #8db8d8);
+  --skrive-bg: light-dark(#fcfcfb, #201f1d);
+  --skrive-fg: light-dark(#1b1a17, #e8e6e1);
+  --skrive-muted: light-dark(#8c8983, #8f8b83);
+  --skrive-rule: light-dark(#e4e1db, #322f2b);
+  --skrive-link: light-dark(#4c5ba6, #8c97d6);
   --skrive-selection: light-dark(
-    rgba(26, 93, 142, 0.14),
-    rgba(141, 184, 216, 0.18)
+    rgba(76, 91, 166, 0.13),
+    rgba(140, 151, 214, 0.2)
   );
-  --skrive-focus-ring: light-dark(#1a5d8e, #8db8d8);
+  --skrive-focus-ring: light-dark(#4c5ba6, #8c97d6);
+
+  /* Slate-indigo accent — the single deliberate hit of color in the
+     Overcast chrome: save dot, active markers, live-state pulses. Equal
+     to --skrive-link by design; named separately so accent usages read
+     as intent rather than borrowing the link color. */
+  --skrive-accent: light-dark(#4c5ba6, #8c97d6);
 }
 
 :root[data-theme='light'] {
@@ -53,7 +59,7 @@
      than a 1px divider line. */
   --skrive-shell-pad: 8px;
   --skrive-shell-gap: 16px;
-  --skrive-card-radius: 8px;
+  --skrive-card-radius: 10px;
 
   /* Editor typography — the curated default. Phase 9 rewrites these. */
   --skrive-editor-font:
@@ -82,9 +88,11 @@
      toggle, panel containers, tab tops). The 999px pill on Settings
      dictionary chips stays a literal — pill is a category, not a
      scale step. */
-  --skrive-radius-xs: 2px;
-  --skrive-radius-sm: 3px;
-  --skrive-radius-md: 4px;
+  --skrive-radius-xs: 4px;
+  --skrive-radius-sm: 6px;
+  --skrive-radius-md: 8px;
+  /* lg: settings group cards (Stage 1) and other large soft containers. */
+  --skrive-radius-lg: 12px;
 
   /* Z-index scale. Higher = closer to the viewer. Context menus sit
      above modals so right-clicking inside a modal still surfaces a
@@ -1565,7 +1573,7 @@ body {
   height: 28px;
   padding: 0;
   border: 1px solid var(--skrive-rule);
-  border-radius: 7px;
+  border-radius: var(--skrive-radius-sm);
   background: var(--skrive-bg);
   color: var(--skrive-muted);
   cursor: pointer;
