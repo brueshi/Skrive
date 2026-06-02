@@ -5,7 +5,7 @@
  * editor and preview panes consume. Phase 9 (settings) will rewrite the
  * editor-font / size / line-height variables from the preferences store.
  * Colors resolve per active scheme via light-dark(); light and dark each
- * ship a full palette, including the shell-tone variants below.
+ * ship a full palette, including the committed inset-shell relationship.
  */
 
 :root {
@@ -45,14 +45,16 @@
 
 :root {
 
-  /* Inset-design tokens — driven by data-shell-tone on .app-root.
-     The card is always var(--skrive-bg); shell bg shifts per tone.
-     Defaults below match data-shell-tone="dark" (legacy/flush feel);
-     the App overrides them at runtime via the data-attribute. */
-  --skrive-shell-bg: var(--skrive-bg);
-  --skrive-card-bg: var(--skrive-bg);
-  --skrive-card-shadow: none;
-  --skrive-card-border: transparent;
+  /* Inset-design shell relationship — committed Overcast (2026-06-02).
+     The editor + sidebar cards are the warm near-white paper floating on
+     a cooler dove-grey desk; a hairline separates them in light, a quiet
+     shadow in dark. Formerly three runtime data-shell-tone forks; matured
+     to one committed shell. The header and sidebar spine read these var
+     names, so the names stay even though the fork is gone. */
+  --skrive-shell-bg: light-dark(#ece9e4, #141310);
+  --skrive-card-bg: light-dark(#fcfcfb, #201f1d);
+  --skrive-card-shadow: light-dark(0 1px 2px rgba(0, 0, 0, 0.04), none);
+  --skrive-card-border: light-dark(#e4e1db, transparent);
   /* Outer shell pad = window edge → outermost card; gap = between
      adjacent cards (sidebar↔editor). Gap is wider than pad so the
      space between cards reads as deliberate breathing room rather
@@ -156,59 +158,6 @@ body {
   background: var(--skrive-shell-bg);
 }
 
-/* ============ Inset design forks (experimental) ============
- *
- * Five independently-toggleable forks driven by data-attributes on
- * .app-root. Defaults wire up to the user's picks: full inset, sidebar
- * as its own card, tabs on the editor card, panels push the card
- * narrower, light shell. Settings → General → Shell + chrome flips any
- * fork live. Once a winner settles, this block goes away.
- */
-
-/* Shell tone. Varies the relationship between the desk (shell), the
-   sidebar/tab card (card), and the editor paper — which is the fixed
-   warm cream var(--skrive-bg). Each rule lists its light value first,
-   dark second via light-dark(); both color schemes resolve a distinct
-   palette per variant.
-
-   Light mode has little headroom above the cream paper and soft shadows
-   barely read on near-white, so the light variants separate cards with
-   tone and a hairline border rather than glow/float:
-     - darker: strong beige desk, cream cards (high tonal contrast)
-     - same:   one cream across desk + cards, hairline border separates
-     - soft:   cream cards on a softly tinted beige desk (low contrast)
-   The 'soft' variant is the dark-mode 'shell lighter' slot; light has no
-   room above cream for a lighter desk, so it reads as a gentle tint. */
-.app-root[data-shell-tone='dark'] {
-  --skrive-shell-bg: light-dark(#e8e4dc, #0e0e0e);
-  --skrive-card-bg: light-dark(#fefcf7, #1a1a1a);
-  --skrive-card-shadow: light-dark(
-    0 1px 0 rgba(0, 0, 0, 0.04),
-    none
-  );
-  --skrive-card-border: transparent;
-}
-
-.app-root[data-shell-tone='same'] {
-  --skrive-shell-bg: light-dark(#fefcf7, #1a1a1a);
-  --skrive-card-bg: light-dark(#fefcf7, #1a1a1a);
-  --skrive-card-shadow: light-dark(
-    0 4px 12px rgba(0, 0, 0, 0.06),
-    0 4px 12px rgba(0, 0, 0, 0.28)
-  );
-  --skrive-card-border: light-dark(var(--skrive-rule), transparent);
-}
-
-.app-root[data-shell-tone='light'] {
-  --skrive-shell-bg: light-dark(#f4f0e8, #2a2a2a);
-  --skrive-card-bg: light-dark(#fefcf7, #141414);
-  --skrive-card-shadow: light-dark(
-    0 1px 0 rgba(0, 0, 0, 0.03),
-    0 1px 0 rgba(255, 255, 255, 0.03)
-  );
-  --skrive-card-border: transparent;
-}
-
 /* The header picks up the shell bg so it reads as part of the shell
    rather than the card. Header rules live in their own section
    (line ~120); this is the override. The 1px chrome divider from the
@@ -219,10 +168,10 @@ body {
   border-bottom: none;
 }
 
-/* Soft color transitions on the layout surfaces so flipping shell-tone
-   fades rather than snaps. Limited to background + shadow to avoid
-   animating typography weight or text color (those re-render every
-   keystroke and would feel sluggish). */
+/* Soft color transitions on the layout surfaces so switching theme
+   (light <-> dark) fades rather than snaps. Limited to background +
+   shadow to avoid animating typography weight or text color (those
+   re-render every keystroke and would feel sluggish). */
 .app-root,
 .app-body,
 .app-root .workspace,

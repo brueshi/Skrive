@@ -67,7 +67,6 @@ export function App() {
   const activeView = useProjectStore((s) => s.activeView);
   const setActiveView = useProjectStore((s) => s.setActiveView);
   const panelOpenBehavior = usePreferencesStore((s) => s.panelOpenBehavior);
-  const shellTone = usePreferencesStore((s) => s.shellTone);
   const theme = usePreferencesStore((s) => s.theme);
   const showOutlineRail = usePreferencesStore((s) => s.showOutlineRail);
   const defaultSurface = usePreferencesStore((s) => s.defaultSurface);
@@ -348,7 +347,6 @@ export function App() {
     <div
       className="app-root"
       data-panel-behavior={panelOpenBehavior}
-      data-shell-tone={shellTone}
       data-panels-open={anyPanelOpen ? 'true' : 'false'}
       style={{ '--skrive-panel-reserve': panelReserve } as React.CSSProperties}
     >

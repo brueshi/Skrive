@@ -166,28 +166,6 @@ const PANEL_BEHAVIOR_OPTIONS: {
   }
 ];
 
-const SHELL_TONE_OPTIONS: {
-  id: 'dark' | 'same' | 'light';
-  label: string;
-  desc: string;
-}[] = [
-  {
-    id: 'dark',
-    label: 'Shell darker',
-    desc: 'Page glows on a darker desk (Linear-ish).'
-  },
-  {
-    id: 'same',
-    label: 'Same tone',
-    desc: 'Card matches the shell; a subtle edge separates them.'
-  },
-  {
-    id: 'light',
-    label: 'Soft contrast',
-    desc: 'A gentle desk tint — soft beige in light, a lifted desk in dark.'
-  }
-];
-
 const SURFACE_OPTIONS: {
   id: 'rich' | 'text';
   label: string;
@@ -246,8 +224,6 @@ function GeneralSection() {
   const setPanelOpenBehavior = usePreferencesStore(
     (s) => s.setPanelOpenBehavior
   );
-  const shellTone = usePreferencesStore((s) => s.shellTone);
-  const setShellTone = usePreferencesStore((s) => s.setShellTone);
   const theme = usePreferencesStore((s) => s.theme);
   const setTheme = usePreferencesStore((s) => s.setTheme);
   return (
@@ -339,13 +315,6 @@ function GeneralSection() {
         options={THEME_OPTIONS}
         value={theme}
         onChange={setTheme}
-      />
-      <LayoutFork
-        label="Shell tone"
-        blurb="Color relationship between the shell and the editor card. Applies in both light and dark."
-        options={SHELL_TONE_OPTIONS}
-        value={shellTone}
-        onChange={setShellTone}
       />
       <LayoutFork
         label="Side panels"
