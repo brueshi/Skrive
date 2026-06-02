@@ -786,7 +786,9 @@ body {
   left: 50%;
   transform: translate(-50%, -50%);
   background: var(--skrive-bg);
-  border: 2px solid var(--skrive-fg);
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-card-radius);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
   padding: 1.5rem 1.75rem;
   width: 26rem;
   max-width: calc(100vw - 2rem);
@@ -835,6 +837,7 @@ body {
   color: var(--skrive-muted);
   cursor: pointer;
   user-select: none;
+  accent-color: var(--skrive-accent);
 }
 
 .modal-actions {
@@ -849,12 +852,14 @@ body {
   font: inherit;
   font-size: 0.8125rem;
   cursor: pointer;
-  border: 1px solid var(--skrive-fg);
+  border: 1px solid var(--skrive-rule);
   background: transparent;
   color: var(--skrive-fg);
   transition:
     background-color var(--skrive-duration-quick) var(--skrive-easing),
-    color var(--skrive-duration-quick) var(--skrive-easing);
+    border-color var(--skrive-duration-quick) var(--skrive-easing),
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    opacity var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .modal-button:disabled {
@@ -863,13 +868,24 @@ body {
 }
 
 .modal-button.secondary {
-  border-color: var(--skrive-rule);
   color: var(--skrive-muted);
 }
 
 .modal-button.secondary:not(:disabled):hover {
-  border-color: var(--skrive-fg);
+  border-color: var(--skrive-muted);
   color: var(--skrive-fg);
+}
+
+/* Primary action — a solid fill so it leads without a heavy outline,
+   matching the Done button and empty-state primary. */
+.modal-button.primary:not(.destructive) {
+  border-color: transparent;
+  background: var(--skrive-fg);
+  color: var(--skrive-bg);
+}
+
+.modal-button.primary:not(.destructive):not(:disabled):hover {
+  opacity: 0.85;
 }
 
 .modal-button.primary.destructive {
@@ -880,11 +896,6 @@ body {
 .modal-button.primary.destructive:not(:disabled):hover {
   background: #a84030;
   color: #fff;
-}
-
-.modal-button.primary:not(.destructive):not(:disabled):hover {
-  background: var(--skrive-fg);
-  color: var(--skrive-bg);
 }
 
 .app-body {
@@ -4222,7 +4233,9 @@ body {
   left: 50%;
   transform: translate(-50%, -50%);
   background: var(--skrive-bg);
-  border: 2px solid var(--skrive-fg);
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-card-radius);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
   padding: 1.25rem 1.5rem 1rem;
   width: 36rem;
   max-width: calc(100vw - 2rem);
@@ -4751,15 +4764,18 @@ body {
   text-overflow: ellipsis;
 }
 
+/* Keycap treatment — a quiet raised chip (paper key on a soft desk)
+   rather than a flat fill, so the shortcut reads as something pressable. */
 .cheatsheet-chord {
   flex-shrink: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.75rem;
-  color: var(--skrive-muted);
-  background: var(--skrive-rule);
-  padding: 0.05rem 0.4rem;
+  color: var(--skrive-fg);
+  background: var(--skrive-bg);
+  padding: 0.1rem 0.45rem;
   border-radius: var(--skrive-radius-sm);
-  border: 1px solid transparent;
+  border: 1px solid var(--skrive-rule);
+  box-shadow: 0 1px 0 var(--skrive-rule);
 }
 
 .cheatsheet-foot {
@@ -4775,9 +4791,11 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.7rem;
   color: var(--skrive-fg);
-  background: var(--skrive-rule);
-  padding: 0.05rem 0.3rem;
+  background: var(--skrive-bg);
+  padding: 0.05rem 0.35rem;
   border-radius: var(--skrive-radius-sm);
+  border: 1px solid var(--skrive-rule);
+  box-shadow: 0 1px 0 var(--skrive-rule);
 }
 
 @media (max-width: 600px) {
