@@ -260,6 +260,50 @@ function sanitizeAppState(raw: Record<string, unknown>): Partial<AppUiState> {
   ) {
     out.markerMode = raw.markerMode;
   }
+  // Skrive 1.0 settings. Each whitelists its own shape; an absent or
+  // malformed field falls through to the default in cloneAppDefaults().
+  if (
+    raw.lineMeasure === 'narrow' ||
+    raw.lineMeasure === 'normal' ||
+    raw.lineMeasure === 'wide'
+  ) {
+    out.lineMeasure = raw.lineMeasure;
+  }
+  if (typeof raw.smartTypography === 'boolean') {
+    out.smartTypography = raw.smartTypography;
+  }
+  if (typeof raw.formatOnSave === 'boolean') {
+    out.formatOnSave = raw.formatOnSave;
+  }
+  if (
+    typeof raw.autosaveIdleDelayMs === 'number' &&
+    Number.isFinite(raw.autosaveIdleDelayMs)
+  ) {
+    out.autosaveIdleDelayMs = raw.autosaveIdleDelayMs;
+  }
+  if (
+    raw.newFileLocation === 'activeFolder' ||
+    raw.newFileLocation === 'projectRoot'
+  ) {
+    out.newFileLocation = raw.newFileLocation;
+  }
+  if (raw.newFileNaming === 'title' || raw.newFileNaming === 'untitled') {
+    out.newFileNaming = raw.newFileNaming;
+  }
+  if (raw.slugFormat === 'kebab-case' || raw.slugFormat === 'snake_case') {
+    out.slugFormat = raw.slugFormat;
+  }
+  if (typeof raw.seedFrontmatter === 'boolean') {
+    out.seedFrontmatter = raw.seedFrontmatter;
+  }
+  if (Array.isArray(raw.frontmatterFields)) {
+    out.frontmatterFields = raw.frontmatterFields.filter(
+      (f): f is string => typeof f === 'string'
+    );
+  }
+  if (typeof raw.dateFormat === 'string') {
+    out.dateFormat = raw.dateFormat;
+  }
   return out;
 }
 
@@ -333,7 +377,10 @@ function cloneAppDefaults(): AppUiState {
     ...DEFAULT_APP_UI_STATE,
     recentProjects: [],
     personalDictionary: [],
-    recentFiles: []
+    recentFiles: [],
+    // Fresh array so a clone can't alias (and later mutate) the shared
+    // default; mirrors the other array fields reset above.
+    frontmatterFields: [...DEFAULT_APP_UI_STATE.frontmatterFields]
   };
 }
 

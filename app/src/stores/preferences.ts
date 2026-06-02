@@ -15,17 +15,28 @@ import {
   DEFAULT_RECENT_PROJECTS_CAP,
   type AppUiState,
   type EditorFontId,
+  type LineMeasure,
+  type NewFileLocation,
+  type NewFileNaming,
   type PanelOpenBehaviorId,
   type RecentFile,
   type MarkerMode,
   type RecentProject,
   type ShellToneId,
+  type SlugFormat,
   type SurfaceId,
   type ThemeId
 } from '@skrive/shared';
 
 const SAVE_DEBOUNCE_MS = 300;
 const RECENT_FILES_CAP = 30;
+
+/** Autosave idle-delay bounds (ms). The Settings stepper steps within
+ *  this range; the setter clamps to it so a stored or stepped value can
+ *  never drive the autosave debounce out of a sane window. */
+export const AUTOSAVE_IDLE_MIN_MS = 250;
+export const AUTOSAVE_IDLE_MAX_MS = 3000;
+export const AUTOSAVE_IDLE_STEP_MS = 250;
 
 type PreferencesState = AppUiState & {
   hydrated: boolean;
@@ -52,6 +63,17 @@ type PreferencesActions = {
   toggleDefaultSurface(): void;
   setSurfaceSwitchingEnabled(value: boolean): void;
   setMarkerMode(value: MarkerMode): void;
+
+  setLineMeasure(value: LineMeasure): void;
+  setSmartTypography(value: boolean): void;
+  setFormatOnSave(value: boolean): void;
+  setAutosaveIdleDelayMs(value: number): void;
+  setNewFileLocation(value: NewFileLocation): void;
+  setNewFileNaming(value: NewFileNaming): void;
+  setSlugFormat(value: SlugFormat): void;
+  setSeedFrontmatter(value: boolean): void;
+  setFrontmatterFields(value: string[]): void;
+  setDateFormat(value: string): void;
 
   addDictionaryWord(word: string): void;
   removeDictionaryWord(word: string): void;
@@ -92,7 +114,17 @@ function snapshot(state: PreferencesState): AppUiState {
     showOutlineRail: state.showOutlineRail,
     defaultSurface: state.defaultSurface,
     surfaceSwitchingEnabled: state.surfaceSwitchingEnabled,
-    markerMode: state.markerMode
+    markerMode: state.markerMode,
+    lineMeasure: state.lineMeasure,
+    smartTypography: state.smartTypography,
+    formatOnSave: state.formatOnSave,
+    autosaveIdleDelayMs: state.autosaveIdleDelayMs,
+    newFileLocation: state.newFileLocation,
+    newFileNaming: state.newFileNaming,
+    slugFormat: state.slugFormat,
+    seedFrontmatter: state.seedFrontmatter,
+    frontmatterFields: state.frontmatterFields,
+    dateFormat: state.dateFormat
   };
 }
 
@@ -216,6 +248,62 @@ export const usePreferencesStore = create<
   setMarkerMode(value) {
     if (get().markerMode === value) return;
     set({ markerMode: value });
+    scheduleSave(get);
+  },
+
+  setLineMeasure(value) {
+    if (get().lineMeasure === value) return;
+    set({ lineMeasure: value });
+    scheduleSave(get);
+  },
+  setSmartTypography(value) {
+    if (get().smartTypography === value) return;
+    set({ smartTypography: value });
+    scheduleSave(get);
+  },
+  setFormatOnSave(value) {
+    if (get().formatOnSave === value) return;
+    set({ formatOnSave: value });
+    scheduleSave(get);
+  },
+  setAutosaveIdleDelayMs(value) {
+    // Clamp to the stepper's range so a malformed stored value or an
+    // over-eager click can't push the autosave debounce out of bounds.
+    const clamped = Math.min(
+      AUTOSAVE_IDLE_MAX_MS,
+      Math.max(AUTOSAVE_IDLE_MIN_MS, Math.round(value))
+    );
+    if (get().autosaveIdleDelayMs === clamped) return;
+    set({ autosaveIdleDelayMs: clamped });
+    scheduleSave(get);
+  },
+  setNewFileLocation(value) {
+    if (get().newFileLocation === value) return;
+    set({ newFileLocation: value });
+    scheduleSave(get);
+  },
+  setNewFileNaming(value) {
+    if (get().newFileNaming === value) return;
+    set({ newFileNaming: value });
+    scheduleSave(get);
+  },
+  setSlugFormat(value) {
+    if (get().slugFormat === value) return;
+    set({ slugFormat: value });
+    scheduleSave(get);
+  },
+  setSeedFrontmatter(value) {
+    if (get().seedFrontmatter === value) return;
+    set({ seedFrontmatter: value });
+    scheduleSave(get);
+  },
+  setFrontmatterFields(value) {
+    set({ frontmatterFields: value });
+    scheduleSave(get);
+  },
+  setDateFormat(value) {
+    if (get().dateFormat === value) return;
+    set({ dateFormat: value });
     scheduleSave(get);
   },
 

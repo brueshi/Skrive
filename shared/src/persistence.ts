@@ -94,6 +94,23 @@ export type SurfaceId = 'text' | 'rich';
  *  The Rich surface hides syntax entirely, so this only affects Text. */
 export type MarkerMode = 'raw' | 'recessed' | 'concealed';
 
+/** Width of the centered writing column. A reading-comfort knob; the
+ *  exact measures are resolved at the editor surface (Stage 2 wiring). */
+export type LineMeasure = 'narrow' | 'normal' | 'wide';
+
+/** Where the "new file" action drops a document.
+ *   - 'activeFolder' — alongside the doc you're in (project root if none open).
+ *   - 'projectRoot'  — always the project root. */
+export type NewFileLocation = 'activeFolder' | 'projectRoot';
+
+/** How a new file's name is derived.
+ *   - 'title'    — slugified from the document title as you write it.
+ *   - 'untitled' — a plain "Untitled" placeholder you rename yourself. */
+export type NewFileNaming = 'title' | 'untitled';
+
+/** Slug casing for heading anchors and wiki links. */
+export type SlugFormat = 'kebab-case' | 'snake_case';
+
 export type AppUiState = {
   schemaVersion: 1;
   lastOpenedProject: string | null;
@@ -128,6 +145,31 @@ export type AppUiState = {
   surfaceSwitchingEnabled: boolean;
   /** How the Text surface renders Markdown markers (raw / recessed / concealed). */
   markerMode: MarkerMode;
+
+  // ---- Skrive 1.0 settings (Stage 1). Persisted now; several wire to
+  //      live behavior incrementally (Stage 2+). Each is a plain pref the
+  //      Settings page reads and writes; unwired ones still round-trip. ----
+
+  /** Width of the centered writing column. */
+  lineMeasure: LineMeasure;
+  /** Curly quotes, em dashes, and ellipses substituted as you type. */
+  smartTypography: boolean;
+  /** Normalize Markdown spacing when a file is written to disk. */
+  formatOnSave: boolean;
+  /** Debounce (ms) between the last keystroke and an autosave flush. */
+  autosaveIdleDelayMs: number;
+  /** Where the "new file" action creates the document. */
+  newFileLocation: NewFileLocation;
+  /** How a new file's name is derived. */
+  newFileNaming: NewFileNaming;
+  /** Slug casing for heading anchors and wiki links. */
+  slugFormat: SlugFormat;
+  /** Seed new documents with a frontmatter block. */
+  seedFrontmatter: boolean;
+  /** Frontmatter keys inserted into every seeded document, in order. */
+  frontmatterFields: string[];
+  /** strftime-ish token string for the seeded `date` field. */
+  dateFormat: string;
 };
 
 export const DEFAULT_RECENT_PROJECTS_CAP = 10;
@@ -152,7 +194,17 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   showOutlineRail: true,
   defaultSurface: 'rich',
   surfaceSwitchingEnabled: true,
-  markerMode: 'recessed'
+  markerMode: 'recessed',
+  lineMeasure: 'normal',
+  smartTypography: true,
+  formatOnSave: false,
+  autosaveIdleDelayMs: 750,
+  newFileLocation: 'activeFolder',
+  newFileNaming: 'title',
+  slugFormat: 'kebab-case',
+  seedFrontmatter: true,
+  frontmatterFields: ['title', 'date', 'tags'],
+  dateFormat: 'YYYY-MM-DD'
 };
 
 export const DEFAULT_SIDEBAR_WIDTH = 260;
