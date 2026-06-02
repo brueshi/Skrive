@@ -3908,15 +3908,42 @@ body {
   top: 10vh;
   left: 50%;
   transform: translateX(-50%);
-  width: 48rem;
+  width: 54rem;
   max-width: calc(100vw - 2rem);
-  max-height: 70vh;
+  height: 64vh;
+  max-height: 64vh;
   background: var(--skrive-bg);
-  border: 2px solid var(--skrive-fg);
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-card-radius);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   font-family: var(--skrive-ui-font);
   z-index: var(--skrive-z-modal-content);
+}
+
+/* Two panes below the query row: grouped results on the left, the
+   highlighted match's context preview on the right. */
+.search-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.search-left {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 24rem;
+  min-height: 0;
+  border-right: 1px solid var(--skrive-rule);
+}
+
+.search-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 0.75rem 0;
 }
 
 .search-query-row {
@@ -3984,6 +4011,7 @@ body {
 .search-results {
   overflow-y: auto;
   min-height: 0;
+  flex: 1;
 }
 
 .search-group-header {
@@ -4058,6 +4086,78 @@ body {
   color: inherit;
   font-weight: 600;
   padding: 0 1px;
+}
+
+/* ----- Search preview pane ----- */
+
+.search-preview-path {
+  padding: 0 1rem 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.6875rem;
+  color: var(--skrive-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--skrive-rule);
+  margin-bottom: 0.5rem;
+}
+
+.search-preview-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.search-preview-line {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0 1rem;
+  white-space: pre;
+}
+
+.search-preview-line.is-match {
+  background: color-mix(in srgb, var(--skrive-accent) 9%, transparent);
+}
+
+.search-preview-gutter {
+  flex-shrink: 0;
+  width: 2.5em;
+  text-align: right;
+  color: var(--skrive-muted);
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.search-preview-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--skrive-fg);
+}
+
+.search-preview-line:not(.is-match) .search-preview-text {
+  color: var(--skrive-muted);
+}
+
+.search-preview-text mark {
+  background: var(--skrive-selection, var(--skrive-rule));
+  color: var(--skrive-fg);
+  font-weight: 600;
+  padding: 0 1px;
+  border-radius: 2px;
+}
+
+.search-preview-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 2rem;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--skrive-muted);
 }
 
 /* ===================== New-project dialog (Phase 11) ===================== */

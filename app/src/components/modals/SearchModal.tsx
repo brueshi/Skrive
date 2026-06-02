@@ -1,14 +1,17 @@
-// Project-wide full-text search modal.
+// Project-wide full-text search.
 //
 // ⌘F opens it (overrides the in-document find — Skrive's find is
-// project-wide; in-doc navigation is by scroll). Debounced 150ms
-// query, monotonic search token discards out-of-order responses,
-// hits are grouped by file with the path-sorted order from shell.
-// Enter / click jumps to the hit via openTabAtLine.
+// project-wide; in-doc navigation is by scroll). Debounced 150ms query,
+// monotonic search token discards out-of-order responses, hits grouped
+// by file. Enter / click jumps to the hit via openTabAtLine.
+//
+// Two-pane layout (Skrive 1.0): the grouped result list on the left, a
+// context preview of the highlighted match on the right — see the match
+// in its surrounding lines before jumping. The preview reads the file
+// body once per file and caches it for the session.
 //
 // Built on Radix Dialog so focus trap, ESC, scroll lock, and portal
-// placement come from the primitive. The visual is a slimmer-than-
-// modal-dialog backdrop + a wider palette to fit code-style snippets.
+// placement come from the primitive.
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -17,6 +20,8 @@ import { logProjectError, useProjectStore } from '../../stores/project';
 import { notify } from '../../lib/notify';
 
 const DEBOUNCE_MS = 150;
+/** Lines of context shown on each side of the match in the preview. */
+const PREVIEW_CONTEXT = 4;
 
 type Props = {
   open: boolean;
@@ -24,6 +29,15 @@ type Props = {
 };
 
 type Group = { path: string; items: SearchHit[] };
+
+type PreviewLine = {
+  num: number;
+  text: string;
+  isMatch: boolean;
+  /** Match span within `text`, when isMatch. */
+  matchStart?: number;
+  matchEnd?: number;
+};
 
 function groupByPath(hits: SearchHit[]): Group[] {
   const groups: Group[] = [];
@@ -45,9 +59,6 @@ function flatIndexFor(groups: Group[], gi: number, hi: number): number {
   return n;
 }
 
-const RESULTS_LISTBOX_ID = 'skrive-search-results';
-const HIT_OPTION_ID = (idx: number) => `skrive-search-hit-${idx}`;
-
 function splitSnippet(hit: SearchHit): {
   before: string;
   matched: string;
@@ -62,8 +73,37 @@ function splitSnippet(hit: SearchHit): {
   };
 }
 
+/** Build the preview window around a hit from the full file body. */
+function buildPreview(body: string, hit: SearchHit): PreviewLine[] {
+  const lines = body.split('\n');
+  const matchIdx = hit.line - 1; // SearchHit.line is 1-indexed.
+  const from = Math.max(0, matchIdx - PREVIEW_CONTEXT);
+  const to = Math.min(lines.length - 1, matchIdx + PREVIEW_CONTEXT);
+  const out: PreviewLine[] = [];
+  for (let i = from; i <= to; i++) {
+    const text = lines[i] ?? '';
+    if (i === matchIdx) {
+      const matchStart = Math.max(0, Math.min(text.length, hit.column));
+      out.push({
+        num: i + 1,
+        text,
+        isMatch: true,
+        matchStart,
+        matchEnd: Math.min(text.length, matchStart + hit.matchLength)
+      });
+    } else {
+      out.push({ num: i + 1, text, isMatch: false });
+    }
+  }
+  return out;
+}
+
+const RESULTS_LISTBOX_ID = 'skrive-search-results';
+const HIT_OPTION_ID = (idx: number) => `skrive-search-hit-${idx}`;
+
 export function SearchModal({ open, onClose }: Props) {
   const openTabAtLine = useProjectStore((s) => s.openTabAtLine);
+  const manifestRoot = useProjectStore((s) => s.manifest?.root ?? null);
 
   const [query, setQuery] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -71,19 +111,19 @@ export function SearchModal({ open, onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [preview, setPreview] = useState<PreviewLine[] | null>(null);
 
-  // Token guards against out-of-order resolves: if the user types fast,
-  // an earlier invoke may resolve after a later one. Discard any result
-  // whose token doesn't match the latest issued.
   const tokenRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  // File bodies cached for the open session so arrowing through hits in
+  // the same file doesn't re-read it from disk.
+  const fileCache = useRef<Map<string, string>>(new Map());
 
   const groups = useMemo(() => groupByPath(hits), [hits]);
+  const selectedHit = hits[selectedIndex] ?? null;
 
-  // Reset state every time the modal closes so the next open starts
-  // clean. Done on the close transition rather than on open so the
-  // closing animation doesn't show empty state for a frame.
+  // Reset on close so the next open starts clean.
   useEffect(() => {
     if (open) return;
     setQuery('');
@@ -91,6 +131,8 @@ export function SearchModal({ open, onClose }: Props) {
     setError(null);
     setLoading(false);
     setSelectedIndex(0);
+    setPreview(null);
+    fileCache.current.clear();
   }, [open]);
 
   useEffect(() => {
@@ -130,6 +172,37 @@ export function SearchModal({ open, onClose }: Props) {
     };
   }, [query, caseSensitive, open]);
 
+  // Build the preview for the highlighted hit, reading (and caching) the
+  // file body when needed.
+  useEffect(() => {
+    if (!open || !selectedHit || !manifestRoot) {
+      setPreview(null);
+      return;
+    }
+    const hit = selectedHit;
+    const cached = fileCache.current.get(hit.path);
+    if (cached !== undefined) {
+      setPreview(buildPreview(cached, hit));
+      return;
+    }
+    let cancelled = false;
+    void window.skrive.fs
+      .readFile(manifestRoot, hit.path)
+      .then((fc) => {
+        if (cancelled) return;
+        fileCache.current.set(hit.path, fc.body);
+        setPreview(buildPreview(fc.body, hit));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        logProjectError('search:readFile', err);
+        setPreview(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, selectedHit, manifestRoot]);
+
   function scrollSelectedIntoView(idx: number) {
     const el = listRef.current?.querySelector<HTMLElement>(
       `[data-index="${idx}"]`
@@ -141,7 +214,6 @@ export function SearchModal({ open, onClose }: Props) {
     if (hits.length === 0) return;
     setSelectedIndex((prev) => {
       const next = (prev + delta + hits.length) % hits.length;
-      // Schedule scroll after the state commit lands.
       queueMicrotask(() => scrollSelectedIntoView(next));
       return next;
     });
@@ -211,66 +283,114 @@ export function SearchModal({ open, onClose }: Props) {
             </label>
           </div>
 
-          <div className="search-status">
-            {loading && <span>Searching…</span>}
-            {!loading && error && <span className="search-err">{error}</span>}
-            {!loading && !error && query.trim().length === 0 && (
-              <span>Type to search file contents.</span>
-            )}
-            {!loading && !error && query.trim().length > 0 && hits.length === 0 && (
-              <span>No matches.</span>
-            )}
-            {!loading && !error && hits.length > 0 && (
-              <span>
-                {hits.length} {hits.length === 1 ? 'match' : 'matches'} in{' '}
-                {groups.length} {groups.length === 1 ? 'file' : 'files'}
-              </span>
-            )}
-          </div>
-
-          <div
-            ref={listRef}
-            className="search-results"
-            role="listbox"
-            id={RESULTS_LISTBOX_ID}
-            aria-label="Search results"
-          >
-            {groups.map((group, gi) => (
-              <div key={group.path} className="search-group">
-                <div className="search-group-header">
-                  <span className="search-group-path">{group.path}</span>
-                  <span className="search-group-count">{group.items.length}</span>
-                </div>
-                {group.items.map((hit, hi) => {
-                  const idx = flatIndexFor(groups, gi, hi);
-                  const parts = splitSnippet(hit);
-                  const selected = idx === selectedIndex;
-                  return (
-                    <button
-                      key={`${hit.line}:${hit.column}`}
-                      type="button"
-                      className={`search-hit${selected ? ' selected' : ''}`}
-                      data-index={idx}
-                      id={HIT_OPTION_ID(idx)}
-                      role="option"
-                      aria-selected={selected}
-                      onMouseEnter={() => setSelectedIndex(idx)}
-                      onClick={() => {
-                        setSelectedIndex(idx);
-                        void openSelected();
-                      }}
-                    >
-                      <span className="search-line-no">{hit.line}</span>
-                      <span className="search-snippet">
-                        <span className="search-ctx">{parts.before}</span>
-                        <mark>{parts.matched}</mark>
-                        <span className="search-ctx">{parts.after}</span>
-                      </span>
-                    </button>
-                  );
-                })}
+          <div className="search-body">
+            <div className="search-left">
+              <div className="search-status">
+                {loading && <span>Searching…</span>}
+                {!loading && error && (
+                  <span className="search-err">{error}</span>
+                )}
+                {!loading && !error && query.trim().length === 0 && (
+                  <span>Type to search file contents.</span>
+                )}
+                {!loading &&
+                  !error &&
+                  query.trim().length > 0 &&
+                  hits.length === 0 && <span>No matches.</span>}
+                {!loading && !error && hits.length > 0 && (
+                  <span>
+                    {hits.length} {hits.length === 1 ? 'match' : 'matches'} in{' '}
+                    {groups.length} {groups.length === 1 ? 'file' : 'files'}
+                  </span>
+                )}
               </div>
-            ))}
+
+              <div
+                ref={listRef}
+                className="search-results"
+                role="listbox"
+                id={RESULTS_LISTBOX_ID}
+                aria-label="Search results"
+              >
+                {groups.map((group, gi) => (
+                  <div key={group.path} className="search-group">
+                    <div className="search-group-header">
+                      <span className="search-group-path">{group.path}</span>
+                      <span className="search-group-count">
+                        {group.items.length}
+                      </span>
+                    </div>
+                    {group.items.map((hit, hi) => {
+                      const idx = flatIndexFor(groups, gi, hi);
+                      const parts = splitSnippet(hit);
+                      const selected = idx === selectedIndex;
+                      return (
+                        <button
+                          key={`${hit.line}:${hit.column}`}
+                          type="button"
+                          className={`search-hit${selected ? ' selected' : ''}`}
+                          data-index={idx}
+                          id={HIT_OPTION_ID(idx)}
+                          role="option"
+                          aria-selected={selected}
+                          onMouseEnter={() => setSelectedIndex(idx)}
+                          onClick={() => {
+                            setSelectedIndex(idx);
+                            void openSelected();
+                          }}
+                        >
+                          <span className="search-line-no">{hit.line}</span>
+                          <span className="search-snippet">
+                            <span className="search-ctx">{parts.before}</span>
+                            <mark>{parts.matched}</mark>
+                            <span className="search-ctx">{parts.after}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="search-preview" aria-hidden>
+              {selectedHit && preview ? (
+                <>
+                  <div className="search-preview-path">{selectedHit.path}</div>
+                  <div className="search-preview-code">
+                    {preview.map((line) => (
+                      <div
+                        key={line.num}
+                        className={`search-preview-line${
+                          line.isMatch ? ' is-match' : ''
+                        }`}
+                      >
+                        <span className="search-preview-gutter">{line.num}</span>
+                        <span className="search-preview-text">
+                          {line.isMatch ? (
+                            <>
+                              {line.text.slice(0, line.matchStart)}
+                              <mark>
+                                {line.text.slice(line.matchStart, line.matchEnd)}
+                              </mark>
+                              {line.text.slice(line.matchEnd)}
+                            </>
+                          ) : (
+                            line.text
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="search-preview-empty">
+                  {hits.length > 0
+                    ? 'Select a match to preview it in context.'
+                    : 'Matches preview here.'}
+                </div>
+              )}
+            </div>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
