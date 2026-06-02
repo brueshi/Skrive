@@ -28,12 +28,51 @@ export function Header() {
   const activeTab = useProjectStore(selectActiveTab);
   const sidebarVisible = useProjectStore((s) => s.sidebarVisible);
   const toggleSidebar = useProjectStore((s) => s.toggleSidebar);
+  const activeView = useProjectStore((s) => s.activeView);
+  const setActiveView = useProjectStore((s) => s.setActiveView);
 
   const headerClass = `header${isMacOS ? ' is-macos' : ''}`;
   const dragStyle: CSSProperties = { WebkitAppRegion: 'drag' } as CSSProperties;
   const noDragStyle: CSSProperties = {
     WebkitAppRegion: 'no-drag'
   } as CSSProperties;
+
+  // Settings is a full-page view, not a modal — the topbar collapses to
+  // Back / Settings / Done so the chrome matches the focused context.
+  if (activeView === 'settings') {
+    return (
+      <header className={`${headerClass} header-settings`} style={dragStyle}>
+        <div className="header-left" style={noDragStyle}>
+          <button
+            type="button"
+            className="settings-back"
+            onClick={() => setActiveView('editor')}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+              <path
+                d="M10 3.5L5.5 8L10 12.5"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Back to editor
+          </button>
+        </div>
+        <div className="header-settings-title">Settings</div>
+        <div className="header-right" style={noDragStyle}>
+          <button
+            type="button"
+            className="settings-done"
+            onClick={() => setActiveView('editor')}
+          >
+            Done
+          </button>
+        </div>
+      </header>
+    );
+  }
 
   return (
     <header className={headerClass} style={dragStyle}>
