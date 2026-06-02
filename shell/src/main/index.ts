@@ -53,7 +53,10 @@ function createWindow(): void {
       ? { icon: nativeImage.createFromPath(devIconPath()) }
       : {}),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    trafficLightPosition: { x: 16, y: 16 },
+    // Pushed toward the window edge and raised so the lights' colored
+    // circles land on the 40px topbar's centerline (y=20), sharing a
+    // baseline with the sidebar toggle beside them.
+    trafficLightPosition: { x: 12, y: 13 },
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       sandbox: true,
