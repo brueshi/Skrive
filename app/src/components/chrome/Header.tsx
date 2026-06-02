@@ -86,9 +86,11 @@ export function Header() {
           title="Toggle sidebar  ⌘["
           onClick={() => toggleSidebar()}
         >
-          <IconSidebarToggle size={24} shown={sidebarVisible} />
+          <IconSidebarToggle size={16} shown={sidebarVisible} />
         </button>
       </div>
+
+      <span className="header-sep" aria-hidden="true" />
 
       <div style={noDragStyle} className="header-tabs">
         <TabBar />

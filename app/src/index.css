@@ -265,26 +265,31 @@ body {
   border-bottom: 1px solid var(--skrive-rule);
 }
 
-/* Clear the macOS traffic-light cluster (~78px wide) with a Notion-
-   style gap before the sidebar toggle starts. With titleBarStyle:
-   hiddenInset, the chrome extends under the lights so they sit on the
-   same surface as the rest of the chrome. The 96px is calibrated so
-   the toggle reads as deliberate first-class chrome rather than a
-   button squeezed against the traffic lights. */
+/* Clear the macOS traffic-light cluster. With titleBarStyle:
+   hiddenInset the chrome extends under the lights; trafficLightPosition
+   puts them at x:12 ending ~x:64, so the sidebar toggle starts just
+   past them — the two read as one window-controls cluster tucked to the
+   left edge. */
 .header.is-macos {
-  padding-left: 96px;
+  padding-left: 72px;
 }
 
 .header-left {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
   min-width: 0;
-  /* Mirror the .header .tabs top inset so the sidebar toggle's top
-     edge sits at the same y as the tab strip's top edge. Without this
-     the toggle reads as floating above the tabs. */
-  padding-top: 6px;
+}
+
+/* Hairline between the window-controls cluster (lights + sidebar toggle)
+   and the tab strip — separates them into their own box. */
+.header-sep {
+  align-self: center;
+  flex-shrink: 0;
+  width: 1px;
+  height: 18px;
+  background: var(--skrive-rule);
 }
 
 /* Project menu trigger. Lives in the sidebar's section header now —
@@ -337,8 +342,8 @@ body {
   border: none;
   color: var(--skrive-muted);
   cursor: pointer;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -359,20 +364,25 @@ body {
   color: var(--skrive-fg);
 }
 
-/* Sidebar toggle gets a bigger hit target than other header icon
-   buttons — Notion-style first-class chrome rather than a utility
-   icon. Sits in its own column with deliberate space from the traffic
-   lights (see .header.is-macos padding) and aligned with the tab
-   strip's top inset (see .header-left padding-top). */
+/* The toggle is a peer of the traffic lights — same cluster, on their
+   centerline, its panel matched to their top/bottom. The glyph has ~3px
+   of internal padding (panel is 10 of 16 viewBox units tall), so the
+   SVG renders at 20px to bring the visible panel up to the lights' ~13px
+   height. The button keeps a comfortable hover target around it. */
 .sidebar-toggle {
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
 }
 
-/* Tab strip hugs the bottom edge of the chrome row so the active tab
-   can extend down to the editor edge and visually merge with it
-   (Notion / browser pattern: chrome is the "shelf", active tab is the
-   lifted card). 6px top inset gives breathing room above tabs. */
+.sidebar-toggle svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Lifted browser tabs: the strip hugs the bottom of the chrome row (6px
+   top inset is the shelf), the active tab a rounded paper card lifted
+   off the desk. Separated from the window-controls cluster on the left
+   by .header-sep. */
 .header .tabs {
   flex: 1;
   display: flex;
@@ -383,9 +393,9 @@ body {
   overflow: hidden;
 }
 
-/* Browser-style sizing — tabs hug their natural content width
-   (icon + name + close), can shrink down to a 36px floor when crowded,
-   and cap at 14rem so a long filename can't dominate the row. */
+/* Content-width tabs (icon + name + close): shrink to a 36px floor when
+   crowded, cap at 14rem so one long filename can't dominate. Rounded
+   tops so the active tab reads as a lifted card. */
 .tab {
   position: relative;
   display: inline-flex;
@@ -417,7 +427,6 @@ body {
 .tab.active {
   color: var(--skrive-fg);
   background: var(--skrive-bg);
-  box-shadow: inset 0 -1px 0 var(--skrive-bg);
 }
 
 .tab-icon {
