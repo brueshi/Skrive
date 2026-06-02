@@ -1,12 +1,18 @@
-// Shared chrome for the three top-right floating panels (frontmatter,
-// backlinks, history). Each panel had its own wrapper-with-grid-rows
-// trick before; framer-motion's AnimatePresence handles the
-// enter/exit transition with a slide-from-top + opacity fade and lets
-// the panel unmount cleanly when closed.
+// Shared chrome for the three side panels (frontmatter, backlinks,
+// history). Skrive 1.0 docks them: instead of floating over the editor,
+// the open panel is an in-flow card to the right of the workspace, and
+// the editor narrows to make room (one panel at a time — the store's
+// mutex still guarantees that).
 //
-// Per-panel sizing/positioning still differs (HI is 26rem, FM is 32rem,
-// BL is 26rem), so the panel passes a `width` style override and any
-// extra class names. Everything else is shared.
+// The dock animates its own width (a right-anchored drawer reveal) so
+// the editor reflows smoothly as it opens and closes. The inner card
+// keeps a fixed width and is absolutely anchored to the dock's right
+// edge, so its content never reflows mid-animation — the clip just
+// uncovers it from the right. AnimatePresence drives the open/exit and
+// unmounts the panel when closed.
+//
+// Per-panel width still differs (FM is 32rem, BL/HI 26rem), passed as
+// `widthRem`.
 
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { forwardRef, useEffect, useRef, type ReactNode } from 'react';
@@ -14,37 +20,28 @@ import { forwardRef, useEffect, useRef, type ReactNode } from 'react';
 type Props = {
   open: boolean;
   ariaLabel: string;
-  /** Forwarded to the inner panel for click-outside dismissal in the
-   *  parent's effect. */
+  /** Forwarded to the inner panel for focus management in the parent. */
   panelRef?: React.Ref<HTMLDivElement>;
-  /** Extra class on the panel for surface-specific styling (header /
-   *  body color tweaks etc). The shell already applies `panel-shell`. */
+  /** Extra class on the inner card for surface-specific styling. */
   className?: string;
-  /** CSS width — defaults to 26rem to match the existing chrome. */
-  width?: string;
+  /** Card width in rem — defaults to 26 to match the existing chrome. */
+  widthRem?: number;
   children: ReactNode;
 };
 
-// Entry slides 8px down; exit lifts only 6px. The exit being shallower
-// than the entry is deliberate — paired with the opacity fade, the
-// panel feels like it's evaporating in place rather than retracting,
-// which reads less assertive when the user is dismissing it.
-const PANEL_VARIANTS = {
-  hidden: { opacity: 0, y: -8 },
-  visible: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -6 }
-};
+/** :root sets font-size: 14px, so 1rem = 14px. The dock animates a px
+ *  width, so resolve the rem here rather than animate a unit expression. */
+const ROOT_FONT_PX = 14;
 
 export const PanelShell = forwardRef<HTMLDivElement, Props>(
   function PanelShell(
-    { open, ariaLabel, panelRef, className, width = '26rem', children },
+    { open, ariaLabel, panelRef, className, widthRem = 26, children },
     _
   ) {
     const reduced = useReducedMotion();
     const internalRef = useRef<HTMLDivElement | null>(null);
+    const widthPx = widthRem * ROOT_FONT_PX;
 
-    // Forward the rendered node to both the parent's click-outside ref
-    // and our own internal ref (used for the auto-focus effect below).
     function setRef(node: HTMLDivElement | null) {
       internalRef.current = node;
       if (typeof panelRef === 'function') {
@@ -55,11 +52,9 @@ export const PanelShell = forwardRef<HTMLDivElement, Props>(
       }
     }
 
-    // Move keyboard focus into the panel on open. Without this, a user
-    // who hits ⌘⇧F/⌘⇧B/⌘⇧H keeps focus on whatever they had before
-    // (typically the editor), so neither Tab navigation nor Escape
-    // dismissal works as expected. rAF lets the framer-motion enter
-    // transition mount the node first.
+    // Move keyboard focus into the panel on open so Tab navigation and
+    // Escape work without an extra click. rAF lets the enter transition
+    // mount the node first.
     useEffect(() => {
       if (!open) return;
       const id = requestAnimationFrame(() => {
@@ -72,23 +67,26 @@ export const PanelShell = forwardRef<HTMLDivElement, Props>(
       <AnimatePresence>
         {open && (
           <motion.div
-            className={`panel-shell${className ? ` ${className}` : ''}`}
-            style={{ width }}
-            ref={setRef}
-            role="dialog"
-            tabIndex={-1}
-            aria-label={ariaLabel}
-            initial={reduced ? false : 'hidden'}
-            animate="visible"
-            exit="exit"
-            variants={PANEL_VARIANTS}
+            className="panel-dock"
+            initial={reduced ? false : { width: 0, opacity: 0 }}
+            animate={{ width: widthPx, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
             transition={
               reduced
                 ? { duration: 0 }
-                : { duration: 0.15, ease: [0.4, 0, 0.2, 1] }
+                : { duration: 0.16, ease: [0.16, 1, 0.3, 1] }
             }
           >
-            {children}
+            <div
+              className={`panel-shell${className ? ` ${className}` : ''}`}
+              style={{ width: widthPx }}
+              ref={setRef}
+              role="dialog"
+              tabIndex={-1}
+              aria-label={ariaLabel}
+            >
+              {children}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

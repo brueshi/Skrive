@@ -251,24 +251,6 @@ body {
   background: var(--skrive-fg);
 }
 
-/* Side panels — push behavior reserves room on the right of the editor
-   card so the floating panel sits beside (not over) the card. Reserve
-   width is set per-render in App.tsx via --skrive-panel-reserve so we
-   match the actually-open panel (FM 32rem, BL/HI 26rem). Float keeps
-   the legacy overlay behavior. */
-.app-root[data-panel-behavior='push'] .workspace {
-  margin-right: calc(
-    var(--skrive-panel-reserve, 0px) + 12px + var(--skrive-shell-pad)
-  );
-  transition: margin-right var(--skrive-duration-standard)
-    var(--skrive-easing);
-}
-
-.app-root[data-panel-behavior='push'][data-panels-open='false']
-  .workspace {
-  margin-right: 0;
-}
-
 /* ===================== Header (overlay title bar) ===================== */
 
 .header {
@@ -2474,32 +2456,40 @@ body {
   user-select: none;
 }
 
-/* ===================== Floating panels (shared shell) ===================== */
+/* ===================== Docked side panels (shared shell) ===================== */
 
-/* Position + frame for the top-right floating panels (FM / BL / HI).
-   Width is set per-panel by PanelShell; the height + max-height + flex
-   chrome lives here so the inner panel content scrolls correctly. The
-   enter/exit transition is owned by framer-motion (see PanelShell). */
+/* The dock is the in-flow flex child of .app-body, sitting right of the
+   workspace card. framer-motion animates its width (0 -> card width) for
+   the open/close drawer reveal; it clips the right-anchored card so the
+   content never reflows mid-animation. */
+.panel-dock {
+  position: relative;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+/* The panel card itself — anchored to the dock's right edge so the
+   width-clip uncovers it from the right, and styled as an Overcast card
+   to match the sidebar + workspace cards alongside it. Width is set
+   per-panel by PanelShell. */
 .panel-shell {
   position: absolute;
-  top: 48px;
-  right: 12px;
-  max-width: calc(100vw - 24px);
-  max-height: 50vh;
-  z-index: var(--skrive-z-panel);
-  background: var(--skrive-bg);
-  border: 1px solid var(--skrive-fg);
-  border-radius: var(--skrive-radius-md);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  top: 0;
+  right: 0;
+  height: 100%;
+  background: var(--skrive-card-bg);
+  border: 1px solid var(--skrive-card-border);
+  border-radius: var(--skrive-card-radius);
+  box-shadow: var(--skrive-card-shadow);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-/* The panel root is focused programmatically on open so Escape and
-   inner Tab navigation work without an extra click; the panel's solid
-   border already reads as the focus surface, so suppress the global
-   keyboard ring on the wrapper. */
+/* The panel root is focused programmatically on open so Escape and inner
+   Tab navigation work without an extra click; suppress the global
+   keyboard ring on the wrapper since the card frame reads as the
+   surface. */
 .panel-shell:focus-visible {
   outline: none;
 }

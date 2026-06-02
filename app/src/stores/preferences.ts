@@ -18,11 +18,9 @@ import {
   type LineMeasure,
   type NewFileLocation,
   type NewFileNaming,
-  type PanelOpenBehaviorId,
   type RecentFile,
   type MarkerMode,
   type RecentProject,
-  type ShellToneId,
   type SlugFormat,
   type SurfaceId,
   type ThemeId
@@ -52,8 +50,6 @@ type PreferencesActions = {
   setEditorLineHeightX100(value: number): void;
   setSkipDeleteConfirmation(skip: boolean): void;
   setAutoUpdateOnLaunch(value: boolean): void;
-  setPanelOpenBehavior(value: PanelOpenBehaviorId): void;
-  setShellTone(value: ShellToneId): void;
   setTheme(value: ThemeId): void;
   setShowOutlineRail(value: boolean): void;
   setDefaultSurface(value: SurfaceId): void;
@@ -108,8 +104,6 @@ function snapshot(state: PreferencesState): AppUiState {
     editorFontSize: state.editorFontSize,
     editorLineHeightX100: state.editorLineHeightX100,
     autoUpdateOnLaunch: state.autoUpdateOnLaunch,
-    panelOpenBehavior: state.panelOpenBehavior,
-    shellTone: state.shellTone,
     theme: state.theme,
     showOutlineRail: state.showOutlineRail,
     defaultSurface: state.defaultSurface,
@@ -209,16 +203,6 @@ export const usePreferencesStore = create<
   setAutoUpdateOnLaunch(value) {
     if (get().autoUpdateOnLaunch === value) return;
     set({ autoUpdateOnLaunch: value });
-    scheduleSave(get);
-  },
-  setPanelOpenBehavior(value) {
-    if (get().panelOpenBehavior === value) return;
-    set({ panelOpenBehavior: value });
-    scheduleSave(get);
-  },
-  setShellTone(value) {
-    if (get().shellTone === value) return;
-    set({ shellTone: value });
     scheduleSave(get);
   },
   setTheme(value) {

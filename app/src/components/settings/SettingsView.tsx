@@ -186,8 +186,6 @@ function AppearancePane() {
   const setSize = usePreferencesStore((s) => s.setEditorFontSize);
   const lineHeight = usePreferencesStore((s) => s.editorLineHeightX100);
   const setLine = usePreferencesStore((s) => s.setEditorLineHeightX100);
-  const panelBehavior = usePreferencesStore((s) => s.panelOpenBehavior);
-  const setPanelBehavior = usePreferencesStore((s) => s.setPanelOpenBehavior);
   const outlineRail = usePreferencesStore((s) => s.showOutlineRail);
   const setOutlineRail = usePreferencesStore((s) => s.setShowOutlineRail);
 
@@ -262,21 +260,6 @@ function AppearancePane() {
       </SettingsSection>
 
       <SettingsSection cap="Layout">
-        <SettingRow
-          label="Panel behavior"
-          desc="Whether side panels push the editor aside or float over it."
-          control={
-            <Segmented
-              value={panelBehavior}
-              onChange={setPanelBehavior}
-              options={[
-                { id: 'push', label: 'Push' },
-                { id: 'float', label: 'Float' }
-              ]}
-              ariaLabel="Panel behavior"
-            />
-          }
-        />
         <SettingRow
           label="Outline rail"
           desc="Show a column of section ticks down the right edge of the preview."
