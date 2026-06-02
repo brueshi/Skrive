@@ -13,7 +13,7 @@ import { Header } from './components/chrome/Header';
 import { BacklinksPanel } from './components/panels/BacklinksPanel';
 import { FrontmatterPanel } from './components/panels/FrontmatterPanel';
 import { HistoryPanel } from './components/panels/HistoryPanel';
-import { SettingsModal } from './components/settings/SettingsModal';
+import { SettingsView } from './components/settings/SettingsView';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { SearchModal } from './components/modals/SearchModal';
 import { RenameModal } from './components/modals/RenameModal';
@@ -65,7 +65,6 @@ export function App() {
   );
   const openProject = useProjectStore((s) => s.openProject);
   const activeView = useProjectStore((s) => s.activeView);
-  const setActiveView = useProjectStore((s) => s.setActiveView);
   const panelOpenBehavior = usePreferencesStore((s) => s.panelOpenBehavior);
   const theme = usePreferencesStore((s) => s.theme);
   const showOutlineRail = usePreferencesStore((s) => s.showOutlineRail);
@@ -353,7 +352,9 @@ export function App() {
       <Header />
 
       <main className="app-body">
-        {manifest ? (
+        {activeView === 'settings' ? (
+          <SettingsView appVersion={appVersion} />
+        ) : manifest ? (
           <>
             <Sidebar />
             <section className="workspace">
@@ -510,12 +511,6 @@ export function App() {
         onClose={() => setCheatSheetOpen(false)}
         bindings={bindings}
       />
-      <SettingsModal
-        open={activeView === 'settings'}
-        onClose={() => setActiveView('editor')}
-        appVersion={appVersion}
-      />
-
       <Toaster
         position="bottom-right"
         theme="dark"

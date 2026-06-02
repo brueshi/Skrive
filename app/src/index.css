@@ -2871,457 +2871,782 @@ body {
   font-size: 11px;
 }
 
-/* ===================== Settings — topbar layout tiles ===================== */
-
-.settings-inline-blurb {
-  margin-top: 0.25rem;
-  margin-bottom: 0.5rem;
-  max-width: 30rem;
-}
-
-.settings-layout-grid {
-  display: grid;
-  /* auto-fit minmax lets the grid choose 2 or 3 columns based on the
-     pane's actual width: 2-option forks always read as 2 stretched
-     tiles; 3-option forks fit in 3 cols on a wide pane and only fall
-     back to 2 + 1 if the pane is too narrow for three tile widths. */
-  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-  gap: 0.5rem;
-}
-
-.settings-layout-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  align-items: flex-start;
-  padding: 0.55rem 0.75rem;
-  background: transparent;
-  border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-radius-md);
-  cursor: pointer;
-  text-align: left;
-  color: var(--skrive-fg);
-  font: inherit;
-}
-
-.settings-layout-tile:hover {
-  border-color: var(--skrive-fg);
-}
-
-.settings-layout-tile.active {
-  border-color: var(--skrive-fg);
-  background: color-mix(in srgb, var(--skrive-bg) 90%, var(--skrive-fg) 10%);
-}
-
-.settings-layout-tile-label {
-  font-size: 0.95rem;
-  letter-spacing: -0.005em;
-}
-
-.settings-layout-tile-desc {
-  font-size: 0.72rem;
-  color: var(--skrive-muted);
-  font-family: var(--skrive-ui-font);
-  line-height: 1.4;
-}
-
-/* ============================ Settings modal ============================ */
-/* Settings runs as a Dialog.Content modal — sized larger than the
-   default modal-dialog so the nav + pane shell has room. The default
-   modal-dialog padding is zeroed so the inner sections can flush to
-   the modal edges. */
-
-.settings-modal {
-  width: min(58rem, calc(100vw - 4rem));
-  height: min(44rem, calc(100vh - 4rem));
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+/* ===================== Settings (full-page, 1.0) ===================== */
+/*
+ * The Settings view replaces the workspace when activeView === 'settings'.
+ * Two cards sit in the app-body shell: a fixed section-nav (sidebar slot)
+ * beside a scrolling content card. Both reuse the committed Overcast card
+ * tokens so Settings reads as part of the app, not a modal over it.
+ *
+ * Values traced from the paper.design "Skrive v2.0 — Settings" mock:
+ * 12px group-card radius (--skrive-radius-lg), 16/18 row padding, a 30px
+ * sunken segmented track with a raised active pill, the 40x23 accent
+ * toggle, and mono frontmatter chips. Mock chrome used Inter/Fraunces;
+ * here UI rides --skrive-ui-font and titles ride the serif editor font,
+ * per the 1.0 fonts-unchanged decision.
+ *
+ * Two derived greys keep the kit token-driven without new root tokens:
+ *   --settings-cap   — the lightened uppercase label grey
+ *   --settings-hair  — the hairline between rows (lighter than --skrive-rule)
+ *   --settings-sunk  — the sunken segmented-track fill
+ *   --settings-off   — the off-state toggle track
+ */
+.app-root .settings-nav-card,
+.app-root .settings-content-card {
+  --settings-cap: color-mix(in srgb, var(--skrive-muted) 70%, var(--skrive-bg));
+  --settings-hair: color-mix(in srgb, var(--skrive-rule) 55%, var(--skrive-bg));
+  --settings-sunk: color-mix(in srgb, var(--skrive-fg) 8%, var(--skrive-rule));
+  --settings-off: color-mix(in srgb, var(--skrive-fg) 14%, var(--skrive-rule));
   font-family: var(--skrive-ui-font);
 }
 
-.settings-view-header {
+/* ---- Settings topbar (Back / Settings / Done) ---- */
+.header-settings {
+  justify-content: space-between;
+}
+
+.header-settings .header-left,
+.header-settings .header-right {
+  flex: 1;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem 1.25rem;
-  border-bottom: 1px solid var(--skrive-rule);
-  flex-shrink: 0;
+  padding-top: 0;
 }
 
-.settings-view-title {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 500;
-  letter-spacing: -0.01em;
+.header-settings .header-right {
+  justify-content: flex-end;
+}
+
+.header-settings-title {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--skrive-fg);
 }
 
-.settings-close {
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  color: var(--skrive-muted);
-  padding: 0.25rem;
+.settings-back {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 0.4rem;
+  height: 28px;
+  padding: 0 0.625rem 0 0.375rem;
+  border: none;
+  background: transparent;
   border-radius: var(--skrive-radius-sm);
+  color: var(--skrive-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
-.settings-close:hover {
+.settings-back:hover {
   color: var(--skrive-fg);
-  background: color-mix(
-    in srgb,
-    var(--skrive-card-bg) 85%,
-    var(--skrive-fg) 15%
-  );
+  background: var(--skrive-rule);
 }
 
-.settings-shell {
-  display: grid;
-  grid-template-columns: 12rem 1fr;
-  flex: 1 1 auto;
-  min-height: 0;
+.settings-done {
+  height: 28px;
+  padding: 0 1rem;
+  border: none;
+  border-radius: var(--skrive-radius-sm);
+  background: var(--skrive-fg);
+  color: var(--skrive-bg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity var(--skrive-duration-quick) var(--skrive-easing);
 }
 
-.settings-nav {
-  border-right: 1px solid var(--skrive-rule);
-  padding: 0.5rem 0;
-  background: color-mix(
-    in srgb,
-    var(--skrive-card-bg) 96%,
-    var(--skrive-fg) 4%
-  );
+.settings-done:hover {
+  opacity: 0.85;
 }
 
-.settings-nav-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* ---- Nav card (sidebar slot) ---- */
+.settings-nav-card {
+  width: 248px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  background: var(--skrive-card-bg);
+  border: 1px solid var(--skrive-card-border);
+  border-radius: var(--skrive-card-radius);
+  box-shadow: var(--skrive-card-shadow);
+  padding: 14px 10px;
+  overflow: hidden;
+  contain: layout paint;
+}
+
+.settings-nav-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-nav-group {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0.5rem;
+}
+
+.settings-nav-cap {
+  margin: 0.5rem 0 0.25rem;
+  padding: 0 9px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--settings-cap);
 }
 
 .settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  height: 34px;
   width: 100%;
+  padding: 0 9px;
+  border: none;
   background: transparent;
-  border: 0;
-  padding: 0.45rem 1rem;
-  text-align: left;
+  border-radius: var(--skrive-radius-sm);
+  color: color-mix(in srgb, var(--skrive-fg) 78%, var(--skrive-bg));
   font: inherit;
-  font-size: 0.82rem;
-  color: var(--skrive-muted);
+  font-size: 13px;
+  text-align: left;
   cursor: pointer;
-  border-left: 2px solid transparent;
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .settings-nav-item:hover {
+  background: color-mix(in srgb, var(--skrive-fg) 5%, transparent);
   color: var(--skrive-fg);
 }
 
 .settings-nav-item.active {
+  background: color-mix(in srgb, var(--skrive-fg) 7%, transparent);
   color: var(--skrive-fg);
-  border-left-color: var(--skrive-fg);
-  background: color-mix(
-    in srgb,
-    var(--skrive-card-bg) 90%,
-    var(--skrive-fg) 10%
-  );
+  font-weight: 500;
 }
 
-.settings-pane {
-  padding: 1.5rem 2rem;
-  overflow-y: auto;
-  /* box-sizing: border-box keeps the 2rem horizontal padding inside the
-     grid cell — without it, the pane's content edge sits 4rem past its
-     1fr column and clips inner grids (font tiles, layout tiles). */
-  box-sizing: border-box;
-  width: 100%;
+.settings-nav-label {
+  flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.settings-pane-header {
-  margin-bottom: 1rem;
+.settings-nav-trailing {
+  font-size: 11px;
+  color: var(--skrive-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-.settings-pane-header h2 {
-  margin: 0 0 0.25rem;
-  font-size: 1rem;
+.settings-nav-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  /* Soft sage — a calm "license active" status, not the indigo accent. */
+  background: #a9c79b;
+  flex-shrink: 0;
+}
+
+.settings-nav-footer {
+  flex-shrink: 0;
+  padding: 0.5rem 9px 0;
+}
+
+.settings-wordmark {
+  font-family: var(--skrive-editor-font);
+  font-size: 15px;
+  color: var(--skrive-muted);
+}
+
+/* ---- Content card (workspace slot) ---- */
+.settings-content-card {
+  flex: 1;
+  min-width: 0;
+  background: var(--skrive-card-bg);
+  border: 1px solid var(--skrive-card-border);
+  border-radius: var(--skrive-card-radius);
+  box-shadow: var(--skrive-card-shadow);
+  overflow: hidden;
+}
+
+.settings-scroll {
+  height: 100%;
+  overflow-y: auto;
+}
+
+.settings-col {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 44px 40px 80px;
+}
+
+.settings-pane-head {
+  margin-bottom: 28px;
+}
+
+.settings-pane-title {
+  margin: 0;
+  font-family: var(--skrive-editor-font);
+  font-size: 25px;
   font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--skrive-fg);
 }
 
-.settings-pane-blurb {
-  margin: 0;
-  font-size: 0.78rem;
-  color: var(--skrive-muted);
+.settings-pane-sub {
+  margin: 0.375rem 0 0;
+  font-size: 13.5px;
   line-height: 1.5;
-  max-width: 32rem;
+  color: var(--skrive-muted);
 }
 
-.settings-group {
-  margin-bottom: 1.25rem;
+/* ---- Section (cap + card) ---- */
+.settings-section {
+  margin-bottom: 28px;
 }
 
-.settings-group:last-child {
+.settings-section:last-child {
   margin-bottom: 0;
 }
 
-.settings-label {
-  display: block;
-  font-size: 0.72rem;
-  font-weight: 500;
-  letter-spacing: 0.04em;
+.settings-section-cap {
+  margin: 0 0 10px;
+  padding-left: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
+  color: var(--settings-cap);
+}
+
+.settings-card {
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-lg);
+  box-shadow: var(--skrive-card-shadow);
+  overflow: hidden;
+}
+
+/* ---- Row (label/desc + control) ---- */
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px 18px;
+}
+
+.settings-row + .settings-row,
+.settings-card-pad {
+  border-top: 1px solid var(--settings-hair);
+}
+
+.settings-row.is-dimmed {
+  opacity: 0.4;
+}
+
+.settings-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-row-label {
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--skrive-fg);
+}
+
+.settings-row-desc {
+  font-size: 12.5px;
+  line-height: 16px;
   color: var(--skrive-muted);
-  margin-bottom: 0.5rem;
 }
 
-.settings-input {
-  width: 100%;
-  background: transparent;
-  border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-radius-sm);
-  padding: 0.45rem 0.65rem;
-  font: inherit;
-  font-size: 0.85rem;
+.settings-row-control {
+  flex-shrink: 0;
+}
+
+.settings-card-pad {
+  padding: 16px 18px;
+}
+
+.settings-card-blurb {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--skrive-muted);
+}
+
+.settings-value-text {
+  font-size: 13px;
   color: var(--skrive-fg);
-  font-family: var(--skrive-ui-font);
 }
 
-.settings-input:focus {
-  border-color: var(--skrive-fg);
+.settings-value-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--skrive-muted);
 }
 
-.settings-secondary-button {
+/* ---- Segmented ---- */
+.seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  padding: 2px;
+  background: var(--settings-sunk);
+  border-radius: var(--skrive-radius-md);
+}
+
+.seg-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 13px;
+  border: none;
   background: transparent;
-  border: 1px solid var(--skrive-rule);
   border-radius: var(--skrive-radius-sm);
-  padding: 0.4rem 0.85rem;
+  color: var(--skrive-muted);
   font: inherit;
-  font-size: 0.82rem;
-  color: var(--skrive-fg);
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
-.settings-secondary-button:hover:not(:disabled) {
-  border-color: var(--skrive-fg);
-}
-
-.settings-secondary-button:disabled {
-  color: var(--skrive-muted);
-  cursor: not-allowed;
-}
-
-/* Updater status line — sits above the action button in the Updates
-   section. Plain prose by default; .settings-updater-error is a soft
-   red so a network/GitHub-rate-limit failure reads at a glance. */
-.settings-updater-status {
-  margin: 0 0 0.5rem;
-  font-size: 0.8125rem;
-  color: var(--skrive-muted);
-  line-height: 1.4;
-}
-
-.settings-updater-status strong {
+.seg-option.active {
+  background: var(--skrive-bg);
   color: var(--skrive-fg);
   font-weight: 600;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--skrive-fg) 9%, transparent);
 }
 
-.settings-updater-error {
-  color: #a84030;
-}
-
-/* General — toggle row (also used by Updates) */
-
-.settings-toggle-row {
-  display: flex;
-  gap: 0.65rem;
-  align-items: flex-start;
-  cursor: pointer;
-  padding: 0.5rem 0;
-  user-select: none;
-}
-
-.settings-toggle-row input {
-  margin-top: 0.1rem;
-}
-
-.settings-toggle-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.settings-toggle-label {
-  font-size: 0.85rem;
-  color: var(--skrive-fg);
-}
-
-.settings-toggle-desc {
-  font-size: 0.76rem;
-  color: var(--skrive-muted);
-  line-height: 1.45;
-  max-width: 30rem;
-}
-
-/* Editor — font preset grid */
-
-.settings-font-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
-}
-
-.settings-font-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  align-items: flex-start;
-  padding: 0.55rem 0.75rem;
-  background: transparent;
-  border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-radius-md);
-  cursor: pointer;
-  text-align: left;
-  color: var(--skrive-fg);
-  font: inherit;
-}
-
-.settings-font-tile:hover {
-  border-color: var(--skrive-fg);
-}
-
-.settings-font-tile.active {
-  border-color: var(--skrive-fg);
-  background: color-mix(in srgb, var(--skrive-bg) 90%, var(--skrive-fg) 10%);
-}
-
-.settings-font-tile-label {
-  font-size: 1rem;
-  letter-spacing: -0.01em;
-}
-
-.settings-font-tile-subtext {
-  font-size: 0.72rem;
-  color: var(--skrive-muted);
-  font-family: var(--skrive-ui-font);
-}
-
-/* Editor — stepped controls (size, line-height) */
-
-.settings-stepper {
+/* ---- Toggle ---- */
+.tgl {
   display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 40px;
+  height: 23px;
+  padding: 2px;
+  border: none;
+  border-radius: 999px;
+  background: var(--settings-off);
+  cursor: pointer;
+  transition: background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.tgl.on {
+  background: var(--skrive-accent);
+}
+
+.tgl-knob {
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  transition: transform var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.tgl.on .tgl-knob {
+  transform: translateX(17px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tgl-knob {
+    transition: none;
+  }
+}
+
+/* ---- Stepper ---- */
+.stepper {
+  display: inline-flex;
+  align-items: stretch;
+  height: 36px;
+  background: var(--skrive-bg);
   border: 1px solid var(--skrive-rule);
   border-radius: var(--skrive-radius-md);
   overflow: hidden;
 }
 
-.settings-stepper-button {
-  padding: 0.4rem 0.7rem;
+.stepper-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  border: none;
   background: transparent;
-  border: 0;
-  border-right: 1px solid var(--skrive-rule);
-  font: inherit;
-  font-size: 0.82rem;
   color: var(--skrive-muted);
   cursor: pointer;
+  transition: color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.stepper-btn:hover:not(:disabled) {
+  color: var(--skrive-fg);
+}
+
+.stepper-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.stepper-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  padding: 0 8px;
+  border-left: 1px solid var(--settings-hair);
+  border-right: 1px solid var(--settings-hair);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--skrive-fg);
   font-variant-numeric: tabular-nums;
 }
 
-.settings-stepper-button:last-child {
-  border-right: 0;
+/* ---- Select ---- */
+.sel {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
 }
 
-.settings-stepper-button:hover {
+.sel-native {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 36px;
+  min-width: 130px;
+  padding: 0 30px 0 12px;
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-md);
+  background: var(--skrive-bg);
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sel-native:focus-visible {
+  outline: none;
+  border-color: var(--skrive-focus-ring);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--skrive-focus-ring) 35%, transparent);
+}
+
+.sel-caret {
+  position: absolute;
+  right: 10px;
+  color: var(--skrive-muted);
+  pointer-events: none;
+}
+
+/* ---- Theme tiles ---- */
+.settings-theme-block {
+  padding: 16px 18px;
+}
+
+.theme-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.theme-tile {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-md);
+  overflow: hidden;
+  cursor: pointer;
+  transition:
+    border-color var(--skrive-duration-quick) var(--skrive-easing),
+    box-shadow var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.theme-tile.active {
+  border-color: var(--skrive-accent);
+  box-shadow: 0 0 0 1px var(--skrive-accent);
+}
+
+.theme-preview {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  height: 64px;
+  padding: 0 14px;
+}
+
+.theme-preview-line {
+  height: 5px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.55;
+}
+
+.theme-preview-line:nth-child(1) { width: 60%; opacity: 0.8; }
+.theme-preview-line:nth-child(2) { width: 90%; }
+.theme-preview-line:nth-child(3) { width: 75%; }
+
+/* Each preview paints its own scheme so the choice is legible at a
+   glance regardless of the active theme. System splits light/dark. */
+.theme-preview--light {
+  background: #fcfcfb;
+  color: #4c5ba6;
+}
+
+.theme-preview--dark {
+  background: #201f1d;
+  color: #8c97d6;
+}
+
+.theme-preview--system {
+  background: linear-gradient(105deg, #fcfcfb 0 50%, #201f1d 50% 100%);
+  color: #6f79b8;
+}
+
+.theme-tile-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--skrive-rule);
+  font-size: 12px;
   color: var(--skrive-fg);
 }
 
-.settings-stepper-button.active {
-  background: color-mix(in srgb, var(--skrive-bg) 90%, var(--skrive-fg) 10%);
+.theme-tile-foot input {
+  accent-color: var(--skrive-accent);
+}
+
+/* ---- Field chips (frontmatter) ---- */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 300px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--skrive-radius-sm);
+  background: color-mix(in srgb, var(--skrive-rule) 70%, var(--skrive-bg));
+}
+
+.chip-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
   color: var(--skrive-fg);
 }
 
-/* Personal dictionary */
+.chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  padding: 0;
+}
 
+.chip-remove:hover {
+  color: var(--skrive-fg);
+}
+
+.chip-add {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px dashed color-mix(in srgb, var(--skrive-muted) 55%, var(--skrive-bg));
+  border-radius: var(--skrive-radius-sm);
+  background: transparent;
+  color: var(--skrive-muted);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.chip-add:hover {
+  color: var(--skrive-fg);
+  border-color: var(--skrive-muted);
+}
+
+.chip-input {
+  height: 26px;
+  width: 80px;
+  padding: 0 8px;
+  border: 1px solid var(--skrive-focus-ring);
+  border-radius: var(--skrive-radius-sm);
+  background: var(--skrive-bg);
+  color: var(--skrive-fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.chip-input:focus {
+  outline: none;
+}
+
+/* ---- Shared field inputs / buttons (carried from the modal era) ---- */
+.settings-mono-input {
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-md);
+  background: var(--skrive-bg);
+  color: var(--skrive-fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.settings-mono-input:focus-visible {
+  outline: none;
+  border-color: var(--skrive-focus-ring);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--skrive-focus-ring) 35%, transparent);
+}
+
+.settings-input {
+  width: 100%;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-md);
+  background: var(--skrive-bg);
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.settings-input:focus-visible {
+  outline: none;
+  border-color: var(--skrive-focus-ring);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--skrive-focus-ring) 35%, transparent);
+}
+
+.settings-secondary-button {
+  appearance: none;
+  padding: 0.5rem 0.875rem;
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-md);
+  background: var(--skrive-bg);
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    border-color var(--skrive-duration-quick) var(--skrive-easing),
+    color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.settings-secondary-button:hover:not(:disabled) {
+  border-color: var(--skrive-muted);
+}
+
+.settings-secondary-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.settings-updater-status {
+  margin: 0 0 0.625rem;
+  font-size: 13px;
+  color: var(--skrive-muted);
+}
+
+.settings-updater-status strong {
+  color: var(--skrive-fg);
+}
+
+.settings-updater-error {
+  color: #a84030;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+/* ---- Personal dictionary ---- */
 .settings-dict-input {
   display: flex;
   gap: 0.5rem;
-  margin-bottom: 0.75rem;
 }
 
 .settings-dict-input .settings-input {
-  flex: 1 1 auto;
+  flex: 1;
 }
 
 .settings-empty {
-  margin: 0;
-  font-size: 0.78rem;
+  margin: 0.75rem 0 0;
+  font-size: 13px;
   color: var(--skrive-muted);
-  font-style: italic;
 }
 
 .settings-dict-list {
   list-style: none;
-  margin: 0;
+  margin: 0.75rem 0 0;
   padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 6px;
 }
 
 .settings-dict-row {
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.2rem 0.5rem 0.2rem 0.65rem;
-  border: 1px solid var(--skrive-rule);
-  border-radius: 999px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.78rem;
+  gap: 5px;
+  height: 26px;
+  padding: 0 6px 0 9px;
+  border-radius: var(--skrive-radius-sm);
+  background: color-mix(in srgb, var(--skrive-rule) 70%, var(--skrive-bg));
+}
+
+.settings-dict-word {
+  font-size: 12.5px;
   color: var(--skrive-fg);
 }
 
 .settings-dict-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
   background: transparent;
-  border: 0;
-  cursor: pointer;
   color: var(--skrive-muted);
-  font-size: 1rem;
+  font-size: 15px;
   line-height: 1;
-  padding: 0 0.2rem;
+  cursor: pointer;
+  padding: 0 2px;
 }
 
 .settings-dict-remove:hover {
   color: var(--skrive-fg);
-}
-
-/* About / Updates — meta rows */
-
-.settings-meta-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  padding: 0.35rem 0;
-  border-bottom: 1px solid var(--skrive-rule);
-  font-size: 0.82rem;
-}
-
-.settings-meta-row:last-of-type {
-  border-bottom: 0;
-  margin-bottom: 0.5rem;
-}
-
-.settings-meta-label {
-  color: var(--skrive-muted);
-}
-
-.settings-meta-value {
-  color: var(--skrive-fg);
-  font-variant-numeric: tabular-nums;
 }
 
 /* ===================== Search modal (Phase 10) ===================== */
