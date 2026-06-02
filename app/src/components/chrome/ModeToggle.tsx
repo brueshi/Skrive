@@ -1,7 +1,8 @@
-// Raw / Split / Preview segmented control. Lives in the topbar
-// (classic + collapsed layouts) or in the bottom rail
-// (collapsed-bottom layout). Hidden while the active tab is showing
-// a diff — DiffView carries its own mode toggle.
+// Raw / Split / Preview segmented control. Lives in the Text-surface
+// toolbar (TextToolbar) — it's specific to editing Markdown source, so
+// it was relocated out of the global topbar in the 1.0 build. Hidden
+// while the active tab is showing a diff — DiffView carries its own
+// mode toggle.
 
 import { selectActiveTab, useProjectStore } from '../../stores/project';
 import { IconLayoutPreview } from '../icons/IconLayoutPreview';

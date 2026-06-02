@@ -17,8 +17,9 @@ import {
   useProjectStore
 } from '../../stores/project';
 import { IconSidebarToggle } from '../icons/IconSidebarToggle';
-import { ModeToggle } from './ModeToggle';
 import { PanelMenu } from './PanelMenu';
+import { SaveStatus } from './SaveStatus';
+import { SurfaceToggle } from './SurfaceToggle';
 import { TabBar } from './TabBar';
 
 const isMacOS =
@@ -95,8 +96,9 @@ export function Header() {
 
       {activeTab && (
         <div className="header-right" style={noDragStyle}>
+          <SurfaceToggle />
+          <SaveStatus />
           <PanelMenu />
-          <ModeToggle />
         </div>
       )}
     </header>
