@@ -4,6 +4,11 @@ type Props = {
   className?: string;
 };
 
+// Sidebar show/hide toggle. A rounded panel with a filled left rail; the
+// rail collapses to the left (rail-fill / is-hidden, animated in CSS)
+// when the sidebar is hidden, so the glyph mirrors the actual state.
+// The rail is a path with only its left corners rounded so it reads as
+// filling the compartment up to the divider rather than a floating pill.
 export function IconSidebarToggle({
   size = 24,
   shown = true,
@@ -24,13 +29,10 @@ export function IconSidebarToggle({
         className={className}
         aria-hidden="true"
       >
-        <rect x={2} y={3} width={12} height={10} />
-        <rect
+        <rect x={2} y={3} width={12} height={10} rx={2.5} />
+        <path
           className={fillClass}
-          x={2}
-          y={3}
-          width={4}
-          height={10}
+          d="M6 3 L4.5 3 Q2 3 2 5.5 L2 10.5 Q2 13 4.5 13 L6 13 Z"
           fill="currentColor"
           stroke="none"
         />
@@ -51,13 +53,10 @@ export function IconSidebarToggle({
       className={className}
       aria-hidden="true"
     >
-      <rect x={3} y={4} width={18} height={16} />
-      <rect
+      <rect x={3} y={4} width={18} height={16} rx={3.5} />
+      <path
         className={fillClass}
-        x={3}
-        y={4}
-        width={6}
-        height={16}
+        d="M9 4 L6.5 4 Q3 4 3 7.5 L3 16.5 Q3 20 6.5 20 L9 20 Z"
         fill="currentColor"
         stroke="none"
       />
