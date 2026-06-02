@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
 import { SplitView } from './components/editor/SplitView';
+import { TextToolbar } from './components/editor/TextToolbar';
 import { RichEditor } from './components/editor/rich/RichEditor';
 import { flushActiveEditor } from './components/editor/active-editor';
 import { DiffView } from './components/editor/DiffView';
@@ -384,33 +385,36 @@ export function App() {
                   onChange={(next) => setTabBody(activeTabIndex, next)}
                 />
               ) : activeTab ? (
-                <SplitView
-                  key={activeTab.path}
-                  mode={activeTab.layoutMode}
-                  ratio={activeTab.splitDividerRatio}
-                  body={activeTab.body}
-                  filePath={activeTab.path}
-                  projectRoot={manifest.root}
-                  onChange={(next) => setTabBody(activeTabIndex, next)}
-                  onRatioChange={(next) =>
-                    setTabSplitRatio(activeTabIndex, next)
-                  }
-                  lintFindings={activeLintFindings}
-                  initialCursorLine={activeTab.cursorLine}
-                  initialCursorColumn={activeTab.cursorColumn}
-                  initialScrollTop={activeTab.scrollTop}
-                  pendingSelection={activeTab.pendingSelection}
-                  onPendingSelectionApplied={() =>
-                    clearPendingSelection(activeTabIndex)
-                  }
-                  onCursorChange={(line, column) =>
-                    setTabCursor(activeTabIndex, line, column)
-                  }
-                  onScrollTopChange={(top) =>
-                    setTabScrollTop(activeTabIndex, top)
-                  }
-                  showOutlineRail={showOutlineRail}
-                />
+                <>
+                  <TextToolbar />
+                  <SplitView
+                    key={activeTab.path}
+                    mode={activeTab.layoutMode}
+                    ratio={activeTab.splitDividerRatio}
+                    body={activeTab.body}
+                    filePath={activeTab.path}
+                    projectRoot={manifest.root}
+                    onChange={(next) => setTabBody(activeTabIndex, next)}
+                    onRatioChange={(next) =>
+                      setTabSplitRatio(activeTabIndex, next)
+                    }
+                    lintFindings={activeLintFindings}
+                    initialCursorLine={activeTab.cursorLine}
+                    initialCursorColumn={activeTab.cursorColumn}
+                    initialScrollTop={activeTab.scrollTop}
+                    pendingSelection={activeTab.pendingSelection}
+                    onPendingSelectionApplied={() =>
+                      clearPendingSelection(activeTabIndex)
+                    }
+                    onCursorChange={(line, column) =>
+                      setTabCursor(activeTabIndex, line, column)
+                    }
+                    onScrollTopChange={(top) =>
+                      setTabScrollTop(activeTabIndex, top)
+                    }
+                    showOutlineRail={showOutlineRail}
+                  />
+                </>
               ) : (
                 <div className="empty-pane">
                   <p>Select a file from the sidebar to open it as a tab.</p>

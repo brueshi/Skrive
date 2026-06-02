@@ -525,6 +525,85 @@ body {
   background: var(--skrive-rule);
 }
 
+/* Bordered text segmented — the topbar surface toggle and the Text
+   toolbar's marker pill share this. Mirrors .mode-toggle's bordered
+   group (active = rule fill) but sizes to text rather than icon slots. */
+.chip-segmented {
+  display: inline-flex;
+  align-items: stretch;
+  height: 26px;
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-md);
+  overflow: hidden;
+}
+
+.chip-segmented-option {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.6rem;
+  background: transparent;
+  border: none;
+  color: var(--skrive-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.chip-segmented-option + .chip-segmented-option {
+  border-left: 1px solid var(--skrive-rule);
+}
+
+.chip-segmented-option:hover {
+  color: var(--skrive-fg);
+}
+
+.chip-segmented-option.active {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+/* Save-status dot. Filled accent = saved, hollow ring = unsaved edits.
+   Fixed 8px box in both states so the surrounding chrome never reflows
+   when it flips. */
+.save-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.save-dot.saved {
+  background: var(--skrive-accent);
+}
+
+.save-dot.dirty {
+  background: transparent;
+  border: 1.5px solid var(--skrive-muted);
+}
+
+.save-dot.pulse {
+  animation: save-dot-pulse 360ms var(--skrive-easing-out);
+}
+
+@keyframes save-dot-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--skrive-accent) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--skrive-accent) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .save-dot.pulse {
+    animation: none;
+  }
+}
+
 /* ===================== Context + dropdown menus (Radix) ===================== */
 
 @keyframes skrive-ctx-in {
@@ -1362,6 +1441,35 @@ body {
   .rail-fill {
     transition: none;
   }
+}
+
+/* ===================== Text-surface toolbar ===================== */
+
+/* A divided bar above the Text surface, sibling to .split-view in the
+   workspace column. Full-width (the surface can be split) rather than
+   centered like the Rich toolbar; the word count rides the right edge. */
+.text-toolbar {
+  flex: 0 0 auto;
+  background: var(--skrive-bg);
+  border-bottom: 1px solid var(--skrive-rule);
+}
+
+.text-toolbar-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+}
+
+.marker-pill.is-dimmed {
+  opacity: 0.4;
+}
+
+.text-toolbar-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--skrive-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ===================== SplitView ===================== */
