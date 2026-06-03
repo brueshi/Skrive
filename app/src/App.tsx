@@ -37,8 +37,6 @@ import { useTypographyVars } from './lib/typography-css';
 import { notify } from './lib/notify';
 import { logDuration, perfEnabled } from './lib/perf';
 
-const SAVE_DEBOUNCE_MS = 500;
-
 export function App() {
   const manifest = useProjectStore((s) => s.manifest);
   const activeTab = useProjectStore(selectActiveTab);
@@ -69,6 +67,7 @@ export function App() {
   const theme = usePreferencesStore((s) => s.theme);
   const showOutlineRail = usePreferencesStore((s) => s.showOutlineRail);
   const defaultSurface = usePreferencesStore((s) => s.defaultSurface);
+  const autosaveIdleDelayMs = usePreferencesStore((s) => s.autosaveIdleDelayMs);
   const hydratePreferences = usePreferencesStore((s) => s.hydrate);
   const persistPreferencesNow = usePreferencesStore((s) => s.persistNow);
   const preferencesHydrated = usePreferencesStore((s) => s.hydrated);
@@ -251,7 +250,9 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [bindings]);
 
-  // Debounced auto-save flushes any dirty tabs.
+  // Debounced auto-save flushes any dirty tabs after the writer pauses.
+  // The idle delay is the autosaveIdleDelayMs preference; ⌘S still forces
+  // an immediate save independent of this timer.
   const dirtyTabHash = useProjectStore((s) =>
     s.tabs.map((t) => `${t.path}:${t.dirty ? '1' : '0'}`).join('|')
   );
@@ -264,11 +265,11 @@ export function App() {
         logProjectError('saveAllDirty', err);
         notify.error("Couldn't save", err);
       });
-    }, SAVE_DEBOUNCE_MS);
+    }, autosaveIdleDelayMs);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [dirtyTabHash, saveAllDirty]);
+  }, [dirtyTabHash, saveAllDirty, autosaveIdleDelayMs]);
 
   // Best-effort save on unload — beforeunload can't await async, so
   // pending writes that haven't completed by the time the renderer

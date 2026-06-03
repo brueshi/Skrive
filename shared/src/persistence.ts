@@ -188,7 +188,7 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   lineMeasure: 'normal',
   smartTypography: true,
   formatOnSave: false,
-  autosaveIdleDelayMs: 750,
+  autosaveIdleDelayMs: 500,
   newFileLocation: 'activeFolder',
   newFileNaming: 'title',
   slugFormat: 'kebab-case',
