@@ -22,13 +22,17 @@ import {
   inputRules,
   wrappingInputRule,
   textblockTypeInputRule,
-  InputRule
+  InputRule,
+  smartQuotes,
+  emDash,
+  ellipsis
 } from 'prosemirror-inputrules';
 import { splitListItem, liftListItem, sinkListItem } from 'prosemirror-schema-list';
 import { tableEditing, columnResizing, goToNextCell } from 'prosemirror-tables';
 import 'prosemirror-tables/style/tables.css';
 import type { MarkType } from 'prosemirror-model';
 import { schema, parseDoc, serializeDoc, dirtyPlugin, readSelectionSummary } from '../../../lib/projection';
+import { usePreferencesStore } from '../../../stores/preferences';
 import { setActiveEditorFlush, setActiveRichView } from '../active-editor';
 import { RichToolbar } from './RichToolbar';
 import { SelectionBubble } from './SelectionBubble';
@@ -107,12 +111,17 @@ const insertHardBreak = chainCommands(newlineInCode, (state, dispatch) => {
   return true;
 });
 
-function buildPlugins() {
+function buildPlugins(smartTypography: boolean) {
   const listItem = schema.nodes.list_item;
   return [
     history(),
     inputRules({
       rules: [
+        // Smart typography first so the prose substitutions (curly quotes,
+        // em dash, ellipsis) run before the structural rules. PM's
+        // inputRules plugin skips these inside code blocks automatically,
+        // so source stays straight-quoted. Off unless the pref is set.
+        ...(smartTypography ? [...smartQuotes, emDash, ellipsis] : []),
         // Inline marks. strong before em so `**x**` matches the double rule
         // first; the em rule's lookbehind keeps it from firing on a `**` pair.
         markInputRule(/\*\*([^*]+)\*\*$/, schema.marks.strong),
@@ -220,7 +229,9 @@ export function RichEditor({ body, onChange }: RichEditorProps): React.ReactElem
     const view = new EditorView(el, {
       state: EditorState.create({
         doc: parseDoc(initialBodyRef.current),
-        plugins: buildPlugins()
+        // Read once at construction — the surface is uncontrolled, so
+        // toggling the pref takes effect when the document is reopened.
+        plugins: buildPlugins(usePreferencesStore.getState().smartTypography)
       }),
       // Uncontrolled: PM applies the transaction to its own state; the only
       // outward effect is the debounced snapshot. No per-keystroke React write.
