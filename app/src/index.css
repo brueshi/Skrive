@@ -2517,117 +2517,148 @@ body {
   outline: none;
 }
 
+.bl-panel {
+  /* Derived greys keep the panel token-driven: the lighter inner
+     divider, the faintest count/line grey, the cap grey, the pill fill. */
+  --bl-hair: color-mix(in srgb, var(--skrive-rule) 55%, var(--skrive-bg));
+  --bl-faint: color-mix(in srgb, var(--skrive-muted) 55%, var(--skrive-bg));
+  --bl-cap: color-mix(in srgb, var(--skrive-muted) 72%, var(--skrive-bg));
+  --bl-pill-bg: color-mix(in srgb, var(--skrive-rule) 70%, var(--skrive-bg));
+  font-family: var(--skrive-ui-font);
+}
+
+/* Header: title + incoming-reference count, close on the right. */
 .bl-panel-header {
   display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-  padding: 0.625rem 0.875rem;
-  border-bottom: 1px solid var(--skrive-rule);
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
   flex-shrink: 0;
-  background: var(--skrive-bg);
+  padding: 0 12px 0 18px;
+  border-bottom: 1px solid var(--bl-hair);
 }
 
-.bl-panel-title {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+.bl-title-group {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.bl-title {
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--skrive-fg);
-  flex-shrink: 0;
 }
 
-.bl-panel-target {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+.bl-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--bl-pill-bg);
   font-size: 11px;
+  font-weight: 600;
   color: var(--skrive-muted);
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
+}
+
+.bl-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  border-radius: var(--skrive-radius-sm);
+  color: var(--skrive-muted);
+  cursor: pointer;
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.bl-close:hover {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
 }
 
 .bl-panel-body {
-  padding: 0.25rem 0 0.5rem;
-  overflow-y: auto;
   flex: 1;
   min-height: 0;
-  font-family: var(--skrive-ui-font);
-  font-size: 13px;
+  overflow-y: auto;
+}
+
+/* ----- Sections ----- */
+.bl-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 10px;
+}
+
+.bl-section--links-to {
+  border-top: 1px solid var(--bl-hair);
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
+.bl-section-cap {
+  margin: 0;
+  padding: 4px 8px 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--bl-cap);
 }
 
 .bl-empty {
   margin: 0;
-  padding: 0.25rem 0.875rem 0.5rem;
+  padding: 2px 8px 6px;
   font-size: 12px;
   color: var(--skrive-muted);
   line-height: 1.5;
 }
 
-.bl-empty code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.92em;
-  color: var(--skrive-fg);
-  background: var(--skrive-rule);
-  padding: 0 0.3em;
-  border-radius: var(--skrive-radius-xs);
-}
-
-/* A direction section: "Links to" (outbound) / "Linked from" (inbound). */
-.bl-section + .bl-section {
-  margin-top: 0.5rem;
-  border-top: 1px solid var(--skrive-rule);
-  padding-top: 0.25rem;
-}
-
-.bl-section-head {
+.bl-source,
+.bl-source-single {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.5rem 0.875rem 0.25rem;
+  flex-direction: column;
 }
 
-.bl-section-label {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--skrive-muted);
-}
-
-.bl-section-count {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  color: var(--skrive-muted);
-}
-
-.bl-groups {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-/* Group header — one row per linked file, expandable to its references. */
-.bl-group-head {
+/* ----- Source rows (Linked from) ----- */
+.bl-source-head {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 8px;
   width: 100%;
-  background: transparent;
+  padding: 7px 8px;
   border: none;
-  padding: 0.35rem 0.875rem;
-  font: inherit;
+  background: transparent;
+  border-radius: var(--skrive-radius-md);
   color: var(--skrive-fg);
-  cursor: pointer;
+  font: inherit;
   text-align: left;
+  cursor: pointer;
   transition: background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
-.bl-group-head:hover,
-.bl-group-head:focus-visible {
-  background: var(--skrive-rule);
+.bl-source-head:hover,
+.bl-source-head:focus-visible,
+.bl-ref:hover,
+.bl-ref:focus-visible,
+.bl-target:hover,
+.bl-target:focus-visible {
+  background: color-mix(in srgb, var(--skrive-fg) 5%, transparent);
   outline: none;
+}
+
+/* Expanded group sits on a faint fill so its rows read as one block. */
+.bl-source-head--group[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--skrive-fg) 3.5%, transparent);
 }
 
 .bl-caret {
@@ -2646,140 +2677,143 @@ body {
   }
 }
 
-.bl-group-name {
+.bl-source-name,
+.bl-target-name {
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
+  font-weight: 550;
   color: var(--skrive-fg);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex-shrink: 1;
-  min-width: 0;
 }
 
-/* Folder-path pill — disambiguates same-named files across folders. */
 .bl-folder-pill {
-  flex-shrink: 1;
-  min-width: 0;
-  max-width: 9rem;
+  flex-shrink: 0;
+  max-width: 8rem;
+  height: 17px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--bl-pill-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: var(--bl-faint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  color: var(--skrive-muted);
-  background: color-mix(in srgb, var(--skrive-rule) 70%, var(--skrive-bg));
-  padding: 0.05rem 0.35rem;
-  border-radius: var(--skrive-radius-xs);
 }
 
-.bl-dead-badge,
-.bl-wiki-badge {
+.bl-group-count {
   flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--bl-faint);
+}
+
+.bl-tag {
+  flex-shrink: 0;
+  height: 17px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 5px;
   font-size: 10px;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  padding: 0.05rem 0.3rem;
-  border-radius: var(--skrive-radius-xs);
+  background: var(--bl-pill-bg);
+  color: var(--skrive-muted);
 }
 
-.bl-dead-badge {
+.bl-tag--dead {
   color: #a84030;
   background: color-mix(in srgb, #a84030 12%, transparent);
 }
 
-.bl-wiki-badge {
-  color: var(--skrive-muted);
-  background: color-mix(in srgb, var(--skrive-rule) 70%, var(--skrive-bg));
-}
-
-.bl-group-count {
-  margin-left: auto;
-  flex-shrink: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  color: var(--skrive-muted);
-}
-
-/* Single-reference file — one combined row in place of a header + lone
-   child. No caret or count; the line number rides the head's right edge. */
-.bl-single {
+/* ----- Reference rows (under an expanded source) ----- */
+.bl-ref {
   display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
+  align-items: flex-start;
+  gap: 8px;
   width: 100%;
-  background: transparent;
+  padding: 6px 8px 6px 14px;
   border: none;
-  padding: 0.4rem 0.875rem;
-  font: inherit;
-  cursor: pointer;
+  background: transparent;
+  border-radius: var(--skrive-radius-md);
   text-align: left;
+  cursor: pointer;
   transition: background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
-.bl-single:hover,
-.bl-single:focus-visible {
-  background: var(--skrive-rule);
-  outline: none;
+.bl-ref-connector {
+  flex-shrink: 0;
+  width: 16px;
+  color: color-mix(in srgb, var(--skrive-rule) 70%, var(--skrive-bg));
 }
 
-.bl-single-head {
+.bl-ref-connector svg {
+  display: block;
+}
+
+.bl-ref-body {
   display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  width: 100%;
-}
-
-.bl-single-head .bl-ref-line {
-  margin-left: auto;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
   min-width: 0;
 }
 
-.bl-refs {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.bl-ref-snippet {
+  font-family: var(--skrive-editor-font);
+  font-style: italic;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--skrive-fg) 72%, var(--skrive-bg));
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.bl-ref-button {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  width: 100%;
-  background: transparent;
-  border: none;
-  /* Indent under the caret + name so refs read as children of the group. */
-  padding: 0.3rem 0.875rem 0.3rem 1.75rem;
-  font: inherit;
-  cursor: pointer;
-  text-align: left;
-  transition: background-color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.bl-ref-button:hover,
-.bl-ref-button:focus-visible {
-  background: var(--skrive-rule);
-  outline: none;
+.bl-ref-snippet--inset {
+  margin: 0 0 2px;
+  padding: 0 8px 0 14px;
 }
 
 .bl-ref-line {
   flex-shrink: 0;
-  min-width: 1.75rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  color: var(--skrive-muted);
-  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: var(--bl-faint);
 }
 
-.bl-ref-snippet {
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  color: var(--skrive-fg);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  line-height: 1.4;
+/* ----- Target rows (Links to) ----- */
+.bl-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: none;
+  background: transparent;
+  border-radius: var(--skrive-radius-md);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.bl-link-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--skrive-muted);
+  opacity: 0.6;
+}
+
+.bl-target.is-dead .bl-target-name {
+  color: var(--skrive-muted);
 }
 
 /* ===================== Frontmatter panel ===================== */
