@@ -2,84 +2,88 @@
 
 > A Markdown editor for writers. Local-first, offline, portable plain text.
 
-Skrive is a **Markdown editor** — not an Obsidian clone, not a knowledge base, not a second brain, not an AI writing tool. It opens a folder of `.md` files, edits them cleanly, and adds a small set of project-aware features (search, backlinks, safe renames) that keep Markdown portable instead of locking you into a proprietary store.
+Skrive is a **Markdown editor** — not an Obsidian clone, not a knowledge base, not a second brain, not an AI writing tool. It opens a folder of `.md` files, lets you write in them cleanly, and adds a small set of project-aware features (search, backlinks, safe renames) that keep your Markdown portable instead of locking you into a proprietary store.
 
-Built on Tauri 2, Svelte 5, and a Rust core.
+What makes 1.0 different from every other Markdown app: it is a **document you write in, not a code editor with a preview**. One canonical Markdown file, two surfaces projected over it — a no-syntax rich surface for everyone, and an honest source surface for the Markdown-literate. The bytes on disk are always plain Markdown you could have typed by hand.
+
+Built on Electron and React, with a small native Rust core (via napi-rs) for structural diffing.
 
 ## Status
 
-**Alpha — v0.1.0.** Usable for real writing today; some rough edges remain. The four critical-path features (split view, inline preview, link graph + rename, structural diff) all shipped behind earlier versions; v0.1.0 closes out settings, typography, and the command runner. See the [v0.1.0 release notes](https://github.com/brueshi/Skrive/releases/tag/v0.1.0) for the alpha-launch summary.
+**1.0.0 — "Overcast."** A two-part milestone: the editor was rebuilt around a text-canonical projection model, and the entire interface was redesigned. See the [1.0.0 release notes](https://github.com/brueshi/Skrive/releases/tag/v1.0.0) for the full story.
 
 ## Download
 
-Grab the latest macOS or Windows build from [Releases](https://github.com/brueshi/Skrive/releases). See [`docs/skrive-install.md`](docs/skrive-install.md) for platform-specific install notes. macOS is signed + notarized and opens cleanly; Windows is unsigned and will show a dismissable SmartScreen warning on first run.
+Grab the latest macOS or Windows build from [Releases](https://github.com/brueshi/Skrive/releases). macOS (Apple Silicon) is signed + notarized and opens cleanly; Windows is unsigned and shows a dismissable SmartScreen warning on first run (*More info -> Run anyway*). See [`docs/skrive-install.md`](docs/skrive-install.md) for platform notes.
 
-## Features
+## The editor
 
-### Editor
-- CodeMirror 6 editor with a tailored Skrive theme
-- Live decoration for headings, emphasis, code, images, and links
-- Three layout modes — raw, split, preview — toggleable with `⌘1` / `⌘2` / `⌘3`, remembered per file
-- Inline spell check with a per-project personal dictionary
-- File switcher (`⌘P`) and a separate command palette (`⌘⇧P`) for actions
-- OS file associations: open `.md` files straight from Finder or Explorer
+One Markdown file, two ways to work in it:
 
-### Project intelligence
-- Project-scoped full-text search
-- Wiki-link and Markdown-link backlinks, with a dedicated panel
+- **Rich** — a no-syntax writing surface for everyone. Bold, headings, lists, quotes, dividers, tables, and links appear as the real thing, never as raw `**` or `#`. Structure is created through a toolbar, a selection bubble, and a slash menu, so you build a document without typing a fence.
+- **Text** — an honest source surface for people who know Markdown, with a choice of how present the syntax is: **Raw**, **Recessed**, or **Concealed**.
+
+Both surfaces edit the *same* file; switch with `⌘⇧E` and your content carries over untouched. New documents open in Rich by default. Underneath, a source-mapped parser/serializer keeps the round-trip **byte-faithful** — touched blocks re-serialize to canonical Markdown, untouched bytes stay identical — so the file is never a lossy export.
+
+## Project intelligence
+
+- Project-scoped full-text search with a live context preview of each match
+- Bidirectional backlinks (what links *to* a document and what it links *out* to), with folder tags
 - Outgoing-link and dead-link detection
 - Rename a file and every reference to it updates across the project
 - Version history (Git or local checkpoint) with a structural diff that reads paragraph-by-paragraph instead of line-by-line
+- Project linting runs in a background worker, so typing stays smooth at any project size
 
-### Files & frontmatter
+## Files & frontmatter
+
 - Folder-based — open any directory of Markdown; no vault setup, no import
-- File tree sidebar: create, rename, delete, nest folders
+- File-tree sidebar: create, rename, delete, nest folders
 - YAML frontmatter editing via a dedicated panel
+- Durable saves: atomic writes (a crash can't corrupt a file), debounced autosave, external-change detection that asks before overwriting, and a flush before quit
 - Filesystem watcher keeps the tree in sync with edits made outside the app
+- OS file associations: open `.md` files straight from Finder or Explorer
 
-### Settings (`⌘,`)
-- Editor typography: five curated presets (Editorial / Classic / Screen / Sans / Mono) plus a Custom field that uses any system-installed font
-- Stepped size and line-height controls
-- Personal dictionary management
-- Auto-update toggle and on-demand "Check for updates"
+## Interface
 
-### Configuration
-- Per-project [`.skrive.toml`](docs/skrive-toml-reference.md) for dictionary, lint, and (forthcoming) export targets
-- Auto-update on macOS
+The 1.0 "Overcast" design — a warm near-white page on a dove-grey desk, a slate-indigo accent, and custom iconography:
 
-## Why it's nice to use
-
-A couple of small things that make day-to-day writing feel good:
-
-- **Actually the default Markdown app.** Register Skrive as the default handler for `.md` on macOS and double-clicking a file in Finder just opens it — no more accidentally launching Xcode because it grabbed the association last.
-- **Claude Desktop artifacts open straight into the editor.** When an AI tool drops a `.md` file on your disk, there's no vault to import into and no web app to paste into — double-click and keep writing.
+- Full-page Settings (`⌘,`) with grouped cards
+- Side panels (backlinks, frontmatter, history) dock as cards beside a narrowing editor
+- A topbar with the window-controls cluster, lifted tabs, a Rich/Text surface toggle, and a quiet save indicator
+- Editor preferences that take effect live: line measure, smart typography, format on save, autosave delay
+- A command palette (`⌘⇧P`), file switcher (`⌘P`), and keyboard cheat sheet, all in the Overcast language
 
 ## Principles
 
 - **Files are the source of truth.** Plain Markdown with YAML frontmatter on disk — always. Your work stays grep-able, git-friendly, and portable.
 - **No database, no vault, no sync service.** The filesystem is the data layer.
-- **The Rust core owns project intelligence.** The frontend renders and interacts.
+- **Text is canonical; everything richer is a projection of it**, never a container that owns content. No proprietary format, no lossy export.
 - **No network calls, no accounts, no telemetry.** The only exception is user-initiated export to a third-party service.
 - **No AI.** Not now, not quietly later.
-- **One default theme done exceptionally** before a theme system exists.
+- **One default look done exceptionally** before a theme system exists.
 
 ## Development
 
-Prerequisites: Rust toolchain, [Bun](https://bun.com), and the platform requirements listed in the [Tauri prerequisites guide](https://tauri.app/start/prerequisites/).
+Prerequisites: [Bun](https://bun.com) and a Rust toolchain (for the native diff core).
 
 ```bash
 bun install
-bun run tauri dev
+bun run start        # launch the app in dev (electron-vite)
+bun run typecheck    # type-check shared / app / shell
+bun run test         # vitest
 ```
+
+Packaging (`bun run package:mac` / `:win`) is a CI-only path — it signs and notarizes on macOS using secrets the release workflow provides.
 
 ## Project layout
 
 ```
 .
-├── docs/        # Install notes, design notes, .skrive.toml reference
-├── src/         # Svelte 5 frontend
-├── src-tauri/   # Rust core — Tauri commands, filesystem, project intelligence
-└── static/      # Static assets served by SvelteKit
+├── app/          # React renderer — editor surfaces, panels, UI
+├── shell/        # Electron main + preload + IPC, project intelligence
+├── shared/       # Shared types and IPC contracts
+├── native/diff/  # Rust structural-diff core (napi-rs)
+└── docs/         # Install notes, design notes, .skrive.toml reference
 ```
 
 ## License
