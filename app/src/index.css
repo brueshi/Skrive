@@ -1870,7 +1870,7 @@ body {
 }
 
 .preview-inner {
-  max-width: 42rem;
+  max-width: var(--skrive-measure, 42rem);
   margin: 0 auto;
   padding: 2.5rem 2rem 6rem;
   /* Track the editor's font choice so split view stays coherent. */
