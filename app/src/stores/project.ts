@@ -656,7 +656,25 @@ function buildSavePayload(tab: Tab): string {
     }
   }
   stampAutoFields(tab.frontmatter, tab.body);
-  return serializeFrontmatter(tab.frontmatter) + tab.body;
+  const body = usePreferencesStore.getState().formatOnSave
+    ? normalizeMarkdownSpacing(tab.body)
+    : tab.body;
+  return serializeFrontmatter(tab.frontmatter) + body;
+}
+
+/** Conservative "format on save": tidy whitespace without touching what
+ *  renders. Whitespace-only lines are cleared (they're blank either way,
+ *  and never Markdown hard breaks, which live as trailing spaces on
+ *  *content* lines and are preserved here), and the file ends with
+ *  exactly one trailing newline. Deliberately does not reflow, collapse
+ *  blank runs, or restyle, so it can't change meaning or mangle code. */
+function normalizeMarkdownSpacing(body: string): string {
+  const cleared = body
+    .split('\n')
+    .map((line) => (/^[ \t]+$/.test(line) ? '' : line))
+    .join('\n')
+    .replace(/\n+$/, '');
+  return cleared.length === 0 ? '' : `${cleared}\n`;
 }
 
 export const useProjectStore = create<State & Actions>((set, get) => ({
