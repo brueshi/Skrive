@@ -13,6 +13,18 @@
   background: var(--skrive-bg);
 }
 
+/* Positioned host for the editor scroller and its outline rail. Mirrors the
+   preview's `.preview-host`: it takes the surface's remaining height and gives
+   the absolutely-placed rail a frame to anchor to, so the rail spans only the
+   editor area (not the toolbar above it). */
+.rich-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .rich-editor {
   flex: 1 1 auto;
   min-height: 0;
