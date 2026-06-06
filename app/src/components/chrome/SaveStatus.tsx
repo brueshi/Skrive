@@ -1,9 +1,10 @@
-// Save-status dot for the topbar trio (Stage 2). Saves are explicit (⌘S)
-// today, so the state is simply the active tab's dirty flag: a filled
-// accent dot when the document is saved (clean), a hollow ring when it
-// has unsaved edits. A single soft pulse plays on the dirty -> saved
-// transition for quiet confirmation; the dot never moves, per the calm,
-// stationary-chrome bias. Per-tab detail still lives on the tab dirty dot.
+// Save-status dot for the topbar trio (Stage 2). Saving is automatic
+// (debounced autosave), so the state is simply the active tab's dirty flag:
+// a filled accent dot when the document is saved (clean), a hollow ring
+// while edits are still pending the next autosave. A single soft pulse
+// plays on the dirty -> saved transition for quiet confirmation; the dot
+// never moves, per the calm, stationary-chrome bias. Per-tab detail still
+// lives on the tab dirty dot.
 
 import { useEffect, useRef, useState } from 'react';
 import { selectActiveTab, useProjectStore } from '../../stores/project';
@@ -37,8 +38,8 @@ export function SaveStatus() {
         pulse ? ' pulse' : ''
       }`}
       role="status"
-      aria-label={dirty ? 'Unsaved changes' : 'Saved'}
-      title={dirty ? 'Unsaved changes  ⌘S to save' : 'Saved'}
+      aria-label={dirty ? 'Saving' : 'Saved'}
+      title={dirty ? 'Saving…' : 'Saved'}
     />
   );
 }
