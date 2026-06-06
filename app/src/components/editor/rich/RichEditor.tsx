@@ -38,6 +38,7 @@ import { RichToolbar } from './RichToolbar';
 import { SelectionBubble } from './SelectionBubble';
 import { LinkEditor } from './LinkEditor';
 import { SlashMenu } from './SlashMenu';
+import { PreviewOutlineRail } from '../PreviewOutlineRail';
 import { slashPlugin } from './slash-plugin';
 import { selectionStatePlugin, useRichUiStore } from './selection-state';
 import { now, logDuration, perfEnabled } from '../../../lib/perf';
@@ -201,6 +202,9 @@ export function RichEditor({ body, onChange }: RichEditorProps): React.ReactElem
   onChangeRef.current = onChange;
   // Capture the body at mount; the surface is uncontrolled afterwards.
   const initialBodyRef = useRef(body);
+  // The ProseMirror content element (view.dom), handed to the outline rail so
+  // it can read the live headings. Populated once the view is constructed.
+  const contentRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const el = mountRef.current;
@@ -266,12 +270,16 @@ export function RichEditor({ body, onChange }: RichEditorProps): React.ReactElem
     // palette's Insert group can dispatch affordance commands into it.
     setActiveEditorFlush(flush);
     setActiveRichView(view);
+    // The editable element is the outline rail's content node — its headings
+    // are the ones the reader sees and scrolls through.
+    contentRef.current = view.dom as HTMLDivElement;
     setView(view);
 
     return () => {
       flush(); // persist pending edits before teardown (tab / file switch)
       setActiveEditorFlush(null);
       setActiveRichView(null);
+      contentRef.current = null;
       view.destroy();
     };
   }, []);
@@ -279,7 +287,18 @@ export function RichEditor({ body, onChange }: RichEditorProps): React.ReactElem
   return (
     <div className="rich-surface">
       {view && <RichToolbar view={view} />}
-      <div className="rich-editor" ref={mountRef} />
+      {/* Positioned host so the absolutely-placed outline rail anchors to the
+          editor area (below the toolbar), mirroring the preview's host. */}
+      <div className="rich-body">
+        <div className="rich-editor" ref={mountRef} />
+        {view && (
+          <PreviewOutlineRail
+            scrollerRef={mountRef}
+            contentRef={contentRef}
+            renderKey={initialBodyRef.current}
+          />
+        )}
+      </div>
       {view && <SelectionBubble view={view} />}
       {view && <LinkEditor view={view} />}
       {view && <SlashMenu view={view} />}
