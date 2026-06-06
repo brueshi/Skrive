@@ -3210,6 +3210,10 @@ body {
 
 .header-settings-title {
   flex: 0 0 auto;
+  /* The header stretches its children to the full 40px band; without this the
+     title's text pins to the top of that box and reads as floating high. Center
+     it as a unit so it sits on the band's midline. */
+  align-self: center;
   font-size: 13px;
   font-weight: 600;
   color: var(--skrive-fg);
