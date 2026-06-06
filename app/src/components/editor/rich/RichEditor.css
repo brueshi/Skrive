@@ -31,22 +31,34 @@
   border-bottom: 1px solid var(--skrive-rule);
 }
 
+/* Neutral toolbar palette. Resting ink is a softened fg that still reads as a
+   live control (plain --skrive-muted sat too close to the disabled grey); hover
+   and active step up through faint neutral fills rather than an accent colour,
+   to keep the chrome calm. The active fill is a clear notch above hover so an
+   engaged mark is unmistakable at a glance. */
+.rich-toolbar {
+  --rich-tool-ink: color-mix(in srgb, var(--skrive-fg) 68%, var(--skrive-bg));
+  --rich-tool-hover: color-mix(in srgb, var(--skrive-fg) 6%, transparent);
+  --rich-tool-active: color-mix(in srgb, var(--skrive-fg) 12%, transparent);
+}
+
 .rich-toolbar-inner {
   max-width: var(--skrive-measure, 42rem);
   margin: 0 auto;
-  padding: 0.4rem 2rem;
+  padding: 0.35rem 2rem;
   display: flex;
   align-items: center;
-  gap: 0.15rem;
+  /* Tight rhythm inside a group; the separators carry the inter-group space. */
+  gap: 2px;
 }
 
 .rich-toolbar-button {
   background: transparent;
   border: none;
-  color: var(--skrive-muted);
+  color: var(--rich-tool-ink);
   cursor: pointer;
   width: 28px;
-  height: 26px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -59,12 +71,12 @@
 
 .rich-toolbar-button:hover:not(:disabled) {
   color: var(--skrive-fg);
-  background: var(--skrive-rule);
+  background: var(--rich-tool-hover);
 }
 
 .rich-toolbar-button.active {
   color: var(--skrive-fg);
-  background: var(--skrive-rule);
+  background: var(--rich-tool-active);
 }
 
 .rich-toolbar-button:disabled {
@@ -72,17 +84,18 @@
   cursor: default;
 }
 
-/* The "turn into" block-type trigger: a labelled pill on the left of the bar. */
+/* The "turn into" block-type trigger: a labelled pill on the left of the bar. A
+   touch of right margin sets it apart from the first mark group. */
 .rich-toolbar-blocktype {
   background: transparent;
   border: none;
-  color: var(--skrive-muted);
+  color: var(--rich-tool-ink);
   cursor: pointer;
-  height: 26px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   gap: 0.2rem;
-  padding: 0 0.4rem;
+  padding: 0 0.45rem;
   border-radius: var(--skrive-radius-sm, 4px);
   font: inherit;
   font-size: 0.85em;
@@ -94,13 +107,16 @@
 
 .rich-toolbar-blocktype:hover {
   color: var(--skrive-fg);
-  background: var(--skrive-rule);
+  background: var(--rich-tool-hover);
 }
 
+/* A short hairline that floats centred in the bar, with generous flanks, so the
+   three control clusters (marks | lists + quote | insert) read as groups. */
 .rich-toolbar-sep {
   width: 1px;
-  align-self: stretch;
-  margin: 0.25rem 0.35rem;
+  height: 16px;
+  align-self: center;
+  margin: 0 0.5rem;
   background: var(--skrive-rule);
 }
 
