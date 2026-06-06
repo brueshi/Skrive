@@ -28,7 +28,10 @@ const baseTheme = EditorView.theme({
   '.cm-content': {
     caretColor: 'var(--skrive-fg)',
     padding: '3rem 0',
-    maxWidth: '42rem',
+    // Driven by the line-measure preference (narrow/normal/wide) via the
+    // shared --skrive-measure variable, so the Text surface tracks the same
+    // writing column as the Rich and Preview surfaces.
+    maxWidth: 'var(--skrive-measure, 42rem)',
     margin: '0 auto'
   },
   '.cm-line': {
