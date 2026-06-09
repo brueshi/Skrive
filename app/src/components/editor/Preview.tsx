@@ -8,10 +8,16 @@
 // justification). If that ever changes, sanitize in the pipeline, not
 // here.
 //
-// Debouncing: the body prop updates on every keystroke. Re-running marked
-// on each keystroke produces visible flicker when the user types a
-// character that temporarily breaks an emphasis span. A 150ms debounce
-// coalesces keystroke bursts into a single render.
+// Update cadence: there is deliberately NO debounce here. The `body` prop
+// is the project-store snapshot, and every writer of that snapshot already
+// coalesces keystroke bursts before it lands — the Text surface via
+// Editor.tsx's SYNC_DEBOUNCE_MS (250ms), the Rich surface via its own
+// snapshot debounce. A second debounce in this component used to sit on
+// top of that (150ms, a relic of the era when `body` updated per
+// keystroke); since the upstream cadence was already coarser than its
+// window it coalesced nothing and was pure added latency. If a
+// per-keystroke `body` writer is ever reintroduced, restore coalescing at
+// the writer, not here.
 //
 // Link click handling: external schemes go through the OS via the
 // `links:openExternal` IPC. Internal relative links are routed via the
@@ -51,13 +57,29 @@ type Props = {
   showRail?: boolean;
 };
 
-const DEBOUNCE_MS = 150;
-
 // `#fragment` links are handled separately (scroll within the preview),
 // so they are intentionally *not* treated as external here — the caller
 // checks for them first.
 function isExternalHref(href: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//');
+}
+
+// Whole heading elements in renderer output. Headings cannot nest, and the
+// renderer escapes `<` inside code, so a lazy match up to the matching
+// closing tag is unambiguous.
+const HEADING_TAG_RE = /<h([1-6])\b[^>]*>[\s\S]*?<\/h\1>/gi;
+
+/**
+ * A key that changes iff the heading *structure* of rendered HTML changes
+ * — count, levels, ids, or inner content of headings. Paragraph-only
+ * edits leave it stable, so the outline rail can skip its DOM re-measure
+ * on the typical typing render. Built by concatenating the raw heading
+ * tags: deliberately conservative (an inline-markup toggle inside a
+ * heading changes the key), because a spurious re-measure is cheap and a
+ * missed one means stale ticks.
+ */
+export function headingStructureKey(html: string): string {
+  return (html.match(HEADING_TAG_RE) ?? []).join('\n');
 }
 
 export function Preview({
@@ -67,36 +89,20 @@ export function Preview({
   onInternalLink,
   showRail = false
 }: Props) {
-  const [debouncedBody, setDebouncedBody] = useState(body);
-  const mountedRef = useRef(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (!mountedRef.current) {
-      mountedRef.current = true;
-      setDebouncedBody(body);
-      return;
-    }
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      setDebouncedBody(body);
-      timerRef.current = null;
-    }, DEBOUNCE_MS);
-  }, [body]);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
-
   const html = useMemo(
     () =>
-      renderMarkdown(debouncedBody, {
+      renderMarkdown(body, {
         context: { projectRoot, filePath },
         resolver: skriveAssetResolver
       }),
-    [debouncedBody, projectRoot, filePath]
+    [body, projectRoot, filePath]
+  );
+  // Structure-sensitive invalidation key for the rail: paragraph edits
+  // re-render the HTML but keep this key (and thus the rail's heading
+  // re-measure) untouched. Only computed when a rail is mounted to see it.
+  const railKey = useMemo(
+    () => (showRail ? headingStructureKey(html) : ''),
+    [showRail, html]
   );
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const innerRef = useRef<HTMLDivElement | null>(null);
@@ -236,7 +242,7 @@ export function Preview({
         <PreviewOutlineRail
           scrollerRef={scrollerRef}
           contentRef={innerRef}
-          renderKey={html}
+          renderKey={railKey}
         />
       )}
     </div>

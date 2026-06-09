@@ -27,7 +27,15 @@ type Props = {
   scrollerRef: React.RefObject<HTMLDivElement | null>;
   /** The `.preview-inner` content holding the rendered headings. */
   contentRef: React.RefObject<HTMLDivElement | null>;
-  /** Changes when the rendered HTML changes, triggering a re-measure. */
+  /**
+   * Changes when the heading *structure* of the content changes — count,
+   * levels, or texts (see `headingStructureKey` in Preview.tsx) — and
+   * triggers a full re-measure. Paragraph-only edits keep it stable;
+   * offset shifts from reflow (images decoding, pane resize) reach us
+   * through the ResizeObserver path instead. The Rich surface passes a
+   * constant and relies entirely on that resize path, so structural
+   * changes there must still be detected by the observer callback.
+   */
   renderKey: string;
 };
 
@@ -58,30 +66,20 @@ const POPOVER_PAD = 12;
 const POPOVER_DAMP = 0.25;
 // Pointer travel past which a press becomes a scrub rather than a tap.
 const DRAG_THRESHOLD = 4;
+// Trailing settle window for resize-driven re-measures. A burst of
+// content reflows (twenty images decoding as a document opens) collapses
+// to one leading measure plus one at this long after the burst quiets,
+// instead of a measure per reflow.
+const RESIZE_SETTLE_MS = 150;
 
 const optionId = (index: number) => `skrive-outline-option-${index}`;
 const clamp = (v: number, lo: number, hi: number) =>
   Math.min(Math.max(v, lo), hi);
 
-function readHeadings(
-  scroller: HTMLElement,
-  content: HTMLElement
-): OutlineHeading[] {
-  const scRect = scroller.getBoundingClientRect();
-  const out: OutlineHeading[] = [];
-  content
-    .querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6')
-    .forEach((el) => {
-      out.push({
-        id: el.id,
-        text: el.textContent ?? '',
-        depth: Number(el.tagName[1]) || 1,
-        // Offset within the scroller content, independent of which
-        // ancestor happens to be the offsetParent.
-        top: el.getBoundingClientRect().top - scRect.top + scroller.scrollTop
-      });
-    });
-  return out;
+function queryHeadingEls(content: HTMLElement): HTMLElement[] {
+  return Array.from(
+    content.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6')
+  );
 }
 
 export function PreviewOutlineRail({ scrollerRef, contentRef, renderKey }: Props) {
@@ -109,6 +107,17 @@ export function PreviewOutlineRail({ scrollerRef, contentRef, renderKey }: Props
   const [scrubbing, setScrubbing] = useState(false);
 
   const popoverRef = useRef<HTMLDivElement | null>(null);
+  // Heading elements from the last structural measure. The resize path
+  // refreshes offsets against this cache instead of rebuilding the
+  // heading list, and an identity check against a fresh query detects
+  // when the element list itself changed underneath us — Rich-surface
+  // edits (whose renderKey is a constant), or a preview innerHTML swap
+  // replacing the nodes (rect-reading detached nodes would yield zeros).
+  const headingElsRef = useRef<HTMLElement[]>([]);
+  // The current measure closure, exposed outside the effect so
+  // interaction handlers (pointer entering the rail, keyboard focus) can
+  // refresh just-in-time before a click or popover needs fresh anchors.
+  const measureRef = useRef<(() => void) | null>(null);
   const scrollRafRef = useRef<number | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The in-flight press: where it started, which tick it landed on (if
@@ -119,21 +128,63 @@ export function PreviewOutlineRail({ scrollerRef, contentRef, renderKey }: Props
     moved: boolean;
   } | null>(null);
 
-  // Re-measure on first paint, whenever the rendered HTML changes, and
-  // whenever content reflows (images decoding, window resize) — all of
-  // which move heading offsets.
+  // Re-measure on first paint, whenever the heading structure changes
+  // (renderKey), and — coalesced — whenever content reflows (images
+  // decoding, window resize), all of which move heading offsets.
   useEffect(() => {
     const scroller = scrollerRef.current;
     const content = contentRef.current;
     if (!scroller || !content) return;
 
     const measure = () => {
-      const next = readHeadings(scroller, content);
-      setHeadings(next);
+      const els = queryHeadingEls(content);
+      const scRect = scroller.getBoundingClientRect();
+      // Offset within the scroller content, independent of which
+      // ancestor happens to be the offsetParent.
+      const measured = els.map((el) => ({
+        el,
+        top: el.getBoundingClientRect().top - scRect.top + scroller.scrollTop
+      }));
+      const tops = measured.map((m) => m.top);
+      const cached = headingElsRef.current;
+      const sameStructure =
+        els.length === cached.length && els.every((el, i) => el === cached[i]);
+      if (sameStructure) {
+        // Same elements, so no headings came or went: patch the fields
+        // that can drift on a kept element — offset (reflow) and text/id
+        // (a Rich-surface rename edits the node in place; both are plain
+        // property reads, no layout) — while keeping object identity, and
+        // skip the state write entirely (no render, no downstream effect
+        // churn) when nothing actually changed. Depth can't drift: a
+        // level change replaces the element, failing the identity check.
+        setHeadings((prev) => {
+          let changed = false;
+          const next = prev.map((h, i) => {
+            const el = els[i];
+            const top = tops[i];
+            if (el === undefined || top === undefined) return h;
+            const text = el.textContent ?? '';
+            if (top === h.top && text === h.text && el.id === h.id) return h;
+            changed = true;
+            return { ...h, top, text, id: el.id };
+          });
+          return changed ? next : prev;
+        });
+      } else {
+        headingElsRef.current = els;
+        setHeadings(
+          measured.map(({ el, top }) => ({
+            id: el.id,
+            text: el.textContent ?? '',
+            depth: Number(el.tagName[1]) || 1,
+            top
+          }))
+        );
+      }
       setRailHeight(scroller.clientHeight);
       setActiveIndex(
         activeHeadingIndex(
-          next.map((h) => h.top),
+          tops,
           scroller.scrollTop,
           scroller.clientHeight,
           scroller.scrollHeight,
@@ -141,18 +192,49 @@ export function PreviewOutlineRail({ scrollerRef, contentRef, renderKey }: Props
         )
       );
     };
+    measureRef.current = measure;
 
     // One frame's delay lets the freshly-set innerHTML lay out before we
     // read offsets.
-    const raf = requestAnimationFrame(measure);
+    const firstRaf = requestAnimationFrame(measure);
+
     // Observe the content (heading offsets shift as images decode) and
     // the scroller (its height changes when the window resizes even if
-    // the content doesn't).
-    const ro = new ResizeObserver(() => measure());
+    // the content doesn't). Leading-rAF + trailing-debounce coalescing:
+    // an isolated reflow (one image, a single Rich-surface edit) still
+    // measures on the very next frame, while a burst measures once at the
+    // start and once RESIZE_SETTLE_MS after it quiets, instead of once
+    // per reflow.
+    let leadingRaf: number | null = null;
+    let trailingTimer: ReturnType<typeof setTimeout> | null = null;
+    const onResize = () => {
+      // Rail height drives the tick cluster's centering and is cheap to
+      // read here (layout is clean inside an observer callback), so it
+      // updates eagerly and the cluster tracks a live pane resize
+      // frame-by-frame. React bails out of the no-op writes during image
+      // bursts, which grow the content, not the scroller.
+      setRailHeight(scroller.clientHeight);
+      if (leadingRaf == null && trailingTimer == null) {
+        leadingRaf = requestAnimationFrame(() => {
+          leadingRaf = null;
+          measure();
+        });
+      } else {
+        if (trailingTimer) clearTimeout(trailingTimer);
+        trailingTimer = setTimeout(() => {
+          trailingTimer = null;
+          measure();
+        }, RESIZE_SETTLE_MS);
+      }
+    };
+    const ro = new ResizeObserver(onResize);
     ro.observe(content);
     ro.observe(scroller);
     return () => {
-      cancelAnimationFrame(raf);
+      cancelAnimationFrame(firstRaf);
+      if (leadingRaf != null) cancelAnimationFrame(leadingRaf);
+      if (trailingTimer) clearTimeout(trailingTimer);
+      measureRef.current = null;
       ro.disconnect();
     };
   }, [renderKey, scrollerRef, contentRef]);
@@ -325,8 +407,14 @@ export function PreviewOutlineRail({ scrollerRef, contentRef, renderKey }: Props
     }
   };
 
+  // Entering the rail (pointer or focus) re-measures just-in-time: a
+  // click or popover is likely imminent, and anchor positions must be
+  // fresh even if a reflow slipped past the debounced resize path. When
+  // nothing moved the measure bails before any state write, so the
+  // common case costs one layout read and no render.
   const handleEnter = () => {
     cancelClose();
+    measureRef.current?.();
     setHovered(true);
     setDismissed(false);
   };
@@ -337,6 +425,7 @@ export function PreviewOutlineRail({ scrollerRef, contentRef, renderKey }: Props
   };
 
   const handleFocus = () => {
+    measureRef.current?.();
     setFocused(true);
     setDismissed(false);
   };

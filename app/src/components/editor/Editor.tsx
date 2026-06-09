@@ -51,6 +51,12 @@ import type { PendingSelection } from '../../stores/project';
 // whole workspace (Preview included) each keystroke — the controlled-component
 // lag the projection work made law to avoid. A short idle delay coalesces a
 // typing burst into one sync; ⌘S / blur / quit / unmount flush immediately.
+//
+// This is also the single typing→preview latency knob: Preview.tsx renders
+// directly from the store snapshot with no debounce of its own (it used to
+// add 150ms on top, which coalesced nothing at this cadence — see the
+// header comment there). Word count, preview, and outline all read the
+// same snapshot, so they move together.
 const SYNC_DEBOUNCE_MS = 250;
 
 type Props = {
