@@ -67,6 +67,11 @@ type PreferencesActions = {
   setNewFileLocation(value: NewFileLocation): void;
   setNewFileNaming(value: NewFileNaming): void;
   setSlugFormat(value: SlugFormat): void;
+  /** Persist the git-history preference. Pure: it only stores the value.
+   *  Project-side coordination (pushing it to the shell and refreshing the
+   *  open project's history) lives in the project store's action of the
+   *  same name, which calls this. */
+  setGitHistoryEnabled(value: boolean): void;
   setSeedFrontmatter(value: boolean): void;
   setFrontmatterFields(value: string[]): void;
   setDateFormat(value: string): void;
@@ -116,6 +121,7 @@ function snapshot(state: PreferencesState): AppUiState {
     newFileLocation: state.newFileLocation,
     newFileNaming: state.newFileNaming,
     slugFormat: state.slugFormat,
+    gitHistoryEnabled: state.gitHistoryEnabled,
     seedFrontmatter: state.seedFrontmatter,
     frontmatterFields: state.frontmatterFields,
     dateFormat: state.dateFormat
@@ -274,6 +280,11 @@ export const usePreferencesStore = create<
   setSlugFormat(value) {
     if (get().slugFormat === value) return;
     set({ slugFormat: value });
+    scheduleSave(get);
+  },
+  setGitHistoryEnabled(value) {
+    if (get().gitHistoryEnabled === value) return;
+    set({ gitHistoryEnabled: value });
     scheduleSave(get);
   },
   setSeedFrontmatter(value) {

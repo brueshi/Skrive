@@ -283,6 +283,9 @@ function sanitizeAppState(raw: Record<string, unknown>): Partial<AppUiState> {
   if (raw.slugFormat === 'kebab-case' || raw.slugFormat === 'snake_case') {
     out.slugFormat = raw.slugFormat;
   }
+  if (typeof raw.gitHistoryEnabled === 'boolean') {
+    out.gitHistoryEnabled = raw.gitHistoryEnabled;
+  }
   if (typeof raw.seedFrontmatter === 'boolean') {
     out.seedFrontmatter = raw.seedFrontmatter;
   }
