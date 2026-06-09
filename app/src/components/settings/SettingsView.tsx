@@ -18,7 +18,7 @@ import {
   AUTOSAVE_IDLE_MIN_MS,
   AUTOSAVE_IDLE_STEP_MS
 } from '../../stores/preferences';
-import { logProjectError } from '../../stores/project';
+import { logProjectError, useProjectStore } from '../../stores/project';
 import {
   EDITOR_FONT_PRESETS,
   FONT_SIZE_STEPS,
@@ -140,6 +140,10 @@ function GeneralPane() {
   const setSkip = usePreferencesStore((s) => s.setSkipDeleteConfirmation);
   const switching = usePreferencesStore((s) => s.surfaceSwitchingEnabled);
   const setSwitching = usePreferencesStore((s) => s.setSurfaceSwitchingEnabled);
+  const gitHistory = usePreferencesStore((s) => s.gitHistoryEnabled);
+  // The action lives in the project store: it persists the preference, pushes
+  // it to the shell, and refreshes the open project's history live.
+  const setGitHistory = useProjectStore((s) => s.setGitHistoryEnabled);
 
   return (
     <>
@@ -167,6 +171,19 @@ function GeneralPane() {
               checked={switching}
               onChange={setSwitching}
               ariaLabel="Allow switching surfaces"
+            />
+          }
+        />
+      </SettingsSection>
+      <SettingsSection cap="Version history">
+        <SettingRow
+          label="Use Git for version history"
+          desc="When a project is a Git repository, source its history panel from Git. Off keeps Skrive's own checkpoint history for every project and never reads Git — useful when opening documents churns your working tree."
+          control={
+            <Toggle
+              checked={gitHistory}
+              onChange={setGitHistory}
+              ariaLabel="Use Git for version history"
             />
           }
         />
