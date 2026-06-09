@@ -78,7 +78,19 @@ export const schema = new Schema({
       group: 'block',
       content: 'text*',
       marks: '',
-      attrs: { ...blockAttrs, lang: { default: '' } },
+      // `fence` is the literal opening fence captured from the source ('```',
+      // '~~~~', ...; null for an indented block or one created in the editor) and
+      // `meta` is the info string after the language. Both are style/fidelity
+      // captures: a dirty block re-serializes with the writer's own fence
+      // character — re-fencing a `~~~` block with backticks corrupts it when the
+      // body contains ``` lines — and keeps the info string the parser exposes
+      // but the editor does not surface.
+      attrs: {
+        ...blockAttrs,
+        lang: { default: '' },
+        meta: { default: null as string | null },
+        fence: { default: null as string | null }
+      },
       code: true,
       defining: true,
       toDOM: () => ['pre', ['code', 0]]
@@ -113,6 +125,13 @@ export const schema = new Schema({
       // paragraphs for a loose item. This is what lets nested and loose lists be
       // modeled instead of frozen.
       content: 'paragraph block*',
+      // `spread` is the ITEM's own rhythm — whether ITS child blocks are blank-
+      // line-separated — distinct from the list's spread (blank lines between
+      // items). A loose list can hold a tight item (intro paragraph with a
+      // nested sub-list packed right under it); joining that item's blocks by
+      // the list's spread would inject a blank line and flip the re-parsed
+      // listItem.spread.
+      attrs: { spread: { default: false } },
       defining: true,
       toDOM: () => ['li', 0]
     },
@@ -152,13 +171,39 @@ export const schema = new Schema({
     text: { group: 'inline' },
     // A within-block line break (Shift-Enter), distinct from a soft break (a bare
     // `\n` in the source, which renders as a space). Serializes to a CommonMark
-    // backslash hard break; renders as <br>.
+    // backslash hard break; renders as <br>. It may carry marks: a break inside
+    // emphasis must stay inside the emphasis when the serializer reconstructs
+    // the inline tree, or the emphasis splits in two on re-parse.
     hard_break: {
       group: 'inline',
       inline: true,
       selectable: false,
       parseDOM: [{ tag: 'br' }],
       toDOM: () => ['br']
+    },
+    // An inline image, modeled as a real leaf so dirtying its paragraph cannot
+    // delete it (it used to fall through inlineToPM's text-only default and
+    // vanish). Fidelity first: url/alt/title round-trip exactly; display polish
+    // (placeholders, resolution of relative paths) is a separate concern.
+    image: {
+      group: 'inline',
+      inline: true,
+      atom: true,
+      draggable: false,
+      attrs: {
+        url: { default: '' },
+        alt: { default: '' },
+        title: { default: null as string | null }
+      },
+      toDOM: (node) => {
+        const attrs: Record<string, string> = {
+          src: String(node.attrs.url),
+          alt: String(node.attrs.alt),
+          class: 'pm-image'
+        };
+        if (node.attrs.title != null) attrs.title = String(node.attrs.title);
+        return ['img', attrs];
+      }
     }
   },
   marks: {
@@ -169,8 +214,14 @@ export const schema = new Schema({
     em: { toDOM: () => ['em', 0] },
     strong: { toDOM: () => ['strong', 0] },
     link: {
-      attrs: { href: {} },
-      toDOM: (mark) => ['a', { href: mark.attrs.href }, 0]
+      // `title` is the optional CommonMark link title (`[t](url "title")`),
+      // captured so a dirtied paragraph does not silently drop it.
+      attrs: { href: {}, title: { default: null as string | null } },
+      toDOM: (mark) => {
+        const attrs: Record<string, string> = { href: String(mark.attrs.href) };
+        if (mark.attrs.title != null) attrs.title = String(mark.attrs.title);
+        return ['a', attrs, 0];
+      }
     }
   }
 });

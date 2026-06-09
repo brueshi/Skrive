@@ -384,6 +384,19 @@
   opacity: 0.4;
 }
 
+/* Inline images. Fidelity-first rendering: the real image when the URL
+   resolves, the browser's alt-text fallback when it does not. Constrained to
+   the measure so a large image cannot blow the column open. */
+.rich-editor .ProseMirror img.pm-image {
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+}
+.rich-editor .ProseMirror img.pm-image.ProseMirror-selectednode {
+  outline: 2px solid var(--skrive-accent, var(--skrive-fg));
+  outline-offset: 1px;
+}
+
 /* Frozen blocks: constructs the schema does not model richly (blockquotes,
    tables, HTML, loose/nested lists). They render as their raw Markdown source,
    visibly distinct so it is clear they are verbatim and not yet rich-editable. */
