@@ -17,6 +17,11 @@ import { registerLinksHandlers } from '../ipc/links';
 import { registerPersistenceHandlers } from '../ipc/persistence';
 import { registerSearchHandlers } from '../ipc/search';
 import { registerUpdaterHandlers } from '../ipc/updater';
+// App-icon tiles bundled via electron-vite's `?asset` (resolves in dev and
+// packaged). icon.png is the brand's light tile — the variant electron-
+// builder also bakes into the bundle .icns; icon-dark.png is the dark tile.
+import iconLight from '../../../build/icon.png?asset';
+import iconDark from '../../../build/icon-dark.png?asset';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -25,15 +30,18 @@ const isDev = !app.isPackaged;
 // Privileged scheme registration must happen before the app is ready.
 registerAssetScheme();
 
-// Dev-only window icon. In packaged builds the OS reads the icon from
-// the bundle/exe metadata that electron-builder embeds (mac.icon /
-// win.icon), so the BrowserWindow `icon` prop is redundant. In dev
-// (electron-vite) the binary is plain Electron with no bundled icon,
-// so we point BrowserWindow at the project-root build/icon.png to make
-// the dock + Alt-Tab thumbnail show the Skrive mark instead of the
-// generic Electron diamond.
-function devIconPath(): string {
-  return join(__dirname, '../../../build/icon.png');
+// macOS dock tile, appearance-aware. The bundle .icns electron-builder
+// bakes in is the light tile, and macOS never swaps a flat .icns for dark
+// mode, so we swap the *running* dock tile ourselves: the dark brand tile
+// under a dark system appearance, the light tile otherwise. Re-applied
+// whenever the system appearance changes. Dock-only by design — Finder,
+// Launchpad, and the closed-app icon keep the bundle .icns (appearance
+// variants there would need a macOS asset catalog electron-builder can't
+// produce). No-op off macOS.
+function applyDockIcon(): void {
+  if (process.platform !== 'darwin') return;
+  const tile = nativeTheme.shouldUseDarkColors ? iconDark : iconLight;
+  app.dock?.setIcon(nativeImage.createFromPath(tile));
 }
 
 function createWindow(): void {
@@ -49,8 +57,12 @@ function createWindow(): void {
     // background paints first. A theme-aware default keeps the launch
     // flash close to whatever the renderer will end up showing.
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1a1a1a' : '#fefcf7',
+    // Dev-only window icon (Windows/Linux taskbar + Alt-Tab). In packaged
+    // builds the OS reads the icon from the bundle/exe metadata, and on
+    // macOS the dock tile is driven by applyDockIcon() instead, so this is
+    // a dev fallback to avoid the generic Electron diamond.
     ...(isDev
-      ? { icon: nativeImage.createFromPath(devIconPath()) }
+      ? { icon: nativeImage.createFromPath(iconLight) }
       : {}),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     // Pushed toward the window edge and raised so the lights' colored
@@ -110,12 +122,17 @@ function registerIpcHandlers(): void {
 void app.whenReady().then(() => {
   registerAssetProtocol();
   registerIpcHandlers();
+  applyDockIcon();
   createWindow();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+// Swap the macOS dock tile live when the user toggles system appearance.
+// Safe to register before `whenReady` — the event only fires at runtime.
+nativeTheme.on('updated', applyDockIcon);
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
