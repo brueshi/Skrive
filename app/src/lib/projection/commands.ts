@@ -19,7 +19,15 @@
 import type { Command, EditorState } from 'prosemirror-state';
 import { TextSelection } from 'prosemirror-state';
 import type { MarkType, Node as PMNode, ResolvedPos } from 'prosemirror-model';
-import { setBlockType, wrapIn, lift, toggleMark } from 'prosemirror-commands';
+import {
+  setBlockType,
+  wrapIn,
+  lift,
+  toggleMark,
+  chainCommands,
+  newlineInCode,
+  splitBlock
+} from 'prosemirror-commands';
 import { wrapInList, liftListItem } from 'prosemirror-schema-list';
 import { schema } from './schema';
 
@@ -44,6 +52,38 @@ export const setParagraph: Command = setBlockType(nodes.paragraph);
 
 /** Turn the current textblock into a fenced code block. */
 export const setCodeBlock: Command = setBlockType(nodes.code_block);
+
+// ============================ Hard breaks ============================
+
+// The hard_break payload of Shift-Enter, valid only where a backslash hard
+// break is valid Markdown. A heading is the exclusion that matters: ATX
+// headings are single-line by definition, so `## a\` + newline re-parses as a
+// heading plus a separate paragraph — the <br> the writer saw would not
+// survive a round-trip. Returns false in a heading so the chain below can fall
+// through to a split instead.
+const hardBreakInProse: Command = (state, dispatch) => {
+  const { $from, $to } = state.selection;
+  const heading = nodes.heading;
+  if ($from.parent.type === heading || $to.parent.type === heading) return false;
+  if (dispatch) {
+    dispatch(
+      state.tr.replaceSelectionWith(nodes.hard_break.create()).scrollIntoView()
+    );
+  }
+  return true;
+};
+
+/** Shift-Enter: a within-block line break. In a code block that is a literal
+ *  newline (newlineInCode); in a heading it behaves like Enter and splits —
+ *  Markdown has no in-heading line break, and a visible split is honest where
+ *  a silent no-op would feel like a dead key; everywhere else it inserts a
+ *  hard_break node, which serializes to a CommonMark backslash hard break and
+ *  renders as <br>. */
+export const insertHardBreak: Command = chainCommands(
+  newlineInCode,
+  hardBreakInProse,
+  splitBlock
+);
 
 // ============================ Lists ============================
 

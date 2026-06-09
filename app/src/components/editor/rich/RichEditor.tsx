@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from 'react';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { keymap } from 'prosemirror-keymap';
-import { baseKeymap, toggleMark, chainCommands, newlineInCode } from 'prosemirror-commands';
+import { baseKeymap, toggleMark, chainCommands } from 'prosemirror-commands';
 import { history, undo, redo } from 'prosemirror-history';
 import {
   inputRules,
@@ -31,7 +31,14 @@ import { splitListItem, liftListItem, sinkListItem } from 'prosemirror-schema-li
 import { tableEditing, columnResizing, goToNextCell } from 'prosemirror-tables';
 import 'prosemirror-tables/style/tables.css';
 import type { MarkType } from 'prosemirror-model';
-import { schema, parseDoc, serializeDoc, dirtyPlugin, readSelectionSummary } from '../../../lib/projection';
+import {
+  schema,
+  parseDoc,
+  serializeDoc,
+  dirtyPlugin,
+  readSelectionSummary,
+  insertHardBreak
+} from '../../../lib/projection';
 import { usePreferencesStore } from '../../../stores/preferences';
 import { setActiveEditorFlush, setActiveRichView } from '../active-editor';
 import { RichToolbar } from './RichToolbar';
@@ -99,18 +106,6 @@ function horizontalRuleInputRule(): InputRule {
     return tr;
   });
 }
-
-// Shift-Enter: a within-block line break. In a code block that is a literal
-// newline (newlineInCode); everywhere else it inserts a hard_break node, which
-// serializes to a CommonMark backslash hard break and renders as <br>.
-const insertHardBreak = chainCommands(newlineInCode, (state, dispatch) => {
-  if (dispatch) {
-    dispatch(
-      state.tr.replaceSelectionWith(schema.nodes.hard_break.create()).scrollIntoView()
-    );
-  }
-  return true;
-});
 
 function buildPlugins(smartTypography: boolean) {
   const listItem = schema.nodes.list_item;
