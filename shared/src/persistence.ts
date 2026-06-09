@@ -156,6 +156,11 @@ export type AppUiState = {
   newFileNaming: NewFileNaming;
   /** Slug casing for heading anchors and wiki links. */
   slugFormat: SlugFormat;
+  /** Use the project's git repository for version history when one is
+   *  present. When false, Skrive ignores `.git` and keeps its own
+   *  checkpoint history for every project instead — git is never read or
+   *  queried. Global, not per-project. */
+  gitHistoryEnabled: boolean;
   /** Seed new documents with a frontmatter block. */
   seedFrontmatter: boolean;
   /** Frontmatter keys inserted into every seeded document, in order. */
@@ -192,6 +197,7 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   newFileLocation: 'activeFolder',
   newFileNaming: 'title',
   slugFormat: 'kebab-case',
+  gitHistoryEnabled: true,
   seedFrontmatter: true,
   frontmatterFields: ['title', 'date', 'tags'],
   dateFormat: 'YYYY-MM-DD'
