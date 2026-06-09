@@ -42,7 +42,13 @@ const HANDLERS: HandlerMap = {
 
 export function inlinePreview() {
   return [
-    createInlinePlugin(HANDLERS),
+    // The image handler reads these two fields; registering them as config
+    // inputs makes the plugin rebuild when either is replaced via its
+    // StateEffect, instead of waiting for the next doc/selection change.
+    createInlinePlugin(HANDLERS, (state) => [
+      state.field(imageContextField, false),
+      state.field(imageResolverField, false)
+    ]),
     markerModeField,
     stableEmphasisField,
     spellcheckFrontmatterPlugin,
