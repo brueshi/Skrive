@@ -12,6 +12,7 @@
 // Reads the active tab + marker pref directly from the stores, like the
 // layout control it absorbs.
 
+import { useMemo } from 'react';
 import { selectActiveTab, useProjectStore } from '../../stores/project';
 import { usePreferencesStore } from '../../stores/preferences';
 import type { MarkerMode } from '@skrive/shared';
@@ -36,12 +37,17 @@ export function TextToolbar() {
   const markerMode = usePreferencesStore((s) => s.markerMode);
   const setMarkerMode = usePreferencesStore((s) => s.setMarkerMode);
 
+  // The store emits on every keystroke-driven body update (and plenty of
+  // unrelated state changes); recount only when the body reference itself
+  // changes. Hoisted above the early return to keep hook order stable.
+  const body = activeTab && !activeTab.diff ? activeTab.body : '';
+  const words = useMemo(() => countWords(body), [body]);
+
   // DiffView carries its own chrome; no document toolbar over it.
   if (!activeTab || activeTab.diff) return null;
 
   // Marker treatment only shows where an editor pane is visible.
   const markerDimmed = activeTab.layoutMode === 'preview';
-  const words = countWords(activeTab.body);
 
   return (
     <div className="text-toolbar">
