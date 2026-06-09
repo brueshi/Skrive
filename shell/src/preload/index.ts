@@ -153,7 +153,12 @@ const api: SkriveIpc = {
         relPath,
         name,
         content
-      ) as Promise<void>
+      ) as Promise<void>,
+    setGitHistoryEnabled: (enabled: boolean) =>
+      ipcRenderer.invoke(
+        'history:setGitHistoryEnabled',
+        enabled
+      ) as Promise<HistoryMode>
   },
   linkGraph: {
     getBacklinks: (target: string) =>

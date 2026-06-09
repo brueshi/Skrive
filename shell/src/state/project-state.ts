@@ -82,11 +82,15 @@ class ProjectState {
    *  them present — they aren't markdown sources, so they have no
    *  graph entry and can't be "orphaned." */
   nonMarkdownPaths = new Set<string>();
-  /** Phase 10. Decided at project:open: 'git' when a `.git/` directory
-   *  sits at the root, 'checkpoint' otherwise. The IPC layer reads it;
-   *  fs:writeFile reads it to decide whether to fire an auto-checkpoint
-   *  after a write. */
-  historyMode: HistoryMode = 'checkpoint';
+  /** Phase 10. Whether a `.git/` directory sits at the project root.
+   *  Decided at project:open and stable for the session — the raw
+   *  capability, independent of the user's preference. */
+  gitDetected = false;
+  /** Global user preference (mirrors AppUiState.gitHistoryEnabled). The
+   *  renderer pushes the stored value through `history:setGitHistoryEnabled`
+   *  at project open and on every toggle. Survives project switches —
+   *  `reset()` deliberately leaves it untouched. */
+  gitHistoryEnabled = true;
   /** Retention caps from `[checkpoints]` in `.skrive.toml`. Only
    *  meaningful in checkpoint mode; threaded through to the writer so
    *  the cap moves when the user retunes the config. */
@@ -105,12 +109,23 @@ class ProjectState {
    *  prior value. */
   manifestVersion = 0;
 
+  /** Effective history backend for the open project. Git only when the
+   *  repo is present AND the user hasn't disabled git history; otherwise
+   *  Skrive's own checkpoint store. Every consumer (the history IPC, the
+   *  auto-checkpoint-on-write in fs:writeFile) reads through here, so the
+   *  preference takes effect everywhere without per-caller branching. */
+  get historyMode(): HistoryMode {
+    return this.gitDetected && this.gitHistoryEnabled ? 'git' : 'checkpoint';
+  }
+
   reset(root: string | null): void {
     this.root = root;
     this.linkGraph = new LinkGraph();
     this.filePaths = new Set();
     this.nonMarkdownPaths = new Set();
-    this.historyMode = 'checkpoint';
+    // gitHistoryEnabled is a global preference — preserved across project
+    // switches. Only the per-project capability resets here.
+    this.gitDetected = false;
     this.checkpointsConfig = { ...DEFAULT_CHECKPOINTS_CONFIG };
     // Drop the cached manifest; scanProject rebuilds it and bumps the
     // version so the renderer sees a fresh value after a project switch.

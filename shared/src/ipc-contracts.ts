@@ -485,6 +485,12 @@ export interface SkriveIpc {
       name: string,
       content: string
     ): Promise<void>;
+    /** Toggle whether git is used for the open project's history. Updates
+     *  the global preference shell-side and returns the now-effective mode
+     *  for the open project: 'git' only when the root has a `.git/` AND the
+     *  preference is on, else 'checkpoint'. The renderer pushes the stored
+     *  preference through here at project open and on every user toggle. */
+    setGitHistoryEnabled(enabled: boolean): Promise<HistoryMode>;
   };
   linkGraph: {
     /** Sources that link to `target` (project-relative path). Wiki

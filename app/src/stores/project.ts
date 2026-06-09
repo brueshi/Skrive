@@ -250,6 +250,10 @@ type Actions = {
    *  opens, when the active tab changes, and when the watcher reports
    *  a change to the active path. Best-effort. */
   refreshHistory(): Promise<void>;
+  /** Flip the global git-history preference. Persists it, pushes it to the
+   *  shell, updates the open project's effective history mode, and refreshes
+   *  the history rows so the panel switches backends live. */
+  setGitHistoryEnabled(enabled: boolean): Promise<void>;
   /** Render the diff overlay on the active tab. Single click passes
    *  `(entry, null)` — diff against current. Shift-click passes
    *  `(entry, baseline)` — pair-diff. Older side always lands on the
@@ -753,13 +757,19 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
       // Phase 10: pull the project's history mode (git vs checkpoint)
       // up-front so HI button + history panel pick it up on first
-      // render. Best-effort — fall back to checkpoint if the IPC
-      // hiccups; history listing degrades gracefully on either path.
+      // render. Preferences are hydrated before any project opens (see
+      // App.tsx boot order), so pushing the stored git-history preference
+      // here is race-free; the shell returns the now-effective mode, which
+      // forces checkpoint when the preference is off regardless of a
+      // `.git/`. Best-effort — fall back to checkpoint if the IPC hiccups;
+      // history listing degrades gracefully on either path.
       let historyMode: HistoryMode = 'checkpoint';
       try {
-        historyMode = await window.skrive.history.getMode();
+        historyMode = await window.skrive.history.setGitHistoryEnabled(
+          usePreferencesStore.getState().gitHistoryEnabled
+        );
       } catch (err) {
-        logProjectError('history:getMode', err);
+        logProjectError('history:setGitHistoryEnabled', err);
       }
 
       set({
@@ -1446,6 +1456,20 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       logProjectError('history:listForFile', err);
       set({ historyOfActive: [] });
     }
+  },
+
+  async setGitHistoryEnabled(enabled) {
+    // Persist the preference, push it to the shell, and re-fetch the open
+    // project's history under the now-effective backend. The shell returns
+    // the effective mode (checkpoint when disabled, regardless of `.git/`).
+    usePreferencesStore.getState().setGitHistoryEnabled(enabled);
+    try {
+      const mode = await window.skrive.history.setGitHistoryEnabled(enabled);
+      set({ historyMode: mode });
+    } catch (err) {
+      logProjectError('history:setGitHistoryEnabled', err);
+    }
+    await get().refreshHistory();
   },
 
   async openDiffForEntry(entry, baseline) {

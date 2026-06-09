@@ -85,12 +85,12 @@ async function readSkriveToml(root: string): Promise<string | null> {
   }
 }
 
-async function detectHistoryMode(root: string): Promise<'git' | 'checkpoint'> {
+async function detectGitRepo(root: string): Promise<boolean> {
   try {
     const stat = await fs.stat(path.join(root, '.git'));
-    return stat.isDirectory() ? 'git' : 'checkpoint';
+    return stat.isDirectory();
   } catch {
-    return 'checkpoint';
+    return false;
   }
 }
 
@@ -159,7 +159,7 @@ export async function scanProject(root: string): Promise<ProjectManifest> {
   // Reset link-graph state for the new project. Files get added to
   // the graph as we walk, with their edges extracted from disk.
   projectState.reset(canonicalRoot);
-  projectState.historyMode = await detectHistoryMode(canonicalRoot);
+  projectState.gitDetected = await detectGitRepo(canonicalRoot);
 
   // `.skrive.toml` lives at the project root; absent → defaults.
   const tomlSource = await readSkriveToml(canonicalRoot);

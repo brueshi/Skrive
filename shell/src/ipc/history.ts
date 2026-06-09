@@ -19,6 +19,16 @@ export function registerHistoryHandlers(): void {
   });
 
   ipcMain.handle(
+    'history:setGitHistoryEnabled',
+    async (_event, enabled: boolean): Promise<HistoryMode> => {
+      projectState.gitHistoryEnabled = enabled === true;
+      // historyMode is computed from gitDetected && gitHistoryEnabled, so
+      // returning it here hands the renderer the now-effective backend.
+      return projectState.historyMode;
+    }
+  );
+
+  ipcMain.handle(
     'history:listForFile',
     async (_event, relPath: string): Promise<HistoryEntry[]> => {
       const root = projectState.root;
