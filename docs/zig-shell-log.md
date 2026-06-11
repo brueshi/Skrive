@@ -242,5 +242,18 @@ re-point.
 extract/fixtures suites); shell 110/110; shared 51/51; build clean;
 preload requires only `electron`.
 
-**Pending.** Step 6 (deletion of dead shell handlers + state, contract
-bump) awaits the `[CONFIRM WITH JOE]` gate and his manual pass.
+**Step 6 (2026-06-11, after Joe's manual pass + confirm).** Deleted:
+`linkGraph:*` and `search:*` handlers (`ipc/links.ts`, `ipc/search.ts`),
+`project:open` / `project:getManifest`, `shell/src/lib/link-graph/`,
+the manifest/graph portions of `project-state.ts` (now ~50 lines: root,
+git detection, history preference, checkpoint caps), their tests, the
+mdast deps from shell/package.json, and the matching contract + bridge
+entries (RenameReport type retired; the worker's RenamePlan supersedes
+it). `frontmatter.test.ts` moved to shared. Added
+`SKRIVE_CONTRACT_VERSION = 2` to the contract (v1 = pre-0.4 surface).
+The shell no longer parses Markdown anywhere — grep-verified.
+
+**Stage 0.4 exit.** All done-criteria met: moved suites green in their
+new homes (app 326, shared 65, shell 56), manual pass green (Joe),
+typecheck + build clean. Next: Stage 0.5 (symlink-safe path
+containment).
