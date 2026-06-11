@@ -116,11 +116,8 @@
         "@skrive/diff": "workspace:*",
         "@skrive/shared": "workspace:*",
         "chokidar": "^4.0.1",
-        "mdast-util-from-markdown": "^2.0.2",
-        "unist-util-visit": "^5.0.0",
       },
       "devDependencies": {
-        "@types/mdast": "^4.0.4",
         "vitest": "^2.1.8",
       },
     },

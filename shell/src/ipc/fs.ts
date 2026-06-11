@@ -76,13 +76,6 @@ export function registerFsHandlers(): void {
     const content = requireString(payload, 'content');
     await fs.mkdir(path.dirname(target), { recursive: true });
     await atomicWriteFile(target, content);
-    // Update link graph from the body we just persisted. Cheaper
-    // than the watcher's disk-read path, and the renderer's
-    // immediate follow-up backlinks query sees the new state
-    // without waiting for awaitWriteFinish.
-    if (MARKDOWN_EXT.test(relPath)) {
-      projectState.upsertFile(toForwardSlash(relPath), content);
-    }
     // Phase 10. In checkpoint history mode, every successful save is
     // a candidate for an auto-checkpoint. The writer enforces its own
     // 5-min interval + content-hash dedup, so calling it on every
@@ -131,9 +124,6 @@ export function registerFsHandlers(): void {
       throw err;
     }
     await handle.close();
-    if (MARKDOWN_EXT.test(relPath)) {
-      projectState.addEmpty(toForwardSlash(relPath));
-    }
     return {};
   });
 
@@ -151,29 +141,12 @@ export function registerFsHandlers(): void {
     const newTarget = resolveSafe(projectRoot, newRelPath);
     await fs.mkdir(path.dirname(newTarget), { recursive: true });
     await fs.rename(oldTarget, newTarget);
-    // Drop the old path from the graph; re-extract under the new
-    // path. Rename-with-references (phase 6c) handles updating the
-    // edges that POINT at the renamed file separately.
-    if (MARKDOWN_EXT.test(oldRelPath)) {
-      projectState.removeFile(toForwardSlash(oldRelPath));
-    }
-    if (MARKDOWN_EXT.test(newRelPath)) {
-      try {
-        const body = await fs.readFile(newTarget, 'utf8');
-        projectState.upsertFile(toForwardSlash(newRelPath), body);
-      } catch {
-        projectState.addEmpty(toForwardSlash(newRelPath));
-      }
-    }
     return {};
   });
 
   registerCommand('fs:trash', async (payload) => {
     const { relPath, target } = resolveFromPayload(payload);
     await shell.trashItem(target);
-    if (MARKDOWN_EXT.test(relPath)) {
-      projectState.removeFile(toForwardSlash(relPath));
-    }
     return {};
   });
 }

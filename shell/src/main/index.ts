@@ -25,9 +25,7 @@ import { registerClipboardHandlers } from '../ipc/clipboard';
 import { registerFsHandlers } from '../ipc/fs';
 import { registerDiffHandlers } from '../ipc/diff';
 import { registerHistoryHandlers } from '../ipc/history';
-import { registerLinksHandlers } from '../ipc/links';
 import { registerPersistenceHandlers } from '../ipc/persistence';
-import { registerSearchHandlers } from '../ipc/search';
 import { registerUpdaterHandlers } from '../ipc/updater';
 // App-icon tiles bundled via electron-vite's `?asset` (resolves in dev and
 // packaged). icon.png is the brand's light tile — the variant electron-
@@ -153,9 +151,7 @@ function registerIpcHandlers(): void {
   registerClipboardHandlers();
   registerFsHandlers();
   registerDiffHandlers();
-  registerLinksHandlers();
   registerPersistenceHandlers();
-  registerSearchHandlers();
   registerHistoryHandlers();
   registerUpdaterHandlers();
 }

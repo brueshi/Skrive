@@ -94,22 +94,6 @@ describe('project', () => {
     await expect(bridge.project.openDialog()).resolves.toBeNull();
   });
 
-  it('open passes { root } and returns the manifest flat', async () => {
-    const manifest = {
-      root: '/p',
-      files: [],
-      schema: {},
-      config: {},
-      warnings: []
-    };
-    transport.stub('project:open', manifest);
-    await expect(bridge.project.open('/p')).resolves.toEqual(manifest);
-    expect(lastCall()).toEqual({
-      cmd: 'project:open',
-      payload: { root: '/p' }
-    });
-  });
-
   it('snapshot passes { root } and returns the snapshot flat', async () => {
     const snapshot = { root: '/p', files: [] };
     transport.stub('project:snapshot', snapshot);
@@ -118,11 +102,6 @@ describe('project', () => {
       cmd: 'project:snapshot',
       payload: { root: '/p' }
     });
-  });
-
-  it('getManifest unwraps { current }, including null', async () => {
-    transport.stub('project:getManifest', { current: null });
-    await expect(bridge.project.getManifest()).resolves.toBeNull();
   });
 
   it('watch and unwatch are void commands', async () => {
@@ -230,19 +209,6 @@ describe('diff', () => {
   });
 });
 
-describe('search', () => {
-  it('searchProject unwraps { hits }', async () => {
-    transport.stub('search:searchProject', { hits: [] });
-    await expect(
-      bridge.search.searchProject('needle', { caseSensitive: false })
-    ).resolves.toEqual([]);
-    expect(lastCall()).toEqual({
-      cmd: 'search:searchProject',
-      payload: { query: 'needle', options: { caseSensitive: false } }
-    });
-  });
-});
-
 describe('history', () => {
   it('getMode and setGitHistoryEnabled unwrap { mode }', async () => {
     transport.stub('history:getMode', { mode: 'checkpoint' });
@@ -277,45 +243,6 @@ describe('history', () => {
       cmd: 'history:createManualCheckpoint',
       payload: { relPath: 'a.md', name: 'pin', content: 'body' }
     });
-  });
-});
-
-describe('linkGraph', () => {
-  it('unwraps each query result field', async () => {
-    transport.stub('linkGraph:getBacklinks', { backlinks: [] });
-    await expect(bridge.linkGraph.getBacklinks('a.md')).resolves.toEqual([]);
-    expect(lastCall().payload).toEqual({ target: 'a.md' });
-
-    transport.stub('linkGraph:getOutgoing', { outgoing: [] });
-    await expect(bridge.linkGraph.getOutgoing('a.md')).resolves.toEqual([]);
-    expect(lastCall().payload).toEqual({ source: 'a.md' });
-
-    transport.stub('linkGraph:getDeadLinks', { deadLinks: [] });
-    await expect(bridge.linkGraph.getDeadLinks()).resolves.toEqual([]);
-
-    transport.stub('linkGraph:getOrphanedFiles', { paths: ['b.md'] });
-    await expect(bridge.linkGraph.getOrphanedFiles()).resolves.toEqual([
-      'b.md'
-    ]);
-  });
-
-  it('rename preview and commit return their reports flat', async () => {
-    const preview = {
-      targetExists: false,
-      references: [],
-      definitionUpdates: []
-    };
-    transport.stub('linkGraph:previewRename', preview);
-    await expect(
-      bridge.linkGraph.previewRename('a.md', 'b.md')
-    ).resolves.toEqual(preview);
-    expect(lastCall().payload).toEqual({ oldPath: 'a.md', newPath: 'b.md' });
-
-    const report = { filesWritten: ['c.md'], referencesUpdated: 2 };
-    transport.stub('linkGraph:renameWithReferences', report);
-    await expect(
-      bridge.linkGraph.renameWithReferences('a.md', 'b.md')
-    ).resolves.toEqual(report);
   });
 });
 

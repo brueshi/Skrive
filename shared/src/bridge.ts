@@ -11,21 +11,13 @@
 
 import type { AppUiState, ProjectUiState } from './persistence';
 import type {
-  Backlink,
-  DeadLink,
   DiffOp,
   FileContent,
   HistoryEntry,
   HistoryMode,
   LineDiffRow,
-  OutgoingLink,
   ProjectChange,
-  ProjectManifest,
   ProjectSnapshot,
-  RenamePreview,
-  RenameReport,
-  SearchHit,
-  SearchOptions,
   SkriveIpc,
   SkrivePlatform,
   UpdaterStatus
@@ -88,15 +80,8 @@ export function createSkriveBridge(transport: SkriveTransport): SkriveIpc {
     project: {
       openDialog: async () =>
         (await invoke<{ path: string | null }>('project:openDialog')).path,
-      open: (root: string) => invoke<ProjectManifest>('project:open', { root }),
       snapshot: (root: string) =>
         invoke<ProjectSnapshot>('project:snapshot', { root }),
-      getManifest: async () =>
-        (
-          await invoke<{
-            current: { manifest: ProjectManifest; version: number } | null;
-          }>('project:getManifest')
-        ).current,
       watch: async (root: string) => {
         await invoke('project:watch', { root });
       },
@@ -183,15 +168,6 @@ export function createSkriveBridge(transport: SkriveTransport): SkriveIpc {
           })
         ).rows
     },
-    search: {
-      searchProject: async (query: string, options: SearchOptions) =>
-        (
-          await invoke<{ hits: SearchHit[] }>('search:searchProject', {
-            query,
-            options
-          })
-        ).hits
-    },
     history: {
       getMode: async () =>
         (await invoke<{ mode: HistoryMode }>('history:getMode')).mode,
@@ -232,32 +208,6 @@ export function createSkriveBridge(transport: SkriveTransport): SkriveIpc {
             enabled
           })
         ).mode
-    },
-    linkGraph: {
-      getBacklinks: async (target: string) =>
-        (
-          await invoke<{ backlinks: Backlink[] }>('linkGraph:getBacklinks', {
-            target
-          })
-        ).backlinks,
-      getOutgoing: async (source: string) =>
-        (
-          await invoke<{ outgoing: OutgoingLink[] }>('linkGraph:getOutgoing', {
-            source
-          })
-        ).outgoing,
-      getDeadLinks: async () =>
-        (await invoke<{ deadLinks: DeadLink[] }>('linkGraph:getDeadLinks'))
-          .deadLinks,
-      getOrphanedFiles: async () =>
-        (await invoke<{ paths: string[] }>('linkGraph:getOrphanedFiles')).paths,
-      previewRename: (oldPath: string, newPath: string) =>
-        invoke<RenamePreview>('linkGraph:previewRename', { oldPath, newPath }),
-      renameWithReferences: (oldPath: string, newPath: string) =>
-        invoke<RenameReport>('linkGraph:renameWithReferences', {
-          oldPath,
-          newPath
-        })
     },
     updater: {
       current: () => invoke<UpdaterStatus>('updater:current'),

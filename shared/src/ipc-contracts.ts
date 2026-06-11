@@ -20,6 +20,13 @@ import type { SkriveProjectConfig } from './skrive-toml';
 
 export const ENVELOPE_VERSION = 1;
 
+/** Version of the COMMAND SURFACE (not the envelope shape). Bumped when
+ *  commands are added or removed. v1 = the pre-Stage-0.4 surface with
+ *  shell-side linkGraph/search and project:open/getManifest; v2 = text
+ *  analysis lives in the renderer's project-model worker and the shell
+ *  exposes project:snapshot instead. */
+export const SKRIVE_CONTRACT_VERSION = 2;
+
 /** Hard cap on a serialized request. Oversize requests are rejected
  *  with PAYLOAD_TOO_LARGE before parsing. */
 export const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
@@ -347,14 +354,10 @@ export type RenamePreview = {
   definitionUpdates: Reference[];
 };
 
-export type RenameReport = {
-  /** Source files whose bodies were rewritten. */
-  filesWritten: string[];
-  /** Total references rewritten across all files. */
-  referencesUpdated: number;
-};
-
 // ============================ Search types ============================
+// SearchOptions/SearchHit and the link-graph types above remain shared
+// data shapes: the renderer's project-model worker produces them now
+// (Stage 0.4); the shell no longer implements search or graph commands.
 
 export type SearchOptions = {
   /** Plain ASCII case folding when false. Mirrors the v0.1.6 contract;
@@ -487,12 +490,6 @@ export interface SkriveIpc {
      */
     openDialog(): Promise<string | null>;
     /**
-     * Scan a directory recursively, returning a manifest of every
-     * markdown file found. Skips a hardcoded set of noise directories
-     * (node_modules, target, dist, build, __pycache__, venv, .git, .svelte-kit).
-     */
-    open(path: string): Promise<ProjectManifest>;
-    /**
      * Batched project read: every file in one response (bodies for
      * markdown and `.skrive.toml`, `body: null` for assets). Also
      * primes the shell's per-project state (root, git detection,
@@ -500,16 +497,6 @@ export interface SkriveIpc {
      * project-model worker derives manifest/schema/graph from this.
      */
     snapshot(root: string): Promise<ProjectSnapshot>;
-    /**
-     * Return the cached manifest for the open project plus a monotonic
-     * version, or null when no project is open. O(1) — the watcher keeps
-     * the manifest incrementally fresh, so this never rescans. The
-     * version bumps only on structure-relevant changes (the set of
-     * markdown paths changing, or a file's frontmatter changing), letting
-     * the renderer/worker skip re-shipping the manifest on content-only
-     * edits.
-     */
-    getManifest(): Promise<{ manifest: ProjectManifest; version: number } | null>;
     /**
      * Start watching the project root for changes. Subsequent calls
      * replace the previous watcher.
@@ -594,13 +581,6 @@ export interface SkriveIpc {
      */
     computeLineDiff(before: string, after: string): Promise<LineDiffRow[]>;
   };
-  search: {
-    /** Walk every Markdown file in the open project and return matches
-     *  for `query`. Hits are stable-sorted by path, then line, then
-     *  column. Capped at 500 hits; pathological queries (`.`, single
-     *  letters) return the cap and stop scanning. */
-    searchProject(query: string, options: SearchOptions): Promise<SearchHit[]>;
-  };
   history: {
     /** Mode for the open project — git when the root has a `.git/`
      *  directory, checkpoint otherwise. Decided at project:open and
@@ -634,32 +614,6 @@ export interface SkriveIpc {
      *  preference is on, else 'checkpoint'. The renderer pushes the stored
      *  preference through here at project open and on every user toggle. */
     setGitHistoryEnabled(enabled: boolean): Promise<HistoryMode>;
-  };
-  linkGraph: {
-    /** Sources that link to `target` (project-relative path). Wiki
-     *  edges aren't included — the backward index is keyed on resolved
-     *  relative paths only. */
-    getBacklinks(target: string): Promise<Backlink[]>;
-    /** Outgoing edges from `source`. Carries a `resolved` flag the UI
-     *  uses to surface dead links inline. */
-    getOutgoing(source: string): Promise<OutgoingLink[]>;
-    /** Every relative-target edge in the project whose target doesn't
-     *  resolve to a file in the current manifest. */
-    getDeadLinks(): Promise<DeadLink[]>;
-    /** Project-relative paths of every file with zero inbound edges.
-     *  Drives the `orphaned_files` lint rule (Phase 8). Sorted
-     *  alphabetically. */
-    getOrphanedFiles(): Promise<string[]>;
-    /** Read-only preview of a rename: which files have references to
-     *  `oldPath` and would be rewritten if it became `newPath`. */
-    previewRename(oldPath: string, newPath: string): Promise<RenamePreview>;
-    /** Commit a rename. Renames the file, rewrites every reference,
-     *  refreshes the in-memory graph. The renderer's chrome refreshes
-     *  the manifest from the watcher event afterwards. */
-    renameWithReferences(
-      oldPath: string,
-      newPath: string
-    ): Promise<RenameReport>;
   };
   updater: {
     /** Read the shell's current status snapshot. Useful for renderers

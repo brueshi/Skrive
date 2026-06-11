@@ -11,6 +11,7 @@ export type {
 export {
   ENVELOPE_VERSION,
   MAX_REQUEST_BYTES,
+  SKRIVE_CONTRACT_VERSION,
   SKRIVE_ERROR_CODES,
   SKRIVE_EVENT_CHANNEL,
   SKRIVE_INVOKE_CHANNEL
@@ -44,7 +45,6 @@ export type {
   HistoryMode,
   Reference,
   RenamePreview,
-  RenameReport,
   SearchHit,
   SearchOptions,
   SkriveIpc,

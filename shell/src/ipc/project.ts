@@ -1,8 +1,7 @@
-// Project IPC: folder picker, recursive scan, filesystem watcher.
-//
-// Phase 7 scope: scan emits a manifest with parsed frontmatter per file
-// plus a project-wide schema (presence + types + known-values per field)
-// for the renderer's frontmatter-panel autocomplete.
+// Project commands: folder picker, batched snapshot, create, watcher.
+// Since Stage 0.4 the renderer's project-model worker derives manifest,
+// schema, and link graph from the snapshot — the shell never parses
+// Markdown.
 //
 // Watcher: a single chokidar instance per renderer. Re-entering `watch`
 // closes the previous watcher first. Events are forwarded to the
@@ -14,22 +13,9 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import chokidar, { type FSWatcher } from 'chokidar';
-import {
-  inferSchema,
-  parseFrontmatter,
-  type FileEntry,
-  type ProjectChange,
-  type ProjectManifest
-} from '@skrive/shared';
+import { parseSkriveToml, type ProjectChange } from '@skrive/shared';
 import { projectState } from '../state/project-state';
-import { parseSkriveToml } from '@skrive/shared';
-import {
-  MARKDOWN_EXT,
-  NOISE_DIRS,
-  scanSnapshot,
-  toForwardSlash,
-  walk
-} from '../lib/snapshot';
+import { MARKDOWN_EXT, NOISE_DIRS, scanSnapshot, toForwardSlash } from '../lib/snapshot';
 import { IpcError, emitEvent, registerCommand } from '../main/dispatch';
 
 let activeWatcher: FSWatcher | null = null;
@@ -52,64 +38,6 @@ async function detectGitRepo(root: string): Promise<boolean> {
   }
 }
 
-// Build the manifest FileEntry for a single project-relative markdown
-// file by reading it from disk. The single source of truth for a
-// FileEntry's shape: scanProject's full walk and the watcher's
-// incremental patch both go through here, so the two paths can never
-// diverge. Returns null if the file vanished (stat failed) — the caller
-// drops it rather than synthesizing an entry. A file that stats but
-// can't be read (rare) still gets an entry with empty frontmatter, the
-// same lenient behavior the original full scan had. The body is returned
-// alongside the entry so callers can populate the link graph from the
-// same read (null when the read failed but the stat succeeded).
-export async function buildFileEntry(
-  root: string,
-  relPath: string
-): Promise<{ entry: FileEntry; body: string | null } | null> {
-  const fullPath = path.join(root, relPath);
-
-  let stat;
-  try {
-    stat = await fs.stat(fullPath);
-  } catch {
-    return null;
-  }
-
-  let body: string | null = null;
-  try {
-    body = await fs.readFile(fullPath, 'utf8');
-  } catch {
-    // Stat succeeded but the read didn't — keep the entry, no frontmatter.
-  }
-
-  const fm = body === null ? {} : parseFrontmatter(body).frontmatter;
-  const entry: FileEntry = {
-    path: relPath,
-    name: path.basename(fullPath),
-    sizeBytes: stat.size,
-    modifiedMs: stat.mtimeMs ?? null,
-    frontmatter: fm,
-    outgoingLinks: []
-  };
-  return { entry, body };
-}
-
-// Build a FileEntry from disk and hand it to the cached manifest +
-// graph patch. Fire-and-forget from the watcher (the renderer debounces
-// ~750ms, so the patch lands before any follow-up read). If the file
-// vanished between the watcher event and the read, drop it from both
-// the manifest and the graph instead.
-async function patchManifestFromDisk(relPath: string): Promise<void> {
-  const root = projectState.root;
-  if (!root) return;
-  const built = await buildFileEntry(root, relPath);
-  if (built === null) {
-    projectState.removeManifestFile(relPath);
-    return;
-  }
-  projectState.patchManifestFile(relPath, built.body ?? '', built.entry);
-}
-
 /** Reset per-project shell state for a (re)opened root: link graph,
  *  git detection, and the checkpoint caps from `.skrive.toml`. Both
  *  the legacy full scan and `project:snapshot` go through here, so the
@@ -126,55 +54,6 @@ async function primeProjectState(
   const { config, warnings } = parseSkriveToml(tomlSource);
   projectState.checkpointsConfig = config.checkpoints;
   return { config, warnings };
-}
-
-export async function scanProject(root: string): Promise<ProjectManifest> {
-  const canonicalRoot = path.resolve(root);
-  const files: FileEntry[] = [];
-
-  // Reset link-graph state for the new project. Files get added to
-  // the graph as we walk, with their edges extracted from disk.
-  const { config, warnings } = await primeProjectState(canonicalRoot);
-
-  for await (const { fullPath, isMarkdown } of walk(
-    canonicalRoot,
-    canonicalRoot
-  )) {
-    const rel = toForwardSlash(path.relative(canonicalRoot, fullPath));
-
-    if (!isMarkdown) {
-      // Track non-markdown files as "exists" so link-target checks
-      // don't flag prose-adjacent assets (LICENSE, attachments,
-      // images) as broken. They aren't part of the manifest's `files`
-      // — the renderer's tab/sidebar surfaces stay markdown-only.
-      projectState.addNonMarkdown(rel);
-      continue;
-    }
-
-    const built = await buildFileEntry(canonicalRoot, rel);
-    if (built === null) continue;
-
-    // Feed the graph from the same read buildFileEntry used.
-    if (built.body === null) {
-      projectState.addEmpty(rel);
-    } else {
-      projectState.upsertFile(rel, built.body);
-    }
-
-    files.push(built.entry);
-  }
-
-  files.sort((a, b) => a.path.localeCompare(b.path));
-
-  const manifest: ProjectManifest = {
-    root: canonicalRoot,
-    files,
-    schema: inferSchema(files),
-    config,
-    warnings
-  };
-  projectState.setManifest(manifest);
-  return manifest;
 }
 
 function relPath(root: string, abs: string): string {
@@ -255,38 +134,7 @@ export function registerProjectHandlers(): void {
     const canonicalRoot = path.resolve(root);
     await primeProjectState(canonicalRoot);
     const snapshot = await scanSnapshot(canonicalRoot);
-    // The shell-side graph still backs the legacy linkGraph commands and
-    // the auto-checkpoint path during the 0.4 transition; populate it
-    // from the snapshot bodies so a snapshot-opened project behaves
-    // identically. Dies with the handlers in the 0.4 deletion step.
-    for (const file of snapshot.files) {
-      if (file.body === null) {
-        projectState.addNonMarkdown(file.path);
-      } else if (MARKDOWN_EXT.test(file.path)) {
-        projectState.upsertFile(file.path, file.body);
-      }
-    }
     return snapshot as unknown as Record<string, unknown>;
-  });
-
-  registerCommand('project:open', async (payload) => {
-    const root = payload.root;
-    if (typeof root !== 'string' || root.length === 0) {
-      throw new IpcError(
-        'INVALID_PAYLOAD',
-        'project:open requires a non-empty root path'
-      );
-    }
-    const manifest = await scanProject(root);
-    return manifest as unknown as Record<string, unknown>;
-  });
-
-  registerCommand('project:getManifest', async () => {
-    // O(1): hand back the cached manifest kept fresh by the watcher.
-    // No rescan. Null when no project is open / nothing cached yet.
-    const manifest = projectState.manifest;
-    if (!manifest) return { current: null };
-    return { current: { manifest, version: projectState.manifestVersion } };
   });
 
   registerCommand('project:watch', async (payload) => {
@@ -324,17 +172,6 @@ export function registerProjectHandlers(): void {
         })();
         emitEvent('project:change', e);
         return;
-      }
-
-      // Keep the link graph AND the cached manifest in sync with disk
-      // before the renderer hears about the change — that way the
-      // renderer's follow-up backlinks query and getManifest read both
-      // see up-to-date state. patchManifestFile handles both the graph
-      // upsert and the manifest patch so they can't drift apart.
-      if (e.kind === 'add' || e.kind === 'change') {
-        void patchManifestFromDisk(e.path);
-      } else if (e.kind === 'unlink') {
-        projectState.removeManifestFile(e.path);
       }
 
       emitEvent('project:change', e);
