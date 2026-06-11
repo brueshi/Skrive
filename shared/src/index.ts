@@ -16,6 +16,9 @@ export {
   SKRIVE_INVOKE_CHANNEL
 } from './ipc-contracts';
 
+export type { SkriveTransport } from './bridge';
+export { createSkriveBridge } from './bridge';
+
 export type {
   Backlink,
   Block,
