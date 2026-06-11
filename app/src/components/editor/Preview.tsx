@@ -28,6 +28,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { renderMarkdown, stripLeadingFrontmatter } from '../../lib/preview/markdown';
 import { skriveAssetResolver } from '../../lib/preview/imageResolver';
 import { buildClipboardPayload } from '../../lib/clipboard/copyOut';
+import {
+  writeRichToClipboard,
+  writeTextToClipboard
+} from '../../lib/clipboard/systemClipboard';
 import { IconCopy } from '../icons/IconCopy';
 import { IconCheck } from '../icons/IconCheck';
 import { PreviewOutlineRail } from './PreviewOutlineRail';
@@ -126,16 +130,11 @@ export function Preview({
   async function copyDocument() {
     const { text, html: rendered } = buildClipboardPayload(documentBody);
     try {
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          'text/plain': new Blob([text], { type: 'text/plain' }),
-          'text/html': new Blob([rendered], { type: 'text/html' })
-        })
-      ]);
+      await writeRichToClipboard(rendered, text);
     } catch {
       // Some environments refuse rich clipboard writes; fall back to plain.
       try {
-        await navigator.clipboard.writeText(text);
+        await writeTextToClipboard(text);
       } catch (err) {
         console.warn('[skrive] copy to clipboard failed:', err);
         return;
