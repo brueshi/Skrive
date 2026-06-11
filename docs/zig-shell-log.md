@@ -84,6 +84,45 @@ fix: pending (Joe).
 
 **Blocked.** Nothing.
 
-**Next.** Stage 0.2 — transport abstraction (`shared/src/bridge.ts`,
-`createSkriveBridge(transport)`, preload becomes a thin transport, mock
-transport + bridge tests).
+---
+
+## 2026-06-11 — Stage 0.2: transport abstraction
+
+**Branch:** `refactor/ipc-envelope-dispatch` (continued; same session).
+Stage 0.1 manual app-runs check green (Joe) before starting.
+
+**What was done.**
+- New `shared/src/bridge.ts`: `SkriveTransport` (`invoke` + `on`) and
+  `createSkriveBridge(transport): SkriveIpc`. The full command-name /
+  payload-shape / result-unwrap mapping moved out of the preload into
+  the factory, so every future transport (native host bridge, web shim)
+  inherits it tested. Zero runtime imports, same sandboxed-preload rule
+  as `ipc-contracts.ts`.
+- Preload reduced to framing only: envelope build/parse on
+  `skrive:invoke`, one event demux on `skrive:event`, then
+  `createSkriveBridge(transport)`.
+- `shared/__test__/bridge.test.ts` (33 tests) exercises every namespace
+  against `shared/__test__/mock-transport.ts` — the in-memory transport
+  the plan names as the seed of the website embed's web shim. `shared`
+  gained its own vitest setup (it had none).
+
+**Decision: the flush ack became a command.** `app.flushComplete()` was
+a bare `ipcRenderer.send` + `ipcMain.once` pair — inexpressible through
+a transport that only has `invoke`/`on`, and renderer-to-shell traffic
+is requests-only in the envelope model (events flow shell-to-renderer
+only). It is now an `app:flushComplete` request, fire-and-forget from
+the bridge; main installs a callback while a quit-flush is pending. The
+Part I command table lists `flush-complete` under events (r-to-shell) —
+log note for the contract freeze: it should move to the invoke column,
+since the envelope has no renderer-to-shell event lane. Zig Stage 2.4
+implements the same shape.
+
+**Gates.** Typecheck clean; shared 33/33; shell 120/120; app 297/297;
+`start:build` clean; preload bundle's only external require is
+`electron`. Renderer untouched (`app/` has no diff).
+
+**Blocked.** Nothing.
+
+**Next.** Stage 0.3 — clipboard commands (`clipboard:writeRich` /
+`writeText` / `readText` in contract + Electron shell; migrate
+`app/src/components/editor/clipboard.ts` off `navigator.clipboard`).
