@@ -19,9 +19,9 @@ import {
   type FileEntry,
   type ProjectManifest
 } from '@skrive/shared';
-import { extract } from '../../../shell/src/lib/link-graph/extract';
-import { LinkGraph } from '../../../shell/src/lib/link-graph/graph';
-import { parseSkriveToml } from '../../../shell/src/lib/skrive-toml';
+import { extract } from '../../src/lib/project-model/link-graph/extract';
+import { LinkGraph } from '../../src/lib/project-model/link-graph/graph';
+import { parseSkriveToml } from '@skrive/shared';
 import { runProjectLint } from '../../src/lib/lint';
 import {
   CLEAN_FIXTURE,
