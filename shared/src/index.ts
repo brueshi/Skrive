@@ -1,4 +1,22 @@
 export type {
+  SkriveError,
+  SkriveErrorCode,
+  SkriveEvent,
+  SkriveRequest,
+  SkriveResponse,
+  SkriveResponseError,
+  SkriveResponseOk
+} from './ipc-contracts';
+
+export {
+  ENVELOPE_VERSION,
+  MAX_REQUEST_BYTES,
+  SKRIVE_ERROR_CODES,
+  SKRIVE_EVENT_CHANNEL,
+  SKRIVE_INVOKE_CHANNEL
+} from './ipc-contracts';
+
+export type {
   Backlink,
   Block,
   BlockKind,

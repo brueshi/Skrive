@@ -10,6 +10,102 @@ import type { FrontmatterMap, ProjectSchema } from './frontmatter';
 import type { AppUiState, ProjectUiState } from './persistence';
 import type { SkriveProjectConfig } from './skrive-toml';
 
+// ============================ Envelope (v1) ============================
+// Every message between renderer and shell is one JSON object, defined
+// here and shared by the Electron shell, the Zig shell, and any future
+// web shim. Spec: `docs/Zig shell master plan.md` Part I. Envelopes are
+// string-marshaled on every transport (including Electron) so the size
+// cap is enforceable without parsing and the parity corpus replays the
+// same bytes against every dispatcher.
+
+export const ENVELOPE_VERSION = 1;
+
+/** Hard cap on a serialized request. Oversize requests are rejected
+ *  with PAYLOAD_TOO_LARGE before parsing. */
+export const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
+
+/** Electron channel carrying request/response envelopes (JSON strings). */
+export const SKRIVE_INVOKE_CHANNEL = 'skrive:invoke';
+/** Electron channel carrying event envelopes (JSON strings), shell to renderer. */
+export const SKRIVE_EVENT_CHANNEL = 'skrive:event';
+
+/**
+ * The closed error-code set. Hosts and core never invent codes ad hoc;
+ * adding a code is a contract change that lands here first.
+ *
+ *  - BAD_ENVELOPE: malformed JSON, wrong version, unknown top-level
+ *    field, or a missing/ill-typed envelope field. Spec clarification:
+ *    when the request is unparseable or its `id` is invalid, the error
+ *    response carries `id: 0` (no valid id exists to echo).
+ *  - UNKNOWN_COMMAND: `cmd` is not in the dispatcher's table.
+ *  - PAYLOAD_TOO_LARGE: serialized request exceeds MAX_REQUEST_BYTES.
+ *  - INVALID_PAYLOAD: envelope is well-formed but a payload field is
+ *    missing or has the wrong type for the command.
+ *  - PATH_ESCAPE: a path resolved outside the project root.
+ *  - NOT_FOUND: the referenced file / checkpoint / commit is absent.
+ *  - ALREADY_EXISTS: exclusive-create target already exists.
+ *  - NO_PROJECT: the command requires an open project and none is.
+ *  - IO_ERROR: the underlying filesystem operation failed.
+ *  - GIT_ERROR: spawning or parsing git failed.
+ *  - INTERNAL: anything unmapped. A handler error surfacing as
+ *    INTERNAL is a bug in the error mapping, not a renderer concern.
+ */
+export const SKRIVE_ERROR_CODES = [
+  'BAD_ENVELOPE',
+  'UNKNOWN_COMMAND',
+  'PAYLOAD_TOO_LARGE',
+  'INVALID_PAYLOAD',
+  'PATH_ESCAPE',
+  'NOT_FOUND',
+  'ALREADY_EXISTS',
+  'NO_PROJECT',
+  'IO_ERROR',
+  'GIT_ERROR',
+  'INTERNAL'
+] as const;
+
+export type SkriveErrorCode = (typeof SKRIVE_ERROR_CODES)[number];
+
+export type SkriveError = {
+  code: SkriveErrorCode;
+  message: string;
+};
+
+/** Request, renderer -> shell. `id` is a positive integer assigned by
+ *  the renderer, unique per in-flight request. `payload` is always an
+ *  object (never a bare scalar) so fields can be added without
+ *  breaking shape. */
+export type SkriveRequest = {
+  v: typeof ENVELOPE_VERSION;
+  id: number;
+  cmd: string;
+  payload: Record<string, unknown>;
+};
+
+export type SkriveResponseOk = {
+  v: typeof ENVELOPE_VERSION;
+  id: number;
+  ok: true;
+  /** Always an object, command-specific shape. */
+  result: Record<string, unknown>;
+};
+
+export type SkriveResponseError = {
+  v: typeof ENVELOPE_VERSION;
+  id: number;
+  ok: false;
+  error: SkriveError;
+};
+
+export type SkriveResponse = SkriveResponseOk | SkriveResponseError;
+
+/** Event, shell -> renderer, unsolicited. */
+export type SkriveEvent = {
+  v: typeof ENVELOPE_VERSION;
+  event: string;
+  payload: Record<string, unknown>;
+};
+
 export type SkrivePlatform =
   | 'aix'
   | 'android'
