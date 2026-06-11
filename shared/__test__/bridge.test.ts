@@ -110,6 +110,16 @@ describe('project', () => {
     });
   });
 
+  it('snapshot passes { root } and returns the snapshot flat', async () => {
+    const snapshot = { root: '/p', files: [] };
+    transport.stub('project:snapshot', snapshot);
+    await expect(bridge.project.snapshot('/p')).resolves.toEqual(snapshot);
+    expect(lastCall()).toEqual({
+      cmd: 'project:snapshot',
+      payload: { root: '/p' }
+    });
+  });
+
   it('getManifest unwraps { current }, including null', async () => {
     transport.stub('project:getManifest', { current: null });
     await expect(bridge.project.getManifest()).resolves.toBeNull();

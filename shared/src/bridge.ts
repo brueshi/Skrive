@@ -21,6 +21,7 @@ import type {
   OutgoingLink,
   ProjectChange,
   ProjectManifest,
+  ProjectSnapshot,
   RenamePreview,
   RenameReport,
   SearchHit,
@@ -88,6 +89,8 @@ export function createSkriveBridge(transport: SkriveTransport): SkriveIpc {
       openDialog: async () =>
         (await invoke<{ path: string | null }>('project:openDialog')).path,
       open: (root: string) => invoke<ProjectManifest>('project:open', { root }),
+      snapshot: (root: string) =>
+        invoke<ProjectSnapshot>('project:snapshot', { root }),
       getManifest: async () =>
         (
           await invoke<{

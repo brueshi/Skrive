@@ -35,6 +35,8 @@ export type {
   OutgoingLink,
   ProjectChange,
   ProjectManifest,
+  ProjectSnapshot,
+  SnapshotFile,
   CheckpointKind,
   CheckpointVersion,
   GitVersion,

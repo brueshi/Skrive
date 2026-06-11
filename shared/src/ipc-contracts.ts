@@ -153,6 +153,30 @@ export type ProjectManifest = {
   warnings: string[];
 };
 
+/** One file in a project snapshot. Markdown files (and `.skrive.toml`)
+ *  carry their full body; binary/asset files are listed with
+ *  `body: null` and the renderer fetches them via the asset origin.
+ *  `hash` matches `FileContent.hash` (hex SHA-256 of the body); null
+ *  when the body wasn't read. `sizeBytes` extends the plan's minimal
+ *  shape — the stat is already in hand and `FileEntry` needs it. */
+export type SnapshotFile = {
+  /** Project-relative, forward-slash separated. */
+  path: string;
+  body: string | null;
+  modifiedMs: number | null;
+  hash: string | null;
+  sizeBytes: number;
+};
+
+/** The batched project read (Zig shell plan, Part I): ALL project files
+ *  in one response, never per-file round trips. The renderer worker
+ *  derives manifest, frontmatter schema, and link graph from this. */
+export type ProjectSnapshot = {
+  /** Canonical absolute path of the project root. */
+  root: string;
+  files: SnapshotFile[];
+};
+
 export type FileContent = {
   path: string;
   body: string;
@@ -468,6 +492,14 @@ export interface SkriveIpc {
      * (node_modules, target, dist, build, __pycache__, venv, .git, .svelte-kit).
      */
     open(path: string): Promise<ProjectManifest>;
+    /**
+     * Batched project read: every file in one response (bodies for
+     * markdown and `.skrive.toml`, `body: null` for assets). Also
+     * primes the shell's per-project state (root, git detection,
+     * checkpoint config) the way `open` does. The renderer's
+     * project-model worker derives manifest/schema/graph from this.
+     */
+    snapshot(root: string): Promise<ProjectSnapshot>;
     /**
      * Return the cached manifest for the open project plus a monotonic
      * version, or null when no project is open. O(1) — the watcher keeps

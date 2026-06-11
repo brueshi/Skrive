@@ -23,60 +23,16 @@ import {
 } from '@skrive/shared';
 import { projectState } from '../state/project-state';
 import { parseSkriveToml } from '../lib/skrive-toml';
+import {
+  MARKDOWN_EXT,
+  NOISE_DIRS,
+  scanSnapshot,
+  toForwardSlash,
+  walk
+} from '../lib/snapshot';
 import { IpcError, emitEvent, registerCommand } from '../main/dispatch';
 
-// Hardcoded skip list per `planning/open-questions.md` P3. Phase 3.4
-// will layer `.gitignore` and `.skrive.toml` `[project].exclude` on top
-// of this — for v0.2 the hardcoded list covers the 95% case.
-const NOISE_DIRS = new Set([
-  'node_modules',
-  'target',
-  'dist',
-  'build',
-  '__pycache__',
-  'venv',
-  '.git',
-  '.svelte-kit',
-  '.next',
-  'out',
-  '.DS_Store'
-]);
-
-const MARKDOWN_EXT = /\.(md|markdown)$/i;
-
 let activeWatcher: FSWatcher | null = null;
-
-function toForwardSlash(p: string): string {
-  return p.split(path.sep).join('/');
-}
-
-type WalkEntry = { fullPath: string; isMarkdown: boolean };
-
-async function* walk(root: string, current: string): AsyncGenerator<WalkEntry> {
-  let entries;
-  try {
-    entries = await fs.readdir(current, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    const full = path.join(current, entry.name);
-    if (entry.isDirectory()) {
-      if (NOISE_DIRS.has(entry.name)) continue;
-      // Skip hidden directories (dot-prefixed) too — they're rarely
-      // prose-bearing and a writer with a `.archive/` of drafts can
-      // override later via `.skrive.toml` [project].exclude.
-      if (entry.name.startsWith('.')) continue;
-      yield* walk(root, full);
-    } else if (entry.isFile()) {
-      // Skip dot-files (.DS_Store, .gitignore, etc.) and noise files
-      // by name; everything else gets yielded so link-target checks
-      // can see non-markdown siblings (LICENSE, images, attachments).
-      if (entry.name.startsWith('.')) continue;
-      yield { fullPath: full, isMarkdown: MARKDOWN_EXT.test(entry.name) };
-    }
-  }
-}
 
 async function readSkriveToml(root: string): Promise<string | null> {
   try {
@@ -154,19 +110,31 @@ async function patchManifestFromDisk(relPath: string): Promise<void> {
   projectState.patchManifestFile(relPath, built.body ?? '', built.entry);
 }
 
+/** Reset per-project shell state for a (re)opened root: link graph,
+ *  git detection, and the checkpoint caps from `.skrive.toml`. Both
+ *  the legacy full scan and `project:snapshot` go through here, so the
+ *  fs/history handlers see primed state regardless of which open path
+ *  the renderer uses. */
+async function primeProjectState(
+  canonicalRoot: string
+): Promise<{ config: ReturnType<typeof parseSkriveToml>['config']; warnings: string[] }> {
+  projectState.reset(canonicalRoot);
+  projectState.gitDetected = await detectGitRepo(canonicalRoot);
+
+  // `.skrive.toml` lives at the project root; absent -> defaults.
+  const tomlSource = await readSkriveToml(canonicalRoot);
+  const { config, warnings } = parseSkriveToml(tomlSource);
+  projectState.checkpointsConfig = config.checkpoints;
+  return { config, warnings };
+}
+
 export async function scanProject(root: string): Promise<ProjectManifest> {
   const canonicalRoot = path.resolve(root);
   const files: FileEntry[] = [];
 
   // Reset link-graph state for the new project. Files get added to
   // the graph as we walk, with their edges extracted from disk.
-  projectState.reset(canonicalRoot);
-  projectState.gitDetected = await detectGitRepo(canonicalRoot);
-
-  // `.skrive.toml` lives at the project root; absent → defaults.
-  const tomlSource = await readSkriveToml(canonicalRoot);
-  const { config, warnings } = parseSkriveToml(tomlSource);
-  projectState.checkpointsConfig = config.checkpoints;
+  const { config, warnings } = await primeProjectState(canonicalRoot);
 
   for await (const { fullPath, isMarkdown } of walk(
     canonicalRoot,
@@ -274,6 +242,31 @@ export function registerProjectHandlers(): void {
       return { path: null };
     }
     return { path: result.filePaths[0] ?? null };
+  });
+
+  registerCommand('project:snapshot', async (payload) => {
+    const root = payload.root;
+    if (typeof root !== 'string' || root.length === 0) {
+      throw new IpcError(
+        'INVALID_PAYLOAD',
+        'project:snapshot requires a non-empty root path'
+      );
+    }
+    const canonicalRoot = path.resolve(root);
+    await primeProjectState(canonicalRoot);
+    const snapshot = await scanSnapshot(canonicalRoot);
+    // The shell-side graph still backs the legacy linkGraph commands and
+    // the auto-checkpoint path during the 0.4 transition; populate it
+    // from the snapshot bodies so a snapshot-opened project behaves
+    // identically. Dies with the handlers in the 0.4 deletion step.
+    for (const file of snapshot.files) {
+      if (file.body === null) {
+        projectState.addNonMarkdown(file.path);
+      } else if (MARKDOWN_EXT.test(file.path)) {
+        projectState.upsertFile(file.path, file.body);
+      }
+    }
+    return snapshot as unknown as Record<string, unknown>;
   });
 
   registerCommand('project:open', async (payload) => {
