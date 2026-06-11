@@ -22,7 +22,7 @@ import {
   type ProjectManifest
 } from '@skrive/shared';
 import { projectState } from '../state/project-state';
-import { parseSkriveToml } from '../lib/skrive-toml';
+import { parseSkriveToml } from '@skrive/shared';
 import {
   MARKDOWN_EXT,
   NOISE_DIRS,

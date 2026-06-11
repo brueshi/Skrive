@@ -102,6 +102,9 @@
     "shared": {
       "name": "@skrive/shared",
       "version": "0.0.0",
+      "dependencies": {
+        "smol-toml": "^1.6.1",
+      },
       "devDependencies": {
         "vitest": "^2.1.8",
       },
@@ -114,7 +117,6 @@
         "@skrive/shared": "workspace:*",
         "chokidar": "^4.0.1",
         "mdast-util-from-markdown": "^2.0.2",
-        "smol-toml": "^1.6.1",
         "unist-util-visit": "^5.0.0",
       },
       "devDependencies": {

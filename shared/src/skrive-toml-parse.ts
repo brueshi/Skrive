@@ -17,7 +17,7 @@ import {
   type LintRuleId,
   type LintSeverity,
   type SkriveProjectConfig
-} from '@skrive/shared';
+} from './skrive-toml';
 
 const VALID_SEVERITIES: LintSeverity[] = ['error', 'warn', 'off'];
 const KNOWN_TOP_LEVEL = new Set([

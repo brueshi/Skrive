@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_LINT_CONFIG } from '@skrive/shared';
-import { parseSkriveToml } from '../src/lib/skrive-toml';
+import { parseSkriveToml } from '../src/skrive-toml-parse';
 
 describe('parseSkriveToml', () => {
   it('returns defaults with no warnings when source is null', () => {

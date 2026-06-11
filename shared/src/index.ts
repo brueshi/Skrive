@@ -87,6 +87,8 @@ export {
   LINT_RULE_TOML_KEYS
 } from './skrive-toml';
 
+export { parseSkriveToml } from './skrive-toml-parse';
+
 export type { LintFinding, ProjectLintReport } from './lint';
 
 export type {
