@@ -1,3 +1,9 @@
+// The Electron transport for the envelope contract (Stage 0.1 of the
+// Zig shell plan). Requests are JSON-string envelopes on one channel,
+// events arrive as JSON-string envelopes on another; this file maps
+// the typed `SkriveIpc` surface onto that transport. The renderer is
+// unchanged and unaware — it sees the same `window.skrive` as before.
+
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   AppUiState,
@@ -16,207 +22,281 @@ import type {
   RenameReport,
   SearchHit,
   SearchOptions,
+  SkriveEvent,
   SkriveIpc,
   SkrivePlatform,
+  SkriveRequest,
+  SkriveResponse,
   UpdaterStatus
 } from '@skrive/shared';
+import {
+  ENVELOPE_VERSION,
+  SKRIVE_EVENT_CHANNEL,
+  SKRIVE_INVOKE_CHANNEL
+} from '@skrive/shared';
+
+let nextRequestId = 1;
+
+async function invoke<T>(
+  cmd: string,
+  payload: Record<string, unknown> = {}
+): Promise<T> {
+  const request: SkriveRequest = {
+    v: ENVELOPE_VERSION,
+    id: nextRequestId++,
+    cmd,
+    payload
+  };
+  const raw = (await ipcRenderer.invoke(
+    SKRIVE_INVOKE_CHANNEL,
+    JSON.stringify(request)
+  )) as string;
+  const response = JSON.parse(raw) as SkriveResponse;
+  if (!response.ok) {
+    throw new Error(response.error.message);
+  }
+  return response.result as T;
+}
+
+// One listener demuxes every shell event to its subscribers. Handlers
+// are registered per event name; unsubscribe removes from the set.
+type EventHandler = (payload: Record<string, unknown>) => void;
+const eventHandlers = new Map<string, Set<EventHandler>>();
+
+ipcRenderer.on(SKRIVE_EVENT_CHANNEL, (_event, raw: string) => {
+  let envelope: SkriveEvent;
+  try {
+    envelope = JSON.parse(raw) as SkriveEvent;
+  } catch {
+    return;
+  }
+  const handlers = eventHandlers.get(envelope.event);
+  if (!handlers) return;
+  for (const handler of handlers) handler(envelope.payload);
+});
+
+function onEvent(event: string, handler: EventHandler): () => void {
+  let handlers = eventHandlers.get(event);
+  if (!handlers) {
+    handlers = new Set();
+    eventHandlers.set(event, handlers);
+  }
+  handlers.add(handler);
+  return () => {
+    handlers.delete(handler);
+  };
+}
 
 const api: SkriveIpc = {
   app: {
-    version: () => ipcRenderer.invoke('app:version') as Promise<string>,
-    platform: () =>
-      ipcRenderer.invoke('app:platform') as Promise<SkrivePlatform>,
-    onFlushBeforeQuit: (handler: () => void) => {
-      const wrapped = () => handler();
-      ipcRenderer.on('app:flush-before-quit', wrapped);
-      return () => {
-        ipcRenderer.removeListener('app:flush-before-quit', wrapped);
-      };
-    },
+    version: async () =>
+      (await invoke<{ version: string }>('app:version')).version,
+    platform: async () =>
+      (await invoke<{ platform: SkrivePlatform }>('app:platform')).platform,
+    onFlushBeforeQuit: (handler: () => void) =>
+      onEvent('app:flush-before-quit', () => handler()),
     flushComplete: () => ipcRenderer.send('app:flush-complete')
   },
   links: {
-    openExternal: (url: string) =>
-      ipcRenderer.invoke('links:openExternal', url) as Promise<void>
+    openExternal: async (url: string) => {
+      await invoke('links:openExternal', { url });
+    }
   },
   project: {
-    openDialog: () =>
-      ipcRenderer.invoke('project:openDialog') as Promise<string | null>,
-    open: (root: string) =>
-      ipcRenderer.invoke('project:open', root) as Promise<ProjectManifest>,
-    getManifest: () =>
-      ipcRenderer.invoke('project:getManifest') as Promise<{
-        manifest: ProjectManifest;
-        version: number;
-      } | null>,
-    watch: (root: string) =>
-      ipcRenderer.invoke('project:watch', root) as Promise<void>,
-    unwatch: () => ipcRenderer.invoke('project:unwatch') as Promise<void>,
-    onChange: (handler: (event: ProjectChange) => void) => {
-      const wrapped = (_event: unknown, payload: ProjectChange) =>
-        handler(payload);
-      ipcRenderer.on('project:change', wrapped);
-      return () => {
-        ipcRenderer.removeListener('project:change', wrapped);
-      };
+    openDialog: async () =>
+      (await invoke<{ path: string | null }>('project:openDialog')).path,
+    open: (root: string) => invoke<ProjectManifest>('project:open', { root }),
+    getManifest: async () =>
+      (
+        await invoke<{
+          current: { manifest: ProjectManifest; version: number } | null;
+        }>('project:getManifest')
+      ).current,
+    watch: async (root: string) => {
+      await invoke('project:watch', { root });
     },
-    create: (parent: string, name: string, options: { gitInit: boolean }) =>
-      ipcRenderer.invoke(
-        'project:create',
-        parent,
-        name,
-        options
-      ) as Promise<string>
+    unwatch: async () => {
+      await invoke('project:unwatch');
+    },
+    onChange: (handler: (event: ProjectChange) => void) =>
+      onEvent('project:change', (payload) =>
+        handler(payload as unknown as ProjectChange)
+      ),
+    create: async (parent: string, name: string, options: { gitInit: boolean }) =>
+      (
+        await invoke<{ path: string }>('project:create', {
+          parent,
+          name,
+          gitInit: options?.gitInit === true
+        })
+      ).path
   },
   fs: {
     readFile: (projectRoot: string, relPath: string) =>
-      ipcRenderer.invoke('fs:readFile', projectRoot, relPath) as Promise<FileContent>,
-    writeFile: (projectRoot: string, relPath: string, content: string) =>
-      ipcRenderer.invoke(
-        'fs:writeFile',
-        projectRoot,
-        relPath,
-        content
-      ) as Promise<string>,
-    detectExternalChange: (projectRoot: string, relPath: string, knownHash: string) =>
-      ipcRenderer.invoke(
-        'fs:detectExternalChange',
-        projectRoot,
-        relPath,
-        knownHash
-      ) as Promise<boolean>,
-    writeBinaryFile: (projectRoot: string, relPath: string, base64: string) =>
-      ipcRenderer.invoke(
-        'fs:writeBinaryFile',
-        projectRoot,
-        relPath,
-        base64
-      ) as Promise<void>,
-    newFile: (projectRoot: string, relPath: string) =>
-      ipcRenderer.invoke('fs:newFile', projectRoot, relPath) as Promise<void>,
-    mkdir: (projectRoot: string, relPath: string) =>
-      ipcRenderer.invoke('fs:mkdir', projectRoot, relPath) as Promise<void>,
-    rename: (projectRoot: string, oldRelPath: string, newRelPath: string) =>
-      ipcRenderer.invoke(
-        'fs:rename',
-        projectRoot,
-        oldRelPath,
-        newRelPath
-      ) as Promise<void>,
-    trash: (projectRoot: string, relPath: string) =>
-      ipcRenderer.invoke('fs:trash', projectRoot, relPath) as Promise<void>
+      invoke<FileContent>('fs:readFile', { projectRoot, relPath }),
+    writeFile: async (projectRoot: string, relPath: string, content: string) =>
+      (
+        await invoke<{ hash: string }>('fs:writeFile', {
+          projectRoot,
+          relPath,
+          content
+        })
+      ).hash,
+    detectExternalChange: async (
+      projectRoot: string,
+      relPath: string,
+      knownHash: string
+    ) =>
+      (
+        await invoke<{ changed: boolean }>('fs:detectExternalChange', {
+          projectRoot,
+          relPath,
+          knownHash
+        })
+      ).changed,
+    writeBinaryFile: async (
+      projectRoot: string,
+      relPath: string,
+      base64: string
+    ) => {
+      await invoke('fs:writeBinaryFile', { projectRoot, relPath, base64 });
+    },
+    newFile: async (projectRoot: string, relPath: string) => {
+      await invoke('fs:newFile', { projectRoot, relPath });
+    },
+    mkdir: async (projectRoot: string, relPath: string) => {
+      await invoke('fs:mkdir', { projectRoot, relPath });
+    },
+    rename: async (
+      projectRoot: string,
+      oldRelPath: string,
+      newRelPath: string
+    ) => {
+      await invoke('fs:rename', { projectRoot, oldRelPath, newRelPath });
+    },
+    trash: async (projectRoot: string, relPath: string) => {
+      await invoke('fs:trash', { projectRoot, relPath });
+    }
   },
   diff: {
-    computeDiff: (before: string, after: string) =>
-      ipcRenderer.invoke('diff:computeDiff', before, after) as Promise<DiffOp[]>,
-    computeLineDiff: (before: string, after: string) =>
-      ipcRenderer.invoke(
-        'diff:computeLineDiff',
-        before,
-        after
-      ) as Promise<LineDiffRow[]>
+    computeDiff: async (before: string, after: string) =>
+      (await invoke<{ ops: DiffOp[] }>('diff:computeDiff', { before, after }))
+        .ops,
+    computeLineDiff: async (before: string, after: string) =>
+      (
+        await invoke<{ rows: LineDiffRow[] }>('diff:computeLineDiff', {
+          before,
+          after
+        })
+      ).rows
   },
   search: {
-    searchProject: (query: string, options: SearchOptions) =>
-      ipcRenderer.invoke(
-        'search:searchProject',
-        query,
-        options
-      ) as Promise<SearchHit[]>
+    searchProject: async (query: string, options: SearchOptions) =>
+      (
+        await invoke<{ hits: SearchHit[] }>('search:searchProject', {
+          query,
+          options
+        })
+      ).hits
   },
   history: {
-    getMode: () => ipcRenderer.invoke('history:getMode') as Promise<HistoryMode>,
-    listForFile: (relPath: string) =>
-      ipcRenderer.invoke(
-        'history:listForFile',
-        relPath
-      ) as Promise<HistoryEntry[]>,
-    readGitBlobAt: (relPath: string, sha: string) =>
-      ipcRenderer.invoke(
-        'history:readGitBlobAt',
-        relPath,
-        sha
-      ) as Promise<string>,
-    readCheckpointAt: (relPath: string, id: string) =>
-      ipcRenderer.invoke(
-        'history:readCheckpointAt',
-        relPath,
-        id
-      ) as Promise<string>,
-    createManualCheckpoint: (
+    getMode: async () =>
+      (await invoke<{ mode: HistoryMode }>('history:getMode')).mode,
+    listForFile: async (relPath: string) =>
+      (
+        await invoke<{ entries: HistoryEntry[] }>('history:listForFile', {
+          relPath
+        })
+      ).entries,
+    readGitBlobAt: async (relPath: string, sha: string) =>
+      (
+        await invoke<{ content: string }>('history:readGitBlobAt', {
+          relPath,
+          sha
+        })
+      ).content,
+    readCheckpointAt: async (relPath: string, id: string) =>
+      (
+        await invoke<{ content: string }>('history:readCheckpointAt', {
+          relPath,
+          id
+        })
+      ).content,
+    createManualCheckpoint: async (
       relPath: string,
       name: string,
       content: string
-    ) =>
-      ipcRenderer.invoke(
-        'history:createManualCheckpoint',
+    ) => {
+      await invoke('history:createManualCheckpoint', {
         relPath,
         name,
         content
-      ) as Promise<void>,
-    setGitHistoryEnabled: (enabled: boolean) =>
-      ipcRenderer.invoke(
-        'history:setGitHistoryEnabled',
-        enabled
-      ) as Promise<HistoryMode>
+      });
+    },
+    setGitHistoryEnabled: async (enabled: boolean) =>
+      (
+        await invoke<{ mode: HistoryMode }>('history:setGitHistoryEnabled', {
+          enabled
+        })
+      ).mode
   },
   linkGraph: {
-    getBacklinks: (target: string) =>
-      ipcRenderer.invoke('linkGraph:getBacklinks', target) as Promise<Backlink[]>,
-    getOutgoing: (source: string) =>
-      ipcRenderer.invoke('linkGraph:getOutgoing', source) as Promise<
-        OutgoingLink[]
-      >,
-    getDeadLinks: () =>
-      ipcRenderer.invoke('linkGraph:getDeadLinks') as Promise<DeadLink[]>,
-    getOrphanedFiles: () =>
-      ipcRenderer.invoke('linkGraph:getOrphanedFiles') as Promise<string[]>,
+    getBacklinks: async (target: string) =>
+      (
+        await invoke<{ backlinks: Backlink[] }>('linkGraph:getBacklinks', {
+          target
+        })
+      ).backlinks,
+    getOutgoing: async (source: string) =>
+      (
+        await invoke<{ outgoing: OutgoingLink[] }>('linkGraph:getOutgoing', {
+          source
+        })
+      ).outgoing,
+    getDeadLinks: async () =>
+      (await invoke<{ deadLinks: DeadLink[] }>('linkGraph:getDeadLinks'))
+        .deadLinks,
+    getOrphanedFiles: async () =>
+      (await invoke<{ paths: string[] }>('linkGraph:getOrphanedFiles')).paths,
     previewRename: (oldPath: string, newPath: string) =>
-      ipcRenderer.invoke(
-        'linkGraph:previewRename',
-        oldPath,
-        newPath
-      ) as Promise<RenamePreview>,
+      invoke<RenamePreview>('linkGraph:previewRename', { oldPath, newPath }),
     renameWithReferences: (oldPath: string, newPath: string) =>
-      ipcRenderer.invoke(
-        'linkGraph:renameWithReferences',
+      invoke<RenameReport>('linkGraph:renameWithReferences', {
         oldPath,
         newPath
-      ) as Promise<RenameReport>
+      })
   },
   updater: {
-    current: () =>
-      ipcRenderer.invoke('updater:current') as Promise<UpdaterStatus>,
-    check: () => ipcRenderer.invoke('updater:check') as Promise<void>,
-    downloadAndInstall: () =>
-      ipcRenderer.invoke('updater:downloadAndInstall') as Promise<void>,
-    onStatus: (handler: (status: UpdaterStatus) => void) => {
-      const wrapped = (_event: unknown, payload: UpdaterStatus) =>
-        handler(payload);
-      ipcRenderer.on('updater:status', wrapped);
-      return () => {
-        ipcRenderer.removeListener('updater:status', wrapped);
-      };
-    }
+    current: () => invoke<UpdaterStatus>('updater:current'),
+    check: async () => {
+      await invoke('updater:check');
+    },
+    downloadAndInstall: async () => {
+      await invoke('updater:downloadAndInstall');
+    },
+    onStatus: (handler: (status: UpdaterStatus) => void) =>
+      onEvent('updater:status', (payload) =>
+        handler(payload as unknown as UpdaterStatus)
+      )
   },
   persistence: {
-    loadAppState: () =>
-      ipcRenderer.invoke('appState:load') as Promise<AppUiState>,
-    saveAppState: (state: AppUiState) =>
-      ipcRenderer.invoke('appState:save', state) as Promise<void>,
-    loadProjectState: (projectRoot: string) =>
-      ipcRenderer.invoke(
-        'projectState:load',
-        projectRoot
-      ) as Promise<ProjectUiState | null>,
-    saveProjectState: (projectRoot: string, state: ProjectUiState) =>
-      ipcRenderer.invoke(
-        'projectState:save',
-        projectRoot,
-        state
-      ) as Promise<void>,
-    revealUserData: () =>
-      ipcRenderer.invoke('appState:revealUserData') as Promise<void>
+    loadAppState: () => invoke<AppUiState>('persistence:loadAppState'),
+    saveAppState: async (state: AppUiState) => {
+      await invoke('persistence:saveAppState', { state });
+    },
+    loadProjectState: async (projectRoot: string) =>
+      (
+        await invoke<{ state: ProjectUiState | null }>(
+          'persistence:loadProjectState',
+          { projectRoot }
+        )
+      ).state,
+    saveProjectState: async (projectRoot: string, state: ProjectUiState) => {
+      await invoke('persistence:saveProjectState', { projectRoot, state });
+    },
+    revealUserData: async () => {
+      await invoke('persistence:revealUserData');
+    }
   }
 };
 

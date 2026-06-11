@@ -8,11 +8,11 @@
 // profiling shows it's hot. The renderer debounces invokes so a fast
 // typist doesn't fan out IPC round-trips.
 
-import { ipcMain } from 'electron';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import type { SearchHit, SearchOptions } from '@skrive/shared';
 import { projectState } from '../state/project-state';
+import { IpcError, registerCommand } from '../main/dispatch';
 
 const SEARCH_HIT_CAP = 500;
 
@@ -92,14 +92,15 @@ export async function searchProject(
 }
 
 export function registerSearchHandlers(): void {
-  ipcMain.handle(
-    'search:searchProject',
-    (
-      _event,
-      query: string,
-      options: SearchOptions
-    ): Promise<SearchHit[]> => {
-      return searchProject(query, options);
+  registerCommand('search:searchProject', async (payload) => {
+    const { query, options } = payload;
+    if (typeof query !== 'string') {
+      throw new IpcError('INVALID_PAYLOAD', 'query must be a string');
     }
-  );
+    const caseSensitive =
+      typeof options === 'object' &&
+      options !== null &&
+      (options as SearchOptions).caseSensitive === true;
+    return { hits: await searchProject(query, { caseSensitive }) };
+  });
 }

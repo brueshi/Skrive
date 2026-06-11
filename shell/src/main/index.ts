@@ -8,6 +8,17 @@ import {
 } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import {
+  SKRIVE_EVENT_CHANNEL,
+  SKRIVE_INVOKE_CHANNEL,
+  type SkrivePlatform
+} from '@skrive/shared';
+import {
+  dispatchJson,
+  emitEvent,
+  registerCommand,
+  setEventSink
+} from './dispatch';
 import { registerAssetProtocol, registerAssetScheme } from './asset-protocol';
 import { registerProjectHandlers } from '../ipc/project';
 import { registerFsHandlers } from '../ipc/fs';
@@ -95,18 +106,37 @@ function createWindow(): void {
 }
 
 function registerIpcHandlers(): void {
-  ipcMain.handle('app:version', () => app.getVersion());
-  ipcMain.handle('app:platform', () => process.platform);
+  // Every request crosses one channel as a JSON-string envelope and
+  // flows through the dispatcher; events go out the same way on the
+  // event channel. This is the same dispatch surface the parity-fixture
+  // harness and the Zig core implement.
+  ipcMain.handle(SKRIVE_INVOKE_CHANNEL, (_event, raw: unknown) =>
+    dispatchJson(typeof raw === 'string' ? raw : '')
+  );
+  setEventSink((json) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (window.isDestroyed()) continue;
+      window.webContents.send(SKRIVE_EVENT_CHANNEL, json);
+    }
+  });
+
+  registerCommand('app:version', () => ({ version: app.getVersion() }));
+  registerCommand('app:platform', () => ({
+    platform: process.platform as SkrivePlatform
+  }));
 
   // External links from the Preview pane. We validate the scheme so a
   // crafted markdown link can't trigger unexpected handlers (e.g. file://).
   // Allow-list mirrors the Preview's `isExternalHref` set: http(s), mailto,
-  // tel, plus the skrive:// deep-link scheme we own.
-  ipcMain.handle('links:openExternal', async (_event, url: string) => {
-    if (typeof url !== 'string') return;
+  // tel, plus the skrive:// deep-link scheme we own. Disallowed input is
+  // silently ignored, matching the pre-envelope behavior.
+  registerCommand('links:openExternal', async (payload) => {
+    const url = payload.url;
+    if (typeof url !== 'string') return {};
     const allowed = /^(https?|mailto|tel|skrive):/i;
-    if (!allowed.test(url)) return;
+    if (!allowed.test(url)) return {};
     await shell.openExternal(url);
+    return {};
   });
 
   registerProjectHandlers();
@@ -161,5 +191,5 @@ app.on('before-quit', (event) => {
     clearTimeout(timer);
     proceed();
   });
-  win.webContents.send('app:flush-before-quit');
+  emitEvent('app:flush-before-quit', {});
 });

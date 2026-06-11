@@ -17,22 +17,18 @@
 //     state with a human-readable message. The Settings UI surfaces
 //     it; nothing throws across the IPC boundary.
 
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app } from 'electron';
 import pkg from 'electron-updater';
 import type { UpdaterStatus } from '@skrive/shared';
+import { emitEvent, registerCommand } from '../main/dispatch';
 
 const { autoUpdater } = pkg;
-
-const STATUS_CHANNEL = 'updater:status';
 
 let current: UpdaterStatus = { kind: 'idle' };
 
 function broadcast(next: UpdaterStatus): void {
   current = next;
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (window.isDestroyed()) continue;
-    window.webContents.send(STATUS_CHANNEL, next);
-  }
+  emitEvent('updater:status', next);
 }
 
 function errorMessage(err: unknown): string {
@@ -89,7 +85,7 @@ export function registerUpdaterHandlers(): void {
     broadcast({ kind: 'error', message: errorMessage(err) });
   });
 
-  ipcMain.handle('updater:check', async () => {
+  registerCommand('updater:check', async () => {
     if (!app.isPackaged) {
       // In dev there's no signed app and no publish feed; short-circuit
       // so the Settings UI doesn't spew an opaque error every time the
@@ -99,25 +95,26 @@ export function registerUpdaterHandlers(): void {
         current: app.getVersion(),
         checkedAtMs: Date.now()
       });
-      return;
+      return {};
     }
     try {
       await autoUpdater.checkForUpdates();
     } catch (err) {
       broadcast({ kind: 'error', message: errorMessage(err) });
     }
+    return {};
   });
 
   // Single handler covers both "Download" (when status is 'available')
   // and "Restart to install" (when status is 'ready'). The renderer
   // labels the button per state but always calls this same channel.
-  ipcMain.handle('updater:downloadAndInstall', async () => {
-    if (!app.isPackaged) return;
+  registerCommand('updater:downloadAndInstall', async () => {
+    if (!app.isPackaged) return {};
     if (current.kind === 'ready') {
       // electron's quitAndInstall closes all windows and relaunches
       // into the new app bundle. No further events fire.
       autoUpdater.quitAndInstall();
-      return;
+      return {};
     }
     if (current.kind !== 'available') {
       // Out-of-band call (palette command before a check ran, etc.).
@@ -128,7 +125,7 @@ export function registerUpdaterHandlers(): void {
       } catch (err) {
         broadcast({ kind: 'error', message: errorMessage(err) });
       }
-      return;
+      return {};
     }
     try {
       // Capture version for the downloading-state labels — the
@@ -146,10 +143,13 @@ export function registerUpdaterHandlers(): void {
     } catch (err) {
       broadcast({ kind: 'error', message: errorMessage(err) });
     }
+    return {};
   });
 
   // Renderer-side `onStatus` subscriptions ask for the current state on
   // mount so the UI can render the right control on first paint without
   // waiting for a transition. `updater:current` is a synchronous query.
-  ipcMain.handle('updater:current', () => current);
+  registerCommand('updater:current', () => {
+    return current as unknown as Record<string, unknown>;
+  });
 }

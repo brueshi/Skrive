@@ -1,8 +1,8 @@
-// IPC handlers for the Phase 9 persistence layer. The main process is
-// the only place we touch `node:fs` for state files — the renderer
-// goes through `window.skrive.persistence.*`.
+// Persistence commands for the Phase 9 persistence layer. The main
+// process is the only place we touch `node:fs` for state files — the
+// renderer goes through `window.skrive.persistence.*`.
 
-import { app, ipcMain, shell } from 'electron';
+import { app, shell } from 'electron';
 import type { AppUiState, ProjectUiState } from '@skrive/shared';
 import {
   loadAppState,
@@ -10,44 +10,47 @@ import {
   saveAppState,
   saveProjectState
 } from '../lib/persistence';
+import { IpcError, registerCommand } from '../main/dispatch';
 
 export function registerPersistenceHandlers(): void {
-  ipcMain.handle('appState:load', async (): Promise<AppUiState> => {
-    return loadAppState(app.getPath('userData'));
+  registerCommand('persistence:loadAppState', async () => {
+    const state = await loadAppState(app.getPath('userData'));
+    return state as unknown as Record<string, unknown>;
   });
 
-  ipcMain.handle(
-    'appState:save',
-    async (_event, state: AppUiState): Promise<void> => {
-      await saveAppState(app.getPath('userData'), state);
-    }
-  );
+  registerCommand('persistence:saveAppState', async (payload) => {
+    await saveAppState(app.getPath('userData'), payload.state as AppUiState);
+    return {};
+  });
 
-  ipcMain.handle(
-    'projectState:load',
-    async (_event, projectRoot: string): Promise<ProjectUiState | null> => {
-      if (typeof projectRoot !== 'string' || projectRoot.length === 0) {
-        return null;
-      }
-      return loadProjectState(app.getPath('userData'), projectRoot);
+  registerCommand('persistence:loadProjectState', async (payload) => {
+    const projectRoot = payload.projectRoot;
+    if (typeof projectRoot !== 'string' || projectRoot.length === 0) {
+      return { state: null };
     }
-  );
+    return {
+      state: await loadProjectState(app.getPath('userData'), projectRoot)
+    };
+  });
 
-  ipcMain.handle(
-    'projectState:save',
-    async (
-      _event,
-      projectRoot: string,
-      state: ProjectUiState
-    ): Promise<void> => {
-      if (typeof projectRoot !== 'string' || projectRoot.length === 0) {
-        throw new Error('projectState:save requires a non-empty project root');
-      }
-      await saveProjectState(app.getPath('userData'), projectRoot, state);
+  registerCommand('persistence:saveProjectState', async (payload) => {
+    const projectRoot = payload.projectRoot;
+    if (typeof projectRoot !== 'string' || projectRoot.length === 0) {
+      throw new IpcError(
+        'INVALID_PAYLOAD',
+        'persistence:saveProjectState requires a non-empty project root'
+      );
     }
-  );
+    await saveProjectState(
+      app.getPath('userData'),
+      projectRoot,
+      payload.state as ProjectUiState
+    );
+    return {};
+  });
 
-  ipcMain.handle('appState:revealUserData', async (): Promise<void> => {
+  registerCommand('persistence:revealUserData', async () => {
     await shell.openPath(app.getPath('userData'));
+    return {};
   });
 }

@@ -6,9 +6,10 @@
 //
 // Watcher: a single chokidar instance per renderer. Re-entering `watch`
 // closes the previous watcher first. Events are forwarded to the
-// renderer via `webContents.send('project:change', ...)`.
+// renderer as `project:change` event envelopes via the dispatcher's
+// event sink.
 
-import { BrowserWindow, dialog, ipcMain } from 'electron';
+import { BrowserWindow, dialog } from 'electron';
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -22,6 +23,7 @@ import {
 } from '@skrive/shared';
 import { projectState } from '../state/project-state';
 import { parseSkriveToml } from '../lib/skrive-toml';
+import { IpcError, emitEvent, registerCommand } from '../main/dispatch';
 
 // Hardcoded skip list per `planning/open-questions.md` P3. Phase 3.4
 // will layer `.gitignore` and `.skrive.toml` `[project].exclude` on top
@@ -261,50 +263,51 @@ function startWatcher(
 }
 
 export function registerProjectHandlers(): void {
-  ipcMain.handle(
-    'project:openDialog',
-    async (event): Promise<string | null> => {
-      const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-      const result = await dialog.showOpenDialog(win!, {
-        properties: ['openDirectory', 'createDirectory'],
-        title: 'Open project',
-        buttonLabel: 'Open'
-      });
-      if (result.canceled || result.filePaths.length === 0) return null;
-      return result.filePaths[0] ?? null;
+  registerCommand('project:openDialog', async () => {
+    const win = BrowserWindow.getFocusedWindow() ?? undefined;
+    const result = await dialog.showOpenDialog(win!, {
+      properties: ['openDirectory', 'createDirectory'],
+      title: 'Open project',
+      buttonLabel: 'Open'
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { path: null };
     }
-  );
+    return { path: result.filePaths[0] ?? null };
+  });
 
-  ipcMain.handle(
-    'project:open',
-    async (_event, root: string): Promise<ProjectManifest> => {
-      if (typeof root !== 'string' || root.length === 0) {
-        throw new Error('project:open requires a non-empty root path');
-      }
-      return scanProject(root);
-    }
-  );
-
-  ipcMain.handle(
-    'project:getManifest',
-    async (): Promise<{ manifest: ProjectManifest; version: number } | null> => {
-      // O(1): hand back the cached manifest kept fresh by the watcher.
-      // No rescan. Null when no project is open / nothing cached yet.
-      const manifest = projectState.manifest;
-      if (!manifest) return null;
-      return { manifest, version: projectState.manifestVersion };
-    }
-  );
-
-  ipcMain.handle('project:watch', async (event, root: string): Promise<void> => {
+  registerCommand('project:open', async (payload) => {
+    const root = payload.root;
     if (typeof root !== 'string' || root.length === 0) {
-      throw new Error('project:watch requires a non-empty root path');
+      throw new IpcError(
+        'INVALID_PAYLOAD',
+        'project:open requires a non-empty root path'
+      );
+    }
+    const manifest = await scanProject(root);
+    return manifest as unknown as Record<string, unknown>;
+  });
+
+  registerCommand('project:getManifest', async () => {
+    // O(1): hand back the cached manifest kept fresh by the watcher.
+    // No rescan. Null when no project is open / nothing cached yet.
+    const manifest = projectState.manifest;
+    if (!manifest) return { current: null };
+    return { current: { manifest, version: projectState.manifestVersion } };
+  });
+
+  registerCommand('project:watch', async (payload) => {
+    const root = payload.root;
+    if (typeof root !== 'string' || root.length === 0) {
+      throw new IpcError(
+        'INVALID_PAYLOAD',
+        'project:watch requires a non-empty root path'
+      );
     }
     if (activeWatcher) {
       await activeWatcher.close();
       activeWatcher = null;
     }
-    const sender = event.sender;
     activeWatcher = startWatcher(root, (e) => {
       // A `.skrive.toml` edit changes config (and therefore lint
       // behavior) without being a markdown file change. It's rare, so the
@@ -331,66 +334,69 @@ export function registerProjectHandlers(): void {
         projectState.removeManifestFile(e.path);
       }
 
-      // The webContents may have been destroyed if the renderer
-      // navigated or closed. Send is a no-op in that case but the
-      // guard avoids a stack trace in the main log.
-      if (sender.isDestroyed()) return;
-      sender.send('project:change', e);
+      emitEvent('project:change', e);
     });
+    return {};
   });
 
-  ipcMain.handle('project:unwatch', async (): Promise<void> => {
+  registerCommand('project:unwatch', async () => {
     if (activeWatcher) {
       await activeWatcher.close();
       activeWatcher = null;
     }
+    return {};
   });
 
-  ipcMain.handle(
-    'project:create',
-    async (
-      _event,
-      parent: string,
-      name: string,
-      options: { gitInit: boolean }
-    ): Promise<string> => {
-      if (typeof parent !== 'string' || parent.length === 0) {
-        throw new Error('project:create requires a parent directory');
-      }
-      const trimmed = (name ?? '').trim();
-      if (trimmed.length === 0) {
-        throw new Error('project:create requires a non-empty name');
-      }
-      // Reject path separators in the name — the user picked a parent;
-      // they shouldn't be able to nest the new project arbitrarily.
-      if (/[\\/]/.test(trimmed) || trimmed === '.' || trimmed === '..') {
-        throw new Error('Project name cannot contain path separators');
-      }
-      const target = path.resolve(parent, trimmed);
-      try {
-        await fs.mkdir(target, { recursive: false });
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code === 'EEXIST') {
-          throw new Error(`A directory already exists at ${target}`);
-        }
-        throw err;
-      }
-      // Starter README so the project has at least one file the
-      // sidebar / linter / search has something to chew on.
-      const readme = `# ${trimmed}\n\nWritten with Skrive.\n`;
-      await fs.writeFile(path.join(target, 'README.md'), readme, 'utf8');
-      if (options?.gitInit) {
-        await new Promise<void>((resolve) => {
-          const child = spawn('git', ['init', '--quiet'], {
-            cwd: target,
-            windowsHide: true
-          });
-          child.on('error', () => resolve()); // git missing → ignore
-          child.on('close', () => resolve());
-        });
-      }
-      return target;
+  registerCommand('project:create', async (payload) => {
+    const parent = payload.parent;
+    if (typeof parent !== 'string' || parent.length === 0) {
+      throw new IpcError(
+        'INVALID_PAYLOAD',
+        'project:create requires a parent directory'
+      );
     }
-  );
+    const trimmed = (typeof payload.name === 'string' ? payload.name : '').trim();
+    if (trimmed.length === 0) {
+      throw new IpcError(
+        'INVALID_PAYLOAD',
+        'project:create requires a non-empty name'
+      );
+    }
+    // Reject path separators in the name — the user picked a parent;
+    // they shouldn't be able to nest the new project arbitrarily.
+    if (/[\\/]/.test(trimmed) || trimmed === '.' || trimmed === '..') {
+      throw new IpcError(
+        'INVALID_PAYLOAD',
+        'Project name cannot contain path separators'
+      );
+    }
+    const target = path.resolve(parent, trimmed);
+    try {
+      await fs.mkdir(target, { recursive: false });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'EEXIST') {
+        throw new IpcError(
+          'ALREADY_EXISTS',
+          `A directory already exists at ${target}`
+        );
+      }
+      throw err;
+    }
+    // Starter README so the project has at least one file the
+    // sidebar / linter / search has something to chew on.
+    const readme = `# ${trimmed}\n\nWritten with Skrive.\n`;
+    await fs.writeFile(path.join(target, 'README.md'), readme, 'utf8');
+    if (payload.gitInit === true) {
+      await new Promise<void>((resolve) => {
+        const child = spawn('git', ['init', '--quiet'], {
+          cwd: target,
+          windowsHide: true
+        });
+        child.on('error', () => resolve()); // git missing -> ignore
+        child.on('close', () => resolve());
+      });
+    }
+    return { path: target };
+  });
 }
