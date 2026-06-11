@@ -125,6 +125,15 @@ function registerIpcHandlers(): void {
     platform: process.platform as SkrivePlatform
   }));
 
+  // The renderer's ack in the pre-quit flush handshake. Renderer-to-
+  // shell traffic is requests-only in the envelope model, so the ack is
+  // a command rather than a bare channel send; the before-quit flow
+  // below installs the callback while a flush is pending.
+  registerCommand('app:flushComplete', () => {
+    flushCompleteCallback?.();
+    return {};
+  });
+
   // External links from the Preview pane. We validate the scheme so a
   // crafted markdown link can't trigger unexpected handlers (e.g. file://).
   // Allow-list mirrors the Preview's `isExternalHref` set: http(s), mailto,
@@ -174,6 +183,7 @@ app.on('window-all-closed', () => {
 // (or after a short timeout, so a wedged renderer can never trap the app).
 let quitFlushed = false;
 let quitFlushing = false;
+let flushCompleteCallback: (() => void) | null = null;
 app.on('before-quit', (event) => {
   if (quitFlushed) return;
   const win = BrowserWindow.getAllWindows()[0];
@@ -184,12 +194,13 @@ app.on('before-quit', (event) => {
 
   const proceed = () => {
     quitFlushed = true;
+    flushCompleteCallback = null;
     app.quit();
   };
   const timer = setTimeout(proceed, 2000);
-  ipcMain.once('app:flush-complete', () => {
+  flushCompleteCallback = () => {
     clearTimeout(timer);
     proceed();
-  });
+  };
   emitEvent('app:flush-before-quit', {});
 });
