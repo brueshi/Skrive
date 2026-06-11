@@ -74,6 +74,16 @@ export function createSkriveBridge(transport: SkriveTransport): SkriveIpc {
         await invoke('links:openExternal', { url });
       }
     },
+    clipboard: {
+      writeRich: async (html: string, text: string) => {
+        await invoke('clipboard:writeRich', { html, text });
+      },
+      writeText: async (text: string) => {
+        await invoke('clipboard:writeText', { text });
+      },
+      readText: async () =>
+        (await invoke<{ text: string }>('clipboard:readText')).text
+    },
     project: {
       openDialog: async () =>
         (await invoke<{ path: string | null }>('project:openDialog')).path,

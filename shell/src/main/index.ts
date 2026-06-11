@@ -21,6 +21,7 @@ import {
 } from './dispatch';
 import { registerAssetProtocol, registerAssetScheme } from './asset-protocol';
 import { registerProjectHandlers } from '../ipc/project';
+import { registerClipboardHandlers } from '../ipc/clipboard';
 import { registerFsHandlers } from '../ipc/fs';
 import { registerDiffHandlers } from '../ipc/diff';
 import { registerHistoryHandlers } from '../ipc/history';
@@ -149,6 +150,7 @@ function registerIpcHandlers(): void {
   });
 
   registerProjectHandlers();
+  registerClipboardHandlers();
   registerFsHandlers();
   registerDiffHandlers();
   registerLinksHandlers();

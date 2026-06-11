@@ -441,6 +441,21 @@ export interface SkriveIpc {
      */
     openExternal(url: string): Promise<void>;
   };
+  clipboard: {
+    /**
+     * Write both rich (text/html) and plain (text/plain) flavors in one
+     * call — the preview's "copy document" payload. Bridged because
+     * `navigator.clipboard` requires a secure context, which native
+     * webview custom schemes don't provide (Zig shell plan, Stage 0.3);
+     * the OS clipboard has no such constraint.
+     */
+    writeRich(html: string, text: string): Promise<void>;
+    /** Plain-text clipboard write. */
+    writeText(text: string): Promise<void>;
+    /** Plain-text clipboard read. Empty string when the clipboard holds
+     *  no text flavor. */
+    readText(): Promise<string>;
+  };
   project: {
     /**
      * Show a folder-picker dialog. Returns the chosen path, or null if

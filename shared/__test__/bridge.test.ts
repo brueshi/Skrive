@@ -63,6 +63,29 @@ describe('links', () => {
   });
 });
 
+describe('clipboard', () => {
+  it('writeRich passes both flavors', async () => {
+    await bridge.clipboard.writeRich('<p>hi</p>', 'hi');
+    expect(lastCall()).toEqual({
+      cmd: 'clipboard:writeRich',
+      payload: { html: '<p>hi</p>', text: 'hi' }
+    });
+  });
+
+  it('writeText passes the text', async () => {
+    await bridge.clipboard.writeText('plain');
+    expect(lastCall()).toEqual({
+      cmd: 'clipboard:writeText',
+      payload: { text: 'plain' }
+    });
+  });
+
+  it('readText unwraps { text }', async () => {
+    transport.stub('clipboard:readText', { text: 'from-os' });
+    await expect(bridge.clipboard.readText()).resolves.toBe('from-os');
+  });
+});
+
 describe('project', () => {
   it('openDialog unwraps { path }, including null', async () => {
     transport.stub('project:openDialog', { path: '/p' });
