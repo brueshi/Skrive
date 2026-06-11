@@ -126,3 +126,54 @@ implements the same shape.
 **Next.** Stage 0.3 — clipboard commands (`clipboard:writeRich` /
 `writeText` / `readText` in contract + Electron shell; migrate
 `app/src/components/editor/clipboard.ts` off `navigator.clipboard`).
+
+**Post-session note (typing-lag report).** After the Stage 0.1/0.2
+manual checks Joe reported slightly laggy typing in the dev build.
+Investigated: nothing crosses IPC per keystroke (typing only resets
+debounce timers; saves/refreshes fire on pauses), and a measured bound
+on the JSON-envelope overhead is 0.02 ms per 20 KB document save and
+0.53 ms per 500-file manifest refresh, full round trip — mechanically
+incapable of felt lag. Attributed to dev mode (unminified React in
+StrictMode with double-invoked effects, detached DevTools, Vite serving)
+versus the packaged 1.0.3 daily driver. Standing rule for Stage 0.7 and
+6.3 baselines: perf comparisons are packaged-vs-packaged only.
+
+---
+
+## 2026-06-11 — Stage 0.3: clipboard commands
+
+**Branch:** `refactor/ipc-envelope-dispatch` (continued).
+
+**What was done.**
+- Contract: `clipboard` namespace added to `SkriveIpc` —
+  `writeRich(html, text)`, `writeText(text)`, `readText()`.
+- Shell: `shell/src/ipc/clipboard.ts` implements all three over
+  Electron's clipboard module (`clipboard.write({ text, html })` writes
+  both flavors atomically).
+- Bridge: namespace mapping added (`readText` unwraps `{ text }`),
+  with three new bridge tests (shared suite now 36).
+- Renderer: new `app/src/lib/clipboard/systemClipboard.ts` —
+  bridge-primary, `navigator.clipboard` only when `window.skrive` is
+  absent (bare-browser embed case). `Preview.tsx`'s copy-document
+  button migrated; its rich-then-plain degradation chain preserved.
+
+**Scope finding.** The audit's migration target
+(`app/src/components/editor/clipboard.ts`) needed no changes: editor
+copy/cut/paste ride DOM ClipboardEvent/clipboardData, which work in any
+webview without a secure context. The preview's copy button was the
+only `navigator.clipboard` consumer in `app/src` (verified by grep —
+the 0.3 done-criterion's "no unconditional usage" now holds; the sole
+remaining reference is the guarded fallback in `systemClipboard.ts`).
+`readText` currently has no renderer consumer; it ships for contract
+completeness per the plan's table.
+
+**Gates.** Typecheck clean; shared 36/36; shell 120/120; app 297/297;
+build clean; preload external requires still `electron` only. Manual
+check pending (Joe): rich copy from preview pastes with formatting into
+a rich target (e.g. Pages/Mail) and as plain markdown into a plain one.
+
+**Blocked.** Nothing.
+
+**Next.** Stage 0.4 — move text analysis to the renderer worker; add
+`project:snapshot`. The largest Stage 0 item; includes a
+`[CONFIRM WITH JOE]` gate before deleting the old shell handlers.
