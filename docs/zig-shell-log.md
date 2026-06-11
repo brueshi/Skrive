@@ -177,3 +177,70 @@ a rich target (e.g. Pages/Mail) and as plain markdown into a plain one.
 **Next.** Stage 0.4 — move text analysis to the renderer worker; add
 `project:snapshot`. The largest Stage 0 item; includes a
 `[CONFIRM WITH JOE]` gate before deleting the old shell handlers.
+
+---
+
+## 2026-06-11 — Stage 0.4 (steps 1-5): snapshot + project-model worker
+
+**Branch:** `refactor/ipc-envelope-dispatch` (continued). Four commits:
+snapshot command; toml parser to shared; project-model worker; store
+re-point.
+
+**What was done.**
+- `project:snapshot` (contract + shell + bridge): one batched response,
+  every project file — bodies for markdown and `.skrive.toml`, `body:
+  null` for assets. New pure scan module `shell/src/lib/snapshot.ts`
+  shares the walk with the legacy scan; tested against a fixture tree
+  (the same shapes will gate the Zig core in Stage 2.3). Shape
+  extension: `sizeBytes` added per file (stat already in hand,
+  `FileEntry` needs it).
+- `parseSkriveToml` moved to `shared/src/skrive-toml-parse.ts`
+  (smol-toml dep moved to shared): the renderer worker derives config
+  from the snapshot; the shell keeps reading only its own slice (the
+  checkpoint caps) — matching the Zig plan, where the core parses toml
+  for checkpoint caps and the renderer owns config.
+- `app/src/lib/project-model/`: link-graph extract/graph copied from
+  the shell verbatim (shell copies remain until the deletion step);
+  `model.ts` derives manifest + schema + config, answers
+  backlinks/outgoing/dead-links/orphans, search (ported
+  `search.ts` semantics), previewRename, and a pure `renamePlan`
+  (worker computes rewrites from in-memory bodies; the store applies
+  them via `fs:writeFile` then `fs:rename`, per the plan's order — the
+  disk-mutating half of the old shell rename module). Manifest-version
+  semantics ported intact (bump only on path-set/frontmatter/config
+  changes).
+- Worker protocol decision: NO unsolicited manifest pushes. Every
+  mutation is store-initiated, so the updated manifest rides in the
+  mutation's result and the client delivers it to subscribers before
+  resolving — `createFile -> openTab` style flows can rely on the
+  manifest being current after an awaited upsert. Removes a whole
+  class of ordering races.
+- Store re-pointed: open = snapshot + worker init; watcher events
+  coalesce into a debounced read+upsert sync; saves upsert the worker
+  (FIFO message order makes fire-and-forget safe); lint inputs
+  (dead links/orphans) come from the worker; BacklinksPanel /
+  RenameModal / SearchModal use the worker client. `refreshManifest`
+  and its `project:getManifest` polling are gone from the renderer.
+- Shell watcher now FORWARDS `.skrive.toml` change events (it used to
+  swallow them and rescan); the shell's own response shrinks to
+  re-reading the checkpoint caps. Toml live-reload thus flows through
+  the worker like any other change.
+
+**Deviations from "move, don't rewrite" (logged honestly).**
+- The rename suite couldn't move unchanged: the shell version is
+  disk-coupled, the worker version is pure planning. The case content
+  (relative-path rewrites, wiki stems, referenceUse exclusion, error
+  shapes) was carried into `app/__test__/project-model/model.test.ts`.
+- `previewRename`'s targetExists check drops the shell's extra
+  disk-existence probe — the worker checks the known file set instead.
+  Same data source the shell's set was built from; the difference is
+  only files created outside the watcher's view.
+- The shell manifest suite tests a cache that ceases to exist; its
+  version-bump contract was ported to the worker tests instead.
+
+**Gates.** Typecheck clean; app 326/326 (21 files, +model suite +moved
+extract/fixtures suites); shell 110/110; shared 51/51; build clean;
+preload requires only `electron`.
+
+**Pending.** Step 6 (deletion of dead shell handlers + state, contract
+bump) awaits the `[CONFIRM WITH JOE]` gate and his manual pass.
