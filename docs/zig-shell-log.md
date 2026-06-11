@@ -65,8 +65,22 @@ these; none contradict it).**
   Nothing in `app/src` matches on error message text (verified by grep).
 
 **Gates.** `bun run typecheck` clean; shell suites 120/120 (10 files);
-app suites 297/297 (18 files); `bun run start:build` clean. Manual
-app-runs check pending (Joe).
+app suites 297/297 (18 files); `bun run start:build` clean.
+
+**Incident (caught by the manual app-runs check).** First launch died
+with `window.skrive` undefined: the preload's new value imports from
+the `@skrive/shared` barrel dragged in the frontmatter module, whose
+externalized `yaml` import survived bundling as `require("yaml")` — and
+a sandboxed preload can require nothing but `electron`, so the preload
+died before exposing the bridge. The previous preload only imported
+types (erased at compile), which is why this never bit before. Fix:
+the preload imports envelope constants from
+`shared/src/ipc-contracts.ts` directly; that module has zero runtime
+imports by design and must stay that way. Standing rule for every
+future host: the renderer-facing transport layer must not import the
+shared barrel's value surface. Verified post-fix: the built preload's
+only external require is `electron`. Manual app-runs re-check after the
+fix: pending (Joe).
 
 **Blocked.** Nothing.
 

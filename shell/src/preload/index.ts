@@ -29,11 +29,17 @@ import type {
   SkriveResponse,
   UpdaterStatus
 } from '@skrive/shared';
+// Value imports come from the contract module directly, NOT the
+// `@skrive/shared` barrel. The barrel re-exports frontmatter helpers
+// whose `yaml` import survives bundling as an external require — and a
+// sandboxed preload can require nothing but `electron`, so that single
+// line kills the preload before `window.skrive` is exposed.
+// `ipc-contracts.ts` has zero runtime imports by design; keep it that way.
 import {
   ENVELOPE_VERSION,
   SKRIVE_EVENT_CHANNEL,
   SKRIVE_INVOKE_CHANNEL
-} from '@skrive/shared';
+} from '../../../shared/src/ipc-contracts';
 
 let nextRequestId = 1;
 
