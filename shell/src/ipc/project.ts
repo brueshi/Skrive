@@ -302,17 +302,27 @@ export function registerProjectHandlers(): void {
       activeWatcher = null;
     }
     activeWatcher = startWatcher(root, (e) => {
-      // A `.skrive.toml` edit changes config (and therefore lint
-      // behavior) without being a markdown file change. It's rare, so the
-      // simplest correct response is a full rescan — that re-reads the
-      // toml, rebuilds the manifest, and bumps the version. We don't
-      // forward it to the renderer as a file change: it isn't one.
+      // A `.skrive.toml` edit changes config. The renderer's
+      // project-model worker owns config derivation now (Stage 0.4), so
+      // the event is forwarded like any other change; the shell only
+      // refreshes its own slice — the checkpoint caps the auto-
+      // checkpoint writer reads.
       if (
         (e.kind === 'add' || e.kind === 'change' || e.kind === 'unlink') &&
         e.path === '.skrive.toml' &&
         projectState.root
       ) {
-        void scanProject(projectState.root);
+        const projectRoot = projectState.root;
+        void (async () => {
+          try {
+            const tomlSource = await readSkriveToml(projectRoot);
+            projectState.checkpointsConfig =
+              parseSkriveToml(tomlSource).config.checkpoints;
+          } catch {
+            // Unreadable config: keep the prior caps.
+          }
+        })();
+        emitEvent('project:change', e);
         return;
       }
 

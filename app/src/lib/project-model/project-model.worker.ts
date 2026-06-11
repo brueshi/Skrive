@@ -5,6 +5,8 @@
 
 import { ProjectModel } from './model';
 import type {
+  ModelUpdate,
+  MutationResult,
   ProjectModelQuery,
   ProjectModelRequest,
   ProjectModelResponse
@@ -20,12 +22,8 @@ const ctx = self as unknown as {
 
 const model = new ProjectModel();
 
-function pushModel(): void {
-  ctx.postMessage({
-    type: 'model',
-    manifest: model.manifest(),
-    version: model.currentVersion()
-  });
+function modelUpdate(): ModelUpdate {
+  return { manifest: model.manifest(), version: model.currentVersion() };
 }
 
 function runQuery(query: ProjectModelQuery): unknown {
@@ -53,20 +51,29 @@ ctx.onmessage = (event: MessageEvent<ProjectModelRequest>) => {
     switch (request.type) {
       case 'init': {
         model.init(request.snapshot);
-        ctx.postMessage({ type: 'result', seq: request.seq, data: null });
-        pushModel();
+        ctx.postMessage({
+          type: 'result',
+          seq: request.seq,
+          data: modelUpdate()
+        });
         break;
       }
       case 'upsert': {
-        const bumped = model.upsert(request.path, request.body, request.meta);
-        ctx.postMessage({ type: 'result', seq: request.seq, data: bumped });
-        if (bumped) pushModel();
+        const changed = model.upsert(request.path, request.body, request.meta);
+        const result: MutationResult = {
+          changed,
+          model: changed ? modelUpdate() : null
+        };
+        ctx.postMessage({ type: 'result', seq: request.seq, data: result });
         break;
       }
       case 'remove': {
-        const bumped = model.remove(request.path);
-        ctx.postMessage({ type: 'result', seq: request.seq, data: bumped });
-        if (bumped) pushModel();
+        const changed = model.remove(request.path);
+        const result: MutationResult = {
+          changed,
+          model: changed ? modelUpdate() : null
+        };
+        ctx.postMessage({ type: 'result', seq: request.seq, data: result });
         break;
       }
       case 'query': {

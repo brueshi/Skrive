@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SearchHit } from '@skrive/shared';
 import { logProjectError, useProjectStore } from '../../stores/project';
 import { notify } from '../../lib/notify';
+import { projectModel } from '../../lib/project-model/client';
 
 const DEBOUNCE_MS = 150;
 /** Lines of context shown on each side of the match in the preview. */
@@ -150,7 +151,12 @@ export function SearchModal({ open, onClose }: Props) {
       debounceRef.current = null;
       tokenRef.current += 1;
       const issued = tokenRef.current;
-      window.skrive.search
+      const client = projectModel();
+      if (!client) {
+        setLoading(false);
+        return;
+      }
+      client
         .searchProject(trimmed, { caseSensitive })
         .then((result) => {
           if (issued !== tokenRef.current) return;

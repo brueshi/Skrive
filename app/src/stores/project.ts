@@ -38,6 +38,12 @@ import { runProjectLint } from '../lib/lint';
 import type { LintWorkerResponse } from '../lib/lint/lint-worker-protocol';
 import { notify } from '../lib/notify';
 import { logDuration, now as perfNow } from '../lib/perf';
+import {
+  projectModel,
+  spawnProjectModel,
+  terminateProjectModel
+} from '../lib/project-model/client';
+import type { ModelUpdate } from '../lib/project-model/protocol';
 import { usePreferencesStore } from './preferences';
 
 export const SIDEBAR_MIN_WIDTH = 180;
@@ -180,7 +186,6 @@ type Actions = {
   openProjectFromDialog(): Promise<void>;
   openProject(path: string): Promise<void>;
   closeProject(): Promise<void>;
-  refreshManifest(): Promise<void>;
 
   openTab(path: string, hydrate?: HydrateTab): Promise<void>;
   /** Open `path` (or focus the existing tab) and request a selection
@@ -376,7 +381,7 @@ let sentBodies = new Map<string, string>();
 // The manifest the worker currently holds. The worker caches it across passes,
 // so we ship the (heavy, ~95-entry) manifest only when its identity changes —
 // during prose typing it doesn't, so we send `null` and skip the structured
-// clone entirely. Identity is stable because refreshManifest only swaps in a new
+// clone entirely. Identity is stable because applyModelUpdate only swaps in a new
 // manifest object when its lint-relevant version actually changed (below).
 let sentManifest: ProjectManifest | null = null;
 
@@ -558,21 +563,89 @@ function scheduleDebouncedSave(getState: () => State): void {
   }, DEBOUNCED_SAVE_MS);
 }
 
-// Coalesce watcher-driven manifest+lint refreshes. Each new file event resets
-// the timer, so a run of autosaves (or any burst) collapses into one refresh
-// once the tree settles.
-function scheduleWatchRefresh(getState: () => State & Actions): void {
+// Coalesce watcher-driven model syncs. Each new file event resets the
+// timer, so a run of autosaves (or any burst) collapses into one sync
+// once the tree settles. Paths accumulate in `pendingWatchPaths` with
+// their latest operation; the sync reads each changed file once and
+// feeds it to the project-model worker (the renderer-side mirror of the
+// shell's old watcher -> manifest patch path).
+const pendingWatchPaths = new Map<string, 'upsert' | 'remove'>();
+
+function scheduleWatchSync(getState: () => State & Actions): void {
   if (watchRefreshTimer) clearTimeout(watchRefreshTimer);
   watchRefreshTimer = setTimeout(() => {
     watchRefreshTimer = null;
-    void getState().refreshManifest();
+    void syncWatchedChanges(getState);
   }, WATCH_REFRESH_DEBOUNCE_MS);
+}
+
+async function syncWatchedChanges(getState: () => State & Actions): Promise<void> {
+  const manifest = getState().manifest;
+  const client = projectModel();
+  if (!manifest || !client) {
+    pendingWatchPaths.clear();
+    return;
+  }
+  const entries = Array.from(pendingWatchPaths.entries());
+  pendingWatchPaths.clear();
+  await Promise.all(
+    entries.map(async ([path, op]) => {
+      if (op === 'remove') {
+        await client.remove(path);
+        return;
+      }
+      try {
+        const content = await window.skrive.fs.readFile(manifest.root, path);
+        await client.upsert(path, content.body, {
+          modifiedMs: content.modifiedMs
+        });
+      } catch {
+        // Vanished between the event and the read — drop instead.
+        await client.remove(path);
+      }
+    })
+  );
+  // Always re-lint after a sync — a content change to a closed file bumps
+  // no manifest version but can still move cross-file findings.
+  scheduleLint();
 }
 
 function cancelWatchRefresh(): void {
   if (watchRefreshTimer) {
     clearTimeout(watchRefreshTimer);
     watchRefreshTimer = null;
+  }
+  pendingWatchPaths.clear();
+}
+
+/** Commit a worker-delivered manifest into the store: swap it in and
+ *  drop tabs whose files vanished. The worker only delivers on a
+ *  version bump, so every call here is a real structural change —
+ *  content-only edits never reach this (and never re-render). */
+function applyModelUpdate(
+  update: ModelUpdate,
+  get: () => State & Actions,
+  set: (partial: Partial<State>) => void
+): void {
+  lastManifestVersion = update.version;
+  const next = update.manifest;
+  set({ manifest: next });
+  const { tabs, activeTabIndex } = get();
+  const survivingTabs = tabs.filter((t) =>
+    next.files.some((f) => f.path === t.path)
+  );
+  if (survivingTabs.length !== tabs.length) {
+    let nextActive = activeTabIndex;
+    // If the active tab survived, find its new index. Otherwise step
+    // back to the previous tab (or to -1 when none left).
+    const wasActive = tabs[activeTabIndex];
+    if (wasActive) {
+      const i = survivingTabs.findIndex((t) => t.path === wasActive.path);
+      nextActive = i;
+    } else {
+      nextActive = Math.min(activeTabIndex, survivingTabs.length - 1);
+    }
+    set({ tabs: survivingTabs, activeTabIndex: nextActive });
   }
 }
 
@@ -727,7 +800,16 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       resetLintReadCache();
       resetLintPipeline();
 
-      const manifest = await window.skrive.project.open(path);
+      // One batched read; the project-model worker derives manifest,
+      // schema, and link graph from it renderer-side (Stage 0.4).
+      const client = spawnProjectModel();
+      const snapshot = await window.skrive.project.snapshot(path);
+      const initial = await client.init(snapshot);
+      const manifest = initial.manifest;
+      lastManifestVersion = initial.version;
+      // Subscribed after init so the handler only sees incremental
+      // updates; the initial manifest is committed by the set() below.
+      client.onModelUpdate((update) => applyModelUpdate(update, get, set));
 
       const unsubscribe = window.skrive.project.onChange((event) => {
         if (event.kind === 'ready') return;
@@ -735,10 +817,15 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         // and serves the rest from the closed-body cache. (Dir events carry a
         // path too; tracking it is harmless — it just isn't a lintable file.)
         if ('path' in event) watchDirtyPaths.add(event.path);
+        if (event.kind === 'add' || event.kind === 'change') {
+          pendingWatchPaths.set(event.path, 'upsert');
+        } else if (event.kind === 'unlink') {
+          pendingWatchPaths.set(event.path, 'remove');
+        }
         // Debounced: the app's own autosaves fire watcher events too, and an
-        // undebounced full re-lint per event stacks passes on the main thread
-        // and stutters typing. Coalesce to one refresh once edits settle.
-        scheduleWatchRefresh(get);
+        // undebounced sync per event would stack reads while the writer is
+        // mid-keystroke. Coalesce to one sync once edits settle.
+        scheduleWatchSync(get);
       });
       await window.skrive.project.watch(manifest.root);
 
@@ -840,6 +927,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     cancelWatchRefresh();
     resetLintReadCache();
     resetLintPipeline();
+    terminateProjectModel();
     // Flush dirty tabs + persist project UI state before clearing.
     await get().saveAllDirty();
     await get().persistProjectStateNow();
@@ -856,45 +944,6 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       historyPanelOpen: false,
       unsubscribeWatch: null
     });
-  },
-
-  async refreshManifest() {
-    const manifest = get().manifest;
-    if (!manifest) return;
-    // Cheap O(1) read of the main process's incrementally-maintained manifest —
-    // no full rescan. `version` bumps only on lint/structure-relevant changes
-    // (file-set or frontmatter), so a content-only save (the common watcher
-    // event while typing) returns the same version and we skip the swap-in
-    // entirely: no new manifest object, no sidebar re-render, no manifest
-    // re-ship to the worker.
-    const result = await window.skrive.project.getManifest();
-    // Always re-lint — a content change to a closed file bumps no version but
-    // can still move cross-file findings; the debounce coalesces this with any
-    // edit-driven pass.
-    scheduleLint();
-    if (!result) return;
-    if (result.version === lastManifestVersion) return;
-    lastManifestVersion = result.version;
-    const next = result.manifest;
-    set({ manifest: next });
-    // Drop tabs whose files vanished from disk.
-    const { tabs, activeTabIndex } = get();
-    const survivingTabs = tabs.filter((t) =>
-      next.files.some((f) => f.path === t.path)
-    );
-    if (survivingTabs.length !== tabs.length) {
-      let nextActive = activeTabIndex;
-      // If the active tab survived, find its new index. Otherwise step
-      // back to the previous tab (or to -1 when none left).
-      const wasActive = tabs[activeTabIndex];
-      if (wasActive) {
-        const i = survivingTabs.findIndex((t) => t.path === wasActive.path);
-        nextActive = i;
-      } else {
-        nextActive = Math.min(activeTabIndex, survivingTabs.length - 1);
-      }
-      set({ tabs: survivingTabs, activeTabIndex: nextActive });
-    }
   },
 
   // ============================ Tabs ============================
@@ -1088,6 +1137,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const writable: Tab = { ...tab, frontmatter: { ...tab.frontmatter } };
     const payload = buildSavePayload(writable);
     const hash = await window.skrive.fs.writeFile(manifest.root, tab.path, payload);
+    void projectModel()?.upsert(tab.path, payload);
     const nextTabs = tabs.slice();
     nextTabs[activeTabIndex] = {
       ...writable,
@@ -1125,6 +1175,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       const idx = i;
       writes.push(
         window.skrive.fs.writeFile(manifest.root, t.path, payload).then((hash) => {
+          void projectModel()?.upsert(t.path, payload);
           updatedTabs[idx] = { ...writable, dirty: false, diskHash: hash };
         })
       );
@@ -1152,6 +1203,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const writable: Tab = { ...tab, frontmatter: { ...tab.frontmatter } };
     const payload = buildSavePayload(writable);
     const hash = await window.skrive.fs.writeFile(manifest.root, path, payload);
+    void projectModel()?.upsert(path, payload);
     const nextTabs = get().tabs.slice();
     const j = nextTabs.findIndex((t) => t.path === path);
     const existing = nextTabs[j];
@@ -1175,7 +1227,9 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     if (!manifest) return;
     const normalized = relPath.endsWith('.md') ? relPath : `${relPath}.md`;
     await window.skrive.fs.newFile(manifest.root, normalized);
-    await get().refreshManifest();
+    // Awaited: openTab needs the new entry in the manifest, and the
+    // client guarantees the model update lands before this resolves.
+    await projectModel()?.upsert(normalized, '');
     await get().openTab(normalized);
   },
 
@@ -1190,7 +1244,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     if (!manifest) return;
     await window.skrive.fs.trash(manifest.root, relPath);
     // Close any tab pointing at the deleted file. The watcher's unlink
-    // event will also fire and trigger refreshManifest, but explicitly
+    // event will also fire and sync the model, but explicitly
     // closing here keeps the tab list responsive.
     const tabs = get().tabs;
     const i = tabs.findIndex((t) => t.path === relPath);
@@ -1204,7 +1258,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         nextActive = Math.min(activeTabIndex, next.length - 1);
       set({ tabs: next, activeTabIndex: nextActive });
     }
-    await get().refreshManifest();
+    await projectModel()?.remove(relPath);
   },
 
   async deleteDirectory(relPath: string) {
@@ -1225,7 +1279,16 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       }
       set({ tabs: survivors, activeTabIndex: nextActive });
     }
-    await get().refreshManifest();
+    // Drop every manifest file under the deleted directory from the
+    // model. The watcher's per-file unlink events echo this; both paths
+    // are idempotent.
+    const client = projectModel();
+    if (client) {
+      const doomed = manifest.files
+        .filter((f) => f.path.startsWith(prefix))
+        .map((f) => f.path);
+      for (const p of doomed) await client.remove(p);
+    }
   },
 
   // ============================ Sidebar ============================
@@ -1378,12 +1441,35 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
           };
           const payload = buildSavePayload(writable);
           await window.skrive.fs.writeFile(manifest.root, oldPath, payload);
+          // The rename plan is computed from the worker's bodies — the
+          // flushed content must be in the model before planning, or
+          // the rewrite would resurrect the stale body.
+          await projectModel()?.upsert(oldPath, payload);
         } catch (err) {
           logProjectError('flush before rename', err);
         }
       }
     }
-    await window.skrive.linkGraph.renameWithReferences(oldPath, newPath);
+    // Worker computes the rewrites; the store applies them through
+    // ordinary fs commands (plan order: writes first — self-references
+    // land at the OLD path — then the rename), then feeds the results
+    // back into the model.
+    const client = projectModel();
+    if (!client) return;
+    const plan = await client.renamePlan(oldPath, newPath);
+    for (const write of plan.writes) {
+      await window.skrive.fs.writeFile(manifest.root, write.path, write.body);
+    }
+    await window.skrive.fs.rename(manifest.root, oldPath, newPath);
+    for (const write of plan.writes) {
+      if (write.path === oldPath) continue;
+      await client.upsert(write.path, write.body);
+    }
+    await client.remove(oldPath);
+    const renamedBody = await window.skrive.fs.readFile(manifest.root, newPath);
+    await client.upsert(newPath, renamedBody.body, {
+      modifiedMs: renamedBody.modifiedMs
+    });
     // The watcher's add+unlink events refresh the manifest, but we
     // also need to repoint the open tab at its new path so the
     // editor doesn't try to load from the gone-away `oldPath`.
@@ -1400,7 +1486,6 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         void activeTabIndex;
       }
     }
-    await get().refreshManifest();
   },
 
   // ============================ History panel ============================
@@ -1584,11 +1669,14 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     let posted = false;
     try {
       const ipcStart = perfNow();
-      const [deadLinks, orphanedFiles] = await Promise.all([
-        window.skrive.linkGraph.getDeadLinks(),
-        window.skrive.linkGraph.getOrphanedFiles()
-      ]);
-      logDuration('lint ipc (deadlinks+orphans)', ipcStart);
+      const modelClient = projectModel();
+      const [deadLinks, orphanedFiles] = modelClient
+        ? await Promise.all([
+            modelClient.getDeadLinks(),
+            modelClient.getOrphanedFiles()
+          ])
+        : [[], []];
+      logDuration('lint model (deadlinks+orphans)', ipcStart);
       // Build the body map from open tabs so unsaved edits are linted
       // against the editor content, not the on-disk version. Files not
       // currently open fall back to disk during the engine's per-file
@@ -1656,7 +1744,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         // Ship the manifest only when its identity changed since the worker's
         // last pass — the worker caches it, so during prose typing (manifest
         // unchanged) we send null and skip cloning ~95 entries. Identity is
-        // stable because refreshManifest only swaps a new manifest in on a real
+        // stable because applyModelUpdate only swaps a new manifest in on a real
         // version bump.
         const manifestToSend = manifest === sentManifest ? null : manifest;
         // Hand the engine off-thread. The result lands in handleLintResult,

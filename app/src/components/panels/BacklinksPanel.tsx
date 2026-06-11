@@ -16,6 +16,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { selectActiveTab, useProjectStore } from '../../stores/project';
 import type { Backlink, OutgoingLink } from '@skrive/shared';
 import { PanelShell } from './PanelShell';
+import { projectModel } from '../../lib/project-model/client';
 
 type RefItem = { line: number; column: number; snippet: string };
 
@@ -134,9 +135,11 @@ export function BacklinksPanel() {
     }
     const path = activeTab.path;
     let cancelled = false;
+    const client = projectModel();
+    if (!client) return;
     void Promise.all([
-      window.skrive.linkGraph.getBacklinks(path),
-      window.skrive.linkGraph.getOutgoing(path)
+      client.getBacklinks(path),
+      client.getOutgoing(path)
     ]).then(([back, out]) => {
       if (cancelled) return;
       setInbound(back);

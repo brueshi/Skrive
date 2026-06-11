@@ -2,12 +2,15 @@
 // module-level singleton the store and panels share. The store owns the
 // lifecycle (spawn on project open, terminate on close); panels and
 // modals call the query methods and never touch the worker directly.
+//
+// Mutations resolve AFTER any resulting model update has been delivered
+// to onModelUpdate subscribers — callers can rely on the store's
+// manifest being current when an `await upsert()` returns.
 
 import type {
   Backlink,
   DeadLink,
   OutgoingLink,
-  ProjectManifest,
   ProjectSnapshot,
   RenamePreview,
   SearchHit,
@@ -15,15 +18,14 @@ import type {
 } from '@skrive/shared';
 import type { RenamePlan, UpsertMeta } from './model';
 import type {
+  ModelUpdate,
+  MutationResult,
   ProjectModelQuery,
   ProjectModelRequest,
   ProjectModelResponse
 } from './protocol';
 
-export type ModelUpdateHandler = (
-  manifest: ProjectManifest,
-  version: number
-) => void;
+export type ModelUpdateHandler = (update: ModelUpdate) => void;
 
 type Pending = {
   resolve: (data: unknown) => void;
@@ -32,6 +34,24 @@ type Pending = {
 
 /** Distributive Omit — plain Omit collapses a discriminated union. */
 type WithoutSeq<T> = T extends unknown ? Omit<T, 'seq'> : never;
+
+function hasModelUpdate(data: unknown): data is { model: ModelUpdate } {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    'model' in data &&
+    (data as { model: unknown }).model !== null
+  );
+}
+
+function isModelUpdate(data: unknown): data is ModelUpdate {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    'manifest' in data &&
+    'version' in data
+  );
+}
 
 export class ProjectModelClient {
   private worker: Worker;
@@ -46,17 +66,21 @@ export class ProjectModelClient {
     );
     this.worker.onmessage = (event: MessageEvent<ProjectModelResponse>) => {
       const message = event.data;
-      if (message.type === 'model') {
-        for (const handler of this.updateHandlers) {
-          handler(message.manifest, message.version);
-        }
-        return;
-      }
       const entry = this.pending.get(message.seq);
       if (!entry) return;
       this.pending.delete(message.seq);
-      if (message.type === 'error') entry.reject(new Error(message.message));
-      else entry.resolve(message.data);
+      if (message.type === 'error') {
+        entry.reject(new Error(message.message));
+        return;
+      }
+      // Deliver the model update to subscribers BEFORE resolving the
+      // caller — the ordering guarantee documented above.
+      if (hasModelUpdate(message.data)) {
+        this.deliver(message.data.model);
+      } else if (isModelUpdate(message.data)) {
+        this.deliver(message.data);
+      }
+      entry.resolve(message.data);
     };
     this.worker.onerror = (event) => {
       // A worker crash strands every in-flight promise; fail them loudly
@@ -67,7 +91,11 @@ export class ProjectModelClient {
     };
   }
 
-  /** Subscribe to manifest pushes (fired on structure-relevant changes
+  private deliver(update: ModelUpdate): void {
+    for (const handler of this.updateHandlers) handler(update);
+  }
+
+  /** Subscribe to manifest updates (fired on structure-relevant changes
    *  only). Returns an unsubscribe function. */
   onModelUpdate(handler: ModelUpdateHandler): () => void {
     this.updateHandlers.add(handler);
@@ -92,16 +120,25 @@ export class ProjectModelClient {
     });
   }
 
-  init(snapshot: ProjectSnapshot): Promise<void> {
-    return this.post({ type: 'init', snapshot }) as Promise<void>;
+  init(snapshot: ProjectSnapshot): Promise<ModelUpdate> {
+    return this.post({ type: 'init', snapshot }) as Promise<ModelUpdate>;
   }
 
-  upsert(path: string, body: string, meta?: UpsertMeta): Promise<boolean> {
-    return this.post({ type: 'upsert', path, body, meta }) as Promise<boolean>;
+  upsert(
+    path: string,
+    body: string,
+    meta?: UpsertMeta
+  ): Promise<MutationResult> {
+    return this.post({
+      type: 'upsert',
+      path,
+      body,
+      meta
+    }) as Promise<MutationResult>;
   }
 
-  remove(path: string): Promise<boolean> {
-    return this.post({ type: 'remove', path }) as Promise<boolean>;
+  remove(path: string): Promise<MutationResult> {
+    return this.post({ type: 'remove', path }) as Promise<MutationResult>;
   }
 
   private query<T>(query: ProjectModelQuery): Promise<T> {

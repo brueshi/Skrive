@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Reference, RenamePreview } from '@skrive/shared';
 import { logProjectError, useProjectStore } from '../../stores/project';
 import { notify } from '../../lib/notify';
+import { projectModel } from '../../lib/project-model/client';
 
 const DEBOUNCE_MS = 120;
 
@@ -125,7 +126,12 @@ export function RenameModal() {
       debounceRef.current = null;
       seqRef.current += 1;
       const issued = seqRef.current;
-      window.skrive.linkGraph
+      const client = projectModel();
+      if (!client) {
+        setPreviewPending(false);
+        return;
+      }
+      client
         .previewRename(oldPath, newPath)
         .then((result) => {
           if (issued !== seqRef.current) return;
