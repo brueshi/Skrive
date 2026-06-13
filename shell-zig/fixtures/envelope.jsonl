@@ -1,0 +1,6 @@
+{"name":"malformed-json","request":"{ not json","response":"{\"v\":1,\"id\":0,\"ok\":false,\"error\":{\"code\":\"BAD_ENVELOPE\",\"message\":\"<message>\"}}"}
+{"name":"unknown-top-level-field","request":"{\"v\":1,\"id\":1,\"cmd\":\"fs:readFile\",\"payload\":{},\"extra\":1}","response":"{\"v\":1,\"id\":1,\"ok\":false,\"error\":{\"code\":\"BAD_ENVELOPE\",\"message\":\"<message>\"}}"}
+{"name":"bad-version","request":"{\"v\":2,\"id\":2,\"cmd\":\"app:version\",\"payload\":{}}","response":"{\"v\":1,\"id\":2,\"ok\":false,\"error\":{\"code\":\"BAD_ENVELOPE\",\"message\":\"<message>\"}}"}
+{"name":"non-object-payload","request":"{\"v\":1,\"id\":3,\"cmd\":\"fs:readFile\",\"payload\":\"scalar\"}","response":"{\"v\":1,\"id\":3,\"ok\":false,\"error\":{\"code\":\"BAD_ENVELOPE\",\"message\":\"<message>\"}}"}
+{"name":"unknown-command","request":"{\"v\":1,\"id\":4,\"cmd\":\"nope:never\",\"payload\":{}}","response":"{\"v\":1,\"id\":4,\"ok\":false,\"error\":{\"code\":\"UNKNOWN_COMMAND\",\"message\":\"<message>\"}}"}
+{"name":"payload-too-large","request":"__SKRIVE_OVERSIZE__","response":"{\"v\":1,\"id\":0,\"ok\":false,\"error\":{\"code\":\"PAYLOAD_TOO_LARGE\",\"message\":\"<message>\"}}"}
