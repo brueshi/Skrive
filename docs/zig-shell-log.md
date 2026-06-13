@@ -257,3 +257,43 @@ The shell no longer parses Markdown anywhere — grep-verified.
 new homes (app 326, shared 65, shell 56), manual pass green (Joe),
 typecheck + build clean. Next: Stage 0.5 (symlink-safe path
 containment).
+
+---
+
+## 2026-06-13 — Packaged dogfood build; dev-mode lag concern cleared
+
+**What was done.** To test feel/performance on a real substrate (dev
+mode being an unreliable proxy — see the 2026-06-11 typing-lag note),
+added a `workflow_dispatch`-gated `actions/upload-artifact` step to
+`release.yml` (`ci:` commit on the branch) and dispatched the Release
+workflow against `refactor/ipc-envelope-dispatch`. This builds, signs,
+and notarizes WITHOUT cutting a tag, creating a GitHub release, or
+touching the electron-updater feed — maximally reversible (the artifact
+self-expires; nothing public is created). Run 27467632953 succeeded;
+the signed+notarized DMG (stamped 1.0.3 — `package.json` not bumped)
+was dogfooded.
+
+**Finding (decision data).** The packaged Stage 0.1–0.4 build feels
+snappy with no issues on Joe's hands-on pass — typing is immediate,
+project actions (open/save/search/backlinks/rename) responsive. This
+CONFIRMS the 2026-06-11 attribution: the "slightly laggy" dev-mode read
+was a dev-mode artifact (unminified React, StrictMode double-render,
+Vite dev server, cold V8), not an envelope/worker-architecture
+regression. The string-marshaled envelope + project-model worker hold
+up on the production substrate. Longer multi-day dogfooding still
+wanted before a real release, but the architecture-regression risk is
+retired.
+
+**Scope check (verified against the repo, not memory).** Stage 0 is
+0.1–0.4 done; **0.5, 0.6, 0.7 are NOT done**:
+- 0.5 — `resolveSafe` is still lexical-only (no `realpath` physical
+  check); no `path-safety.test.ts`; `asset-protocol.ts` has no
+  containment logic. Audit S1 symlink gap still open.
+- 0.6 — no `shell-zig/` tree, no parity-fixture scripts.
+- 0.7 — legacy trees all present (`src-tauri/`, `src/`, `static/`,
+  `svelte.config.js`, `vite.config.js`, `build/_app/`, the five
+  `legacy:*` scripts); no baselines recorded.
+
+**Next.** Stage 0.5 (symlink-safe path containment) before any
+`1.1.0` release, so the release doesn't ship the S1 gap. 0.6/0.7 can
+follow without gating a user-facing release.
