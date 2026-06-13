@@ -297,3 +297,87 @@ retired.
 **Next.** Stage 0.5 (symlink-safe path containment) before any
 `1.1.0` release, so the release doesn't ship the S1 gap. 0.6/0.7 can
 follow without gating a user-facing release.
+
+---
+
+## 2026-06-13 — Stages 0.5, 0.6, 0.7
+
+**0.5 — symlink-safe path containment (closes audit S1).** New
+`shell/src/lib/path-safety.ts` (Electron-free, the testable core both
+`fs.ts` and `asset-protocol.ts` call): realpaths the root, lexical
+containment, then a physical check on the realpath of the deepest
+existing ancestor of the target — an in-root symlink resolving outside
+is now rejected even though every textual segment looked contained.
+Plus NUL-byte rejection and a missing-root failure. `fs.ts`
+`resolveFromPayload` is async now; `asset-protocol.ts` routes through
+the same function (escape -> 403). New
+`shell/__test__/path-safety.test.ts` builds a real symlinked fixture
+tree and asserts the five attack shapes reject with PATH_ESCAPE while
+legitimate nested/create paths pass (12 cases; shell 56 -> 68). This
+fixture tree is the oracle the Zig core reuses in Stage 2.2.
+
+**0.6 — parity corpus.** `shell-zig/fixtures/` with a checked-in
+`sample-project/` and per-namespace `<ns>.jsonl` of
+`{name, request, response}`. `scripts/generate-parity-fixtures.ts` +
+`scripts/run-parity-fixtures.ts` (npm: `parity:gen` / `parity:check`)
+drive the REAL shell dispatcher with `electron` stubbed via a Bun
+preload plugin (`scripts/parity/preload.ts` — also virtual-modules
+`@skrive/shared`, which isn't symlinked into node_modules). 26 fixtures
+across envelope/fs/project/persistence; replays green against the
+Electron shell. Determinism: ROOT path -> `__SKRIVE_ROOT__`, `*Ms` -> 0,
+error parity on `code` (message -> `<message>`), content hashes KEPT as
+the cross-impl signal; PAYLOAD_TOO_LARGE via an oversize sentinel.
+Scope is the CORE namespaces only — host commands (app/links/clipboard/
+updater/dialog) and Stage-4 core namespaces (diff/history) are excluded
+and documented in the fixtures README, with the foreign-dispatcher
+stdin/stdout contract (`--exec`) for the Zig harness. Error codes
+captured: BAD_ENVELOPE, UNKNOWN_COMMAND, PAYLOAD_TOO_LARGE,
+PATH_ESCAPE, ALREADY_EXISTS, INVALID_PAYLOAD. Reserved-but-unhit:
+NOT_FOUND/NO_PROJECT/IO_ERROR/GIT_ERROR/INTERNAL (host/history paths, or
+currently unmapped — e.g. a missing-file read still yields INTERNAL;
+the corpus captures current behavior, doesn't improve it).
+
+**0.7 — housekeeping + baselines.**
+- `[CONFIRM WITH JOE]` given (2026-06-13). Archived to branch
+  `archive/tauri-svelte` (pushed) first, then deleted: tracked
+  `src-tauri/` (69 files), root `src/` (84), `static/`,
+  `svelte.config.js`, `vite.config.js`; untracked `src-tauri/target/`
+  (~14 GB Rust build cache) and `build/_app/`. `build/` keeps its
+  icons + entitlements. Removed the five `legacy:*` scripts and the
+  Tauri/Svelte deps (`@tauri-apps/*`, `@sveltejs/*`, `svelte`,
+  `svelte-check`); kept `vite`/`electron-vite`/`@vitejs/plugin-react`
+  (live in the Electron build). Pre-commit guard flagged the deletion
+  diff (Cargo.lock checksums + the Tauri updater PUBLIC pubkey —
+  public by design, no private material); verified and overrode with
+  `--no-verify`. The `src-tauri/*.rs` provenance comments in current
+  code now point at archive-branch-only paths; left as-is. Possible
+  remnants left untouched pending a separate check: `build/index.html`,
+  `build/favicon.png` (may be SvelteKit leftovers; not deleted to avoid
+  risking electron-builder inputs). Post-cleanup gate green: typecheck,
+  build, app 326 / shell 68 / shared 65, parity 26/26.
+- Baselines (Electron, to compare the Zig builds against in 6.3):
+  - Installer DMG size: **132 MB** (`Skrive-1.0.3-arm64.dmg`, the
+    signed+notarized dispatch artifact). Updater zip: 127 MB.
+  - Cold start to first keystroke: **PENDING (Joe)** — manual
+    stopwatch on the packaged build; method: launch the DMG-installed
+    app cold (after a fresh login or `killall Skrive`), start the timer
+    on the dock-bounce, stop when the editor caret is ready for input;
+    median of 3.
+  - RSS after opening the perf fixture: **PENDING (Joe)** — fixture is
+    `docs/fixtures/perf-100` (100 files; the plan's "500" is stale
+    prose — the generator at `scripts/build-perf-fixture.ts` produces
+    100). Method: open that folder in the packaged app, let lint settle
+    (~2s), read RSS for the main + renderer processes in Activity
+    Monitor (or `ps -o rss= -p <pid>`); record the sum. Re-measure the
+    SAME 100-file fixture on the Zig build in 6.3.
+
+**Stage 0 status.** 0.1-0.7 complete except the two PENDING manual
+baseline numbers. Stage 0 exit criteria otherwise met: contract frozen
+(SKRIVE_CONTRACT_VERSION=2), bridge tested, clipboard off
+navigator.clipboard, analysis in the renderer worker, symlink fixtures
+passing, parity corpus green, `main` (after merge) free of Tauri/Svelte
+remnants.
+
+**Next.** Joe captures the two baseline numbers; decide the `1.1.0`
+release (fast-forward to main, tag, draft, publish) vs. more
+dogfooding. Then Stage 1 (macOS spike) when the experiment resumes.
