@@ -20,12 +20,7 @@
     "typecheck": "tsc -p shared/tsconfig.json && tsc -p app/tsconfig.json && tsc -p shell/tsconfig.json",
     "perf:fixture": "bun scripts/build-perf-fixture.ts",
     "parity:gen": "bun --preload ./scripts/parity/preload.ts ./scripts/generate-parity-fixtures.ts",
-    "parity:check": "bun --preload ./scripts/parity/preload.ts ./scripts/run-parity-fixtures.ts",
-    "legacy:dev": "vite dev",
-    "legacy:dev:web": "VITE_TARGET=web vite dev",
-    "legacy:build": "vite build",
-    "legacy:check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "legacy:tauri": "tauri"
+    "parity:check": "bun --preload ./scripts/parity/preload.ts ./scripts/run-parity-fixtures.ts"
   },
   "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
@@ -35,21 +30,12 @@
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.42.0",
     "@skrive/diff": "workspace:*",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2.7.0",
-    "@tauri-apps/plugin-opener": "^2",
-    "@tauri-apps/plugin-process": "^2",
-    "@tauri-apps/plugin-updater": "^2",
     "character-entities": "^2.0.2",
     "electron-updater": "^6.8.3",
     "marked": "^18.0.0",
     "yaml": "^2.6.1"
   },
   "devDependencies": {
-    "@sveltejs/adapter-static": "^3.0.6",
-    "@sveltejs/kit": "^2.9.0",
-    "@sveltejs/vite-plugin-svelte": "^5.0.0",
-    "@tauri-apps/cli": "^2",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
@@ -57,8 +43,6 @@
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
-    "svelte": "^5.0.0",
-    "svelte-check": "^4.0.0",
     "typescript": "~5.6.2",
     "vite": "^6.0.3"
   }
