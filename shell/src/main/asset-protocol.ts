@@ -13,6 +13,7 @@ import { protocol } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { projectState } from '../state/project-state';
+import { resolveSafe } from '../lib/path-safety';
 
 const SCHEME = 'skrive-asset';
 
@@ -26,16 +27,6 @@ const MIME_BY_EXT: Record<string, string> = {
   '.avif': 'image/avif',
   '.bmp': 'image/bmp'
 };
-
-// Resolve a project-relative path against the active root, refusing escapes.
-// Mirrors the containment check in ipc/fs.ts.
-function resolveWithinRoot(root: string, relPath: string): string | null {
-  const resolvedRoot = path.resolve(root);
-  const target = path.resolve(resolvedRoot, relPath);
-  const rel = path.relative(resolvedRoot, target);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
-  return target;
-}
 
 // Must run before the app 'ready' event.
 export function registerAssetScheme(): void {
@@ -60,8 +51,15 @@ export function registerAssetProtocol(): void {
       return new Response(null, { status: 400 });
     }
 
-    const target = resolveWithinRoot(root, relPath);
-    if (!target) return new Response(null, { status: 403 });
+    // Symlink-safe containment (lib/path-safety): a crafted
+    // `skrive-asset://asset/../../etc/passwd`, or an in-root symlink
+    // pointing outside the project, is refused with 403 before any read.
+    let target: string;
+    try {
+      target = await resolveSafe(root, relPath);
+    } catch {
+      return new Response(null, { status: 403 });
+    }
 
     try {
       const data = await fs.readFile(target);

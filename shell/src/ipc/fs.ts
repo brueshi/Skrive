@@ -11,6 +11,7 @@ import path from 'node:path';
 import { projectState } from '../state/project-state';
 import { maybeWriteAutoCheckpoint } from '../lib/checkpoint';
 import { atomicWriteFile, contentHash, detectExternalChange } from '../lib/atomic-write';
+import { resolveSafe } from '../lib/path-safety';
 import { IpcError, registerCommand } from '../main/dispatch';
 
 const MARKDOWN_EXT = /\.(md|markdown)$/i;
@@ -27,32 +28,20 @@ function requireString(payload: Record<string, unknown>, field: string): string 
   return value;
 }
 
-function resolveSafe(projectRoot: string, relPath: string): string {
-  const root = path.resolve(projectRoot);
-  const target = path.resolve(root, relPath);
-  // Must stay inside the project root. `path.relative(root, target)`
-  // returns "../..." or absolute when escaping.
-  const rel = path.relative(root, target);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) {
-    throw new IpcError('PATH_ESCAPE', `Path escapes project root: ${relPath}`);
-  }
-  return target;
-}
-
 /** Pull the `{ projectRoot, relPath }` pair every fs command carries and
- *  resolve it safely. */
-function resolveFromPayload(payload: Record<string, unknown>): {
+ *  resolve it with symlink-safe containment (see lib/path-safety). */
+async function resolveFromPayload(payload: Record<string, unknown>): Promise<{
   relPath: string;
   target: string;
-} {
+}> {
   const projectRoot = requireString(payload, 'projectRoot');
   const relPath = requireString(payload, 'relPath');
-  return { relPath, target: resolveSafe(projectRoot, relPath) };
+  return { relPath, target: await resolveSafe(projectRoot, relPath) };
 }
 
 export function registerFsHandlers(): void {
   registerCommand('fs:readFile', async (payload) => {
-    const { relPath, target } = resolveFromPayload(payload);
+    const { relPath, target } = await resolveFromPayload(payload);
     const [body, stat] = await Promise.all([
       fs.readFile(target, 'utf8'),
       fs.stat(target)
@@ -66,13 +55,13 @@ export function registerFsHandlers(): void {
   });
 
   registerCommand('fs:detectExternalChange', async (payload) => {
-    const { target } = resolveFromPayload(payload);
+    const { target } = await resolveFromPayload(payload);
     const knownHash = requireString(payload, 'knownHash');
     return { changed: await detectExternalChange(target, knownHash) };
   });
 
   registerCommand('fs:writeFile', async (payload) => {
-    const { relPath, target } = resolveFromPayload(payload);
+    const { relPath, target } = await resolveFromPayload(payload);
     const content = requireString(payload, 'content');
     await fs.mkdir(path.dirname(target), { recursive: true });
     await atomicWriteFile(target, content);
@@ -98,7 +87,7 @@ export function registerFsHandlers(): void {
   });
 
   registerCommand('fs:writeBinaryFile', async (payload) => {
-    const { target } = resolveFromPayload(payload);
+    const { target } = await resolveFromPayload(payload);
     const base64 = requireString(payload, 'base64');
     await fs.mkdir(path.dirname(target), { recursive: true });
     // Binary assets (pasted images) are not markdown, so they bypass the
@@ -108,7 +97,7 @@ export function registerFsHandlers(): void {
   });
 
   registerCommand('fs:newFile', async (payload) => {
-    const { relPath, target } = resolveFromPayload(payload);
+    const { relPath, target } = await resolveFromPayload(payload);
     await fs.mkdir(path.dirname(target), { recursive: true });
     // wx flag = exclusive create. Errors if the file exists.
     let handle;
@@ -128,7 +117,7 @@ export function registerFsHandlers(): void {
   });
 
   registerCommand('fs:mkdir', async (payload) => {
-    const { target } = resolveFromPayload(payload);
+    const { target } = await resolveFromPayload(payload);
     await fs.mkdir(target, { recursive: true });
     return {};
   });
@@ -137,15 +126,15 @@ export function registerFsHandlers(): void {
     const projectRoot = requireString(payload, 'projectRoot');
     const oldRelPath = requireString(payload, 'oldRelPath');
     const newRelPath = requireString(payload, 'newRelPath');
-    const oldTarget = resolveSafe(projectRoot, oldRelPath);
-    const newTarget = resolveSafe(projectRoot, newRelPath);
+    const oldTarget = await resolveSafe(projectRoot, oldRelPath);
+    const newTarget = await resolveSafe(projectRoot, newRelPath);
     await fs.mkdir(path.dirname(newTarget), { recursive: true });
     await fs.rename(oldTarget, newTarget);
     return {};
   });
 
   registerCommand('fs:trash', async (payload) => {
-    const { relPath, target } = resolveFromPayload(payload);
+    const { relPath, target } = await resolveFromPayload(payload);
     await shell.trashItem(target);
     return {};
   });
