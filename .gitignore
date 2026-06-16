@@ -33,3 +33,10 @@ planning/
 # Working scratch dir for reference screenshots, paste-board grabs,
 # and other workflow artifacts that shouldn't enter history.
 /attachments/
+
+# shell-zig (Stage 1 macOS spike) build artifacts. All reproducible from
+# shell-zig/build-macos.sh; never commit them.
+/shell-zig/core/zig-out/
+/shell-zig/core/.zig-cache/
+/shell-zig/macos/.build/
+/shell-zig/web/dist/
