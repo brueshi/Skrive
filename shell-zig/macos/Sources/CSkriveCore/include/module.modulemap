@@ -1,0 +1,6 @@
+// Cribbed from Ghostty's include/ghostty.h + module.modulemap idiom: the
+// Zig core is a C-ABI archive, and Swift imports it as a clean module.
+module CSkriveCore {
+    header "skrive_core.h"
+    export *
+}
