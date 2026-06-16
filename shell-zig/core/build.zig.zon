@@ -1,0 +1,18 @@
+.{
+    .name = .skrive_core,
+    .version = "0.1.0",
+    // Generated once by the Zig toolchain; never changes. See the Zig
+    // package docs on forking before touching this.
+    .fingerprint = 0x13ba53ebe6078b65, // Changing this has security and trust implications.
+    // Pinned per the master plan's Zig-core conventions: the spike runs
+    // on current stable 0.16.x, and a compiler upgrade is its own commit,
+    // never mixed with feature work.
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "include",
+    },
+}
