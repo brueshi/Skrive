@@ -381,3 +381,112 @@ remnants.
 **Next.** Joe captures the two baseline numbers; decide the `1.1.0`
 release (fast-forward to main, tag, draft, publish) vs. more
 dogfooding. Then Stage 1 (macOS spike) when the experiment resumes.
+
+---
+
+## 2026-06-15 — Stage 1.1 skeleton + early 1.2 serving-mode answer
+
+**Branch:** `labs/zig-shell-stage-1-macos-spike` (off `main`).
+
+**Toolchain (verified on this machine).** Zig 0.16.0 (the pinned stable),
+Swift 6.3.2 with full Xcode (clang 21), arm64, macOS 26.5.1. No toolchain
+fetching needed; the friction was integration, not availability.
+
+**What was built (the skeleton Stage 2 hardens, not rewrites).**
+- `shell-zig/core/` — Zig static library exposing the Part I C ABI
+  (`skrive_core_create`/`handle`/`destroy`) in its real async-callback
+  shape. Only `app:version` is implemented (returns
+  `"0.1.0-zig-spike"`, distinct from the Electron version so the
+  round-trip is legible by eye). Two-stage envelope parse via
+  `std.json`, arena-per-`handle`, C allocator for the long-lived core.
+  Three unit tests (app:version round-trip, UNKNOWN_COMMAND, malformed
+  -> BAD_ENVELOPE) pass under `std.testing.allocator`.
+- `shell-zig/macos/` — SwiftPM executable (Joe's call: SPM over Xcode,
+  for git/CLI/headless friendliness). Programmatic AppKit, no
+  `.xcodeproj`. `CSkriveCore` is a header-only C target wrapping the
+  ABI via an explicit `module.modulemap` (Ghostty idiom); the executable
+  links `libskrive_core.a` by absolute path computed from `#filePath`.
+  NSWindow chrome mirrors `shell/src/main/index.ts`
+  (`titlebarAppearsTransparent` + `fullSizeContentView`, theme-aware
+  pre-paint `#1a1a1a`/`#fefcf7`, traffic-light reposition toward
+  `{x:12,y:13}`).
+- `shell-zig/web/native-bridge.ts` (+ `sample-data.ts`) — the
+  renderer-side transport, bundled by bun to a 11 KB IIFE injected as a
+  `WKUserScript` at document start. It composes the native channel
+  (`app:version` only, via `NATIVE_COMMANDS`) with the Stage 0.2
+  `MockTransport` preloaded with the `shell-zig/fixtures/sample-project`
+  corpus as a read-only project. `fs:readFile` is special-cased
+  payload-aware so the writer can click between the sample's docs. NO
+  edits to `app/` or `shared/` — the bridge only imports from them.
+- `shell-zig/build-macos.sh` — the documented build order (renderer ->
+  bridge bundle -> zig core -> ld64 re-archive -> swift host -> assemble
+  `Skrive.app`). `shell-zig/README.md` written.
+- Diagnostics (env-gated `SKRIVE_DIAG=1`): a console relay to stdout +
+  a post-load self-test that round-trips `app:version`/`app:platform`
+  and probes the DOM. This is the repeatable, headless evidence below
+  (and the seed of 1.4's repeatable checks).
+
+**Toolchain friction, logged as decision data (none disproportionate).**
+- *ld64 archive alignment.* Zig's LLVM archiver writes
+  `libskrive_core_zcu.o` not 8-byte aligned; Apple's `ld64` refuses it
+  ("not 8-byte aligned in '...a'"). Fix: re-archive the single member
+  with Apple's `libtool -static` (step 4 of the build script). Stable,
+  one line; Stage 2 keeps it until/unless Zig fixes upstream.
+- *Swift 6 strict concurrency.* The C `emit` callback is nonisolated;
+  it touches WebKit on the main thread. Resolved by marking `CoreBridge`
+  `@MainActor` and asserting `MainActor.assumeIsolated` inside the C
+  callback (valid in Stage 1 — the core emits synchronously on the
+  calling main thread; Stage 2's thread-pool emit is where the host will
+  marshal). The core pointer is `nonisolated(unsafe)` so the nonisolated
+  deinit can free it.
+- *Deployment target.* Zig defaults its min-OS to the host (26.x); the
+  package targets macOS 14. Pinned the Zig build to
+  `-Dtarget=aarch64-macos.14.0` in the script to silence the ld
+  mismatch warning.
+
+**1.2 serving-mode finding (the bake-off's first, decisive matrix row),
+runtime-switchable via `SKRIVE_SERVE`.**
+- `file` (`loadFileURL`): the injected bridge IIFE runs (`hasSkrive:
+  true`) but the renderer's `<script type="module">` bundle **silently
+  does not execute** — `#root` stays empty, blank window. Stripping the
+  `crossorigin` attribute does not help, so it is the file:// origin not
+  loading ES modules, not a CORS-attribute issue. This is the survey §2
+  prediction confirmed empirically.
+- `scheme` (`skrive-app://app/`, a `WKURLSchemeHandler` serving the
+  bundle with correct MIME types — JS as `text/javascript` is
+  load-bearing for module acceptance): the full UI renders, the
+  read-only sample project opens, and a document renders. Because
+  `openProject` derives the manifest from the snapshot through the
+  project-model **worker**, `sampleHeadingRendered: true` is also
+  positive evidence that **module workers load under the custom
+  scheme**. Default serving mode set to `scheme`.
+
+**1.1 done-criteria: MET (objective self-test, scheme mode).**
+`SELFTEST {"hasSkrive":true,"version":"0.1.0-zig-spike",`
+`"platform":"darwin","rootChildren":1,"sampleHeadingRendered":true}`,
+no console errors/warnings relayed. That is: UI renders, sample document
+opens read-only, `app:version` round-trips renderer -> Swift -> Zig ->
+renderer.
+
+**Still open in Stage 1 (not done this session).**
+- 1.2 remaining checklist rows: `localStorage` survives relaunch under
+  the scheme, `light-dark()` behavior on macOS 26, a dedicated
+  `skrive-asset://` image path, explicit no-mixed-content check, and the
+  loopback-HTTP shape (only needed as fallback — not expected, since the
+  scheme already renders + runs workers). Log the full matrix before
+  declaring 1.2 closed.
+- 1.3 typography gate — `[CONFIRM WITH JOE]`, his eyeball judgment,
+  side-by-side vs Electron. **Now unblocked** (UI renders); pending a
+  manual pass.
+- 1.4 injection + worker hardening as committed repeatable tests (the
+  delivery-rule escaper `JSEscape` and the worker shim under the scheme).
+  The escaper is written and exercised by the round-trip; the adversarial
+  `</script>`/backtick/`${}`/U+2028 byte-identity test is not yet a
+  committed test.
+- Traffic-light inset parity is approximate (AppKit relayouts on
+  resize); verify by eye in the manual pass.
+
+**Pending (Joe).** Manual visual pass: `open
+shell-zig/macos/.build/Skrive.app` (or run the binary for console logs;
+`SKRIVE_DIAG=1` for the self-test; `SKRIVE_SERVE=file` to see the blank
+file:// case). Judge UI fidelity + chrome, and the 1.3 typography gate.
