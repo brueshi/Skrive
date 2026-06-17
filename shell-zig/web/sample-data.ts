@@ -13,6 +13,10 @@ import type {
   FileContent,
   ProjectSnapshot
 } from '../../shared/src/ipc-contracts';
+// The typography specimen is authored once on disk (Electron opens that
+// folder directly) and inlined here at bundle time, so the spike and the
+// Electron build render byte-identical input for the 1.3 gate.
+import typographyMd from '../fixtures/typography-sample/typography.md' with { type: 'text' };
 
 /** Fake absolute root. Never touched on disk — `fs:*` is fully canned. */
 export const SAMPLE_ROOT = '/Skrive/Parity Sample';
@@ -23,6 +27,7 @@ export const SAMPLE_ROOT = '/Skrive/Parity Sample';
 export const NATIVE_COMMANDS = new Set<string>(['app:version', 'diag:poison']);
 
 const BODIES: Record<string, string> = {
+  'typography.md': typographyMd,
   'README.md':
     '# Parity Sample\n\nA tiny project the parity corpus runs against. See [intro](notes/intro.md).\n',
   'notes/intro.md':
@@ -34,6 +39,8 @@ const BODIES: Record<string, string> = {
 // (external-change detection only runs before a save), so any well-formed
 // 64-char hex is inert here. Stage 2's real core computes true SHA-256.
 const HASHES: Record<string, string> = {
+  'typography.md':
+    '4444444444444444444444444444444444444444444444444444444444444444',
   'README.md':
     '1111111111111111111111111111111111111111111111111111111111111111',
   'notes/intro.md':
@@ -64,10 +71,11 @@ export function sampleProjectState(): ProjectUiState {
     projectName: 'Parity Sample',
     lastOpenedMs: MODIFIED_MS,
     sidebar: { visible: true, width: 260 },
-    // One open tab so a document is on screen at first paint.
+    // Open the typography specimen on launch — it is the 1.3 comparison
+    // doc. README stays in the tree for context.
     tabs: [
       {
-        path: 'README.md',
+        path: 'typography.md',
         layoutMode: 'preview',
         cursor: { line: 1, column: 0 },
         scrollTop: 0,
