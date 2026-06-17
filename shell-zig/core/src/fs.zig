@@ -41,7 +41,17 @@ pub const commands = [_]Command{
     .{ .name = "fs:newFile", .handler = handleNewFile },
     .{ .name = "fs:mkdir", .handler = handleMkdir },
     .{ .name = "fs:rename", .handler = handleRename },
+    // fs:trash is NOT here: it delegates to the host via the reserved
+    // `host:` channel and so is special-cased in dispatch.zig (it emits a
+    // host-command envelope instead of a result the dispatcher wraps).
 };
+
+/// Validate `{ projectRoot, relPath }` and return the resolved absolute
+/// target for `fs:trash`. The dispatcher frames the host-command envelope
+/// around it; the path never goes through the normal result-wrapping path.
+pub fn resolveTrashTarget(a: std.mem.Allocator, io: Io, payload: std.json.Value) FsError![]const u8 {
+    return (try resolveFromPayload(a, io, payload)).target;
+}
 
 // ---- payload helpers ------------------------------------------------------
 
@@ -147,7 +157,7 @@ fn sha256Hex(a: std.mem.Allocator, bytes: []const u8) FsError![]const u8 {
 }
 
 /// A JSON string literal (quoted + escaped) for an arbitrary byte slice.
-fn jsonString(a: std.mem.Allocator, s: []const u8) FsError![]const u8 {
+pub fn jsonString(a: std.mem.Allocator, s: []const u8) FsError![]const u8 {
     var aw = std.Io.Writer.Allocating.init(a);
     std.json.Stringify.encodeJsonString(s, .{}, &aw.writer) catch return error.OutOfMemory;
     return aw.written();
