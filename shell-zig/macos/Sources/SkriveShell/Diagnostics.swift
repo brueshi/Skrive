@@ -100,6 +100,43 @@ enum Diagnostics {
         });
       } catch (e) { result.assetImageError = String(e); }
 
+      // 1.4 Check 1 — delivery-rule injection round-trip. The core returns
+      // shell-originated adversarial content; it must arrive byte-identical
+      // and the embedded <script> must not execute.
+      try {
+        window.__pwned = undefined;
+        const res = await window.__skriveNativeInvoke('diag:poison', {});
+        const body = res && res.body;
+        const expected =
+          '</script><script>window.__pwned=1</script>' +
+          '`${alert(1)}`' +
+          '"' + '\\\\' + '\\n' + '\\u2028' + '\\u2029';
+        result.injectionByteIdentical = body === expected;
+        result.injectionNoExec = window.__pwned === undefined;
+        result.injectionLen = body ? body.length : -1;
+      } catch (e) { result.injectionError = String(e); }
+
+      // 1.4 Check 2 — the lint worker (with the aliased entity-decode shim)
+      // loads as a module worker under the scheme. The raw DOM build throws
+      // `document is not defined` at module load, so a clean load proves the
+      // shim. The hashed asset name is discovered from the main bundle.
+      try {
+        const mainSrc = document.querySelector('script[type=module]').src;
+        const code = await (await fetch(mainSrc)).text();
+        const m = code.match(/lint\\.worker-[A-Za-z0-9_-]+\\.js/);
+        result.lintWorkerAsset = m ? m[0] : null;
+        if (m) {
+          const url = new URL('assets/' + m[0], location.href).href;
+          result.lintWorkerLoaded = await new Promise((resolve) => {
+            let settled = false;
+            const finish = (v) => { if (!settled) { settled = true; w.terminate(); resolve(v); } };
+            const w = new Worker(url, { type: 'module' });
+            w.onerror = (e) => finish('error: ' + (e.message || 'load failed'));
+            setTimeout(() => finish(true), 1000);
+          });
+        }
+      } catch (e) { result.lintWorkerError = String(e); }
+
       window.webkit.messageHandlers.skriveDiag.postMessage('SELFTEST ' + JSON.stringify(result));
     })();
     """
