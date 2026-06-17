@@ -74,6 +74,12 @@ pub const ErrorCode = enum {
 /// here, not a renderer concern.
 pub fn codeFor(err: anyerror) ErrorCode {
     return switch (err) {
+        // fs subsystem (2.2). Zig error tags are global, so these match
+        // `FsError` in fs.zig without importing it (no circular import).
+        error.PathEscape => .path_escape,
+        error.InvalidPayload => .invalid_payload,
+        error.AlreadyExists => .already_exists,
+        error.IoFailure => .io_error,
         error.OutOfMemory => .internal,
         else => .internal,
     };
@@ -87,7 +93,11 @@ test "wire strings match the closed contract set" {
     try std.testing.expectEqualStrings("INTERNAL", ErrorCode.internal.wire());
 }
 
-test "codeFor defaults unmapped errors to INTERNAL" {
+test "codeFor maps subsystem errors and defaults the rest to INTERNAL" {
+    try std.testing.expectEqual(ErrorCode.path_escape, codeFor(error.PathEscape));
+    try std.testing.expectEqual(ErrorCode.invalid_payload, codeFor(error.InvalidPayload));
+    try std.testing.expectEqual(ErrorCode.already_exists, codeFor(error.AlreadyExists));
+    try std.testing.expectEqual(ErrorCode.io_error, codeFor(error.IoFailure));
     try std.testing.expectEqual(ErrorCode.internal, codeFor(error.OutOfMemory));
     try std.testing.expectEqual(ErrorCode.internal, codeFor(error.SomethingElse));
 }

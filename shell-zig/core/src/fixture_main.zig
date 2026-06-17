@@ -34,7 +34,10 @@ pub fn main(init: std.process.Init) !void {
     stdout_file = std.Io.File.stdout();
     stdout_io = init.io;
 
-    const core = try core_mod.Core.create(emit, null);
+    // The harness uses the real process Io for filesystem work (the parity
+    // corpus mutates a temp project on disk); the C-ABI path uses the
+    // global single-threaded Io instead.
+    const core = try core_mod.Core.create(init.io, emit, null);
     defer core.destroy();
 
     // The PAYLOAD_TOO_LARGE fixture sends a request just over the 32 MiB
