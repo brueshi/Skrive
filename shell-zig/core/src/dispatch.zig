@@ -93,6 +93,12 @@ pub fn dispatchJson(a: std.mem.Allocator, io: std.Io, request: []const u8) [:0]c
     const parsed = std.json.parseFromSlice(std.json.Value, a, request, .{}) catch {
         return errorEnvelope(a, 0, .bad_envelope);
     };
+    // Inbound `host:` channel reply (a host command finished). Intercepted
+    // before normal envelope validation because it carries `host` instead
+    // of `cmd` — a renderer never sends `host`.
+    if (parsed.value == .object and parsed.value.object.get("host") != null) {
+        return handleHostReply(a, parsed.value.object);
+    }
     return dispatchValue(a, io, parsed.value);
 }
 
@@ -150,11 +156,61 @@ fn dispatchValue(a: std.mem.Allocator, io: std.Io, root: std.json.Value) [:0]con
         };
     };
 
+    // Host-delegated commands don't go through the result-wrapping path:
+    // the core validates, emits a host-command envelope, and the renderer
+    // response arrives later via the `host:` reply channel (handleHostReply).
+    if (std.mem.eql(u8, cmd, "fs:trash")) {
+        const target = fs.resolveTrashTarget(a, io, payload) catch |err| {
+            return errorEnvelope(a, raw_id, errors.codeFor(err));
+        };
+        return hostTrashEnvelope(a, raw_id, target);
+    }
+
     const handler = lookup(cmd) orelse return errorEnvelope(a, raw_id, .unknown_command);
     const result = handler(a, io, payload, raw_id) catch |err| {
         return errorEnvelope(a, raw_id, errors.codeFor(err));
     };
     return okEnvelope(a, raw_id, result);
+}
+
+// ---- host: channel (host-delegated commands) ------------------------------
+// A handful of commands need the OS (trash, open-external, native dialogs).
+// The core does the path safety / validation, then emits a host-command
+// envelope `{ "v":1, "host":"<verb>", "id":N, ... }`. The host performs the
+// action and calls back with `{ "v":1, "host":"result", "id":N, "ok":bool }`,
+// which the core turns into the deferred renderer response. Stateless: the
+// id and outcome ride in the reply, so no pending-request table.
+
+fn hostTrashEnvelope(a: std.mem.Allocator, id: i64, target: []const u8) [:0]const u8 {
+    const path_json = fs.jsonString(a, target) catch return oom_envelope;
+    return std.fmt.allocPrintSentinel(
+        a,
+        "{{\"v\":{d},\"host\":\"trash\",\"id\":{d},\"path\":{s}}}",
+        .{ ENVELOPE_VERSION, id, path_json },
+        0,
+    ) catch oom_envelope;
+}
+
+fn handleHostReply(a: std.mem.Allocator, obj: std.json.ObjectMap) [:0]const u8 {
+    // The only inbound host verb is `result`.
+    const verb = switch (obj.get("host").?) {
+        .string => |s| s,
+        else => return errorEnvelope(a, 0, .bad_envelope),
+    };
+    if (!std.mem.eql(u8, verb, "result")) return errorEnvelope(a, 0, .bad_envelope);
+
+    const id: i64 = switch (obj.get("id") orelse return errorEnvelope(a, 0, .bad_envelope)) {
+        .integer => |n| n,
+        else => return errorEnvelope(a, 0, .bad_envelope),
+    };
+    const ok = switch (obj.get("ok") orelse return errorEnvelope(a, id, .internal)) {
+        .bool => |b| b,
+        else => return errorEnvelope(a, id, .internal),
+    };
+    // Success turns into the deferred command's empty result; a host-side
+    // failure (e.g. trashItem threw) surfaces as IO_ERROR.
+    if (ok) return okEnvelope(a, id, "{}");
+    return errorEnvelope(a, id, .io_error);
 }
 
 // ---- envelope framing (the only place response JSON is built) -------------
@@ -334,6 +390,20 @@ test "app:version success round-trip" {
     try testing.expectEqualStrings(
         "{\"v\":1,\"id\":42,\"ok\":true,\"result\":{\"version\":\"" ++ CORE_VERSION ++ "\"}}",
         got,
+    );
+}
+
+test "host:result ok turns into the deferred empty-result response" {
+    try expectResponse(
+        "{\"v\":1,\"host\":\"result\",\"id\":14,\"ok\":true}",
+        "{\"v\":1,\"id\":14,\"ok\":true,\"result\":{}}",
+    );
+}
+
+test "host:result failure surfaces as IO_ERROR with the echoed id" {
+    try expectResponse(
+        "{\"v\":1,\"host\":\"result\",\"id\":14,\"ok\":false}",
+        "{\"v\":1,\"id\":14,\"ok\":false,\"error\":{\"code\":\"IO_ERROR\",\"message\":\"filesystem operation failed\"}}",
     );
 }
 
