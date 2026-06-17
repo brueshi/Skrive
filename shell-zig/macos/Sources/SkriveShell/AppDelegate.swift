@@ -1,5 +1,6 @@
 import AppKit
 import WebKit
+import SkriveShellKit
 
 // Stage 1 host: one transparent-titlebar NSWindow holding a WKWebView that
 // loads the existing renderer bundle, with the Zig core wired in behind the

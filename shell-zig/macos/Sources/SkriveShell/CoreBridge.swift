@@ -1,6 +1,7 @@
 import Foundation
 import WebKit
 import CSkriveCore
+import SkriveShellKit
 
 // Owns the Zig core and shuttles envelopes across the C ABI. Host -> core
 // is `handle`; core -> renderer is the `emit` callback, marshaled to the

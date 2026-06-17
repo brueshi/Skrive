@@ -17,14 +17,22 @@ let package = Package(
         // Header-only wrapper around the Zig core's C ABI. The actual
         // symbols are linked from libskrive_core.a by the executable.
         .target(name: "CSkriveCore"),
+        // Pure host logic that warrants unit tests, kept out of the
+        // executable target so `swift test` can import it. Currently the
+        // delivery-rule escaper (JSEscape).
+        .target(name: "SkriveShellKit"),
         .executableTarget(
             name: "SkriveShell",
-            dependencies: ["CSkriveCore"],
+            dependencies: ["CSkriveCore", "SkriveShellKit"],
             linkerSettings: [
                 .unsafeFlags(["-L\(coreLibDir)", "-lskrive_core"]),
                 .linkedFramework("AppKit"),
                 .linkedFramework("WebKit")
             ]
+        ),
+        .testTarget(
+            name: "SkriveShellKitTests",
+            dependencies: ["SkriveShellKit"]
         )
     ]
 )
