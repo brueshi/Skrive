@@ -39,6 +39,13 @@
      to --skrive-link by design; named separately so accent usages read
      as intent rather than borrowing the link color. */
   --skrive-accent: light-dark(#4c5ba6, #8c97d6);
+
+  /* Danger / destructive. Light keeps the brick red on both. Dark splits:
+     -danger is lightened so it reads as text/border on the dark surfaces;
+     -fill stays a deeper red so white text still contrasts when it's used
+     as a solid background (the destructive button's hover). */
+  --skrive-danger: light-dark(#a84030, #df7e6f);
+  --skrive-danger-fill: light-dark(#a84030, #c0503e);
 }
 
 :root[data-theme='light'] {
@@ -668,7 +675,7 @@ body {
 }
 
 .ctx-item.destructive {
-  color: #a84030;
+  color: var(--skrive-danger);
 }
 
 .ctx-shortcut {
@@ -856,7 +863,7 @@ body {
 .modal-error {
   margin: 0 0 0.75rem;
   font-size: 0.75rem;
-  color: #a84030;
+  color: var(--skrive-danger);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   word-break: break-word;
 }
@@ -922,12 +929,12 @@ body {
 }
 
 .modal-button.primary.destructive {
-  border-color: #a84030;
-  color: #a84030;
+  border-color: var(--skrive-danger);
+  color: var(--skrive-danger);
 }
 
 .modal-button.primary.destructive:not(:disabled):hover {
-  background: #a84030;
+  background: var(--skrive-danger-fill);
   color: #fff;
 }
 
@@ -1273,7 +1280,7 @@ body {
 .create-error {
   margin: 0.25rem 0 0;
   font-size: 11px;
-  color: #a84030;
+  color: var(--skrive-danger);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
@@ -2753,8 +2760,8 @@ body {
 }
 
 .bl-tag--dead {
-  color: #a84030;
-  background: color-mix(in srgb, #a84030 12%, transparent);
+  color: var(--skrive-danger);
+  background: color-mix(in srgb, var(--skrive-danger) 12%, transparent);
 }
 
 /* ----- Reference rows (under an expanded source) ----- */
@@ -3970,7 +3977,7 @@ body {
 }
 
 .settings-updater-error {
-  color: #a84030;
+  color: var(--skrive-danger);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
 }
@@ -4153,7 +4160,7 @@ body {
 }
 
 .search-err {
-  color: #a84030;
+  color: var(--skrive-danger);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
@@ -4450,7 +4457,7 @@ body {
 }
 
 .rename-error {
-  color: #a84030;
+  color: var(--skrive-danger);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
