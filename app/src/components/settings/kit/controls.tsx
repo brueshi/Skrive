@@ -10,11 +10,14 @@
 // cell, native select under a custom chevron, and mono field chips.
 
 import { useId, useRef, useState } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
 
 type Option<T extends string> = { id: T; label: string };
 
 /** Segmented control — a sunken track of mutually exclusive options with
- *  one raised active pill. For 2-3 short choices (surface, line measure). */
+ *  one raised active pill. For 2-3 short choices (surface, line measure).
+ *  The pill is a single shared element (layoutId) that slides between
+ *  segments on switch rather than cross-fading per option. */
 export function Segmented<T extends string>({
   value,
   onChange,
@@ -26,20 +29,39 @@ export function Segmented<T extends string>({
   options: Option<T>[];
   ariaLabel: string;
 }) {
+  // Unique per instance so multiple segmented controls on a pane don't
+  // share one thumb and animate into each other.
+  const thumbId = useId();
+  const reduced = useReducedMotion();
   return (
     <div className="seg" role="radiogroup" aria-label={ariaLabel}>
-      {options.map((opt) => (
-        <button
-          key={opt.id}
-          type="button"
-          role="radio"
-          aria-checked={value === opt.id}
-          className={`seg-option${value === opt.id ? ' active' : ''}`}
-          onClick={() => onChange(opt.id)}
-        >
-          {opt.label}
-        </button>
-      ))}
+      {options.map((opt) => {
+        const active = value === opt.id;
+        return (
+          <button
+            key={opt.id}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            className={`seg-option${active ? ' active' : ''}`}
+            onClick={() => onChange(opt.id)}
+          >
+            {active && (
+              <motion.span
+                layoutId={thumbId}
+                className="seg-thumb"
+                aria-hidden
+                transition={
+                  reduced
+                    ? { duration: 0 }
+                    : { type: 'spring', stiffness: 520, damping: 38 }
+                }
+              />
+            )}
+            <span className="seg-label">{opt.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -157,17 +179,22 @@ export function Stepper({
 }
 
 /** Dropdown over a native <select> for keyboard + a11y, with the chrome
- *  hidden behind our chevron. Used for the multi-option prefs. */
+ *  hidden behind our chevron. Used for the multi-option prefs. `disabled`
+ *  makes the control inert (not focusable, can't change) for prefs that
+ *  don't apply in the current context — pair it with SettingRow's
+ *  `dimmed` for the visual cue. */
 export function Select<T extends string>({
   value,
   onChange,
   options,
-  ariaLabel
+  ariaLabel,
+  disabled = false
 }: {
   value: T;
   onChange: (value: T) => void;
   options: Option<T>[];
   ariaLabel: string;
+  disabled?: boolean;
 }) {
   return (
     <div className="sel">
@@ -175,6 +202,7 @@ export function Select<T extends string>({
         className="sel-native"
         aria-label={ariaLabel}
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value as T)}
       >
         {options.map((opt) => (
@@ -205,15 +233,17 @@ export function Select<T extends string>({
 
 /** The three color-theme tiles, each a miniature page preview over a
  *  radio. Light / Dark render a static preview; System splits the two. */
+type ThemeTileId = 'system' | 'light' | 'dark';
+
 export function ThemeTiles({
   value,
   onChange
 }: {
-  value: 'system' | 'light' | 'dark';
-  onChange: (value: 'system' | 'light' | 'dark') => void;
+  value: ThemeTileId;
+  onChange: (value: ThemeTileId) => void;
 }) {
   const name = useId();
-  const tiles: { id: 'light' | 'dark' | 'system'; label: string }[] = [
+  const tiles: { id: ThemeTileId; label: string }[] = [
     { id: 'light', label: 'Light' },
     { id: 'dark', label: 'Dark' },
     { id: 'system', label: 'System' }

@@ -66,7 +66,7 @@ function createWindow(): void {
     // light-dark() and the user's stored theme pref, but the window
     // background paints first. A theme-aware default keeps the launch
     // flash close to whatever the renderer will end up showing.
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1a1a1a' : '#fefcf7',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#161719' : '#e7e8ea',
     // Dev-only window icon (Windows/Linux taskbar + Alt-Tab). In packaged
     // builds the OS reads the icon from the bundle/exe metadata, and on
     // macOS the dock tile is driven by applyDockIcon() instead, so this is

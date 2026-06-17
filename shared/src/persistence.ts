@@ -69,9 +69,11 @@ export type EditorFontId =
   | 'custom';
 
 /** Color theme. 'system' follows the OS via prefers-color-scheme;
- *  'light' / 'dark' override. Default for new installs is 'light';
- *  legacy users without a stored theme migrate to 'dark' (the only
- *  theme that existed before v0.2.2) so they don't get whiplash. */
+ *  'light' (the clean white duotone) / 'dark' override. Default for new
+ *  installs is 'light'; legacy users without a stored theme migrate to
+ *  'dark' (the only theme that existed before v0.2.2) so they don't get
+ *  whiplash. The former warm 'Overcast' light and the separate 'white'
+ *  theme were consolidated into 'light'. */
 export type ThemeId = 'system' | 'light' | 'dark';
 
 /** Default editing surface. 'rich' is the ProseMirror projection surface —
