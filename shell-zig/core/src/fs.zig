@@ -148,8 +148,10 @@ fn resolveSafe(
 const empty_result = "{}";
 
 /// SHA-256 of `bytes` as lowercase hex — byte-equal to `contentHash` in
-/// `shell/src/lib/atomic-write.ts`.
-fn sha256Hex(a: std.mem.Allocator, bytes: []const u8) FsError![]const u8 {
+/// `shell/src/lib/atomic-write.ts`. Shared with project.zig (snapshot
+/// bodies); narrowed to the allocator error so callers in other error
+/// domains can `try` it.
+pub fn sha256Hex(a: std.mem.Allocator, bytes: []const u8) std.mem.Allocator.Error![]const u8 {
     var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
     const hex = std.fmt.bytesToHex(digest, .lower);
@@ -157,13 +159,14 @@ fn sha256Hex(a: std.mem.Allocator, bytes: []const u8) FsError![]const u8 {
 }
 
 /// A JSON string literal (quoted + escaped) for an arbitrary byte slice.
-pub fn jsonString(a: std.mem.Allocator, s: []const u8) FsError![]const u8 {
+/// Shared with project.zig and the host: channel; only OOM can fail.
+pub fn jsonString(a: std.mem.Allocator, s: []const u8) std.mem.Allocator.Error![]const u8 {
     var aw = std.Io.Writer.Allocating.init(a);
     std.json.Stringify.encodeJsonString(s, .{}, &aw.writer) catch return error.OutOfMemory;
     return aw.written();
 }
 
-fn mtimeMs(stat: Dir.Stat) i64 {
+pub fn mtimeMs(stat: Dir.Stat) i64 {
     return @intCast(@divTrunc(stat.mtime.nanoseconds, std.time.ns_per_ms));
 }
 

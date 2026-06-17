@@ -17,6 +17,7 @@
 const std = @import("std");
 const errors = @import("errors.zig");
 const fs = @import("fs.zig");
+const project = @import("project.zig");
 const ErrorCode = errors.ErrorCode;
 
 pub const ENVELOPE_VERSION = 1;
@@ -54,8 +55,9 @@ pub const Command = struct {
 /// The comptime command table, aggregated from each subsystem's own table.
 /// `app:version`/`diag:poison` are the spike carryovers (not corpus-tested;
 /// they keep the macOS round-trip self-test and the Swift host legible).
-/// `fs.commands` lands in 2.2; `project`/`persistence` follow in 2.3-2.4.
-pub const commands = base_commands ++ fs.commands;
+/// `fs.commands` lands in 2.2, `project.commands` in 2.3; `persistence`
+/// follows in 2.4.
+pub const commands = base_commands ++ fs.commands ++ project.commands;
 
 const base_commands = [_]Command{
     .{ .name = "app:version", .handler = handleAppVersion },

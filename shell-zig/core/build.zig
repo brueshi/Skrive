@@ -38,7 +38,7 @@ pub fn build(b: *std.Build) void {
     // errors.zig the wire-string checks, skrive_core.zig the C-ABI
     // round-trip.
     const test_step = b.step("test", "Run core unit tests");
-    inline for (.{ "src/skrive_core.zig", "src/dispatch.zig", "src/errors.zig", "src/fs.zig" }) |src| {
+    inline for (.{ "src/skrive_core.zig", "src/dispatch.zig", "src/errors.zig", "src/fs.zig", "src/project.zig" }) |src| {
         const t = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(src),
