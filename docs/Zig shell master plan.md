@@ -53,7 +53,7 @@ native/diff/          # Rust diff crate — gains a staticlib C-ABI target, stay
 |---|---|---|
 | Command dispatch, FS sandbox, project snapshot, persistence, checkpoints, git-spawn history, watcher integration, asset embedding | Zig | The experiment's subject. Kept deliberately small (~3k lines target) — shell primitives only |
 | macOS host (window, WKWebView, scheme/file serving, message bridge, NSOpenPanel, trash, NSWorkspace, Sparkle, dock icon) | Swift | Every needed API is first-class AppKit/WebKit. The Ghostty pattern: Zig core behind a C ABI, native shell per platform |
-| Windows host (window, WebView2 COM, serving, bridge, dialogs, WinSparkle, single-instance) | C++ | No maintained Zig WebView2 binding exists; zero-native (the best-funded prior art) made the same call |
+| Windows host (window, WebView2 COM, serving, bridge, dialogs, WinSparkle, single-instance) | C++ (default; C# evaluated at Stage 5.0) | No maintained Zig WebView2 binding exists; zero-native (the best-funded prior art) made the same call. The C++/C# choice is settled by bake-off at Stage 5.0, not by this table |
 | Structural diff | Rust (unchanged) | `native/diff` compiles as `staticlib` with a C ABI and links into the Zig binary. No port, no NAPI |
 | Link graph, search, frontmatter, schema inference, lint, all editor logic | TypeScript (renderer/workers) | Pure text analysis; keeping it JS keeps it malleable and identical across both shells |
 
@@ -368,6 +368,33 @@ Checklist per shape: lint Web Worker loads and runs (module worker via `import.m
 **Purpose.** Same Zig core, new host. Widest error bars in the plan; sequence it so the core needs zero changes — any core change required by Windows is a design bug to log and fix properly.
 
 **Inputs:** Stage 4 core (unchanged). **Outputs:** Windows build at the same parity level.
+
+#### 5.0 — Host language decision: C++ vs C# (do the side-by-side, do not assume)
+
+The Part I table assigns C++ on the strength of one data point (zero-native's choice) and the absence of a maintained Zig WebView2 binding. That justifies C++ as the *default*, not as a settled decision. The host is thin and fully isolated behind the C ABI — it is the cheapest layer in the whole plan to revisit — so the language gets chosen on evidence at Stage 5, not inherited from the table. Run an honest bake-off first.
+
+**What the host does (the surface being compared).** Win32 window, WebView2, asset serving via request interception, the message bridge, native dialogs/trash/clipboard/shell-open, single-instance, updater glue, C-ABI link to the core. Almost no business logic — it all lives in the core. This is a host-shim choice, not a core-architecture choice.
+
+**Why C# is a real contender, not an afterthought:**
+- WebView2's first-class binding is the .NET one (`Microsoft.Web.WebView2.Core`). The C++ path is raw COM — `ICoreWebView2` interfaces, HRESULT plumbing, event tokens, manual lifetime — for exactly the code that carries this stage's widest error bars. The managed wrapper removes most of that risk.
+- Dialogs, `CF_HTML` clipboard, trash, shell-open, named-pipe single-instance all have clean managed equivalents instead of hand-rolled Win32/COM.
+
+**Why C++ is the thesis-aligned default:**
+- The graduation scoreboard (Part VI) is installer size, cold start, memory baseline vs Electron. A managed runtime undercuts the headline metric this experiment exists to win: self-contained .NET adds ~60-80MB to the installer; framework-dependent adds an install-time dependency (the same friction the WebView2 bootstrap already costs). Shedding V8+Node only to re-add a managed runtime is philosophically the same animal, smaller.
+- Symmetry with the Swift host, which compiles to a native binary.
+- Nuance: on *runtime memory* the objection is weak — the WebView2 Edge process tree dominates RSS in both cases; the host's own footprint is in the noise. The sharp objection is *installer size*, not memory.
+
+**The middle path to evaluate, because it may dominate both:** C# + CsWin32 (raw HWND) + `WebView2.Core` attached to that HWND via `CreateCoreWebView2ControllerAsync` + Native AOT. No WinForms/WPF (which is what breaks AOT), so you keep the managed WebView2 ergonomics *and* get a standalone native binary with a small installer. The open risk: the WebView2 managed layer has historically emitted trim/AOT warnings. If it is AOT-clean at Stage 5, this option beats C++ on every axis here and should win. If it is not, C++ stands. **Verify this before writing host code — it is a fact to look up, not a preference.**
+
+**Mechanical consequence of choosing C#:** P/Invoke cannot bind a static library, so the Windows core ships as `skrive_core.dll` (trivial `addSharedLibrary` in `build.zig`) rather than statically linked like the Swift host links `libskrive_core.a`. That asymmetry is fine, arguably cleaner, but note the `SkriveCoreEmit` callback delegate must be kept alive against the GC.
+
+**Decision procedure (`[CONFIRM WITH JOE]`):**
+1. Look up current WebView2-SDK Native-AOT/trim status and the CsWin32 HWND-hosting path; log the finding.
+2. If the throwaway 5.1 spike is the goal, strongly consider writing it in C# regardless — the managed wrapper answers serving-mode / secure-context / WebView2 questions in a fraction of the time, and the spike is allowed to be discarded.
+3. Pick the *shipping* host on the bake-off result, scored against the Part VI axes: installer size first, then host-code risk/maintainability, then cold start. Record the matrix in `docs/zig-shell-log.md`.
+4. Rust (`windows-rs`/`webview2-com`, reusing the toolchain already in `native/diff`) is a logged fallback if both C++ and C# disappoint — native and memory-safe, but a third systems language in the host layer with COM ergonomics short of C#'s managed wrapper. Do not pursue unless the bake-off forces it.
+
+The rest of Stage 5 below is written in C++ terms because that is the current default; if 5.0 selects C#, the same sub-stages and acceptance criteria hold with the managed equivalents substituted.
 
 #### 5.1 — Host skeleton
 
