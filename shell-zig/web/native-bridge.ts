@@ -117,6 +117,13 @@ const transport: SkriveTransport = {
 
 window.skrive = createSkriveBridge(transport);
 
+// Test-only hook: lets the SKRIVE_DIAG self-test drive the native channel
+// directly (e.g. diag:poison for the 1.4 delivery-rule round-trip) without
+// adding a contract method. Spike-only; the real bridge never exposes this.
+(window as unknown as {
+  __skriveNativeInvoke?: typeof nativeInvoke;
+}).__skriveNativeInvoke = nativeInvoke;
+
 // Surface the sample root for manual debugging in the web inspector.
 (window as unknown as { __skriveSampleRoot?: string }).__skriveSampleRoot =
   SAMPLE_ROOT;
