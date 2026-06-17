@@ -773,3 +773,81 @@ commands, Part I path safety (port the 0.5 symlink fixture tree as Zig
 tests), atomic writes, SHA-256 hashing byte-equal to Electron (verify
 against `fs.jsonl`), `detectExternalChange`, and `fs:trash` routed to the
 host via a reserved `host:` channel designed into the C ABI here.
+
+---
+
+## 2026-06-17 — Stage 2.2a: the seven in-core fs commands
+
+**Branch:** `labs/zig-shell-stage-2-dispatcher` (continued). Split 2.2
+into 2.2a (the core-only commands, this entry) and 2.2b (`fs:trash` via
+the host channel — touches Swift, pending Joe's sign-off on the channel
+shape), so the Swift-touching change is isolated behind an explicit gate.
+
+**What was built (`core/src/fs.zig`).** The seven filesystem commands that
+live in the core — `readFile`, `detectExternalChange`, `writeFile`,
+`writeBinaryFile`, `newFile`, `mkdir`, `rename` — each resolving its path
+through `resolveSafe`, the Part I symlink-safe containment ported verbatim
+from `shell/src/lib/path-safety.ts` (NUL reject -> canonical root ->
+lexical containment -> physical realpath check on the deepest existing
+ancestor). Atomic writes via `createFileAtomic(.replace)` + `file.sync`
+(temp + fsync + rename, the `atomic-write.ts` guarantee). Content hash is
+SHA-256 lowercase hex, byte-equal to Electron — verified two ways: a unit
+test against the known README hash, and the live `fs.jsonl` replay
+(readFile/writeFile hashes match).
+
+**Two 0.16 std findings (real, but no spec deviation — the algorithms port
+verbatim, only API names/shapes change; logged as decision data).**
+- *The core must own an `Io`.* In 0.16 every filesystem op takes an
+  `std.Io` parameter, but the C ABI passes none. `Core` now holds one: the
+  C-ABI `create` uses `std.Io.Threaded.global_single_threaded.io()` (the
+  documented library escape hatch — synchronous blocking fs on the calling
+  thread, exactly Stage 2's model), while `fixture_main` threads the real
+  process `init.io`. `Handler` gained an `io` param; the dispatcher passes
+  `Core.io` through. If the core ever moves to a thread pool (Part I), an
+  owned `Threaded` + host emit-marshaling replaces the global — the
+  localized change Stage 1 already flagged.
+- *`realpath` -> `Dir.realPathFileAbsoluteAlloc`* (renamed/relocated under
+  the Io model). The path-safety algorithm is otherwise identical. Other
+  renames hit along the way: `std.Io.Dir`/`File` for all fs ops,
+  `path.relative(gpa, cwd, environ_map, from, to)` (5-arg; cwd/environ
+  unused on posix for absolute inputs), `createDirPath` for mkdir -p,
+  `renameAbsolute`, `bytesToHex`.
+
+**Serialization note (de-risks readFile/snapshot).** The parity runner
+normalizes *both* sides by JSON-parse + re-stringify, so the core's output
+only needs to be valid JSON with the right key order and values — not
+byte-perfect whitespace or escape style. `readFile` bodies/paths are
+escaped via `std.json.Stringify.encodeJsonString`; the rest is
+`allocPrint` with a fixed field order matching the oracle.
+
+**errors.zig.** `codeFor` extended with the fs set — `PathEscape`,
+`InvalidPayload`, `AlreadyExists`, `IoFailure` — mapped to their codes.
+Zig error tags are global, so no `fs.zig` import (no circular dep). fs
+handlers convert std errors to these at the call site so the dispatcher
+never sees a raw filesystem error.
+
+**Gates.** `zig build test` exit 0 (39 tests: the ported symlink fixture
+tree — all five attack shapes + legitimate paths + root canonicalization +
+symlinked-root + non-existent root — plus the hash-equality check, under
+`std.testing.allocator`). `zig fmt --check` clean. The Stage 0.5 fixture
+tree is now the cross-impl oracle it was built to be: same shapes, same
+verdicts, in Zig.
+
+**Parity.** `parity:check --exec`: `fs.jsonl` **11/12 green** — every
+in-core command, both error cases (`PATH_ESCAPE`, `INVALID_PAYLOAD`,
+`ALREADY_EXISTS`), and hash equality. The only `fs` mismatch is `trash`
+(2.2b). Whole-corpus 9/26 mismatched = `[fs] trash` + 4 `project` (2.3) +
+4 `persistence` (2.4); envelope still 6/6, no fs regression.
+
+**Electron build.** Untouched (`shell-zig/` only).
+
+**Blocked / pending.** 2.2b (`fs:trash`) needs Joe's sign-off on the
+`host:` channel shape before touching `CoreBridge.swift`: core validates
+the path then `emit`s `{"v":1,"host":"trash","id":N,"path":"<abs>"}` and
+defers the renderer response; the host (Swift `FileManager.trashItem`; the
+harness a plain delete) calls `skrive_core_handle` back with
+`{"v":1,"host":"result","id":N,"ok":true}`; the core translates that into
+the `fs:trash` response. Stateless (id + outcome ride in the result), async
+(no reentrancy). No C *function* signature change — a reserved envelope
+convention over the existing `emit` + `handle`, reused by every future
+host command.
