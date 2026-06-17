@@ -851,3 +851,76 @@ the `fs:trash` response. Stateless (id + outcome ride in the result), async
 (no reentrancy). No C *function* signature change — a reserved envelope
 convention over the existing `emit` + `handle`, reused by every future
 host command.
+
+---
+
+## 2026-06-17 — Stage 2.2b: fs:trash via the host: channel. Stage 2.2 complete.
+
+**Branch:** `labs/zig-shell-stage-2-dispatcher` (continued).
+
+**Channel shape (Joe's call, verb-field).** The core emits a host-command
+envelope `{"v":1,"host":"trash","id":N,"path":"<abs>"}`; the host performs
+the OS action and replies `{"v":1,"host":"result","id":N,"ok":bool}`; the
+core turns the reply into the deferred `fs:trash` response. The host
+switches on a short `host` verb (not the original `cmd`), so each host
+command defines its own minimal field set (`path` here; `url` for a future
+`openExternal`) and the host is decoupled from command names. Chosen over
+passing the original `cmd`. No C function-signature change — a reserved
+envelope convention over the existing `emit` + `skrive_core_handle`.
+
+**Core (`dispatch.zig`, `fs.zig`).**
+- `fs:trash` is special-cased in the dispatcher (not in `fs.commands`): it
+  resolves + path-validates via `fs.resolveTrashTarget`, then returns the
+  host-command envelope instead of a wrapped result. A path-safety failure
+  still returns the normal coded error response (PATH_ESCAPE etc.).
+- An inbound `host:result` envelope is intercepted at the top of
+  `dispatchJson` (it carries `host`, not `cmd`, so before normal envelope
+  validation; a renderer never sends `host`). `handleHostReply` is
+  stateless: `ok:true` -> the deferred `{...,"ok":true,"result":{}}`,
+  `ok:false` -> IO_ERROR with the echoed id. Two unit tests cover both.
+
+**Test host (`fixture_main.zig`).** The emit sink intercepts `host:`
+envelopes (cheap `{"v":1,"host":` prefix guard, then parse): for `trash` it
+does a plain delete (no OS trash in a test) and replies on the host
+channel, which the core turns into the response written to stdout. The
+reentrant `core.handle` for the reply is safe — each call has its own arena
+and the core holds no per-request state. So the runner still sees exactly
+one response line per `fs:trash` request.
+
+**Real host (`CoreBridge.swift`).** `dispatch` now guards on the same
+prefix: a host envelope routes to `handleHostCommand` (never to the
+renderer), which for `trash` calls `FileManager.trashItem` and replies via
+`handle`. The trash runs on `DispatchQueue.main.async` so the core's
+original `handle` returns before the reply re-enters it — the
+production-correct async model (no reentrancy into the core's arena, unlike
+the harness's simpler synchronous reentry; both are observably identical).
+Future host commands (openExternal, clipboard, dialogs) add their `case`
+here.
+
+**Gates.** `zig build test` exit 0 (now incl. the two host-reply unit
+tests); `zig fmt --check` clean. macOS host re-verified per the kickoff:
+`zig build -Dtarget=aarch64-macos.14.0` -> libtool re-archive -> `swift
+build` links clean -> `swift test` 2/2 (JSEscapeTests). The C ABI is
+unchanged, so the relink was mechanical.
+
+**Parity — Stage 2.2 done-criterion MET.** `parity:check --exec`:
+**`fs.jsonl` 12/12 green**, including the host-channel `trash`, all
+`PATH_ESCAPE` cases, and hash equality. Whole-corpus 8/26 mismatched =
+4 `project` (2.3) + 4 `persistence` (2.4); `envelope` 6/6 and `fs` 12/12,
+no regression.
+
+**Deferred to the 2.5 manual pass.** Trashing a file in the *running* Zig
+app (real `FileManager.trashItem` moving a file to Finder's Trash, then the
+sidebar updating) — the parity harness proves the channel and the Swift
+code compiles/links, but the end-to-end UI path is integration-pass
+territory. Flagged so it isn't assumed done.
+
+**Stage 2.2 status: COMPLETE.** All 8 fs commands at parity; path safety,
+atomic writes, and SHA-256 hash equality verified; the host: channel
+established and reused-ready.
+
+**Next.** Stage 2.3 — `project` namespace (minus watch): `project:snapshot`
+(recursive walk, exact noise-dir skip list from `shell/src/ipc/project.ts`,
+one batched response) and `project:create` (optional `git init` via
+`std.process`). Done when `project.jsonl` replays green and the perf
+fixture opens through the real UI.
