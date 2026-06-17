@@ -17,10 +17,16 @@
   /* Surface palette. Light values first, dark second. New installs default
      to light; legacy users without a stored theme migrate to dark in
      shell/persistence.ts so they don't get whiplash on upgrade. */
-  --skrive-bg: light-dark(#fcfcfb, #201f1d);
-  --skrive-fg: light-dark(#1b1a17, #e8e6e1);
-  --skrive-muted: light-dark(#8c8983, #8f8b83);
-  --skrive-rule: light-dark(#e4e1db, #322f2b);
+  --skrive-bg: light-dark(#ffffff, #1f2124);
+  --skrive-fg: light-dark(#1a1a1d, #e9eaed);
+  /* muted + rule are tuned to read against the grey rail (--skrive-shell-bg),
+     not only the editor surface: muted carries the folder-root header +
+     folder glyphs, rule carries the indent guides + hover. In light, rule
+     sits below the rail's grey so the guides read as lines rather than
+     inverting into it; in dark the rail is near-black so they already read
+     as lighter lines. Both stay soft hairlines on the editor surface. */
+  --skrive-muted: light-dark(#73737a, #8d8f95);
+  --skrive-rule: light-dark(#d8d9dd, #2f3135);
   --skrive-link: light-dark(#4c5ba6, #8c97d6);
   --skrive-selection: light-dark(
     rgba(76, 91, 166, 0.13),
@@ -45,16 +51,16 @@
 
 :root {
 
-  /* Inset-design shell relationship — committed Overcast (2026-06-02).
-     The editor + sidebar cards are the warm near-white paper floating on
-     a cooler dove-grey desk; a hairline separates them in light, a quiet
-     shadow in dark. Formerly three runtime data-shell-tone forks; matured
-     to one committed shell. The header and sidebar spine read these var
-     names, so the names stay even though the fork is gone. */
-  --skrive-shell-bg: light-dark(#ece9e4, #141310);
-  --skrive-card-bg: light-dark(#fcfcfb, #201f1d);
-  --skrive-card-shadow: light-dark(0 1px 2px rgba(0, 0, 0, 0.04), none);
-  --skrive-card-border: light-dark(#e4e1db, transparent);
+  /* Inset-design shell relationship. The editor + settings cards are a
+     clean white (light) / cool dark (dark) surface floating as rounded
+     cards on a grey shell; the sidebar is a flush rail in the shell tone.
+     A border + soft shadow define the card edge in both schemes — in dark
+     the border is *lighter* than the card so it catches against the
+     near-black shell. The header and sidebar read these var names. */
+  --skrive-shell-bg: light-dark(#e7e8ea, #161719);
+  --skrive-card-bg: light-dark(#ffffff, #1f2124);
+  --skrive-card-shadow: light-dark(0 1px 2px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.35));
+  --skrive-card-border: light-dark(#e2e3e6, #2c2e33);
   /* Outer shell pad = window edge → outermost card; gap = between
      adjacent cards (sidebar↔editor). Gap is wider than pad so the
      space between cards reads as deliberate breathing room rather
@@ -192,14 +198,21 @@ body {
   }
 }
 
-/* The app-body is "the shell" — full 4-side inset wrapping the two
-   floating cards. Gap separates the sidebar card from the workspace
-   card. */
+/* The app-body is "the shell". The sidebar is now part of the shell
+   (a flush rail), so the editor + right panels are the only floating
+   cards. The flex `gap` is 0 — each seam is spaced explicitly with a
+   margin instead, because the resize handle is itself a flex item: a
+   uniform gap would double up around it (gap + handle + gap) and bloat
+   the sidebar↔editor trough. */
 .app-body {
   background: var(--skrive-shell-bg);
-  gap: var(--skrive-shell-gap);
+  gap: 0;
   padding: var(--skrive-shell-pad);
 }
+
+/* Settings reuses the editor view's frame: a flush grey nav rail beside a
+   floating rounded content card. The nav-card + content-card rules below
+   mirror .app-root .sidebar and .app-root .workspace. */
 
 /* The editor card. Always rounded; bg + shadow come from the tone
    tokens. `contain: paint` isolates inner scroll repaints (CodeMirror
@@ -210,21 +223,29 @@ body {
   border-radius: var(--skrive-card-radius);
   box-shadow: var(--skrive-card-shadow);
   border: 1px solid var(--skrive-card-border);
+  /* The editor's breathing room to the sidebar rail. With app-body
+     gap at 0 this margin is the whole seam (handle sits flush to the
+     sidebar's edge, then this gap, then the card). Top/right/bottom
+     inset come from the app-body padding. */
+  margin-left: var(--skrive-shell-gap);
   overflow: hidden;
   min-width: 0;
   flex-direction: column;
   contain: paint;
 }
 
-/* The sidebar is always its own card alongside the workspace card. */
+/* The sidebar is no longer a card — it's a flush rail that reads as part
+   of the shell. It takes the shell bg and negative margins cancel the
+   app-body pad on its top/left/bottom so it runs to the window edges
+   (merging seamlessly with the shell-colored header above it). Its right
+   edge stays put; the editor's margin-left provides the seam. */
 .app-root .sidebar {
-  background: var(--skrive-card-bg);
-  border-radius: var(--skrive-card-radius);
-  box-shadow: var(--skrive-card-shadow);
-  border: 1px solid var(--skrive-card-border);
-  /* Keep the base `.sidebar { overflow: hidden auto }` — horizontal
-     clips at the rounded corner; vertical scrolls when the file tree
-     overflows. */
+  background: var(--skrive-shell-bg);
+  margin-top: calc(-1 * var(--skrive-shell-pad));
+  margin-bottom: calc(-1 * var(--skrive-shell-pad));
+  margin-left: calc(-1 * var(--skrive-shell-pad));
+  /* Keep the base `.sidebar { overflow: hidden auto }` — vertical
+     scrolls when the file tree overflows. */
 }
 
 /* The header's tabs slot — fills the middle of the topbar between the
@@ -1180,7 +1201,10 @@ body {
   padding: 0.75rem 1rem 0.5rem;
   position: sticky;
   top: 0;
-  background: var(--skrive-bg);
+  /* Match the rail (shell bg), not the editor card — the sidebar is part
+     of the shell now, and a sticky header painted in the editor bg would
+     leave a pale block over the grey when the tree scrolls. */
+  background: var(--skrive-shell-bg);
   z-index: var(--skrive-z-sticky);
 }
 
@@ -3242,34 +3266,24 @@ body {
   background: var(--skrive-rule);
 }
 
-.settings-done {
-  height: 28px;
-  padding: 0 1rem;
-  border: none;
-  border-radius: var(--skrive-radius-sm);
-  background: var(--skrive-fg);
-  color: var(--skrive-bg);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.settings-done:hover {
-  opacity: 0.85;
-}
-
-/* ---- Nav card (sidebar slot) ---- */
+/* ---- Nav rail (sidebar slot) ---- */
+/* A flush grey rail matching the main sidebar: shell bg, and negative
+   margins cancel the app-body pad on top/left/bottom so it runs to the
+   window edges beside the floating content card. */
 .settings-nav-card {
   width: 248px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: var(--skrive-card-bg);
-  border: 1px solid var(--skrive-card-border);
-  border-radius: var(--skrive-card-radius);
-  box-shadow: var(--skrive-card-shadow);
+  background: var(--skrive-shell-bg);
+  margin-top: calc(-1 * var(--skrive-shell-pad));
+  margin-bottom: calc(-1 * var(--skrive-shell-pad));
+  margin-left: calc(-1 * var(--skrive-shell-pad));
+  /* The group caps are lightened toward --skrive-bg (the white editor)
+     by the shared rule above; on the grey rail that washes them out, so
+     pin them to plain muted, which is already tuned to read on the rail.
+     The content page keeps the lightened cap. */
+  --settings-cap: var(--skrive-muted);
   padding: 14px 10px;
   overflow: hidden;
   contain: layout paint;
@@ -3364,14 +3378,19 @@ body {
 }
 
 /* ---- Content card (workspace slot) ---- */
+/* The settings surface, matching the editor card: same bg, radius,
+   shadow, border, and the shell-gap to the rail on its left. contain
+   isolates the inner scroll repaints from the rounded-corner mask. */
 .settings-content-card {
   flex: 1;
   min-width: 0;
   background: var(--skrive-card-bg);
-  border: 1px solid var(--skrive-card-border);
   border-radius: var(--skrive-card-radius);
   box-shadow: var(--skrive-card-shadow);
+  border: 1px solid var(--skrive-card-border);
+  margin-left: var(--skrive-shell-gap);
   overflow: hidden;
+  contain: paint;
 }
 
 .settings-scroll {
@@ -3509,6 +3528,7 @@ body {
 }
 
 .seg-option {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3522,19 +3542,40 @@ body {
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition:
-    color var(--skrive-duration-quick) var(--skrive-easing),
-    background-color var(--skrive-duration-quick) var(--skrive-easing);
+  transition: color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
-.seg-option.active {
+/* The raised pill, now a single shared element that slides between
+   options (see Segmented). Fills its active option; the label rides
+   above it. */
+.seg-thumb {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
   background: var(--skrive-bg);
-  color: var(--skrive-fg);
-  font-weight: 600;
+  border-radius: var(--skrive-radius-sm);
   box-shadow: 0 1px 2px color-mix(in srgb, var(--skrive-fg) 9%, transparent);
 }
 
-/* ---- Toggle ---- */
+.seg-label {
+  position: relative;
+  z-index: 1;
+}
+
+.seg-option.active {
+  color: var(--skrive-fg);
+  font-weight: 600;
+}
+
+/* ---- Toggle ----
+ *
+ * Geometry is fixed: a 40x23 track with 2px padding (36x19 inner) holds a
+ * 19px knob with 17px of travel. The press-stretch values below are tied
+ * to these constants, so adjust them together.
+ *
+ * Feel: an ease-out glide (not the symmetric curve) so the knob leads with
+ * motion, a fast press-stretch where the knob elongates toward its leading
+ * edge for tactile give, and hover/sunken-track cues for depth. */
 .tgl {
   display: inline-flex;
   align-items: center;
@@ -3545,28 +3586,68 @@ body {
   border: none;
   border-radius: 999px;
   background: var(--settings-off);
+  /* Sunken track: a faint inset rim + top shadow. fg-based so it reads as
+     a quiet edge in every theme rather than a hard line. */
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--skrive-fg) 6%, transparent),
+    inset 0 1px 1.5px color-mix(in srgb, var(--skrive-fg) 7%, transparent);
   cursor: pointer;
-  transition: background-color var(--skrive-duration-quick) var(--skrive-easing);
+  transition:
+    background-color var(--skrive-duration-quick) var(--skrive-easing),
+    box-shadow var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.tgl:hover:not(.on) {
+  background: color-mix(in srgb, var(--skrive-fg) 8%, var(--settings-off));
 }
 
 .tgl.on {
   background: var(--skrive-accent);
+  /* On the filled track the rim flips to a soft top highlight so the
+     accent reads as raised, not sunken. */
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #000 7%, transparent),
+    inset 0 1px 1px color-mix(in srgb, #fff 20%, transparent);
+}
+
+.tgl.on:hover {
+  background: color-mix(in srgb, var(--skrive-accent) 90%, #000);
 }
 
 .tgl-knob {
   width: 19px;
   height: 19px;
-  border-radius: 50%;
+  /* 999px (not 50%) so the knob stays a clean capsule when it stretches. */
+  border-radius: 999px;
   background: #fff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
-  transition: transform var(--skrive-duration-quick) var(--skrive-easing);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.04),
+    0 1px 1px rgba(0, 0, 0, 0.1),
+    0 2px 5px rgba(0, 0, 0, 0.12);
+  transition:
+    transform var(--skrive-duration-slow) var(--skrive-easing-out),
+    width var(--skrive-duration-quick) var(--skrive-easing-out);
 }
 
 .tgl.on .tgl-knob {
   transform: translateX(17px);
 }
 
+/* Press-stretch. The knob widens toward its leading edge while held: off
+   grows rightward (left edge pinned at the 2px pad); on grows leftward
+   (right edge pinned at the inner edge, so translateX drops by the 3px of
+   extra width). Releasing settles it back via the same transitions. */
+.tgl:active:not(.on) .tgl-knob {
+  width: 22px;
+}
+
+.tgl.on:active .tgl-knob {
+  width: 22px;
+  transform: translateX(14px);
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .tgl,
   .tgl-knob {
     transition: none;
   }
@@ -3647,6 +3728,13 @@ body {
     color-mix(in srgb, var(--skrive-focus-ring) 35%, transparent);
 }
 
+/* Disabled: inert control for a pref that doesn't apply in context. The
+   row's is-dimmed opacity carries the fade; here we just drop the pointer
+   affordance so it doesn't read as clickable. */
+.sel-native:disabled {
+  cursor: default;
+}
+
 .sel-caret {
   position: absolute;
   right: 10px;
@@ -3705,17 +3793,17 @@ body {
 /* Each preview paints its own scheme so the choice is legible at a
    glance regardless of the active theme. System splits light/dark. */
 .theme-preview--light {
-  background: #fcfcfb;
+  background: #ffffff;
   color: #4c5ba6;
 }
 
 .theme-preview--dark {
-  background: #201f1d;
+  background: #1f2124;
   color: #8c97d6;
 }
 
 .theme-preview--system {
-  background: linear-gradient(105deg, #fcfcfb 0 50%, #201f1d 50% 100%);
+  background: linear-gradient(105deg, #ffffff 0 50%, #1f2124 50% 100%);
   color: #6f79b8;
 }
 

@@ -33,6 +33,14 @@ type Props = {
  *  width, so resolve the rem here rather than animate a unit expression. */
 const ROOT_FONT_PX = 14;
 
+/** Seam between the editor card and the open panel. Kept equal to
+ *  --skrive-shell-gap (the editor↔sidebar gap) so both seams read the
+ *  same width. It's folded into the animated dock width — not a static
+ *  margin — so the gap grows with the drawer instead of snapping in the
+ *  instant the panel mounts. The inner card stays right-anchored, so the
+ *  seam falls on the card's left. */
+const PANEL_SEAM_PX = 16;
+
 export const PanelShell = forwardRef<HTMLDivElement, Props>(
   function PanelShell(
     { open, ariaLabel, panelRef, className, widthRem = 26, children },
@@ -69,7 +77,7 @@ export const PanelShell = forwardRef<HTMLDivElement, Props>(
           <motion.div
             className="panel-dock"
             initial={reduced ? false : { width: 0, opacity: 0 }}
-            animate={{ width: widthPx, opacity: 1 }}
+            animate={{ width: widthPx + PANEL_SEAM_PX, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
             transition={
               reduced

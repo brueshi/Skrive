@@ -11,6 +11,7 @@
 // interface/display font trio from the mock are intentionally omitted.
 
 import { useEffect, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import type { UpdaterStatus } from '@skrive/shared';
 import { usePreferencesStore } from '../../stores/preferences';
 import {
@@ -74,6 +75,26 @@ const APP_LICENSE_LABEL = 'PolyForm Noncommercial 1.0.0';
 
 export function SettingsView({ appVersion }: { appVersion: string }) {
   const [section, setSection] = useState<SectionId>('general');
+  const reduced = useReducedMotion();
+
+  function renderSection(id: SectionId) {
+    switch (id) {
+      case 'general':
+        return <GeneralPane />;
+      case 'appearance':
+        return <AppearancePane />;
+      case 'editor':
+        return <EditorPane />;
+      case 'writing':
+        return <WritingFilesPane />;
+      case 'license':
+        return <LicensePane />;
+      case 'updates':
+        return <UpdatesPane appVersion={appVersion} />;
+      case 'about':
+        return <AboutPane appVersion={appVersion} />;
+    }
+  }
 
   return (
     <>
@@ -111,15 +132,25 @@ export function SettingsView({ appVersion }: { appVersion: string }) {
 
       <section className="settings-content-card">
         <div className="settings-scroll">
-          <div className="settings-col">
-            {section === 'general' && <GeneralPane />}
-            {section === 'appearance' && <AppearancePane />}
-            {section === 'editor' && <EditorPane />}
-            {section === 'writing' && <WritingFilesPane />}
-            {section === 'license' && <LicensePane />}
-            {section === 'updates' && <UpdatesPane appVersion={appVersion} />}
-            {section === 'about' && <AboutPane appVersion={appVersion} />}
-          </div>
+          {/* mode="wait" lets the outgoing page finish exiting before the
+              next enters, so the swap reads as one page replacing another
+              rather than a crossfade. initial={false} skips the entrance
+              on first mount. */}
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={section}
+              className="settings-col"
+              initial={reduced ? false : { opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={reduced ? { opacity: 0 } : { opacity: 0, y: -4 }}
+              transition={{
+                duration: reduced ? 0 : 0.16,
+                ease: [0.16, 1, 0.3, 1]
+              }}
+            >
+              {renderSection(section)}
+            </motion.div>
+          </AnimatePresence>
         </div>
       </section>
     </>
@@ -303,9 +334,11 @@ function EditorPane() {
   const smartTypography = usePreferencesStore((s) => s.smartTypography);
   const setSmartTypography = usePreferencesStore((s) => s.setSmartTypography);
 
-  // Marker mode only affects the Text surface; dim it when Rich is the
-  // default so the dependency reads at a glance (it stays editable).
-  const markerDimmed = defaultSurface === 'rich';
+  // Marker mode only affects the Text surface, so when Rich is the default
+  // it's inactive: dim the row and disable the control so it can't be
+  // changed while it has no effect. Switching back to Text re-enables it
+  // with the stored value intact.
+  const markerInactive = defaultSurface === 'rich';
 
   return (
     <>
@@ -332,11 +365,12 @@ function EditorPane() {
         <SettingRow
           label="Marker mode"
           desc="How much Markdown syntax shows in the Text surface."
-          dimmed={markerDimmed}
+          dimmed={markerInactive}
           control={
             <Select
               value={markerMode}
               onChange={setMarkerMode}
+              disabled={markerInactive}
               options={[
                 { id: 'raw', label: 'Raw' },
                 { id: 'recessed', label: 'Recessed' },

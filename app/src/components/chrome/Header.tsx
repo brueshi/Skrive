@@ -62,15 +62,9 @@ export function Header() {
           </button>
         </div>
         <div className="header-settings-title">Settings</div>
-        <div className="header-right" style={noDragStyle}>
-          <button
-            type="button"
-            className="settings-done"
-            onClick={() => setActiveView('editor')}
-          >
-            Done
-          </button>
-        </div>
+        {/* Empty right cluster balances the left so the title stays
+            centered; left draggable (no button to opt out for). */}
+        <div className="header-right" />
       </header>
     );
   }

@@ -225,7 +225,11 @@ function sanitizeAppState(raw: Record<string, unknown>): Partial<AppUiState> {
   // any theme field is a pre-v0.2.2 user who only ever knew dark mode,
   // so we migrate them to 'dark' rather than the new-install default
   // ('light') to avoid theme whiplash on upgrade.
-  if (
+  if (raw.theme === 'white') {
+    // The 'white' duotone was promoted to the primary 'light' theme, so
+    // anyone who selected it lands on the same look under the new id.
+    out.theme = 'light';
+  } else if (
     raw.theme === 'system' ||
     raw.theme === 'light' ||
     raw.theme === 'dark'
