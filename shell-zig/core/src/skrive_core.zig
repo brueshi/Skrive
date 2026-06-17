@@ -23,6 +23,19 @@ const CORE_VERSION = "0.1.0-zig-spike";
 
 const ENVELOPE_VERSION = 1;
 
+/// Adversarial body the 1.4 injection check round-trips through the real
+/// delivery path: core JSON-encode -> JSEscape (JS string literal) ->
+/// window.__skriveDispatch -> renderer JSON.parse. Every byte must arrive
+/// intact and none of it may execute. Contains a script-tag breakout, a
+/// backtick + ${} template trap, a quote, a backslash, a newline, and
+/// U+2028/U+2029 (the line terminators that historically broke JS string
+/// literals).
+const POISON_BODY =
+    "</script><script>window.__pwned=1</script>" ++
+    "`${alert(1)}`" ++
+    "\"\\\n" ++
+    "\u{2028}\u{2029}";
+
 /// Core -> host callback. Matches `SkriveCoreEmit` in
 /// `include/skrive_core.h`; the signatures are coupled by the round-trip
 /// test, not by the compiler.
@@ -112,6 +125,10 @@ fn buildResponse(a: std.mem.Allocator, request: []const u8) ![:0]const u8 {
         );
     }
 
+    if (std.mem.eql(u8, cmd, "diag:poison")) {
+        return buildPoison(a, id);
+    }
+
     // Unknown command. The message is intentionally static — the spike
     // never interpolates the (attacker-influenced) cmd into JSON until
     // the Stage 2 dispatcher escapes it properly.
@@ -119,6 +136,55 @@ fn buildResponse(a: std.mem.Allocator, request: []const u8) ![:0]const u8 {
         a,
         "{{\"v\":{d},\"id\":{d},\"ok\":false,\"error\":{{\"code\":\"UNKNOWN_COMMAND\",\"message\":\"command not implemented in the Stage 1 core\"}}}}",
         .{ ENVELOPE_VERSION, id },
+        0,
+    );
+}
+
+/// Build the diag:poison response: the adversarial body, JSON-encoded.
+/// This is the core's serialization layer (escapes the structural bytes);
+/// JSEscape adds the JS-string layer on the Swift side. U+2028/U+2029 are
+/// valid raw in JSON, so they pass through here as their UTF-8 bytes.
+fn buildPoison(a: std.mem.Allocator, id: i64) ![:0]const u8 {
+    var buf: [256]u8 = undefined;
+    var len: usize = 0;
+    for (POISON_BODY) |c| {
+        switch (c) {
+            '"' => {
+                buf[len] = '\\';
+                buf[len + 1] = '"';
+                len += 2;
+            },
+            '\\' => {
+                buf[len] = '\\';
+                buf[len + 1] = '\\';
+                len += 2;
+            },
+            '\n' => {
+                buf[len] = '\\';
+                buf[len + 1] = 'n';
+                len += 2;
+            },
+            else => {
+                if (c < 0x20) {
+                    const hex = "0123456789abcdef";
+                    buf[len] = '\\';
+                    buf[len + 1] = 'u';
+                    buf[len + 2] = '0';
+                    buf[len + 3] = '0';
+                    buf[len + 4] = hex[(c >> 4) & 0xf];
+                    buf[len + 5] = hex[c & 0xf];
+                    len += 6;
+                } else {
+                    buf[len] = c;
+                    len += 1;
+                }
+            },
+        }
+    }
+    return std.fmt.allocPrintSentinel(
+        a,
+        "{{\"v\":{d},\"id\":{d},\"ok\":true,\"result\":{{\"body\":\"{s}\"}}}}",
+        .{ ENVELOPE_VERSION, id, buf[0..len] },
         0,
     );
 }
@@ -171,6 +237,23 @@ test "unknown command returns UNKNOWN_COMMAND with the echoed id" {
 
     try std.testing.expect(std.mem.indexOf(u8, sink.captured(), "\"id\":7") != null);
     try std.testing.expect(std.mem.indexOf(u8, sink.captured(), "UNKNOWN_COMMAND") != null);
+}
+
+test "diag:poison JSON-encodes the adversarial body" {
+    var sink = TestSink{};
+    const core = skrive_core_create(null, TestSink.record, &sink).?;
+    defer skrive_core_destroy(core);
+
+    skrive_core_handle(core, "{\"v\":1,\"id\":9,\"cmd\":\"diag:poison\"}");
+    const out = sink.captured();
+
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":true") != null);
+    // The script breakout is present literally (the core does not escape
+    // `<`; that is JSEscape's job on the Swift side).
+    try std.testing.expect(std.mem.indexOf(u8, out, "</script>") != null);
+    // The quote and backslash are JSON-escaped by the core.
+    try std.testing.expect(std.mem.indexOf(u8, out, "\\\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "\\\\") != null);
 }
 
 test "malformed JSON returns BAD_ENVELOPE" {

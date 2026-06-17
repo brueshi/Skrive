@@ -20,7 +20,7 @@ export const SAMPLE_ROOT = '/Skrive/Parity Sample';
 /** Commands the Zig core implements for real in Stage 1. Everything else
  *  is served from the canned data below. Stage 2 migrates commands out of
  *  the mock by adding them here. */
-export const NATIVE_COMMANDS = new Set<string>(['app:version']);
+export const NATIVE_COMMANDS = new Set<string>(['app:version', 'diag:poison']);
 
 const BODIES: Record<string, string> = {
   'README.md':
