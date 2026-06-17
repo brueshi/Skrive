@@ -16,6 +16,7 @@
 
 const std = @import("std");
 const errors = @import("errors.zig");
+const fs = @import("fs.zig");
 const ErrorCode = errors.ErrorCode;
 
 pub const ENVELOPE_VERSION = 1;
@@ -32,13 +33,15 @@ pub const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
 /// spike and is not corpus-tested.
 const CORE_VERSION = "0.1.0-zig-spike";
 
-/// A command handler. It receives the per-request arena, the parsed
-/// payload (guaranteed by the dispatcher to be a JSON object), and the
-/// request id, and returns its `result` object as a JSON slice allocated
-/// in the arena. The dispatcher frames the success envelope around it;
-/// any error it returns is mapped to a code in `errors.codeFor`.
+/// A command handler. It receives the per-request arena, the core's `Io`
+/// (for any filesystem work), the parsed payload (guaranteed by the
+/// dispatcher to be a JSON object), and the request id, and returns its
+/// `result` object as a JSON slice allocated in the arena. The dispatcher
+/// frames the success envelope around it; any error it returns is mapped
+/// to a code in `errors.codeFor`.
 pub const Handler = *const fn (
     a: std.mem.Allocator,
+    io: std.Io,
     payload: std.json.Value,
     id: i64,
 ) anyerror![]const u8;
@@ -48,11 +51,13 @@ pub const Command = struct {
     handler: Handler,
 };
 
-/// The comptime command table. Stage 2.1 carries the two spike commands
-/// (neither corpus-tested; they keep the macOS round-trip self-test and
-/// the Swift host legible). `fs:*`, `project:*`, and `persistence:*` are
-/// appended here in 2.2-2.4.
-pub const commands = [_]Command{
+/// The comptime command table, aggregated from each subsystem's own table.
+/// `app:version`/`diag:poison` are the spike carryovers (not corpus-tested;
+/// they keep the macOS round-trip self-test and the Swift host legible).
+/// `fs.commands` lands in 2.2; `project`/`persistence` follow in 2.3-2.4.
+pub const commands = base_commands ++ fs.commands;
+
+const base_commands = [_]Command{
     .{ .name = "app:version", .handler = handleAppVersion },
     .{ .name = "diag:poison", .handler = handleDiagPoison },
 };
@@ -77,7 +82,7 @@ fn isEnvelopeField(key: []const u8) bool {
 /// NUL-terminated response envelope allocated in `a` (the C ABI emits it
 /// as a C string; the fixture harness writes the slice). Never fails — an
 /// allocation failure falls back to the static OOM envelope.
-pub fn dispatchJson(a: std.mem.Allocator, request: []const u8) [:0]const u8 {
+pub fn dispatchJson(a: std.mem.Allocator, io: std.Io, request: []const u8) [:0]const u8 {
     // Size cap before parsing, per spec.
     if (request.len > MAX_REQUEST_BYTES) {
         return errorEnvelope(a, 0, .payload_too_large);
@@ -88,10 +93,10 @@ pub fn dispatchJson(a: std.mem.Allocator, request: []const u8) [:0]const u8 {
     const parsed = std.json.parseFromSlice(std.json.Value, a, request, .{}) catch {
         return errorEnvelope(a, 0, .bad_envelope);
     };
-    return dispatchValue(a, parsed.value);
+    return dispatchValue(a, io, parsed.value);
 }
 
-fn dispatchValue(a: std.mem.Allocator, root: std.json.Value) [:0]const u8 {
+fn dispatchValue(a: std.mem.Allocator, io: std.Io, root: std.json.Value) [:0]const u8 {
     if (root != .object) return errorEnvelope(a, 0, .bad_envelope);
     const obj = root.object;
 
@@ -146,7 +151,7 @@ fn dispatchValue(a: std.mem.Allocator, root: std.json.Value) [:0]const u8 {
     };
 
     const handler = lookup(cmd) orelse return errorEnvelope(a, raw_id, .unknown_command);
-    const result = handler(a, payload, raw_id) catch |err| {
+    const result = handler(a, io, payload, raw_id) catch |err| {
         return errorEnvelope(a, raw_id, errors.codeFor(err));
     };
     return okEnvelope(a, raw_id, result);
@@ -178,7 +183,8 @@ fn errorEnvelope(a: std.mem.Allocator, id: i64, code: ErrorCode) [:0]const u8 {
 
 // ---- handlers -------------------------------------------------------------
 
-fn handleAppVersion(a: std.mem.Allocator, payload: std.json.Value, id: i64) anyerror![]const u8 {
+fn handleAppVersion(a: std.mem.Allocator, io: std.Io, payload: std.json.Value, id: i64) anyerror![]const u8 {
+    _ = io;
     _ = payload;
     _ = id;
     return std.fmt.allocPrint(a, "{{\"version\":\"{s}\"}}", .{CORE_VERSION});
@@ -201,7 +207,8 @@ const POISON_BODY =
 /// escapes the structural bytes); JSEscape adds the JS-string layer on
 /// the Swift side. U+2028/U+2029 are valid raw in JSON, so they pass
 /// through here as their UTF-8 bytes.
-fn handleDiagPoison(a: std.mem.Allocator, payload: std.json.Value, id: i64) anyerror![]const u8 {
+fn handleDiagPoison(a: std.mem.Allocator, io: std.Io, payload: std.json.Value, id: i64) anyerror![]const u8 {
+    _ = io;
     _ = payload;
     _ = id;
     // The body is small and fixed; escape into a stack buffer (2x headroom
@@ -258,7 +265,7 @@ const testing = std.testing;
 fn dispatchForTest(request: []const u8) ![]const u8 {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    const resp = dispatchJson(arena.allocator(), request);
+    const resp = dispatchJson(arena.allocator(), testing.io, request);
     return testing.allocator.dupe(u8, resp);
 }
 

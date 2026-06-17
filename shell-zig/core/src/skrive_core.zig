@@ -28,12 +28,21 @@ const dispatch = @import("dispatch.zig");
 pub const Emit = ?*const fn (userdata: ?*anyopaque, message_json: [*:0]const u8) callconv(.c) void;
 
 pub const Core = struct {
+    /// The Io the dispatcher's filesystem work runs on. In 0.16 every
+    /// fs operation takes an `Io`; the C ABI passes none, so the core
+    /// holds one. The C-ABI `create` uses the global single-threaded Io
+    /// (the documented library escape hatch — synchronous blocking fs on
+    /// the calling thread, which is exactly Stage 2's model); the parity
+    /// harness passes the real process Io. If the core ever moves to a
+    /// thread pool (Part I), an owned `Threaded` + host emit-marshaling
+    /// replaces this.
+    io: std.Io,
     emit: Emit,
     userdata: ?*anyopaque,
 
-    pub fn create(emit: Emit, userdata: ?*anyopaque) !*Core {
+    pub fn create(io: std.Io, emit: Emit, userdata: ?*anyopaque) !*Core {
         const core = try std.heap.c_allocator.create(Core);
-        core.* = .{ .emit = emit, .userdata = userdata };
+        core.* = .{ .io = io, .emit = emit, .userdata = userdata };
         return core;
     }
 
@@ -48,7 +57,7 @@ pub const Core = struct {
         const emit = self.emit orelse return;
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
-        const response = dispatch.dispatchJson(arena.allocator(), request);
+        const response = dispatch.dispatchJson(arena.allocator(), self.io, request);
         emit(self.userdata, response.ptr);
     }
 };
@@ -61,10 +70,11 @@ export fn skrive_core_create(
     userdata: ?*anyopaque,
 ) callconv(.c) ?*Core {
     // config_json carries the app-data dir / markup extension set,
-    // consumed once the fs/persistence namespaces land (2.2+). The
-    // dispatcher has no long-lived state to configure yet.
+    // consumed once the persistence namespace lands (2.4). fs work runs
+    // on the global single-threaded Io (see Core.io).
     _ = config_json;
-    return Core.create(emit, userdata) catch null;
+    const io = std.Io.Threaded.global_single_threaded.io();
+    return Core.create(io, emit, userdata) catch null;
 }
 
 export fn skrive_core_destroy(core_opt: ?*Core) callconv(.c) void {
@@ -119,7 +129,7 @@ test "unknown command returns UNKNOWN_COMMAND with the echoed id" {
     const core = skrive_core_create(null, TestSink.record, &sink).?;
     defer skrive_core_destroy(core);
 
-    skrive_core_handle(core, "{\"v\":1,\"id\":7,\"cmd\":\"fs:readFile\",\"payload\":{}}");
+    skrive_core_handle(core, "{\"v\":1,\"id\":7,\"cmd\":\"nope:never\",\"payload\":{}}");
 
     try std.testing.expect(std.mem.indexOf(u8, sink.captured(), "\"id\":7") != null);
     try std.testing.expect(std.mem.indexOf(u8, sink.captured(), "UNKNOWN_COMMAND") != null);
