@@ -110,12 +110,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         let config = WKWebViewConfiguration()
         config.userContentController = controller
 
-        // Custom-scheme handler must be registered on the configuration
-        // before the webview is created.
+        // Scheme handlers must be registered on the configuration before the
+        // webview is created.
         if servingMode == "scheme", let root = Resources.rendererRootURL() {
             config.setURLSchemeHandler(
                 AppSchemeHandler(rendererRoot: root),
                 forURLScheme: AppSchemeHandler.scheme
+            )
+        }
+        // The asset origin is independent of the app serving mode (a separate
+        // scheme handler in all three shapes); register it whenever a project
+        // root exists so the no-mixed-content row can be exercised.
+        if let projectRoot = Resources.projectRootURL() {
+            config.setURLSchemeHandler(
+                AssetSchemeHandler(projectRoot: projectRoot),
+                forURLScheme: AssetSchemeHandler.scheme
             )
         }
 
@@ -134,8 +143,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         guard diagEnabled else { return }
         // Give the React boot sequence (loadAppState -> snapshot -> worker
         // -> render) time to settle before probing.
+        let probe = Diagnostics.selfTestSource
+            .replacingOccurrences(of: "%SERVE%", with: servingMode)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-            webView.evaluateJavaScript(Diagnostics.selfTestSource, completionHandler: nil)
+            webView.evaluateJavaScript(probe, completionHandler: nil)
         }
     }
 
