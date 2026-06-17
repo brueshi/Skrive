@@ -117,6 +117,13 @@ export type AppUiState = {
   license: string | null;
   /** Unix milliseconds; set the first time the app boots. */
   firstRunMs: number | null;
+  /** Number of times the app has booted. Bumped once per `hydrate()`.
+   *  Drives the one-time feedback nudge (shown once `launchCount`
+   *  crosses a threshold). */
+  launchCount: number;
+  /** Set true the moment the one-time feedback toast is shown, so it
+   *  never reappears. Independent of whether the writer acted on it. */
+  seenFeedbackPrompt: boolean;
   personalDictionary: string[];
   skipDeleteConfirmation: boolean;
   /** Filled by Phase 11 (command palette). Empty in Phase 9. */
@@ -180,6 +187,8 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   recentProjects: [],
   license: null,
   firstRunMs: null,
+  launchCount: 0,
+  seenFeedbackPrompt: false,
   personalDictionary: [],
   skipDeleteConfirmation: false,
   recentFiles: [],

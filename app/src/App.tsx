@@ -35,7 +35,17 @@ import {
 import { usePreferencesStore } from './stores/preferences';
 import { useTypographyVars } from './lib/typography-css';
 import { notify } from './lib/notify';
+import { openFeedbackForm } from './lib/feedback';
 import { logDuration, perfEnabled } from './lib/perf';
+
+// One-time feedback nudge. Surfaces once the writer has opened Skrive
+// enough times to have an opinion worth sharing — not on first run, when
+// they've seen nothing yet. Shown exactly once (see seenFeedbackPrompt).
+// The form URL + opener live in lib/feedback (also used by Settings).
+const FEEDBACK_PROMPT_MIN_LAUNCHES = 3;
+// Hold off a beat after boot so the toast doesn't slam in over the
+// startup render / auto-opened project.
+const FEEDBACK_PROMPT_DELAY_MS = 2500;
 
 export function App() {
   const manifest = useProjectStore((s) => s.manifest);
@@ -156,6 +166,29 @@ export function App() {
       .check()
       .catch((err) => logProjectError('updater:launch-check', err));
     return unsubscribe;
+  }, [preferencesHydrated]);
+
+  // One-time feedback nudge. Fires once the launch counter crosses the
+  // threshold and the writer hasn't seen it before; marks it seen on
+  // display so it never returns. Mirrors the updater's notify.prompt
+  // pattern — a persistent CTA that opens the form in the OS browser.
+  const feedbackPromptRef = useRef(false);
+  useEffect(() => {
+    if (feedbackPromptRef.current) return;
+    if (!preferencesHydrated) return;
+    const prefs = usePreferencesStore.getState();
+    if (prefs.seenFeedbackPrompt) return;
+    if (prefs.launchCount < FEEDBACK_PROMPT_MIN_LAUNCHES) return;
+    feedbackPromptRef.current = true;
+    const timer = setTimeout(() => {
+      usePreferencesStore.getState().setSeenFeedbackPrompt(true);
+      notify.prompt(
+        "How's Skrive treating you? We'd love to hear what you think.",
+        'Share feedback',
+        () => openFeedbackForm()
+      );
+    }, FEEDBACK_PROMPT_DELAY_MS);
+    return () => clearTimeout(timer);
   }, [preferencesHydrated]);
 
   // Auto-open the last project once preferences hydrate. Skipped if

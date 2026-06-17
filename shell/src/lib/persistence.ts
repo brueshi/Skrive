@@ -182,6 +182,12 @@ function sanitizeAppState(raw: Record<string, unknown>): Partial<AppUiState> {
   if (typeof raw.firstRunMs === 'number' || raw.firstRunMs === null) {
     out.firstRunMs = raw.firstRunMs as number | null;
   }
+  if (typeof raw.launchCount === 'number' && Number.isFinite(raw.launchCount)) {
+    out.launchCount = Math.max(0, Math.round(raw.launchCount));
+  }
+  if (typeof raw.seenFeedbackPrompt === 'boolean') {
+    out.seenFeedbackPrompt = raw.seenFeedbackPrompt;
+  }
   if (Array.isArray(raw.personalDictionary)) {
     out.personalDictionary = raw.personalDictionary.filter(
       (w): w is string => typeof w === 'string'

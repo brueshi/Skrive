@@ -49,6 +49,9 @@ type PreferencesActions = {
   setEditorFontSize(size: number): void;
   setEditorLineHeightX100(value: number): void;
   setSkipDeleteConfirmation(skip: boolean): void;
+  /** Record that the one-time feedback nudge has been shown so it
+   *  never fires again. */
+  setSeenFeedbackPrompt(value: boolean): void;
   setAutoUpdateOnLaunch(value: boolean): void;
   setTheme(value: ThemeId): void;
   setShowOutlineRail(value: boolean): void;
@@ -101,6 +104,8 @@ function snapshot(state: PreferencesState): AppUiState {
     recentProjects: state.recentProjects,
     license: state.license,
     firstRunMs: state.firstRunMs,
+    launchCount: state.launchCount,
+    seenFeedbackPrompt: state.seenFeedbackPrompt,
     personalDictionary: state.personalDictionary,
     skipDeleteConfirmation: state.skipDeleteConfirmation,
     recentFiles: state.recentFiles,
@@ -148,16 +153,32 @@ export const usePreferencesStore = create<
   hydrated: false,
 
   async hydrate() {
+    // Idempotent: React StrictMode double-invokes the boot effect in
+    // dev, and we bump launchCount here — running twice would inflate
+    // the counter (and re-trip the firstRun stamp). One hydrate per boot.
+    if (get().hydrated) return;
     try {
       const state = await window.skrive.persistence.loadAppState();
       // Stamp firstRunMs the very first time. Persists immediately so
       // subsequent boots see the same timestamp.
       const firstRunMs = state.firstRunMs ?? Date.now();
-      set({ ...state, firstRunMs, hydrated: true });
-      if (state.firstRunMs === null) scheduleSave(get);
+      set({
+        ...state,
+        firstRunMs,
+        launchCount: state.launchCount + 1,
+        hydrated: true
+      });
+      // launchCount always changed, so always persist (no longer gated
+      // on the firstRun stamp alone).
+      scheduleSave(get);
     } catch (err) {
       console.error('[skrive preferences] hydrate failed', err);
-      set({ ...DEFAULT_APP_UI_STATE, firstRunMs: Date.now(), hydrated: true });
+      set({
+        ...DEFAULT_APP_UI_STATE,
+        firstRunMs: Date.now(),
+        launchCount: 1,
+        hydrated: true
+      });
     }
   },
 
@@ -204,6 +225,11 @@ export const usePreferencesStore = create<
   setSkipDeleteConfirmation(skip) {
     if (get().skipDeleteConfirmation === skip) return;
     set({ skipDeleteConfirmation: skip });
+    scheduleSave(get);
+  },
+  setSeenFeedbackPrompt(value) {
+    if (get().seenFeedbackPrompt === value) return;
+    set({ seenFeedbackPrompt: value });
     scheduleSave(get);
   },
   setAutoUpdateOnLaunch(value) {

@@ -185,6 +185,33 @@ describe('migrateAppState', () => {
     expect(out.surfaceSwitchingEnabled).toBe(true);
   });
 
+  it('defaults the feedback-nudge fields and preserves valid stored values', () => {
+    // Absent (older file): fall back to the launch-counter / seen defaults.
+    const fresh = migrateAppState({ schemaVersion: 1 });
+    expect(fresh.launchCount).toBe(DEFAULT_APP_UI_STATE.launchCount);
+    expect(fresh.seenFeedbackPrompt).toBe(
+      DEFAULT_APP_UI_STATE.seenFeedbackPrompt
+    );
+    // Valid stored values round-trip; a fractional count is rounded.
+    const stored = migrateAppState({
+      schemaVersion: 1,
+      launchCount: 4.7,
+      seenFeedbackPrompt: true
+    });
+    expect(stored.launchCount).toBe(5);
+    expect(stored.seenFeedbackPrompt).toBe(true);
+    // Malformed values are dropped rather than leaking through.
+    const bogus = migrateAppState({
+      schemaVersion: 1,
+      launchCount: 'lots',
+      seenFeedbackPrompt: 'yes'
+    });
+    expect(bogus.launchCount).toBe(DEFAULT_APP_UI_STATE.launchCount);
+    expect(bogus.seenFeedbackPrompt).toBe(
+      DEFAULT_APP_UI_STATE.seenFeedbackPrompt
+    );
+  });
+
   it('preserves an explicit surfaceSwitchingEnabled: false', () => {
     const out = migrateAppState({
       schemaVersion: 1,
