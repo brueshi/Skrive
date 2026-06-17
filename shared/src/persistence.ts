@@ -72,8 +72,9 @@ export type EditorFontId =
  *  'light' (the clean white duotone) / 'dark' override. Default for new
  *  installs is 'light'; legacy users without a stored theme migrate to
  *  'dark' (the only theme that existed before v0.2.2) so they don't get
- *  whiplash. The former warm 'Overcast' light and the separate 'white'
- *  theme were consolidated into 'light'. */
+ *  whiplash. The former warm light palette and the separate cool 'white'
+ *  theme were consolidated into a single 'light'. (Overcast is the design
+ *  aesthetic, not a color option — it persists across all schemes.) */
 export type ThemeId = 'system' | 'light' | 'dark';
 
 /** Default editing surface. 'rich' is the ProseMirror projection surface —
