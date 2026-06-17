@@ -681,3 +681,95 @@ The kill criterion was never triggered.
 the `fs`/`project`/`persistence`/`app`/`links`/`clipboard` namespaces,
 replacing the canned MockTransport command by command, gated by the
 parity corpus. The Stage 1 skeleton is the substrate Stage 2 hardens.
+
+---
+
+## 2026-06-17 — Stage 2.1: core dispatcher + errors.zig + fixture_main
+
+**Branch:** `labs/zig-shell-stage-2-dispatcher` (off `main`).
+
+**What was built (replaces the spike's inline `buildResponse` behind the
+unchanged C ABI).**
+- `core/src/errors.zig` — the `ErrorCode` enum mirroring the closed
+  `SKRIVE_ERROR_CODES` set, with `wire()` (the SCREAMING_SNAKE string) and
+  a static `message()` per code, plus the single `codeFor(anyerror)`
+  mapping the dispatcher calls for handler-thrown errors. 2.1 only needs
+  the envelope-level codes; `codeFor` is the one place 2.2+ adds
+  `FsError`/`ProjectError` cases.
+- `core/src/dispatch.zig` — `dispatchJson(arena, request) -> [:0]const u8`
+  reproducing `shell/src/main/dispatch.ts` (the parity oracle) in its
+  **exact validation order**: size cap (32 MiB) before parse -> two-stage
+  `std.json` parse -> not-object -> compute `rawId` (positive integer,
+  else 0) -> unknown-top-level-field (before the version check, matching
+  the JS) -> `v != 1` -> `rawId == 0` -> non-empty-string `cmd` -> object
+  `payload` -> comptime command-table lookup -> handler, with errors mapped
+  in one place. Envelope framing (`v,id,ok,result` / `...,error:{code,
+  message}`) lives only here; key order is fixed because the parity
+  normalizer re-stringifies in parsed-key order, so byte-equality needs it.
+  The comptime `commands` table carries `app:version` + `diag:poison`
+  (spike carryovers, not corpus-tested — they keep the macOS round-trip
+  legible). Handlers return their `result` object as an arena slice; the
+  dispatcher wraps it.
+- `core/src/fixture_main.zig` — the JSONL stdin/stdout harness. One `Core`,
+  an `emit` sink that writes `response + "\n"` to stdout (`std.Io.File`
+  unbuffered `writeStreamingAll`), reading lines with `takeDelimiter('\n')`
+  over a `MAX_REQUEST_BYTES + 1 MiB` reader buffer so the ~32 MiB
+  PAYLOAD_TOO_LARGE line reaches the dispatcher whole and is rejected
+  there. `pub fn main(init: std.process.Init)` for `init.io`/`init.gpa`.
+- `skrive_core.zig` refactored: a Zig-native `Core` (`create`/`destroy`/
+  `handle`) shared by both the C ABI and `fixture_main`; the `export fn`
+  symbols are thin wrappers. ABI shape and `include/skrive_core.h`
+  unchanged — `nm` confirms `_skrive_core_create/handle/destroy` still
+  exported, so the Swift host links untouched.
+- `build.zig`: added the `fixture_main` executable (installed to
+  `zig-out/bin/`); the `test` step now compiles each of the three source
+  files separately so all `test` blocks run.
+
+**Design decisions (logged as data; none contradict the spec).**
+- *fixture_main enters via the slice API, not the literal C string.* Both
+  it and the C ABI funnel into `Core.handle([]const u8)`; the C-string
+  marshaling is a trivial `std.mem.span`, not worth a per-line
+  NUL-terminated copy to re-exercise. Same dispatch + emit path, same
+  emitted bytes.
+- *Error messages are static per code.* Parity normalizes `message` away,
+  and the delivery rule forbids interpolating attacker-influenced content
+  (a `cmd` value, a path) into the response unescaped — so no message
+  embeds request data. The spike already did this for UNKNOWN_COMMAND; it
+  is now the rule across every code.
+- *0.16 `std.Io`.* Confirmed the reworked I/O surface before writing:
+  `pub fn main(std.process.Init)` is supported on a non-libc exe (the
+  universal `callMain` builds the full `Init` with `.io`/`.gpa`);
+  `std.Io.File.stdin()/stdout()`, `file.reader(io, buf).interface`,
+  `Reader.takeDelimiter`, `File.writeStreamingAll`. No surprises, no
+  toolchain fight.
+
+**Gates.** `cd shell-zig/core && zig build test` exit 0 (errors wire +
+mapping, the six-case envelope-validation matrix against `dispatchJson`,
+the C-ABI round-trip); `zig build` produces both the static lib and the
+fixture binary; `zig fmt --check` clean.
+
+**Parity (the 2.1 done-criterion).** `bun run parity:check -- --exec
+"$(pwd)/shell-zig/core/zig-out/bin/fixture_main"`: **6/6 `envelope`
+fixtures green** (malformed-json, unknown-top-level-field, bad-version,
+non-object-payload, unknown-command, payload-too-large). The run reports
+20/26 overall as expected-red: every one of the 20 is an `fs`/`project`/
+`persistence` command returning `UNKNOWN_COMMAND`, i.e. exactly the
+namespaces that land in 2.2-2.4. The runner has no per-namespace filter,
+so a full red run during 2.1 is intentional, not a regression — "envelope
+group clean" is the gate. Whole corpus goes green by the end of 2.4.
+
+**Electron build.** Untouched — no changes to `app/`, `shared/`, `shell/`
+(only `shell-zig/`), so its suites stay green by construction.
+
+**macOS host build.** Not re-run this session; the C ABI is byte-identical
+(symbols verified via `nm`), so the Swift host's link is unaffected. Full
+`build-macos.sh` re-verification folds into 2.2+ where a host channel
+(`fs:trash`) actually changes the Swift side.
+
+**Blocked.** Nothing.
+
+**Next.** Stage 2.2 — the `fs` namespace in `core/src/fs.zig`: all 8
+commands, Part I path safety (port the 0.5 symlink fixture tree as Zig
+tests), atomic writes, SHA-256 hashing byte-equal to Electron (verify
+against `fs.jsonl`), `detectExternalChange`, and `fs:trash` routed to the
+host via a reserved `host:` channel designed into the C ABI here.
