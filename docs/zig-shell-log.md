@@ -578,3 +578,56 @@ matrix recorded.
 **Still open in Stage 1.** 1.3 typography (Joe's gate); 1.4 the
 adversarial injection byte-identity test as a committed test + the lint
 worker shim confirmation.
+
+---
+
+## 2026-06-16 — Stage 1.4: injection + worker hardening (both as repeatable tests)
+
+**Branch:** `labs/zig-shell-stage-1-macos-spike` (continued).
+
+**Check 1 — delivery-rule injection round-trip (the security-normative
+one), tested two ways.**
+- *End-to-end.* New `diag:poison` command in the Zig core returns
+  shell-originated adversarial content — `</script><script>...</script>`,
+  a backtick + `${}` template trap, a quote, a backslash, a newline, and
+  U+2028/U+2029 — JSON-encoded by the core. It travels the real delivery
+  path: core JSON-encode -> `JSEscape` (JS string literal) ->
+  `window.__skriveDispatch` -> renderer `JSON.parse`. The diagnostics
+  self-test drives it through a spike-only `window.__skriveNativeInvoke`
+  hook and asserts the body arrives **byte-identical** (`length === 60`,
+  matching the source bytes) and that the embedded `<script>` **did not
+  execute** (`window.__pwned` stays `undefined`). Result (scheme mode):
+  `injectionByteIdentical: true, injectionNoExec: true`. (It also passes
+  in `file` mode — the delivery rule is independent of serving mode.)
+- *Unit.* `JSEscape` was extracted into a `SkriveShellKit` library target
+  so it is testable; `swift test` runs `JSEscapeTests` (XCTest +
+  JavaScriptCore) which round-trips eight adversarial inputs through a
+  real JS engine (assert byte-identical) and proves a breakout payload
+  stays inert data (a global it would set stays `0`). 2/2 pass.
+
+**Check 2 — lint worker shim under the chosen serving mode.** The raw
+`decode-named-character-reference` DOM build calls `document.createElement`
+at *module load*, which throws in a worker; the renderer aliases in the
+Node shim (`...node-shim.ts`, `electron.vite.config.ts`), and that alias
+is baked into the built `lint.worker-*.js`. The self-test discovers the
+hashed worker asset from the main bundle, instantiates it as a module
+worker under `skrive-app://`, and asserts no module-load error
+(`lintWorkerLoaded: true`, asset `lint.worker-YbDnztQQ.js`). A clean load
+is the shim confirmation; decode correctness itself is identical to the
+package (pure table lookup) and covered by the `app/` vitest suite.
+
+**Core.** Gained `diag:poison` + a unit test (the JSON-encoding layer);
+`zig build test` 4/4. The manual JSON string-escaper in the core handles
+the structural bytes; U+2028/U+2029 pass through as raw UTF-8 (valid in
+JSON), and `JSEscape` escapes them on the JS-string layer.
+
+**Stage 1.4 exit: MET.** Both checks pass and are committed as repeatable
+tests (`swift test` + the scripted `SKRIVE_DIAG` harness), not one-off
+observations.
+
+**Stage 1 status.** 1.1, 1.2, 1.4 complete. **Only 1.3 (typography,
+Joe's eyeball gate) remains** before the Stage 1 exit criteria are fully
+met. The skeleton, serving-mode decision, injection test, and worker
+confirmation are all in hand; the spike answered every empirical question
+it set out to, with no disproportionate toolchain fight (Stage 1 kill
+criterion not triggered).

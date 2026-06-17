@@ -68,11 +68,18 @@ shell-zig/macos/.build/Skrive.app/Contents/MacOS/SkriveShell
 | `SKRIVE_RENDERER_DIR` | path | Dev override: load the renderer from a directory instead of the app bundle. |
 | `SKRIVE_BRIDGE_JS` | path | Dev override: inject the bridge from a file instead of the app bundle. |
 
-## Core unit tests
+## Tests
 
 ```sh
-cd shell-zig/core && zig build test
+cd shell-zig/core && zig build test     # Zig core (dispatch, diag:poison)
+cd shell-zig/macos && swift test        # JSEscape delivery-rule escaper
 ```
+
+The serving-mode matrix and the 1.4 injection/worker checks are scripted
+through the diagnostics harness: build, then run the binary with
+`SKRIVE_DIAG=1` (optionally `SKRIVE_SERVE=file`) and read the `SELFTEST`
+JSON line on stdout (`injectionByteIdentical`, `injectionNoExec`,
+`lintWorkerLoaded`, etc.).
 
 ## Conventions
 
@@ -85,5 +92,5 @@ cd shell-zig/core && zig build test
   Electron shell — see the Stage 0.1 log entry).
 - The renderer delivery rule (Part I) is security-normative: responses and
   events reach the renderer only as `window.__skriveDispatch(<JSON string
-  literal>)`, escaped in `macos/Sources/SkriveShell/JSEscape.swift`. Never
-  interpolate payload fields into a script.
+  literal>)`, escaped in `macos/Sources/SkriveShellKit/JSEscape.swift`
+  (unit-tested). Never interpolate payload fields into a script.
