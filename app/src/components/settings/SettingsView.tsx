@@ -27,6 +27,7 @@ import {
   lineHeightLabel
 } from '../../lib/typography';
 import { notify } from '../../lib/notify';
+import { openFeedbackForm } from '../../lib/feedback';
 import {
   FieldChips,
   MonoInput,
@@ -834,6 +835,21 @@ function AboutPane({ appVersion }: { appVersion: string }) {
             Reveal preferences in Finder
           </button>
         </div>
+      </SettingsSection>
+      <SettingsSection cap="Feedback">
+        <SettingRow
+          label="Share feedback"
+          desc="Tell us what's working and what isn't. Opens a short form in your browser."
+          control={
+            <button
+              type="button"
+              className="settings-secondary-button"
+              onClick={() => openFeedbackForm()}
+            >
+              Open form
+            </button>
+          }
+        />
       </SettingsSection>
     </>
   );
