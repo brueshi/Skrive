@@ -631,3 +631,53 @@ met. The skeleton, serving-mode decision, injection test, and worker
 confirmation are all in hand; the spike answered every empirical question
 it set out to, with no disproportionate toolchain fight (Stage 1 kill
 criterion not triggered).
+
+---
+
+## 2026-06-16 — Stage 1.3 typography gate: PASS (a). Stage 1 complete.
+
+**Branch:** `labs/zig-shell-stage-1-macos-spike` (continued).
+
+**Method.** A Fraunces/Palatino-heavy specimen
+(`shell-zig/fixtures/typography-sample/typography.md`) authored once on
+disk and inlined into the spike's canned data via a bun text-import, so
+both shells render byte-identical input. It stresses ligatures
+(fi/fl/ffi/ffl), old-style vs lining figures, kerning pairs, curly
+punctuation + dashes + ellipsis, accents, and serif italics at heading
+and body sizes. The spike opens it on launch; Electron opens the same
+folder. Default editorial font (Iowan Old Style -> Palatino), both on the
+Rich surface, side by side on the same macOS 26 display — so the only
+variable is the engine (WKWebView/Core Text vs Electron/Chromium).
+
+**Verdict: (a) acceptable — `[CONFIRM WITH JOE]` given (Joe, 2026-06-16,
+direct side-by-side).** Core Text rendering of the Overcast serif look is
+good; no CEF fallback needed. (Screenshots not captured — programmatic
+window capture here lands on the wrong Space and needs a screen-recording
+permission the build process lacks; the verdict is from Joe's direct
+visual check.)
+
+**One investigation along the way (resolved, not a substrate issue).** A
+multi-line blockquote in the first draft showed line breaks at the source
+line boundaries. Dumped the rendered DOM: a correctly-modeled
+`<blockquote><p>...</p></blockquote>` with **literal `\n` newlines** (the
+draft hard-wrapped the blockquote across `>` lines), rendered as breaks
+by the Rich surface's `white-space: pre-wrap` (standard for an editable
+surface). Identical in Electron — same DOM + CSS; the substrate changes
+only glyph rasterization, never reflow. Fixed the specimen by authoring
+every paragraph as a single unwrapped line (how prose should be written
+for the Rich surface). Standing note: the Rich surface preserves source
+line-wraps; this is a renderer characteristic shared by both shells, not
+a Zig finding.
+
+**Stage 1 exit criteria: ALL MET.** Serving mode decided (custom scheme);
+typography verdict (a); injection test green; worker confirmed; skeleton
+committed; findings logged. The macOS spike answered every empirical
+question — system webview hosts the React+ProseMirror app faithfully, the
+Zig-core-behind-C-ABI + Swift-host pattern works, the delivery rule holds
+against adversarial content — with no disproportionate toolchain fight.
+The kill criterion was never triggered.
+
+**Next.** Stage 2 (macOS editable MVP): the real Zig core dispatcher and
+the `fs`/`project`/`persistence`/`app`/`links`/`clipboard` namespaces,
+replacing the canned MockTransport command by command, gated by the
+parity corpus. The Stage 1 skeleton is the substrate Stage 2 hardens.
