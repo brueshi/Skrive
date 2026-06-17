@@ -37,8 +37,12 @@ export const notify = {
   },
   /**
    * Persistent call-to-action toast. Stays until the user clicks the
-   * action or dismisses. Used for updater prompts and similar
-   * decision-required notices.
+   * action, dismisses it, or swipes it away (sonner enables swipe by
+   * default). Used for updater prompts and similar decision-required
+   * notices. Unlike the auto-expiring toasts above this never times
+   * out, so it carries a corner dismiss control — sonner's `closeButton`
+   * slot, repositioned to the top-right and restyled from an X to a dash
+   * in index.css (see the `[data-close-button]` overrides).
    */
   prompt(
     message: string,
@@ -47,6 +51,7 @@ export const notify = {
   ): void {
     toast(message, {
       duration: Infinity,
+      closeButton: true,
       action: { label: actionLabel, onClick: () => void onAction() }
     });
   }

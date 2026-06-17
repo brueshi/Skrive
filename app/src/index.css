@@ -4948,3 +4948,51 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* Persistent prompt toasts (notify.prompt — the updater and feedback
+   nudges) carry a corner dismiss control via sonner's `closeButton`.
+   Sonner anchors it top-left and draws an X; we want it top-right and a
+   dash. Sonner defines the position vars with zero-specificity :where()
+   selectors, so a plain attribute selector overrides them without
+   !important. The dir='rtl' variant would also move it right, but only
+   by flipping the entire layout — not what we want here. */
+[data-sonner-toaster] {
+  --toast-close-button-start: unset;
+  --toast-close-button-end: 0;
+  --toast-close-button-transform: translate(35%, -35%);
+}
+
+/* Swap sonner's baked-in X glyph for a centered dash. The close button is
+   already display:flex/center, so a sized pseudo-element lands dead-center;
+   currentColor tracks the themed button color. A drawn bar (not the "–"
+   character) keeps the weight crisp and font-independent. */
+[data-sonner-toast] [data-close-button] svg {
+  display: none;
+}
+
+[data-sonner-toast] [data-close-button]::after {
+  content: '';
+  width: 8px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+/* Theme the dismiss control to the toast's own surface. The toast body
+   is styled with --skrive-* tokens (see <Toaster> in App.tsx), which
+   track the app's light/dark theme; sonner's close-button colors track
+   *its own* data-theme instead, so the button would drift off-palette.
+   sonner's rule is [data-sonner-toaster][data-theme='dark'] … (0,4,0) —
+   !important is the clean override rather than an attribute-selector
+   arms race. The ::after dash inherits `color`, so it stays muted at
+   rest and brightens with the button on hover. */
+[data-sonner-toast] [data-close-button] {
+  background: var(--skrive-bg) !important;
+  border-color: var(--skrive-rule) !important;
+  color: var(--skrive-muted) !important;
+}
+
+[data-sonner-toast] [data-close-button]:hover {
+  border-color: var(--skrive-muted) !important;
+  color: var(--skrive-fg) !important;
+}
