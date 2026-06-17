@@ -49,7 +49,7 @@ enum Diagnostics {
       const root = document.getElementById('root');
       result.rootChildren = root ? root.childElementCount : 0;
       const text = document.body ? document.body.innerText : '';
-      result.uiRendered = text.includes('Parity Sample');
+      result.uiRendered = text.includes('Quiet Craft of Reading');
       result.workerErrors = window.__skriveErrorCount || 0;
 
       // Secure context (informational; expected false for scheme/file).
