@@ -924,3 +924,79 @@ established and reused-ready.
 one batched response) and `project:create` (optional `git init` via
 `std.process`). Done when `project.jsonl` replays green and the perf
 fixture opens through the real UI.
+
+---
+
+## 2026-06-17 — Stage 2.3: project:snapshot + project:create (parity half)
+
+**Branch:** `labs/zig-shell-stage-2-dispatcher` (continued).
+
+**Corpus correction first (pre-existing drift, logged).** The
+`project.jsonl` snapshot fixture was generated in 0.6, before `test.png`
+was added to `sample-project` in 1.2 — so the *current Electron oracle
+failed its own fixture* (`parity:check` reported 1/26 on `[project]
+snapshot`: the oracle now lists `test.png`, the stale fixture didn't).
+`[CONFIRM WITH JOE]` given. Regenerated via `parity:gen`; reviewed the
+diff — the only change is `test.png` (`body:null`, `sizeBytes:74`) appended
+to the snapshot list. Separate `test:` commit.
+
+**Core (`core/src/project.zig`).**
+- `project:snapshot` — recursive walk mirroring `snapshot.ts`: the verbatim
+  `NOISE_DIRS` skip list, skip hidden dirs and dot-files, markdown carries a
+  body+hash, assets are `body:null`, `.skrive.toml` always included with a
+  body. One batched `{root, files:[...]}` response, file key order matching
+  the fixture (path, body, modifiedMs, hash, sizeBytes). Root uses
+  `path.resolve` (not realpath), matching the oracle; a missing/unreadable
+  root yields an empty file list (not an error), also matching.
+- `project:create` — validate parent + name (trim, reject separators/`.`/`..`
+  -> INVALID_PAYLOAD), non-recursive `createDir` (PathAlreadyExists ->
+  ALREADY_EXISTS), starter README, optional best-effort `git init` via
+  `std.process.spawn` (argv[0] resolves on the parent PATH; not corpus-
+  tested since the fixture sets `gitInit:false`).
+- `fs.jsonString`/`sha256Hex`/`mtimeMs` are now shared (narrowed to the
+  allocator error so other error domains can `try` them).
+
+**The localeCompare sort (Joe's call, logged as a known approximation).**
+The oracle sorts the files array with JS `localeCompare` (ICU collation),
+which Zig can't byte-replicate without a dependency. We sort case-insensitive
+ASCII, which reproduces the corpus order exactly (the only non-byte-sort
+case is `README.md`). This is non-functional: the renderer's project-model
+worker re-sorts on `init` (model.ts:217) and binary-searches its own
+structure, never the raw snapshot array — verified. A future corpus file
+whose `localeCompare` order diverges from case-insensitive ASCII would be a
+fixture-only mismatch, not a renderer bug. Unit test pins the corpus order.
+
+**Gates.** `zig build test` exit 0 (+ the sort-order and walk-rule tests);
+`zig fmt --check` clean. No Swift change (snapshot/create are pure core), so
+the macOS host is unaffected.
+
+**Parity — the corpus half of the 2.3 criterion: MET.** `parity:check
+--exec`: `project.jsonl` **4/4 green** (snapshot, create, create-exists,
+snapshot-missing-root). Whole-corpus 4/26 mismatched = persistence only
+(2.4); envelope/fs/project all green.
+
+**Scope finding — the perf-UI half is entangled with 2.4/2.5, not 2.3.**
+The plan's 2.3 criterion also wants "the perf fixture opens through the real
+UI and renders the sidebar." That can't be done cleanly inside 2.3: it needs
+(a) `project:snapshot` + `fs:*` added to `NATIVE_COMMANDS` in
+`shell-zig/web/sample-data.ts`, AND (b) the app pointed at a *real on-disk
+project root*. Today the spike auto-opens `SAMPLE_ROOT = "/Skrive/Parity
+Sample"` — a fake path served entirely from canned `MockTransport` data —
+and that root rides in canned `persistence:loadAppState`/`loadProjectState`.
+So opening a real project through the core requires native persistence
+(2.4) and/or a real project-selection path (native `openDialog`, host-side).
+Wiring `NATIVE_COMMANDS` now without that would *break* the running app
+(routing `project:snapshot` native against a non-existent root). The
+perf-UI open therefore belongs in the 2.5 integration pass, after
+persistence lands — the same place the 2.2b running-app trash check went.
+Per the working rules, surfacing this rather than improvising a resequence.
+
+**Stage 2.3 status: core COMPLETE and parity-green; perf-UI open deferred to
+the 2.5 integration pass (rationale above).**
+
+**Next.** Stage 2.4 — `persistence` (`core/src/persistence.zig`: app.json +
+`projects/<16-hex-sha256>.json`, hash construction matching
+`shell/src/lib/persistence.ts`), plus `app:*`, the flush-before-quit
+handshake, `links:openExternal`, and `clipboard:*` (host). After 2.4 the app
+can open/restore a real project end-to-end, which is what unblocks the 2.5
+integration pass (incl. the deferred perf-UI open).
