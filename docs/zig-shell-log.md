@@ -490,3 +490,91 @@ renderer.
 shell-zig/macos/.build/Skrive.app` (or run the binary for console logs;
 `SKRIVE_DIAG=1` for the self-test; `SKRIVE_SERVE=file` to see the blank
 file:// case). Judge UI fidelity + chrome, and the 1.3 typography gate.
+
+**Post-session chrome fix (same day).** The traffic lights were stranded
+in an empty band above the renderer's topbar: the webview was sized to
+`contentLayoutRect` (excludes the titlebar), so the content started
+below the titlebar instead of under it. Fixed by making the webview the
+full content view. Then a separation problem: macOS 26 (Tahoe) spaces
+the lights at 23px (measured), so the cluster ends at x:72 — exactly
+where the renderer's hardcoded `padding-left: 72px` (`.header.is-macos`,
+tuned for ~20px spacing) starts the toggle, leaving zero gap. The shell
+now measures the real cluster width and injects the topbar inset
+(`clusterRight + 14`) as a shell-owned `<style>` — runtime chrome
+coordination, no `app/` change. Cross-finding: the **shipping Electron
+build has the same stale 72px on macOS 26**; the proper fix there is the
+same (shell drives the inset). Joe approved the chrome; skeleton
+committed and pushed (5 commits, `labs/zig-shell-stage-1-macos-spike`).
+
+---
+
+## 2026-06-16 — Stage 1.2: serving-mode bake-off closed
+
+**Branch:** `labs/zig-shell-stage-1-macos-spike` (continued).
+
+**Method.** The diagnostics self-test (`SKRIVE_DIAG=1`) was extended into
+an objective, repeatable per-mode checklist, run under both
+`SKRIVE_SERVE=scheme` and `SKRIVE_SERVE=file`. A `skrive-asset://`
+handler (`AssetSchemeHandler`, Part I path containment, rooted at the
+bundled sample project) was added so the asset-origin and
+no-mixed-content rows are real, and a 2x2 `test.png` checked into the
+fixtures sample project is the probe target. Recon first confirmed the
+renderer's only secure-context-sensitive API is `navigator.clipboard`
+(already bridged in 0.3) — no `crypto.subtle`/`indexedDB`/
+`serviceWorker`/`caches`, and no direct `localStorage` use in app logic
+— so a non-secure custom scheme was not expected to break anything.
+
+**The matrix (probe output, macOS 26.5.1 / WebKit).**
+
+| Checklist row | `file://` | `skrive-app://` (scheme) |
+|---|---|---|
+| UI renders (ES-module bundle executes) | NO (rootChildren 0) | YES |
+| module workers load + run, no errors | n/a (no app) | YES (workerErrors 0) |
+| `light-dark()` CSS resolves | yes | yes |
+| `fetch` of a bundled asset | FAIL (`TypeError: Load failed`) | OK (200) |
+| `localStorage` round-trip (in session) | yes | yes |
+| `localStorage` survives relaunch | n/a | YES (prior value present) |
+| `skrive-asset://` image loads cross-origin | yes | YES |
+| no mixed-content block (asset in app page) | n/a | YES |
+| `isSecureContext` (informational) | true | true |
+
+**Decision: custom scheme (`skrive-app://`), confirmed.** It cleared
+every gating row; `file://` fails the two that matter (the module bundle
+never executes, and bundled-asset `fetch` is blocked). Default serving
+mode stays `scheme`; `file` is retained behind `SKRIVE_SERVE` only as the
+documented negative.
+
+**Findings beyond the pick.**
+- *Custom scheme is a secure context here* (`isSecureContext: true`),
+  contradicting survey §2's WKWebView prediction. macOS 26 / current
+  WebKit treats the `WKURLSchemeHandler` origin (served with an
+  `HTTPURLResponse`) as trustworthy. Strictly better — secure-context
+  APIs would work — though nothing in the renderer depends on it. Worth
+  re-verifying per OS version; do not architect around it.
+- *Workers:* the project-model worker (module worker via
+  `import.meta.url`) rendering the manifest proves that worker shape
+  loads under the scheme; the lint worker (`project.ts:413`) uses the
+  identical mechanism and the console relay reported zero worker errors.
+  The full lint behavior is verified in the Stage 2.5 manual pass.
+- *Renderer asset-resolver gap (Stage 2.5, not the shell):*
+  `skriveAssetResolver` is wired into the Preview and Text (CodeMirror)
+  surfaces but NOT the Rich (ProseMirror) surface, so an image in a
+  Rich-surface doc stays page-relative (`skrive-app://app/...`) instead
+  of becoming `skrive-asset://`. The shell's asset origin is proven by a
+  direct image-load probe; the renderer wiring is an `app/` concern for
+  Stage 2.5.
+
+**Loopback HTTP shape: recorded as fallback, not built.** The plan makes
+it the fallback "if worker or storage behavior fails elsewhere." Neither
+did — workers render under the scheme and `localStorage` both round-trips
+and persists (and is informational regardless, since canonical state is
+native-side). Building `std.http.Server` would add a listening socket and
+port/token lifecycle for zero benefit here. Revisit only if a future OS
+breaks module workers or storage under the custom scheme.
+
+**Stage 1.2 exit: MET.** Serving mode decided (custom scheme) with the
+matrix recorded.
+
+**Still open in Stage 1.** 1.3 typography (Joe's gate); 1.4 the
+adversarial injection byte-identity test as a committed test + the lint
+worker shim confirmation.
