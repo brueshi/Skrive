@@ -23,6 +23,16 @@ enum Resources {
         rendererRootURL()?.appendingPathComponent("index.html")
     }
 
+    /// Project root the asset scheme serves images from. In the spike this
+    /// is the bundled sample project (canned data otherwise has no disk).
+    static func projectRootURL() -> URL? {
+        if let dir = env["SKRIVE_PROJECT_DIR"] {
+            return URL(fileURLWithPath: dir, isDirectory: true)
+        }
+        return Bundle.main.resourceURL?
+            .appendingPathComponent("project", isDirectory: true)
+    }
+
     /// Source of the injected native bridge (bundled IIFE). Empty string
     /// if missing — the host still launches so the failure is visible in
     /// the window rather than as a silent crash.

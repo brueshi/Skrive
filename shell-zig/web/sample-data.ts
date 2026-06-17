@@ -79,16 +79,24 @@ export function sampleProjectState(): ProjectUiState {
 }
 
 export function sampleSnapshot(): ProjectSnapshot {
-  return {
-    root: SAMPLE_ROOT,
-    files: Object.keys(BODIES).map((path) => ({
-      path,
-      body: BODIES[path],
-      modifiedMs: MODIFIED_MS,
-      hash: HASHES[path],
-      sizeBytes: new TextEncoder().encode(BODIES[path]).length
-    }))
+  const textFiles = Object.keys(BODIES).map((path) => ({
+    path,
+    body: BODIES[path],
+    modifiedMs: MODIFIED_MS,
+    hash: HASHES[path],
+    sizeBytes: new TextEncoder().encode(BODIES[path]).length
+  }));
+  // Binary asset: listed with body null; the renderer fetches it through
+  // the asset origin (skrive-asset://). This is the 1.2 cross-origin /
+  // mixed-content probe target.
+  const asset = {
+    path: 'test.png',
+    body: null,
+    modifiedMs: MODIFIED_MS,
+    hash: null,
+    sizeBytes: 74
   };
+  return { root: SAMPLE_ROOT, files: [...textFiles, asset] };
 }
 
 /** Payload-aware `fs:readFile`: the mock transport keys only on command

@@ -53,11 +53,14 @@ BIN="$(cd "$MACOS_DIR" && swift build "${SWIFT_ARGS[@]:1}" --show-bin-path)/Skri
 echo "==> 6/6 assemble Skrive.app"
 APP="$MACOS_DIR/.build/Skrive.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/renderer"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/renderer" \
+    "$APP/Contents/Resources/project"
 cp "$MACOS_DIR/Info.plist" "$APP/Contents/Info.plist"
 cp "$BIN" "$APP/Contents/MacOS/SkriveShell"
 cp "$WEB_DIR/dist/native-bridge.js" "$APP/Contents/Resources/native-bridge.js"
 cp -R "$RENDERER_DIR/." "$APP/Contents/Resources/renderer/"
+# Sample project supplies images for the skrive-asset:// origin (1.2).
+cp -R "$SCRIPT_DIR/fixtures/sample-project/." "$APP/Contents/Resources/project/"
 
 echo ""
 echo "Built $APP"
