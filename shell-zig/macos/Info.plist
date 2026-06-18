@@ -10,6 +10,8 @@
     <string>dev.skrive.zig-shell</string>
     <key>CFBundleExecutable</key>
     <string>SkriveShell</string>
+    <key>CFBundleIconFile</key>
+    <string>skrive</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
