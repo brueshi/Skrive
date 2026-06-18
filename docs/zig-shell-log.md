@@ -1188,3 +1188,70 @@ genuinely shell-specific bit is the window pre-paint background color
 (Electron's moved to `#161719`/`#e7e8ea`; the Zig `AppDelegate` still paints
 the old `#1a1a1a`/`#fefcf7`). Deferred to after the 2.5e manual pass, at
 Joe's direction.
+
+---
+
+## 2026-06-17 — Stage 2.5e manual pass: GREEN. Stage 2 COMPLETE.
+
+**Branch:** `labs/zig-shell-stage-2-persistence`. Tested the assembled
+`Skrive.app` (renderer rebuilt from current `app/`, so the build carried the
+PR-#11 UI makeover too).
+
+**Result: all gates pass.** Joe's hands-on pass:
+- Open + edit (Text and Rich), autosave through native `fs:writeFile`,
+  images, search, backlinks, links, clipboard, UI-state restore — all good.
+- **#9 trash** — file moves to Finder's Trash, sidebar updates. PASS.
+- **#14 flush (the quit-mid-edit gate)** — type, Cmd-Q, relaunch: content
+  persisted. PASS (the flush handshake works end to end).
+- **#15 perf-100** — sidebar renders and stays responsive. PASS.
+
+**The UI makeover surfaced for free** — rebuilding `out/renderer` from the
+current `app/` brought the new themes + filled icon set into the Zig shell
+with zero shell work. The shared-frontend thesis, validated in the most
+direct way: one `app/`, both shells.
+
+**Two findings from the pass.**
+1. *Markdown serializer entities (`&#x20;`/`&#x61;`) — NOT a Zig finding.*
+   Rich-surface markdown source showed numeric-entity escapes for a trailing
+   space and a word char butted against a closing emphasis (`*is not&#x20;*&#x61;`).
+   This is the renderer's ProseMirror->Markdown serializer being
+   fidelity-conservative (the emphasis mark grabbed a trailing space; `*is not *`
+   is invalid CommonMark, so the space is entity-escaped, and the adjacent
+   `a` too). The round-trip is LOSSLESS and the Zig core's fs is byte-exact
+   (SHA-256 parity) — identical in Electron. A candidate `app/` serializer
+   refinement (trim the mark), not a shell concern. Not logged against the
+   experiment.
+2. *Cmd-Q didn't quit — fixed.* The programmatic AppKit app installed no
+   `NSApp.mainMenu`, so Cmd-Q had nothing to bind to. Added a minimal app
+   menu (About/Hide/Quit, Quit -> `terminate:`), which also unblocked the
+   flush test (Cmd-Q is how it's exercised). This is the App-menu half of
+   Stage 4.4 pulled forward; the Edit menu (dialog text fields) stays
+   deferred — the editor's own copy/paste already works via WKWebView, so it
+   wasn't touched.
+
+**Shared-state note (worked in practice).** The Zig shell uses the same
+app-data dir as production Electron Skrive (`~/Library/Application
+Support/Skrive`), so it read Joe's real `app.json` and restored his session,
+and writes back to it. Cross-shell state sharing — a plan goal — works on
+real state. (No isolation override exists; if experimental writes to
+production prefs ever become a concern, add a `SKRIVE_APP_DATA_DIR` env
+override.)
+
+**Gate 3 (Part VI — stop-and-decide before Stage 3): CLEAR.** The pass found
+no blocker-class problems traceable to the architecture. The two findings are
+incomplete-feature (the app menu) and renderer-serializer (the entities) —
+neither is the Zig-core/host design. The substrate hosts a real editable
+Skrive faithfully.
+
+**Stage 2 exit criteria: ALL MET.** Parity corpus 26/26 (`fs`/`project`-
+minus-watch/`persistence`/`app`/`links`/`clipboard`); manual pass green;
+dogfooding can begin. The canned spike is now a real native core, command by
+command.
+
+**Deferred (carried forward, none blocking).** Stage 4.4 Edit menu; the
+window pre-paint color (`#161719`/`#e7e8ea`); housekeeping the now-dead
+canned data in `shell-zig/web/sample-data.ts`.
+
+**Next.** Dogfood real writing sessions on the Zig build (friction -> log);
+then Stage 3 (the watcher: `project:watch`/`unwatch` + `project:change`
+events via `watcher-c`), the one shell primitive with real platform depth.
