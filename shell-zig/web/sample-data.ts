@@ -45,7 +45,11 @@ export const NATIVE_COMMANDS = new Set<string>([
   'persistence:saveAppState',
   'persistence:loadProjectState',
   'persistence:saveProjectState',
-  'persistence:revealUserData'
+  'persistence:revealUserData',
+  'links:openExternal',
+  'clipboard:writeRich',
+  'clipboard:writeText',
+  'clipboard:readText'
 ]);
 
 const BODIES: Record<string, string> = {

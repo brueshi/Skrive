@@ -71,9 +71,56 @@ final class CoreBridge {
         case "project:openDialog":
             handleOpenDialog(id: id)
             return true
+        case "links:openExternal":
+            handleOpenExternal(id: id, payload: payload)
+            return true
+        case "clipboard:writeRich":
+            handleClipboardWriteRich(id: id, payload: payload)
+            return true
+        case "clipboard:writeText":
+            handleClipboardWriteText(id: id, payload: payload)
+            return true
+        case "clipboard:readText":
+            handleClipboardReadText(id: id)
+            return true
         default:
             return false
         }
+    }
+
+    /// Open an external URL in the OS default handler, gated by the Part I
+    /// scheme allowlist. A disallowed scheme is a silent no-op (the contract
+    /// returns void either way).
+    private func handleOpenExternal(id: Int, payload: [String: Any]) {
+        if let urlString = payload["url"] as? String,
+            let url = URL(string: urlString),
+            let scheme = url.scheme?.lowercased(),
+            ["http", "https", "mailto", "tel", "skrive"].contains(scheme)
+        {
+            NSWorkspace.shared.open(url)
+        }
+        replyToRenderer(id: id, result: [:])
+    }
+
+    /// Write rich (HTML) + plain flavors to the pasteboard in one shot.
+    private func handleClipboardWriteRich(id: Int, payload: [String: Any]) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        if let html = payload["html"] as? String { pb.setString(html, forType: .html) }
+        if let text = payload["text"] as? String { pb.setString(text, forType: .string) }
+        replyToRenderer(id: id, result: [:])
+    }
+
+    private func handleClipboardWriteText(id: Int, payload: [String: Any]) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(payload["text"] as? String ?? "", forType: .string)
+        replyToRenderer(id: id, result: [:])
+    }
+
+    private func handleClipboardReadText(id: Int) {
+        let text = NSPasteboard.general.string(forType: .string) ?? ""
+        replyToRenderer(id: id, result: ["text": text])
     }
 
     /// Folder picker (NSOpenPanel). Replies with the chosen path, or null on
