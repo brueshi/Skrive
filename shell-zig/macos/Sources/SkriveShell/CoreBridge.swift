@@ -20,9 +20,11 @@ final class CoreBridge {
     // lets the (nonisolated) deinit free it without a Sendable wrapper.
     nonisolated(unsafe) private var core: OpaquePointer?
     private weak var webView: WKWebView?
+    private let activeProject: ActiveProject
 
-    init(webView: WKWebView, configJSON: String) {
+    init(webView: WKWebView, configJSON: String, activeProject: ActiveProject) {
         self.webView = webView
+        self.activeProject = activeProject
         // The emit closure captures nothing, so it converts to a C
         // function pointer. `userdata` carries us back into Swift.
         let userdata = Unmanaged.passUnretained(self).toOpaque()
@@ -55,10 +57,15 @@ final class CoreBridge {
         if let data = requestJSON.data(using: .utf8),
             let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let cmd = obj["cmd"] as? String,
-            let id = obj["id"] as? Int,
-            routeHostOwned(cmd: cmd, id: id, payload: obj["payload"] as? [String: Any] ?? [:])
+            let id = obj["id"] as? Int
         {
-            return
+            let payload = obj["payload"] as? [String: Any] ?? [:]
+            if routeHostOwned(cmd: cmd, id: id, payload: payload) { return }
+            // Track the active project root for asset serving — the snapshot's
+            // root is the project the renderer just opened.
+            if cmd == "project:snapshot", let root = payload["root"] as? String {
+                activeProject.rootPath = root
+            }
         }
         guard let core else { return }
         requestJSON.withCString { skrive_core_handle(core, $0) }
