@@ -41,6 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private let servingMode = ProcessInfo.processInfo.environment["SKRIVE_SERVE"] ?? "scheme"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        setupMenu()
+
         let isDark = NSApp.effectiveAppearance
             .bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
 
@@ -88,6 +90,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool {
         true
+    }
+
+    /// Minimal app menu so the standard shortcuts bind — most importantly
+    /// Quit (Cmd-Q -> terminate:, which runs the flush handshake). A
+    /// programmatic AppKit app has no menu unless one is installed. The Edit
+    /// menu (for native text fields in dialogs) is the rest of Stage 4.4.
+    private func setupMenu() {
+        let mainMenu = NSMenu()
+        let appItem = NSMenuItem()
+        mainMenu.addItem(appItem)
+        let appMenu = NSMenu()
+        appItem.submenu = appMenu
+        appMenu.addItem(
+            withTitle: "About Skrive",
+            action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+            keyEquivalent: ""
+        )
+        appMenu.addItem(.separator())
+        appMenu.addItem(
+            withTitle: "Hide Skrive",
+            action: #selector(NSApplication.hide(_:)),
+            keyEquivalent: "h"
+        )
+        appMenu.addItem(.separator())
+        appMenu.addItem(
+            withTitle: "Quit Skrive",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        NSApp.mainMenu = mainMenu
     }
 
     private var quitFlushed = false
