@@ -1153,3 +1153,38 @@ dogfooding.
 
 **Stage 2.5 status: a-d COMPLETE (code, headless-verified); 2.5e manual pass
 is the remaining exit gate before dogfooding.**
+
+---
+
+## 2026-06-17 — Fix: re-sync the embedded default app-state (dual-shell tax)
+
+The embedded-default coupling logged in 2.4 bit. A feedback-nudge feature
+(`launchCount`, `seenFeedbackPrompt`) landed in `main`'s
+`DEFAULT_APP_UI_STATE` after the persistence fixture + the
+`persistence.zig` `DEFAULT_APP_STATE` were captured, so the Zig core was
+returning a stale default: `bun run parity:check` (the live Electron
+oracle) failed 1/26 on `loadAppState-default`, while `--exec` (core vs the
+stale fixture) was a false-green 26/26. Fixed by `parity:gen` (only
+`persistence.jsonl`'s default line changed — the two fields inserted after
+`firstRunMs`) and inserting the same two fields into the embedded constant.
+Both directions green again: core-vs-fixture AND fixture-vs-oracle 26/26.
+
+**Decision data — the dual-shell tax made concrete.** Anything `app/`
+embeds that the Zig core mirrors (the default app-state today; the contract
+surface generally) drifts on every `app/` change and silently passes the
+`--exec` gate because the fixture drifts with it. The honest gate is
+running BOTH directions (`parity:check` against the oracle, then `--exec`
+against the core). Candidate guard for later: a CI step that fails if
+`persistence.zig`'s `DEFAULT_APP_STATE` does not equal the regenerated
+fixture's `loadAppState-default` result, so the coupling can't drift
+unnoticed.
+
+**Related (Joe, this session): the app/ UI makeover (PR #11 — themes +
+filled icon set) -> the Zig shell.** Because both shells share one `app/`,
+the makeover transfers for free — it is pure renderer (icons = React,
+themes = CSS). The Zig app just serves a stale `out/renderer` (built before
+the makeover); a `bun run start:build` + re-assemble surfaces it. The only
+genuinely shell-specific bit is the window pre-paint background color
+(Electron's moved to `#161719`/`#e7e8ea`; the Zig `AppDelegate` still paints
+the old `#1a1a1a`/`#fefcf7`). Deferred to after the 2.5e manual pass, at
+Joe's direction.
