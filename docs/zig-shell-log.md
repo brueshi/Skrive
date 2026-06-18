@@ -1082,3 +1082,74 @@ case), `skrive-asset://` at the real project root, embed-vs-bundle decision,
 the host-side app/links/clipboard/flush handlers, and the full manual pass
 (open/edit/autosave/images/search/backlinks/UI-restore + the deferred
 perf-UI and running-app trash checks). Then dogfooding begins.
+
+---
+
+## 2026-06-17 — Stage 2.5a-d: the integration pass (code). Manual pass pending.
+
+**Branch:** `labs/zig-shell-stage-2-persistence` (off `main`; the 2.4 work is
+already merged into `main`, so this is its continuation). Five commits, one
+per sub-stage; the headless `SKRIVE_DIAG` SELFTEST gates each.
+
+**2.5a — the spine (`feat: wire fs/project/persistence to the native core`).**
+The renderer's composite transport now routes the fs/project/persistence
+namespaces to the native channel (`NATIVE_COMMANDS` in `shell-zig/web`),
+retiring the canned `MockTransport` data for them and the `fs:readFile`
+special-case. `CoreBridge.handle` gained host-owned command routing: it
+parses each request and handles host-owned commands in Swift (Part I "host
+owns X, forwards the rest"), starting with `project:openDialog` (NSOpenPanel
+-> chosen path or null). The app now **boots to its welcome state** (native
+persistence returns the default app-state, no last-opened project — and the
+renderer is read-only, so this is the only possible behavior) and opens real
+folders via the dialog. The canned typography auto-open is gone, so the
+self-test was reworked: it drives a native `project:snapshot` of the bundled
+project and asserts real files come back. SELFTEST: `snapshotFiles:4,
+snapshotHasReadme:true, rootChildren:1, workerErrors:0` — the fs/project
+spine round-trips renderer -> Swift -> Zig core -> renderer against real disk.
+
+**2.5b — remaining host commands (two commits).**
+- `links:openExternal` (NSWorkspace, Part I scheme allowlist) and
+  `clipboard:writeRich/writeText/readText` (NSPasteboard, rich = both HTML +
+  plain). Added to `NATIVE_COMMANDS`, routed in `CoreBridge`.
+- The **pre-quit flush handshake** (parity with `shell/src/main/index.ts`):
+  `applicationShouldTerminate` returns `.terminateLater`; `CoreBridge.beginFlush`
+  emits an `app:flush-before-quit` event; the renderer saves dirty docs (native
+  `fs:writeFile`) and acks with `app:flushComplete` (intercepted host-side,
+  fire-and-forget); the app proceeds on the ack or a 2s backstop. Both need
+  user interaction to exercise — manual-pass items; swift build links clean
+  and a diag boot confirms the spine is unaffected.
+
+**2.5c — asset serving (`feat: serve skrive-asset:// from the active project
+root`).** The scheme handler serves from the ACTIVE project root, not the
+fixed bundled one: `CoreBridge` records the root from each `project:snapshot`
+into a lock-guarded `ActiveProject` the handler reads. Path safety hardened
+to a realpath containment (`resolvingSymlinksInPath` on root + target), so an
+in-root symlink jumping outside is rejected. `imageResolver.ts` unchanged.
+SELFTEST `assetImageLoaded:true` against the opened project.
+
+**2.5d — embed-vs-bundle: DECIDED bundle-resource-dir.** The serving mode is
+the custom scheme (`skrive-app://`), whose `AppSchemeHandler` (Swift) reads
+the renderer from the `.app`'s `Resources/renderer`. That is the macOS-native
+packaging — signed, updatable, no binary bloat — and it is what the serving
+mode made natural. Embedding `out/renderer` into a binary would couple the
+renderer bytes into the core or host for zero serving benefit (the core does
+not serve the renderer; it serves nothing over HTTP). `build-macos.sh` step 6
+already copies the renderer into Resources; that is the shipped layout.
+
+**Gates.** Each sub-stage: bridge bundles, `swift build` links clean, full
+`build-macos.sh` + `SKRIVE_DIAG` SELFTEST green (version round-trip, native
+snapshot of real files, asset image, injection round-trip, lint worker). The
+Zig core and parity corpus are untouched by 2.5 (26/26 still green).
+
+**2.5e — full manual pass: PENDING (Joe).** The headless self-test proves the
+native spine, but the hands-on checklist is the real exit gate: open a folder
+via the dialog, edit in Text + Rich, confirm autosave writes through native
+`fs:writeFile`, images render from the active project, search + backlinks work
+(renderer worker over the native snapshot), UI state restores on relaunch,
+quitting mid-edit loses nothing (the flush handshake), the running-app trash
+moves a file to Finder's Trash, and the perf-100 fixture opens and renders the
+sidebar (the deferred 2.3 check). Friction goes in the log. From here:
+dogfooding.
+
+**Stage 2.5 status: a-d COMPLETE (code, headless-verified); 2.5e manual pass
+is the remaining exit gate before dogfooding.**
