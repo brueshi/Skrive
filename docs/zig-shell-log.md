@@ -1000,3 +1000,85 @@ the 2.5 integration pass (rationale above).**
 handshake, `links:openExternal`, and `clipboard:*` (host). After 2.4 the app
 can open/restore a real project end-to-end, which is what unblocks the 2.5
 integration pass (incl. the deferred perf-UI open).
+
+---
+
+## 2026-06-17 — Stage 2.4: persistence + the `Context` seam. Corpus 26/26.
+
+**Branch:** `labs/zig-shell-stage-2-persistence` (off `main`).
+
+**Branch note (state reconciliation).** The Stage 2.1–2.3 work landed in
+`main` independently (via a parallel worktree / resumed context) with
+*different commit SHAs* than the pushed `labs/zig-shell-stage-2-dispatcher`
+branch, plus `main` carried further product work on top (the flush-sidebar /
+white-duotone chrome rework, feedback features, version bumps to 1.3.0).
+So `main` — not the now-superseded dispatcher branch — is the correct base
+for 2.4. Verified the content matches (the fs pub helpers and Handler
+signature are byte-identical to what 2.3 left); only SHAs diverged. This
+branch is off `main`.
+
+**The `Context` seam (refactor in service of persistence).** 0.16 fs ops
+need an `Io`, and persistence additionally needs the app-data dir, so the
+bare `io` handler param became `*const Context = { io, app_data_dir }` —
+the natural home for the long-lived state handlers get (Stage 3's watcher
+registry lands here too). `Core` now holds a `Context`; the C-ABI `create`
+parses `appDataDir` out of `config_json` (the host's `Resources.configJSON`
+already sends it) and copies it into c-allocator-owned storage freed in
+`destroy`; the fixture harness mints a fresh `/tmp/skrive-fixture-<rand>`
+per run so `loadAppState` sees no `app.json` before `saveAppState` writes
+one. fs/project/app handlers were mechanically repointed (`io` → `ctx.io`).
+
+**Core (`core/src/persistence.zig`).** `loadAppState` / `saveAppState` /
+`loadProjectState` / `saveProjectState` over `{appDataDir}/app.json` and
+`{appDataDir}/projects/<hash>.json`, where `<hash>` is the first 16 hex of
+SHA-256 of the project path — matching `hashProjectPath` exactly (unit-
+tested). Writes are atomic temp+rename, no fsync (the lighter guarantee
+`persistence.ts` gives state files). `loadAppState` on a missing file
+returns the embedded default `AppUiState`.
+
+**Two coupling/scope decisions, logged.**
+- *Embedded default.* The shell owns load-with-defaults, so the core has to
+  carry the default `AppUiState` (it IS the `loadAppState-default` fixture
+  verbatim). It MIRRORS `DEFAULT_APP_UI_STATE` in `shared/src/persistence.ts`
+  and must be updated in lockstep — there's no app-side seam to read it
+  from. A logged coupling the dual-shell period pays.
+- *Lenient load, not full sanitize.* App-state load merges the file over
+  the default by key (default order, file values win, `schemaVersion` forced
+  to 1; future version → default) but does NOT port the oracle's exhaustive
+  per-field type whitelisting (`sanitizeAppState`/`sanitizeProjectState`) —
+  porting that defensive renderer-coupled validation is the scope-creep the
+  kill criterion names, and the core writes its own well-formed files.
+  Project-state load returns the stored object as-is. Not corpus-tested
+  (the corpus exercises only missing-file → default/null).
+
+**`revealUserData` — the host channel's payoff.** Host-side (NSWorkspace),
+so it rides the `host:` channel from 2.2b as a second verb: the core
+special-cases `persistence:revealUserData` to emit
+`{"host":"reveal","id","path":<appDataDir>}`; the harness acks (no file
+browser in a test), `CoreBridge.swift` adds a `reveal` case opening the dir
+via `NSWorkspace.shared.open`. First reuse of the generic channel — exactly
+why it was built generic.
+
+**Gates.** `zig build test` exit 0 (+ hash-construction and merge unit
+tests); `zig fmt --check` clean. macOS re-verified: zig core (macos target)
+→ libtool re-archive → `swift build` links clean (AppKit added for
+`NSWorkspace`) → `swift test` green. **Parity — the 2.4 done-criterion:
+`persistence.jsonl` 4/4, whole corpus GREEN 26/26.**
+
+**Deferred to the 2.5 integration pass (host-side, NATIVE_COMMANDS-gated).**
+The flush-before-quit handshake, `links:openExternal`, `clipboard:*`, and
+`app:ready`/`platform` host implementations are only *reachable* once the
+renderer routes commands to native (`NATIVE_COMMANDS`) against a real open
+project — the same entanglement as the 2.3 perf-UI open. Writing them blind
+now isn't testable, so they batch into 2.5 where they are. The quit-mid-edit
+manual test rides with the flush handshake there.
+
+**Stage 2.4 status: core COMPLETE; full parity corpus green. Host-side
+app/links/clipboard/flush deferred to the 2.5 integration pass.**
+
+**Next.** Stage 2.5 — the integration pass: wire `fs`/`project`/
+`persistence` into `NATIVE_COMMANDS` (drop the `fs:readFile` mock special-
+case), `skrive-asset://` at the real project root, embed-vs-bundle decision,
+the host-side app/links/clipboard/flush handlers, and the full manual pass
+(open/edit/autosave/images/search/backlinks/UI-restore + the deferred
+perf-UI and running-app trash checks). Then dogfooding begins.
