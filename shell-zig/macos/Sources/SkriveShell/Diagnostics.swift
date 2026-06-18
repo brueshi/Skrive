@@ -44,13 +44,26 @@ enum Diagnostics {
       try { result.platform = await window.skrive.app.platform(); }
       catch (e) { result.platformError = String(e); }
 
-      // UI render + worker (manifest derives from the snapshot in a
-      // module worker, so a rendered heading proves the worker ran).
+      // UI render: the app mounts to its welcome state (Stage 2.5 retired
+      // the canned auto-open — native persistence returns no last-opened
+      // project, so nothing opens until the user picks a folder).
       const root = document.getElementById('root');
       result.rootChildren = root ? root.childElementCount : 0;
-      const text = document.body ? document.body.innerText : '';
-      result.uiRendered = text.includes('Quiet Craft of Reading');
       result.workerErrors = window.__skriveErrorCount || 0;
+
+      // Native project:snapshot of the bundled sample project — proves the
+      // fs/project namespaces round-trip to the real Zig core (renderer ->
+      // Swift -> Zig core -> renderer), reading real files off disk.
+      try {
+        const projectRoot = %PROJECT_ROOT%;
+        if (projectRoot) {
+          const snap = await window.skrive.project.snapshot(projectRoot);
+          result.snapshotFiles = snap && snap.files ? snap.files.length : 0;
+          result.snapshotHasReadme = !!(
+            snap && snap.files && snap.files.some((f) => f.path === 'README.md')
+          );
+        }
+      } catch (e) { result.snapshotError = String(e); }
 
       // Secure context (informational; expected false for scheme/file).
       result.isSecureContext = window.isSecureContext === true;

@@ -21,10 +21,32 @@ import typographyMd from '../fixtures/typography-sample/typography.md' with { ty
 /** Fake absolute root. Never touched on disk — `fs:*` is fully canned. */
 export const SAMPLE_ROOT = '/Skrive/Parity Sample';
 
-/** Commands the Zig core implements for real in Stage 1. Everything else
- *  is served from the canned data below. Stage 2 migrates commands out of
- *  the mock by adding them here. */
-export const NATIVE_COMMANDS = new Set<string>(['app:version', 'diag:poison']);
+/** Commands routed to the native channel (Zig core, or the Swift host for
+ *  host-owned ones). Everything else is served from the canned data below.
+ *  Stage 2.5 migrated the fs/project/persistence namespaces out of the mock;
+ *  what remains canned is app:platform (2.5b), the watcher (Stage 3), and
+ *  history/updater (Stages 4/6). `project:openDialog` is native but
+ *  host-owned (NSOpenPanel) — CoreBridge handles it, the core never sees it. */
+export const NATIVE_COMMANDS = new Set<string>([
+  'app:version',
+  'diag:poison',
+  'fs:readFile',
+  'fs:writeFile',
+  'fs:detectExternalChange',
+  'fs:writeBinaryFile',
+  'fs:newFile',
+  'fs:mkdir',
+  'fs:rename',
+  'fs:trash',
+  'project:snapshot',
+  'project:create',
+  'project:openDialog',
+  'persistence:loadAppState',
+  'persistence:saveAppState',
+  'persistence:loadProjectState',
+  'persistence:saveProjectState',
+  'persistence:revealUserData'
+]);
 
 const BODIES: Record<string, string> = {
   'typography.md': typographyMd,

@@ -16,14 +16,7 @@
 import { createSkriveBridge } from '../../shared/src/bridge';
 import type { SkriveTransport } from '../../shared/src/bridge';
 import { MockTransport } from '../../shared/__test__/mock-transport';
-import {
-  NATIVE_COMMANDS,
-  SAMPLE_ROOT,
-  sampleAppState,
-  sampleFileContent,
-  sampleProjectState,
-  sampleSnapshot
-} from './sample-data';
+import { NATIVE_COMMANDS, SAMPLE_ROOT } from './sample-data';
 
 type Envelope = {
   id?: number;
@@ -90,10 +83,12 @@ window.__skriveDispatch = (json: string) => {
 
 // ---- canned project -------------------------------------------------------
 
+// fs/project/persistence are native as of Stage 2.5 (see NATIVE_COMMANDS).
+// What remains canned: app:platform (2.5b), history (Stage 4), updater
+// (Stage 6). The app boots to its welcome state — native persistence returns
+// the default app-state with no last-opened project, so nothing auto-opens
+// until the user picks a folder via project:openDialog.
 const mock = new MockTransport();
-mock.stub('persistence:loadAppState', sampleAppState());
-mock.stub('persistence:loadProjectState', { state: sampleProjectState() });
-mock.stub('project:snapshot', sampleSnapshot());
 mock.stub('history:getMode', { mode: 'checkpoint' });
 mock.stub('history:setGitHistoryEnabled', { mode: 'checkpoint' });
 mock.stub('app:platform', { platform: 'darwin' });
@@ -104,10 +99,6 @@ mock.stub('updater:current', { kind: 'idle' });
 const transport: SkriveTransport = {
   invoke(cmd, payload) {
     if (NATIVE_COMMANDS.has(cmd)) return nativeInvoke(cmd, payload);
-    // The mock keys on command name only; reads need the path.
-    if (cmd === 'fs:readFile') {
-      return Promise.resolve(sampleFileContent(payload.relPath as string));
-    }
     return mock.invoke(cmd, payload);
   },
   on(event, handler) {

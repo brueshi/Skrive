@@ -46,10 +46,58 @@ final class CoreBridge {
         if let core { skrive_core_destroy(core) }
     }
 
-    /// Host -> core. The core replies synchronously through `dispatch`.
+    /// Renderer -> shell. Host-owned commands (native dialogs, open-external,
+    /// clipboard, app) are handled in Swift and replied directly; everything
+    /// else forwards to the Zig core verbatim (Part I: "the host owns X,
+    /// forwards the rest"). Parsing every request is cheap — saves are
+    /// debounced, not per-keystroke.
     func handle(requestJSON: String) {
+        if let data = requestJSON.data(using: .utf8),
+            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let cmd = obj["cmd"] as? String,
+            let id = obj["id"] as? Int,
+            routeHostOwned(cmd: cmd, id: id, payload: obj["payload"] as? [String: Any] ?? [:])
+        {
+            return
+        }
         guard let core else { return }
         requestJSON.withCString { skrive_core_handle(core, $0) }
+    }
+
+    /// Handle a host-owned command, returning true if it was. Future host
+    /// commands (links:openExternal, clipboard:*, app:*) add their cases here.
+    private func routeHostOwned(cmd: String, id: Int, payload: [String: Any]) -> Bool {
+        switch cmd {
+        case "project:openDialog":
+            handleOpenDialog(id: id)
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Folder picker (NSOpenPanel). Replies with the chosen path, or null on
+    /// cancel — matching the contract's `openDialog(): Promise<string | null>`.
+    private func handleOpenDialog(id: Int) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.title = "Open project"
+        panel.prompt = "Open"
+        let chosen: String? = panel.runModal() == .OK ? panel.url?.path : nil
+        replyToRenderer(id: id, result: ["path": chosen ?? NSNull()])
+    }
+
+    /// Build and deliver a success response envelope to the renderer. Key
+    /// order is irrelevant — the renderer reads the envelope by key.
+    private func replyToRenderer(id: Int, result: [String: Any]) {
+        let envelope: [String: Any] = ["v": 1, "id": id, "ok": true, "result": result]
+        guard let data = try? JSONSerialization.data(withJSONObject: envelope),
+            let json = String(data: data, encoding: .utf8)
+        else { return }
+        dispatch(json)
     }
 
     /// Core -> renderer, OR a `host:` command for the host to perform.

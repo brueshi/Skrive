@@ -144,8 +144,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         guard diagEnabled else { return }
         // Give the React boot sequence (loadAppState -> snapshot -> worker
         // -> render) time to settle before probing.
+        // The bundled sample project's absolute path, as a JS string literal
+        // (or `null` when absent), so the self-test can drive a native
+        // project:snapshot against real on-disk files.
+        let projectRootLiteral =
+            Resources.projectRootURL().map { JSEscape.stringLiteral($0.path) } ?? "null"
         let probe = Diagnostics.selfTestSource
             .replacingOccurrences(of: "%SERVE%", with: servingMode)
+            .replacingOccurrences(of: "%PROJECT_ROOT%", with: projectRootLiteral)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
             webView.evaluateJavaScript(probe, completionHandler: nil)
         }
