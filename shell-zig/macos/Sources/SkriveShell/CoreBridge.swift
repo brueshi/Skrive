@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import WebKit
 import CSkriveCore
@@ -93,6 +94,16 @@ final class CoreBridge {
                 } catch {
                     ok = false
                 }
+                self?.reply(id: id, ok: ok)
+            }
+        case "reveal":
+            // persistence:revealUserData — open the app-data dir in Finder.
+            guard let path = obj["path"] as? String else {
+                reply(id: id, ok: false)
+                return
+            }
+            DispatchQueue.main.async { [weak self] in
+                let ok = NSWorkspace.shared.open(URL(fileURLWithPath: path))
                 self?.reply(id: id, ok: ok)
             }
         default:

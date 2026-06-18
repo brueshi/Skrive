@@ -17,6 +17,7 @@ const std = @import("std");
 const dispatch = @import("dispatch.zig");
 
 const Command = dispatch.Command;
+const Context = dispatch.Context;
 const Io = std.Io;
 const Dir = std.Io.Dir;
 const path = std.fs.path;
@@ -172,7 +173,8 @@ pub fn mtimeMs(stat: Dir.Stat) i64 {
 
 // ---- handlers -------------------------------------------------------------
 
-fn handleReadFile(a: std.mem.Allocator, io: Io, payload: std.json.Value, id: i64) anyerror![]const u8 {
+fn handleReadFile(ctx: *const Context, a: std.mem.Allocator, payload: std.json.Value, id: i64) anyerror![]const u8 {
+    const io = ctx.io;
     _ = id;
     const r = try resolveFromPayload(a, io, payload);
     const body = Dir.cwd().readFileAlloc(io, r.target, a, .unlimited) catch return error.IoFailure;
@@ -184,7 +186,8 @@ fn handleReadFile(a: std.mem.Allocator, io: Io, payload: std.json.Value, id: i64
     );
 }
 
-fn handleDetectExternalChange(a: std.mem.Allocator, io: Io, payload: std.json.Value, id: i64) anyerror![]const u8 {
+fn handleDetectExternalChange(ctx: *const Context, a: std.mem.Allocator, payload: std.json.Value, id: i64) anyerror![]const u8 {
+    const io = ctx.io;
     _ = id;
     const r = try resolveFromPayload(a, io, payload);
     const known_hash = try requireString(payload, "knownHash");
@@ -196,7 +199,8 @@ fn handleDetectExternalChange(a: std.mem.Allocator, io: Io, payload: std.json.Va
     return std.fmt.allocPrint(a, "{{\"changed\":{}}}", .{changed});
 }
 
-fn handleWriteFile(a: std.mem.Allocator, io: Io, payload: std.json.Value, id: i64) anyerror![]const u8 {
+fn handleWriteFile(ctx: *const Context, a: std.mem.Allocator, payload: std.json.Value, id: i64) anyerror![]const u8 {
+    const io = ctx.io;
     _ = id;
     const r = try resolveFromPayload(a, io, payload);
     const content = try requireString(payload, "content");
@@ -206,7 +210,8 @@ fn handleWriteFile(a: std.mem.Allocator, io: Io, payload: std.json.Value, id: i6
     return std.fmt.allocPrint(a, "{{\"hash\":\"{s}\"}}", .{try sha256Hex(a, content)});
 }
 
-fn handleWriteBinaryFile(a: std.mem.Allocator, io: Io, payload: std.json.Value, id: i64) anyerror![]const u8 {
+fn handleWriteBinaryFile(ctx: *const Context, a: std.mem.Allocator, payload: std.json.Value, id: i64) anyerror![]const u8 {
+    const io = ctx.io;
     _ = id;
     const r = try resolveFromPayload(a, io, payload);
     const base64 = try requireString(payload, "base64");
@@ -221,7 +226,8 @@ fn handleWriteBinaryFile(a: std.mem.Allocator, io: Io, payload: std.json.Value, 
     return empty_result;
 }
 
-fn handleNewFile(a: std.mem.Allocator, io: Io, payload: std.json.Value, id: i64) anyerror![]const u8 {
+fn handleNewFile(ctx: *const Context, a: std.mem.Allocator, payload: std.json.Value, id: i64) anyerror![]const u8 {
+    const io = ctx.io;
     _ = id;
     const r = try resolveFromPayload(a, io, payload);
     if (path.dirname(r.target)) |dir| Dir.cwd().createDirPath(io, dir) catch return error.IoFailure;
@@ -234,14 +240,16 @@ fn handleNewFile(a: std.mem.Allocator, io: Io, payload: std.json.Value, id: i64)
     return empty_result;
 }
 
-fn handleMkdir(a: std.mem.Allocator, io: Io, payload: std.json.Value, id: i64) anyerror![]const u8 {
+fn handleMkdir(ctx: *const Context, a: std.mem.Allocator, payload: std.json.Value, id: i64) anyerror![]const u8 {
+    const io = ctx.io;
     _ = id;
     const r = try resolveFromPayload(a, io, payload);
     Dir.cwd().createDirPath(io, r.target) catch return error.IoFailure;
     return empty_result;
 }
 
-fn handleRename(a: std.mem.Allocator, io: Io, payload: std.json.Value, id: i64) anyerror![]const u8 {
+fn handleRename(ctx: *const Context, a: std.mem.Allocator, payload: std.json.Value, id: i64) anyerror![]const u8 {
+    const io = ctx.io;
     _ = id;
     const project_root = try requireString(payload, "projectRoot");
     const old_rel = try requireString(payload, "oldRelPath");

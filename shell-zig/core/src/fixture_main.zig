@@ -50,21 +50,30 @@ fn playHostCommand(msg: []const u8) bool {
         .object => |o| o,
         else => return false,
     };
-    const host = switch (obj.get("host") orelse return false) {
+    const verb = switch (obj.get("host") orelse return false) {
         .string => |s| s,
         else => return false,
     };
-    if (!std.mem.eql(u8, host, "trash")) return false;
     const id = switch (obj.get("id") orelse return false) {
         .integer => |n| n,
         else => return false,
     };
-    const target = switch (obj.get("path") orelse return false) {
-        .string => |s| s,
-        else => return false,
-    };
 
-    const ok = deletePath(target);
+    var ok = true;
+    if (std.mem.eql(u8, verb, "trash")) {
+        const target = switch (obj.get("path") orelse return false) {
+            .string => |s| s,
+            else => return false,
+        };
+        // No OS trash in a test — a plain delete stands in.
+        ok = deletePath(target);
+    } else if (std.mem.eql(u8, verb, "reveal")) {
+        // Opening a file browser is a no-op in the harness; just ack.
+        ok = true;
+    } else {
+        return false;
+    }
+
     var rbuf: [128]u8 = undefined;
     const reply = std.fmt.bufPrint(
         &rbuf,
@@ -91,10 +100,20 @@ pub fn main(init: std.process.Init) !void {
     stdout_file = std.Io.File.stdout();
     stdout_io = init.io;
 
+    // Fresh, empty app-data dir per run so persistence:loadAppState sees no
+    // app.json (and returns the default) before saveAppState writes one.
+    var rnd: [8]u8 = undefined;
+    init.io.random(&rnd);
+    const hex = std.fmt.bytesToHex(rnd, .lower);
+    const app_data_dir = try std.fmt.allocPrint(init.gpa, "/tmp/skrive-fixture-{s}", .{hex[0..]});
+    defer init.gpa.free(app_data_dir);
+    std.Io.Dir.cwd().createDirPath(init.io, app_data_dir) catch {};
+    defer std.Io.Dir.cwd().deleteTree(init.io, app_data_dir) catch {};
+
     // The harness uses the real process Io for filesystem work (the parity
     // corpus mutates a temp project on disk); the C-ABI path uses the
     // global single-threaded Io instead.
-    const core = try core_mod.Core.create(init.io, emit, null);
+    const core = try core_mod.Core.create(init.io, app_data_dir, emit, null);
     defer core.destroy();
     // Visible to the emit callback so it can reply on the host channel.
     core_ptr = core;
