@@ -21,6 +21,7 @@ const dispatch = @import("dispatch.zig");
 const fs = @import("fs.zig");
 
 const Command = dispatch.Command;
+const Context = dispatch.Context;
 const Io = std.Io;
 const Dir = std.Io.Dir;
 const path = std.fs.path;
@@ -155,7 +156,8 @@ fn snapshotFileJson(a: std.mem.Allocator, io: Io, root_abs: []const u8, rel: []c
     ) catch error.OutOfMemory;
 }
 
-fn handleSnapshot(a: std.mem.Allocator, io: Io, payload: std.json.Value, id: i64) anyerror![]const u8 {
+fn handleSnapshot(ctx: *const Context, a: std.mem.Allocator, payload: std.json.Value, id: i64) anyerror![]const u8 {
+    const io = ctx.io;
     _ = id;
     const root_in = try requireString(payload, "root");
     if (root_in.len == 0) return error.InvalidPayload;
@@ -188,7 +190,8 @@ fn handleSnapshot(a: std.mem.Allocator, io: Io, payload: std.json.Value, id: i64
 
 // ---- create ---------------------------------------------------------------
 
-fn handleCreate(a: std.mem.Allocator, io: Io, payload: std.json.Value, id: i64) anyerror![]const u8 {
+fn handleCreate(ctx: *const Context, a: std.mem.Allocator, payload: std.json.Value, id: i64) anyerror![]const u8 {
+    const io = ctx.io;
     _ = id;
     const parent = try requireString(payload, "parent");
     if (parent.len == 0) return error.InvalidPayload;
