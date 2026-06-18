@@ -14,7 +14,7 @@ import {
   useProjectStore,
   type Tab
 } from '../../stores/project';
-import { IconDocMarkdown } from '../icons/IconDocMarkdown';
+import { DocIcon } from '../icons/DocIcon';
 import { IconDotUnsaved } from '../icons/IconDotUnsaved';
 import { IconX } from '../icons/IconX';
 
@@ -70,7 +70,7 @@ function TabPill({ tab, active, onSelect, onClose }: TabPillProps) {
       title={tab.path}
     >
       <span className="tab-icon" aria-hidden="true">
-        <IconDocMarkdown size={16} />
+        <DocIcon path={tab.path} size={16} />
       </span>
       <span className="tab-name">{name}</span>
       {tab.dirty && (

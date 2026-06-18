@@ -46,6 +46,25 @@
      as a solid background (the destructive button's hover). */
   --skrive-danger: light-dark(#a84030, #df7e6f);
   --skrive-danger-fill: light-dark(#a84030, #c0503e);
+
+  /* ---- Icon tones (theme-tuned filled icons) ----
+     The folder + document glyphs are the one place we depart from the
+     currentColor line-icon house style: they are filled, multi-tone marks
+     (paper.design) that carry more weight in the sidebar. Rather than bake a
+     single grey set, each tonal layer is a token so dark mode gets its own
+     legible values against the near-black rail instead of going muddy. Light
+     values are taken straight from the source art; dark values are lifted so
+     the silhouette reads on the dark shell. */
+  --skrive-icon-folder-back: light-dark(#343334, #6c6d71);
+  --skrive-icon-folder-front: light-dark(#6f6e6e, #97989d);
+  --skrive-icon-folder-lip: light-dark(#313131, #5f6064);
+  /* Paper sits a clear step below the light rail (--skrive-shell-bg #e7e8ea) so
+     the page reads inside the open folder; near-white washes out against it. */
+  --skrive-icon-folder-paper: light-dark(#c6c7c9, #d3d4d7);
+  --skrive-icon-doc-edge: light-dark(#b3b3b3, #6a6b6f);
+  --skrive-icon-doc-page: light-dark(#dfdfe0, #aeb0b4);
+  --skrive-icon-doc-ink: light-dark(#4a4c4d, #2b2d30);
+  --skrive-icon-doc-faint: light-dark(#b2b2b2, #7c7e82);
 }
 
 :root[data-theme='light'] {
@@ -460,12 +479,6 @@ body {
 .tab-icon {
   display: inline-flex;
   flex-shrink: 0;
-  color: var(--skrive-muted);
-}
-
-.tab.active .tab-icon,
-.tab:hover .tab-icon {
-  color: var(--skrive-fg);
 }
 
 .tab-name {
@@ -1339,7 +1352,6 @@ body {
   justify-content: center;
   width: 1rem;
   height: 1rem;
-  color: var(--skrive-muted);
 }
 
 .sidebar .dir-name {
@@ -1385,7 +1397,6 @@ body {
   justify-content: center;
   width: 1rem;
   height: 1rem;
-  color: var(--skrive-muted);
 }
 
 .sidebar .file-labels {
@@ -1394,6 +1405,45 @@ body {
   flex: 1;
   min-width: 0;
   gap: 0.0625rem;
+}
+
+/* Filled folder glyph (IconFolder): open + closed states stacked and
+   crossfaded on the `open` prop. Both drawings are vertically centred so the
+   glyph lines up with the centred doc icons in file rows (the open art is a
+   touch taller than the closed, so the crossfade grows symmetrically rather
+   than jumping). Width follows the inline size; height follows aspect ratio. */
+.icon-folder {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.icon-folder svg {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  height: auto;
+  transform: translateY(-50%);
+  transition: opacity var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.icon-folder__open {
+  opacity: 0;
+}
+
+.icon-folder[data-open] .icon-folder__closed {
+  opacity: 0;
+}
+
+.icon-folder[data-open] .icon-folder__open {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-folder svg {
+    transition: none;
+  }
 }
 
 .sidebar .file-title,
