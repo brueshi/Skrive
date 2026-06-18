@@ -56,6 +56,9 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/renderer" \
     "$APP/Contents/Resources/project"
 cp "$MACOS_DIR/Info.plist" "$APP/Contents/Info.plist"
+# App icon (CFBundleIconFile=skrive -> Resources/skrive.icns); the dark
+# brand mark, distinct from the Electron build's build/icon.icns.
+cp "$MACOS_DIR/skrive.icns" "$APP/Contents/Resources/skrive.icns"
 cp "$BIN" "$APP/Contents/MacOS/SkriveShell"
 cp "$WEB_DIR/dist/native-bridge.js" "$APP/Contents/Resources/native-bridge.js"
 cp -R "$RENDERER_DIR/." "$APP/Contents/Resources/renderer/"
