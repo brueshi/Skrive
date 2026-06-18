@@ -12,6 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private var window: NSWindow!
     private var webView: WKWebView!
     private var bridge: CoreBridge!
+    // Shared between the bridge (sets it on project:snapshot) and the asset
+    // scheme handler (serves images from it).
+    private let activeProject = ActiveProject()
 
     // Electron parity (shell/src/main/index.ts): trafficLightPosition
     // { x: 12, y: 13 } against a 40px topbar.
@@ -70,7 +73,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         webView = makeWebView()
         window.contentView = webView
 
-        bridge = CoreBridge(webView: webView, configJSON: Resources.configJSON())
+        bridge = CoreBridge(
+            webView: webView,
+            configJSON: Resources.configJSON(),
+            activeProject: activeProject
+        )
 
         loadRenderer()
 
@@ -134,14 +141,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             )
         }
         // The asset origin is independent of the app serving mode (a separate
-        // scheme handler in all three shapes); register it whenever a project
-        // root exists so the no-mixed-content row can be exercised.
-        if let projectRoot = Resources.projectRootURL() {
-            config.setURLSchemeHandler(
-                AssetSchemeHandler(projectRoot: projectRoot),
-                forURLScheme: AssetSchemeHandler.scheme
-            )
-        }
+        // scheme handler in all three shapes). It serves from the active
+        // project root, which the bridge updates as the renderer opens
+        // projects; before the first open it serves nothing.
+        config.setURLSchemeHandler(
+            AssetSchemeHandler(activeProject: activeProject),
+            forURLScheme: AssetSchemeHandler.scheme
+        )
 
         let view = WKWebView(frame: .zero, configuration: config)
         view.navigationDelegate = self

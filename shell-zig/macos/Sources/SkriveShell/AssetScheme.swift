@@ -8,17 +8,18 @@ import WebKit
 // row is exactly whether a skrive-app:// page can load images from this
 // skrive-asset:// origin.
 //
-// Path safety (Part I): the decoded path is resolved under the project root
-// and rejected if it escapes. The spike does standardized-path containment;
-// Stage 2.2 ports the full realpath/symlink check against the 0.5 fixture
-// tree.
+// Path safety (Part I): the decoded path is resolved under the ACTIVE
+// project root (the project the renderer last opened) and rejected if it
+// escapes — both root and target are canonicalized via
+// `resolvingSymlinksInPath`, so an in-root symlink that jumps outside is
+// caught, not just lexical `..` traversal.
 final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
     static let scheme = "skrive-asset"
 
-    private let projectRoot: URL
+    private let activeProject: ActiveProject
 
-    init(projectRoot: URL) {
-        self.projectRoot = projectRoot.standardizedFileURL
+    init(activeProject: ActiveProject) {
+        self.activeProject = activeProject
     }
 
     func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
@@ -26,6 +27,13 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
             task.didFailWithError(URLError(.badURL))
             return
         }
+
+        // No project open yet -> nothing to serve.
+        guard let rootPath = activeProject.rootPath else {
+            respond(task, url: url, status: 404, data: Data(), mime: "text/plain")
+            return
+        }
+        let projectRoot = URL(fileURLWithPath: rootPath).resolvingSymlinksInPath()
 
         // URL is skrive-asset://asset/<encoded path>; the leading host
         // ("asset") is dropped, the path is percent-decoded per segment.
@@ -37,7 +45,7 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
             return
         }
 
-        let target = projectRoot.appendingPathComponent(decoded).standardizedFileURL
+        let target = projectRoot.appendingPathComponent(decoded).resolvingSymlinksInPath()
         guard target.path == projectRoot.path
             || target.path.hasPrefix(projectRoot.path + "/") else {
             respond(task, url: url, status: 403, data: Data(), mime: "text/plain")
