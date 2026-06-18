@@ -83,6 +83,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         true
     }
 
+    private var quitFlushed = false
+
+    /// Pre-quit flush handshake (parity with shell/src/main/index.ts): pause
+    /// the quit once, ask the renderer to flush pending saves, and proceed on
+    /// its ack or after a 2s backstop so a wedged renderer can't trap the app.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if quitFlushed || bridge == nil { return .terminateNow }
+        bridge.beginFlush { [weak self] in
+            self?.quitFlushed = true
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     // MARK: - WebView
 
     private func makeWebView() -> WKWebView {

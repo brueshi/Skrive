@@ -83,6 +83,10 @@ final class CoreBridge {
         case "clipboard:readText":
             handleClipboardReadText(id: id)
             return true
+        case "app:flushComplete":
+            // The renderer's pre-quit flush ack — fire-and-forget, no reply.
+            finishFlush()
+            return true
         default:
             return false
         }
@@ -145,6 +149,36 @@ final class CoreBridge {
             let json = String(data: data, encoding: .utf8)
         else { return }
         dispatch(json)
+    }
+
+    /// Deliver an unsolicited event envelope to the renderer.
+    private func emitEvent(_ event: String) {
+        let envelope: [String: Any] = ["v": 1, "event": event, "payload": [:]]
+        guard let data = try? JSONSerialization.data(withJSONObject: envelope),
+            let json = String(data: data, encoding: .utf8)
+        else { return }
+        dispatch(json)
+    }
+
+    // MARK: - Pre-quit flush handshake
+
+    private var flushCompletion: (() -> Void)?
+
+    /// Ask the renderer to flush pending saves before quit, then call
+    /// `completion` on its `app:flushComplete` ack or after a 2s backstop
+    /// (whichever comes first), exactly once.
+    func beginFlush(completion: @escaping () -> Void) {
+        flushCompletion = completion
+        emitEvent("app:flush-before-quit")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.finishFlush()
+        }
+    }
+
+    private func finishFlush() {
+        guard let completion = flushCompletion else { return }
+        flushCompletion = nil
+        completion()
     }
 
     /// Core -> renderer, OR a `host:` command for the host to perform.
