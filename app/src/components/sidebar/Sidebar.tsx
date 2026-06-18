@@ -39,7 +39,7 @@ import { notify } from '../../lib/notify';
 import * as ContextMenu from '@radix-ui/react-context-menu';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { DeleteConfirmModal } from '../DeleteConfirmModal';
-import { IconDocMarkdown } from '../icons/IconDocMarkdown';
+import { DocIcon } from '../icons/DocIcon';
 import { IconFolder } from '../icons/IconFolder';
 import { IconPlus } from '../icons/IconPlus';
 
@@ -176,7 +176,7 @@ function FileRow({
             title={file.path}
           >
             <span className="file-icon">
-              <IconDocMarkdown size={16} />
+              <DocIcon path={file.path} size={16} />
             </span>
             <span className="file-labels">
               <span className="file-title">{resolved.primary}</span>
