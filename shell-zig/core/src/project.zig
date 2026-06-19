@@ -52,7 +52,9 @@ fn requireString(payload: std.json.Value, field: []const u8) ProjectError![]cons
     };
 }
 
-fn isNoiseDir(name: []const u8) bool {
+/// Shared with the watcher (Stage 3), which reuses the leaf predicate for
+/// its chokidar-parity path filter — same NOISE_DIRS, one source of truth.
+pub fn isNoiseDir(name: []const u8) bool {
     for (NOISE_DIRS) |d| {
         if (std.mem.eql(u8, d, name)) return true;
     }
@@ -65,7 +67,8 @@ fn endsWithIgnoreCase(s: []const u8, suffix: []const u8) bool {
 }
 
 /// MARKDOWN_EXT from snapshot.ts: `.md` / `.markdown`, case-insensitive.
-fn isMarkdown(name: []const u8) bool {
+/// Public for the watcher's path filter (Stage 3).
+pub fn isMarkdown(name: []const u8) bool {
     return endsWithIgnoreCase(name, ".md") or endsWithIgnoreCase(name, ".markdown");
 }
 
