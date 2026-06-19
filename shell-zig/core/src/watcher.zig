@@ -515,6 +515,17 @@ const Collector = struct {
     }
 };
 
+/// Poll the collector until `needle` (a `kind:path;` token) appears, within a
+/// budget generous enough for FSEvents latency plus the 80ms debounce.
+fn waitForEvent(io: Io, col: *Collector, needle: []const u8) !void {
+    var waited: usize = 0;
+    while (waited < 4000) : (waited += 25) {
+        try std.Io.sleep(io, .fromMilliseconds(25), .awake);
+        if (col.contains(needle)) return;
+    }
+    return error.EventNotSeen;
+}
+
 test "watcher translates, filters, and debounces real filesystem events" {
     const a = testing.allocator;
     const io = std.Io.Threaded.global_single_threaded.io();
@@ -534,26 +545,15 @@ test "watcher translates, filters, and debounces real filesystem events" {
 
     const w = try Watcher.open(wgpa, io, root, Collector.record, &collector);
 
-    const settle = struct {
-        fn waitFor(c_io: Io, col: *Collector, needle: []const u8) !void {
-            var waited: usize = 0;
-            while (waited < 4000) : (waited += 25) {
-                try std.Io.sleep(c_io, .fromMilliseconds(25), .awake);
-                if (col.contains(needle)) return;
-            }
-            return error.EventNotSeen;
-        }
-    };
-
     try std.Io.sleep(io, .fromMilliseconds(150), .awake); // backend warmup
 
     // add (markdown) — must survive the stabilization window.
     try tmp.dir.writeFile(io, .{ .sub_path = "note.md", .data = "hello" });
-    try settle.waitFor(io, &collector, "add:note.md;");
+    try waitForEvent(io, &collector, "add:note.md;");
 
     // change.
     try tmp.dir.writeFile(io, .{ .sub_path = "note.md", .data = "hello world" });
-    try settle.waitFor(io, &collector, "change:note.md;");
+    try waitForEvent(io, &collector, "change:note.md;");
 
     // A non-markdown file must be filtered out — the png never shows up.
     try tmp.dir.writeFile(io, .{ .sub_path = "image.png", .data = "x" });
@@ -562,8 +562,54 @@ test "watcher translates, filters, and debounces real filesystem events" {
 
     // unlink (immediate).
     try tmp.dir.deleteFile(io, "note.md");
-    try settle.waitFor(io, &collector, "unlink:note.md;");
+    try waitForEvent(io, &collector, "unlink:note.md;");
 
     w.close();
     try testing.expect(wgpa_state.deinit() == .ok); // no watcher leaks
+}
+
+test "watcher reports directory events and renames" {
+    const a = testing.allocator;
+    const io = std.Io.Threaded.global_single_threaded.io();
+
+    var wgpa_state = std.heap.DebugAllocator(.{}){};
+    const wgpa = wgpa_state.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(io, ".", a);
+    defer a.free(root);
+
+    var collector = Collector{ .io = io, .gpa = a };
+    defer collector.buf.deinit(a);
+
+    const w = try Watcher.open(wgpa, io, root, Collector.record, &collector);
+    try std.Io.sleep(io, .fromMilliseconds(150), .awake);
+
+    // mkdir -> addDir (immediate, no debounce).
+    try tmp.dir.createDir(io, "sub", .default_dir);
+    try waitForEvent(io, &collector, "addDir:sub;");
+
+    // A nested markdown file -> add with a forward-slash rel path.
+    try tmp.dir.writeFile(io, .{ .sub_path = "sub/deep.md", .data = "x" });
+    try waitForEvent(io, &collector, "add:sub/deep.md;");
+
+    // A stabilized file to rename.
+    try tmp.dir.writeFile(io, .{ .sub_path = "note.md", .data = "hello" });
+    try waitForEvent(io, &collector, "add:note.md;");
+
+    // Rename within the tree: the gone side unlinks, the present side adds —
+    // disambiguated by existence, not by the backend's from/to ordering.
+    try tmp.dir.rename("note.md", tmp.dir, "renamed.md", io);
+    try waitForEvent(io, &collector, "unlink:note.md;");
+    try waitForEvent(io, &collector, "add:renamed.md;");
+
+    // Remove the nested file, then its (now empty) dir -> unlink + unlinkDir.
+    try tmp.dir.deleteFile(io, "sub/deep.md");
+    try waitForEvent(io, &collector, "unlink:sub/deep.md;");
+    try tmp.dir.deleteDir(io, "sub");
+    try waitForEvent(io, &collector, "unlinkDir:sub;");
+
+    w.close();
+    try testing.expect(wgpa_state.deinit() == .ok);
 }
