@@ -25,9 +25,16 @@ let package = Package(
             name: "SkriveShell",
             dependencies: ["CSkriveCore", "SkriveShellKit"],
             linkerSettings: [
-                .unsafeFlags(["-L\(coreLibDir)", "-lskrive_core"]),
+                // -lc++ and the CoreServices/CoreFoundation frameworks are
+                // for the vendored e-dant/watcher C++ TU linked into
+                // libskrive_core: it uses libc++ (std::filesystem/thread) and
+                // FSEvents (CoreServices). The static archive defers these
+                // symbols to this final link.
+                .unsafeFlags(["-L\(coreLibDir)", "-lskrive_core", "-lc++"]),
                 .linkedFramework("AppKit"),
-                .linkedFramework("WebKit")
+                .linkedFramework("WebKit"),
+                .linkedFramework("CoreServices"),
+                .linkedFramework("CoreFoundation")
             ]
         ),
         .testTarget(

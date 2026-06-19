@@ -32,7 +32,16 @@ bun build "$WEB_DIR/native-bridge.ts" \
     --format iife --target browser
 
 echo "==> 3/6 zig core static lib"
-(cd "$CORE_DIR" && zig build "-Dtarget=aarch64-macos.$ZIG_MACOS_MIN")
+# Build only the static lib (`lib` step), not the native fixture harness: the
+# harness is host-only tooling and links FSEvents directly, which Zig can't
+# resolve under this explicit cross-target. The host links the frameworks.
+#
+# --sysroot hands Zig the macOS SDK: with an explicit `-Dtarget=...macos` Zig
+# cross-compiles and won't auto-detect it, but the vendored watcher's C++
+# includes need the SDK's framework + usr/include headers (build.zig wires
+# those paths from b.sysroot).
+MACOS_SDK="$(xcrun --show-sdk-path)"
+(cd "$CORE_DIR" && zig build lib "-Dtarget=aarch64-macos.$ZIG_MACOS_MIN" --sysroot "$MACOS_SDK")
 
 echo "==> 4/6 re-archive core for ld64 alignment"
 # Zig's archiver writes members ld64 rejects ("not 8-byte aligned"); Apple's

@@ -24,12 +24,21 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    linkWatcher(b, lib.root_module, target);
-    b.installArtifact(lib);
+    // The static archive carries the watcher C++ objects but does not link
+    // frameworks (an archive has no link step; the final consumer — the Swift
+    // host, via Package.swift — links FSEvents). Crucially this keeps the lib
+    // buildable under an explicit `-Dtarget=...macos` where Zig has no SDK
+    // framework search path. `zig build lib` builds just this, for the host.
+    linkWatcher(b, lib.root_module, target, false);
+    const install_lib = b.addInstallArtifact(lib, .{});
+    b.getInstallStep().dependOn(&install_lib.step);
+    const lib_step = b.step("lib", "Install only the static core library (for the Swift host)");
+    lib_step.dependOn(&install_lib.step);
 
     // The parity harness: a small executable reading request JSONL on
     // stdin and writing responses on stdout. Installed to zig-out/bin so
-    // the parity runner can invoke it by path with `--exec`.
+    // the parity runner can invoke it by path with `--exec`. Built and run
+    // natively (the SDK is present), so it links FSEvents directly.
     const fixture = b.addExecutable(.{
         .name = "fixture_main",
         .root_module = b.createModule(.{
@@ -38,7 +47,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    linkWatcher(b, fixture.root_module, target);
+    linkWatcher(b, fixture.root_module, target, true);
     b.installArtifact(fixture);
 
     // Unit tests: each source file is its own test compilation so its
@@ -63,17 +72,22 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
         });
-        linkWatcher(b, t.root_module, target);
+        linkWatcher(b, t.root_module, target, true);
         test_step.dependOn(&b.addRunArtifact(t).step);
     }
 }
 
-/// Compile and link the vendored e-dant/watcher C ABI into `mod`. Every
-/// artifact that compiles the core needs this because dispatch.zig pulls in
-/// watcher.zig's extern declarations; compiling the single C++ TU per
-/// artifact is cheap insurance against undefined symbols. The frameworks are
-/// macOS-only (FSEvents); other targets link just the C++ backend.
-fn linkWatcher(b: *std.Build, mod: *std.Build.Module, target: std.Build.ResolvedTarget) void {
+/// Compile the vendored e-dant/watcher C ABI into `mod`. Every artifact that
+/// compiles the core needs this because dispatch.zig pulls in watcher.zig's
+/// extern declarations; compiling the single C++ TU per artifact is cheap
+/// insurance against undefined symbols, and link_libcpp supplies the C++
+/// stdlib the backend uses. `link_frameworks` adds the macOS FSEvents
+/// frameworks — set it for executables that actually link (tests, the fixture
+/// harness, both built natively), but NOT for the static archive: an archive
+/// has no link step, and `-framework` would fail under an explicit
+/// `-Dtarget=...macos` that lacks an SDK framework search path. The Swift host
+/// links the frameworks itself (Package.swift).
+fn linkWatcher(b: *std.Build, mod: *std.Build.Module, target: std.Build.ResolvedTarget, link_frameworks: bool) void {
     mod.addIncludePath(b.path("vendor/watcher/include"));
     mod.addCSourceFile(.{
         .file = b.path("vendor/watcher/src/watcher-c.cpp"),
@@ -83,7 +97,20 @@ fn linkWatcher(b: *std.Build, mod: *std.Build.Module, target: std.Build.Resolved
         .flags = &.{ "-std=c++17", "-fno-sanitize=undefined" },
     });
     mod.link_libcpp = true;
-    if (target.result.os.tag == .macos) {
+    // Under an explicit `-Dtarget=...macos` Zig treats this as cross-compiling
+    // and doesn't auto-detect the host SDK, so the watcher's framework-style
+    // `#include <CoreFoundation/...>` can't be found. When the build is given
+    // the SDK via `--sysroot`, add its framework dir so the C++ TU compiles.
+    // Native builds (no sysroot) auto-detect and need nothing here.
+    if (b.sysroot) |sysroot| {
+        mod.addSystemFrameworkPath(.{
+            .cwd_relative = b.pathJoin(&.{ sysroot, "System/Library/Frameworks" }),
+        });
+        mod.addSystemIncludePath(.{
+            .cwd_relative = b.pathJoin(&.{ sysroot, "usr/include" }),
+        });
+    }
+    if (link_frameworks and target.result.os.tag == .macos) {
         mod.linkFramework("CoreFoundation", .{});
         mod.linkFramework("CoreServices", .{});
     }

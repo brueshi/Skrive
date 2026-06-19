@@ -24,9 +24,10 @@ export const SAMPLE_ROOT = '/Skrive/Parity Sample';
 /** Commands routed to the native channel (Zig core, or the Swift host for
  *  host-owned ones). Everything else is served from the canned data below.
  *  Stage 2.5 migrated the fs/project/persistence namespaces out of the mock;
- *  what remains canned is app:platform (2.5b), the watcher (Stage 3), and
- *  history/updater (Stages 4/6). `project:openDialog` is native but
- *  host-owned (NSOpenPanel) — CoreBridge handles it, the core never sees it. */
+ *  Stage 3 migrated the watcher (project:watch/unwatch + project:change
+ *  events). What remains canned is app:platform (2.5b) and history/updater
+ *  (Stages 4/6). `project:openDialog` is native but host-owned (NSOpenPanel)
+ *  — CoreBridge handles it, the core never sees it. */
 export const NATIVE_COMMANDS = new Set<string>([
   'app:version',
   'diag:poison',
@@ -40,6 +41,8 @@ export const NATIVE_COMMANDS = new Set<string>([
   'fs:trash',
   'project:snapshot',
   'project:create',
+  'project:watch',
+  'project:unwatch',
   'project:openDialog',
   'persistence:loadAppState',
   'persistence:saveAppState',

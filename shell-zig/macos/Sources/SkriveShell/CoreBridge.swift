@@ -8,12 +8,13 @@ import SkriveShellKit
 // is `handle`; core -> renderer is the `emit` callback, marshaled to the
 // webview via the delivery rule. One instance per window.
 //
-// Everything here runs on the main thread: `handle` is called from the
-// script-message handler, and the Stage 1 core invokes `emit`
-// synchronously inside that same call. Hence @MainActor, and the C
-// callback asserts the invariant with `assumeIsolated`. When Stage 2 lets
-// the core emit from a thread pool, that is where the host marshals back —
-// a localized change behind this same surface.
+// `handle` is called from the script-message handler on the main thread.
+// The core emits responses synchronously inside that call, but since Stage 3
+// it also emits unsolicited events (`project:change`) from the watcher's poll
+// thread. The C callback therefore copies the message synchronously (the
+// pointer is core-owned and valid only for the call) and marshals delivery to
+// the main thread — satisfying the Part I delivery rule from any thread and
+// keeping responses and events FIFO-ordered on the main queue.
 @MainActor
 final class CoreBridge {
     // Touched only on the main thread in practice; `nonisolated(unsafe)`
@@ -36,8 +37,16 @@ final class CoreBridge {
                     let bridge = Unmanaged<CoreBridge>
                         .fromOpaque(ud)
                         .takeUnretainedValue()
+                    // Copy now: `msg` points into core-owned memory (the
+                    // request arena, or the watcher emit's scratch arena)
+                    // valid only for this call.
                     let json = String(cString: msg)
-                    MainActor.assumeIsolated { bridge.dispatch(json) }
+                    // Hop to the main thread for delivery: the core may emit
+                    // from its own thread (the watcher poll thread), and the
+                    // webview must be touched on the main thread.
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated { bridge.dispatch(json) }
+                    }
                 },
                 userdata
             )
