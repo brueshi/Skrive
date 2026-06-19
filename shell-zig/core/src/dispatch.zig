@@ -19,6 +19,7 @@ const errors = @import("errors.zig");
 const fs = @import("fs.zig");
 const project = @import("project.zig");
 const persistence = @import("persistence.zig");
+const watcher = @import("watcher.zig");
 const ErrorCode = errors.ErrorCode;
 
 pub const ENVELOPE_VERSION = 1;
@@ -36,11 +37,14 @@ pub const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
 const CORE_VERSION = "0.1.0-zig-spike";
 
 /// Long-lived state the core hands every handler: the `Io` for filesystem
-/// work and the app-data dir (from `config_json`). Stage 3's watcher
-/// registry will live here too. Read-only in Stage 2.
+/// work, the app-data dir (from `config_json`), and the single-watcher slot
+/// (Stage 3). `watcher_ctl` is null where there is no event channel — the
+/// parity-fixture harness builds a Context with the default, so
+/// `project:watch` is a safe no-op there.
 pub const Context = struct {
     io: std.Io,
     app_data_dir: []const u8,
+    watcher_ctl: ?*watcher.WatcherCtl = null,
 };
 
 /// A command handler. It receives the core `Context`, the per-request

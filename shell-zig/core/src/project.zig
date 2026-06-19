@@ -19,6 +19,7 @@
 const std = @import("std");
 const dispatch = @import("dispatch.zig");
 const fs = @import("fs.zig");
+const filter = @import("filter.zig");
 
 const Command = dispatch.Command;
 const Context = dispatch.Context;
@@ -33,15 +34,11 @@ pub const ProjectError = error{
     OutOfMemory,
 };
 
-/// Hardcoded skip list, copied verbatim from `snapshot.ts` NOISE_DIRS.
-const NOISE_DIRS = [_][]const u8{
-    "node_modules", "target",      "dist",  "build", "__pycache__", "venv",
-    ".git",         ".svelte-kit", ".next", "out",   ".DS_Store",
-};
-
 pub const commands = [_]Command{
     .{ .name = "project:snapshot", .handler = handleSnapshot },
     .{ .name = "project:create", .handler = handleCreate },
+    .{ .name = "project:watch", .handler = handleWatch },
+    .{ .name = "project:unwatch", .handler = handleUnwatch },
 };
 
 fn requireString(payload: std.json.Value, field: []const u8) ProjectError![]const u8 {
@@ -50,26 +47,6 @@ fn requireString(payload: std.json.Value, field: []const u8) ProjectError![]cons
         .string => |s| s,
         else => error.InvalidPayload,
     };
-}
-
-/// Shared with the watcher (Stage 3), which reuses the leaf predicate for
-/// its chokidar-parity path filter — same NOISE_DIRS, one source of truth.
-pub fn isNoiseDir(name: []const u8) bool {
-    for (NOISE_DIRS) |d| {
-        if (std.mem.eql(u8, d, name)) return true;
-    }
-    return false;
-}
-
-fn endsWithIgnoreCase(s: []const u8, suffix: []const u8) bool {
-    if (s.len < suffix.len) return false;
-    return std.ascii.eqlIgnoreCase(s[s.len - suffix.len ..], suffix);
-}
-
-/// MARKDOWN_EXT from snapshot.ts: `.md` / `.markdown`, case-insensitive.
-/// Public for the watcher's path filter (Stage 3).
-pub fn isMarkdown(name: []const u8) bool {
-    return endsWithIgnoreCase(name, ".md") or endsWithIgnoreCase(name, ".markdown");
 }
 
 // ---- snapshot -------------------------------------------------------------
@@ -99,7 +76,7 @@ fn walkDir(io: Io, a: std.mem.Allocator, dir: Dir, rel_prefix: []const u8, out: 
         const entry = (it.next(io) catch break) orelse break;
         switch (entry.kind) {
             .directory => {
-                if (isNoiseDir(entry.name)) continue;
+                if (filter.isNoiseDir(entry.name)) continue;
                 if (entry.name.len > 0 and entry.name[0] == '.') continue;
                 const child_rel = try joinRel(a, rel_prefix, entry.name);
                 var sub = dir.openDir(io, entry.name, .{ .iterate = true }) catch continue;
@@ -109,7 +86,7 @@ fn walkDir(io: Io, a: std.mem.Allocator, dir: Dir, rel_prefix: []const u8, out: 
             .file => {
                 if (entry.name.len > 0 and entry.name[0] == '.') continue;
                 const child_rel = try joinRel(a, rel_prefix, entry.name);
-                try out.append(a, .{ .rel = child_rel, .with_body = isMarkdown(entry.name) });
+                try out.append(a, .{ .rel = child_rel, .with_body = filter.isMarkdown(entry.name) });
             },
             else => {},
         }
@@ -232,6 +209,41 @@ fn handleCreate(ctx: *const Context, a: std.mem.Allocator, payload: std.json.Val
     return std.fmt.allocPrint(a, "{{\"path\":{s}}}", .{try fs.jsonString(a, target)}) catch error.OutOfMemory;
 }
 
+// ---- watch / unwatch ------------------------------------------------------
+
+/// Start watching `root`, replacing any active watcher (single watcher per
+/// core). The path is canonicalized so the watcher's rel-path stripping lines
+/// up with the absolute paths the backend reports. Returns `{}` — the
+/// contract's `watch(): Promise<void>`. Where there is no event channel (the
+/// parity harness), this is a no-op.
+fn handleWatch(ctx: *const Context, a: std.mem.Allocator, payload: std.json.Value, id: i64) anyerror![]const u8 {
+    _ = id;
+    const root_in = try requireString(payload, "root");
+    if (root_in.len == 0) return error.InvalidPayload;
+    const ctl = ctx.watcher_ctl orelse return "{}";
+
+    const root_abs = path.resolve(a, &.{root_in}) catch return error.OutOfMemory;
+    // A missing root just yields no events (chokidar's non-throwing posture),
+    // so fall back to the resolved path if realpath can't canonicalize it.
+    const root_real: []const u8 = if (Dir.realPathFileAbsoluteAlloc(ctx.io, root_abs, a)) |r|
+        r
+    else |_|
+        root_abs;
+
+    ctl.start(ctx.io, root_real) catch return error.IoFailure;
+    return "{}";
+}
+
+/// Stop the active watcher, if any. Returns `{}` (contract `unwatch():
+/// Promise<void>`).
+fn handleUnwatch(ctx: *const Context, a: std.mem.Allocator, payload: std.json.Value, id: i64) anyerror![]const u8 {
+    _ = a;
+    _ = payload;
+    _ = id;
+    if (ctx.watcher_ctl) |ctl| ctl.stop();
+    return "{}";
+}
+
 /// Best-effort `git init` in the new project (matching the oracle, which
 /// ignores a missing or failing git). argv[0] resolves via the parent's
 /// PATH; output is suppressed.
@@ -268,14 +280,4 @@ test "walkedLessThan reproduces the corpus localeCompare order" {
         "notes/intro.md", "README.md",        "test.png",
     };
     for (want, 0..) |w, i| try testing.expectEqualStrings(w, items[i].rel);
-}
-
-test "isMarkdown and isNoiseDir match the oracle rules" {
-    try testing.expect(isMarkdown("a.md"));
-    try testing.expect(isMarkdown("A.MARKDOWN"));
-    try testing.expect(!isMarkdown("a.png"));
-    try testing.expect(!isMarkdown("README"));
-    try testing.expect(isNoiseDir("node_modules"));
-    try testing.expect(isNoiseDir(".git"));
-    try testing.expect(!isNoiseDir("notes"));
 }

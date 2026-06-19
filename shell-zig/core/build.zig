@@ -53,6 +53,7 @@ pub fn build(b: *std.Build) void {
         "src/fs.zig",
         "src/project.zig",
         "src/persistence.zig",
+        "src/filter.zig",
         "src/watcher.zig",
     }) |src| {
         const t = b.addTest(.{

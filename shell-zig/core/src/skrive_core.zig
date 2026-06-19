@@ -21,6 +21,8 @@
 
 const std = @import("std");
 const dispatch = @import("dispatch.zig");
+const watcher = @import("watcher.zig");
+const fs = @import("fs.zig");
 
 /// Core -> host callback. Matches `SkriveCoreEmit` in
 /// `include/skrive_core.h`; the signatures are coupled by the round-trip
@@ -38,6 +40,10 @@ pub const Core = struct {
     ctx: dispatch.Context,
     emit: Emit,
     userdata: ?*anyopaque,
+    /// The single watcher slot (Stage 3). The dispatcher reaches it through
+    /// `ctx.watcher_ctl`; its emit bridge turns ProjectChanges into
+    /// `project:change` event envelopes and hands them to `emit`.
+    watcher_ctl: watcher.WatcherCtl,
 
     pub fn create(io: std.Io, app_data_dir: []const u8, emit: Emit, userdata: ?*anyopaque) !*Core {
         const core = try std.heap.c_allocator.create(Core);
@@ -47,11 +53,23 @@ pub const Core = struct {
             .ctx = .{ .io = io, .app_data_dir = dir_copy },
             .emit = emit,
             .userdata = userdata,
+            .watcher_ctl = .{
+                .gpa = std.heap.c_allocator,
+                .active = null,
+                .emit_fn = watcherEmitBridge,
+                // Set below: the bridge needs the now-allocated core address.
+                .emit_ctx = undefined,
+            },
         };
+        core.watcher_ctl.emit_ctx = core;
+        core.ctx.watcher_ctl = &core.watcher_ctl;
         return core;
     }
 
     pub fn destroy(self: *Core) void {
+        // Stop the watcher (joins its threads) before tearing down state it
+        // emits through.
+        self.watcher_ctl.stop();
         std.heap.c_allocator.free(self.ctx.app_data_dir);
         std.heap.c_allocator.destroy(self);
     }
@@ -67,6 +85,27 @@ pub const Core = struct {
         emit(self.userdata, response.ptr);
     }
 };
+
+/// Bridge a watcher ProjectChange to the host as a `project:change` event
+/// envelope. Runs on the watcher's poll thread, so it builds the JSON in its
+/// own scratch arena (page-allocator backed, thread-safe) and hands the host
+/// the NUL-terminated string; the host copies it (the delivery rule) and
+/// marshals it to the UI thread.
+fn watcherEmitBridge(ctx: ?*anyopaque, kind: watcher.ChangeKind, rel: []const u8) void {
+    const core: *Core = @ptrCast(@alignCast(ctx.?));
+    const emit_cb = core.emit orelse return;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const rel_json = fs.jsonString(a, rel) catch return;
+    const json = std.fmt.allocPrintSentinel(
+        a,
+        "{{\"v\":1,\"event\":\"project:change\",\"payload\":{{\"kind\":\"{s}\",\"path\":{s}}}}}",
+        .{ kind.wireName(), rel_json },
+        0,
+    ) catch return;
+    emit_cb(core.userdata, json.ptr);
+}
 
 // ---- C ABI ----------------------------------------------------------------
 

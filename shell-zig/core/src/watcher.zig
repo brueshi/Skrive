@@ -29,7 +29,7 @@
 //! thread — the host marshals it to the UI thread (Stage 3.4).
 
 const std = @import("std");
-const project = @import("project.zig");
+const filter = @import("filter.zig");
 
 const Dir = std.Io.Dir;
 const Io = std.Io;
@@ -116,17 +116,17 @@ fn shouldIgnore(rel: []const u8, is_dir: bool) bool {
     var idx: usize = 0;
     while (std.mem.indexOfScalarPos(u8, rel, idx, '/')) |slash| {
         const seg = rel[idx..slash];
-        if (project.isNoiseDir(seg)) return true;
+        if (filter.isNoiseDir(seg)) return true;
         if (seg.len > 0 and seg[0] == '.') return true;
         idx = slash + 1;
     }
     const base = rel[idx..];
-    if (project.isNoiseDir(base)) return true;
+    if (filter.isNoiseDir(base)) return true;
     if (is_dir) return base.len > 0 and base[0] == '.';
     // File: keep markdown, and the root config file the watcher rescans on;
     // drop everything else. The root-only check matches the oracle's
     // `resolve(target) === resolve(root, '.skrive.toml')`.
-    if (project.isMarkdown(base)) return false;
+    if (filter.isMarkdown(base)) return false;
     if (std.mem.eql(u8, rel, ".skrive.toml")) return false;
     return true;
 }
@@ -434,6 +434,32 @@ fn cCallback(event: c.Event, context: ?*anyopaque) callconv(.c) void {
     self.onEvent(event);
 }
 
+/// The core's single-watcher slot. Lives on the `Core`; the dispatcher hands
+/// `project:watch`/`unwatch` a pointer to it via `Context`. Holds the emit
+/// bridge the core wires to its host callback, so the watcher itself stays
+/// ignorant of the envelope/transport. Single watcher per core, matching the
+/// Electron shell's one `activeWatcher`.
+pub const WatcherCtl = struct {
+    gpa: std.mem.Allocator,
+    active: ?*Watcher = null,
+    emit_fn: EmitFn,
+    emit_ctx: ?*anyopaque,
+
+    /// (Re)start watching `root`. Re-entering closes the previous watcher
+    /// first, like chokidar's `watch` closing `activeWatcher`.
+    pub fn start(self: *WatcherCtl, io: Io, root: []const u8) !void {
+        self.stop();
+        self.active = try Watcher.open(self.gpa, io, root, self.emit_fn, self.emit_ctx);
+    }
+
+    pub fn stop(self: *WatcherCtl) void {
+        if (self.active) |w| {
+            w.close();
+            self.active = null;
+        }
+    }
+};
+
 // ---- tests ----------------------------------------------------------------
 
 const testing = std.testing;
@@ -496,14 +522,11 @@ test "watcher translates, filters, and debounces real filesystem events" {
     var wgpa_state = std.heap.DebugAllocator(.{}){};
     const wgpa = wgpa_state.allocator();
 
-    const dir_name = "watcher_e2e_test_dir";
-    Dir.cwd().createDir(io, dir_name, .default_dir) catch |e| switch (e) {
-        error.PathAlreadyExists => {},
-        else => return e,
-    };
-    defer Dir.cwd().deleteTree(io, dir_name) catch {};
-
-    const root = try Dir.cwd().realPathFileAlloc(io, dir_name, a);
+    // A unique temp dir: this test is reachable from several test roots and
+    // those binaries run in parallel, so a fixed name would collide.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(io, ".", a);
     defer a.free(root);
 
     var collector = Collector{ .io = io, .gpa = a };
@@ -511,7 +534,6 @@ test "watcher translates, filters, and debounces real filesystem events" {
 
     const w = try Watcher.open(wgpa, io, root, Collector.record, &collector);
 
-    // Helper to write a file inside the watched dir.
     const settle = struct {
         fn waitFor(c_io: Io, col: *Collector, needle: []const u8) !void {
             var waited: usize = 0;
@@ -526,21 +548,20 @@ test "watcher translates, filters, and debounces real filesystem events" {
     try std.Io.sleep(io, .fromMilliseconds(150), .awake); // backend warmup
 
     // add (markdown) — must survive the stabilization window.
-    try Dir.cwd().writeFile(io, .{ .sub_path = dir_name ++ "/note.md", .data = "hello" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "note.md", .data = "hello" });
     try settle.waitFor(io, &collector, "add:note.md;");
 
     // change.
-    try Dir.cwd().writeFile(io, .{ .sub_path = dir_name ++ "/note.md", .data = "hello world" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "note.md", .data = "hello world" });
     try settle.waitFor(io, &collector, "change:note.md;");
 
-    // A non-markdown file must be filtered out — assert the add did fire but
-    // the png never shows up after a generous wait.
-    try Dir.cwd().writeFile(io, .{ .sub_path = dir_name ++ "/image.png", .data = "x" });
+    // A non-markdown file must be filtered out — the png never shows up.
+    try tmp.dir.writeFile(io, .{ .sub_path = "image.png", .data = "x" });
     try std.Io.sleep(io, .fromMilliseconds(400), .awake);
     try testing.expect(!collector.contains("image.png"));
 
     // unlink (immediate).
-    try Dir.cwd().deleteFile(io, dir_name ++ "/note.md");
+    try tmp.dir.deleteFile(io, "note.md");
     try settle.waitFor(io, &collector, "unlink:note.md;");
 
     w.close();
