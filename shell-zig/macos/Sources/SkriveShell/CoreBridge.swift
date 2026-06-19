@@ -4,6 +4,25 @@ import WebKit
 import CSkriveCore
 import SkriveShellKit
 
+/// The C emit callback (core -> host). A top-level function so it forms a C
+/// function pointer and is `nonisolated`: the core invokes it from its own
+/// thread now (the watcher's poll thread), so a MainActor-isolated closure
+/// would trap on an executor check at entry before it could hop to main. It
+/// copies the message synchronously (the pointer is core-owned, valid only
+/// for this call) and dispatches delivery to the main thread — satisfying the
+/// delivery rule from any thread and keeping responses + events FIFO-ordered.
+private func skriveCoreEmit(
+    _ ud: UnsafeMutableRawPointer?,
+    _ msg: UnsafePointer<CChar>?
+) {
+    guard let ud, let msg else { return }
+    let bridge = Unmanaged<CoreBridge>.fromOpaque(ud).takeUnretainedValue()
+    let json = String(cString: msg)
+    DispatchQueue.main.async {
+        MainActor.assumeIsolated { bridge.dispatch(json) }
+    }
+}
+
 // Owns the Zig core and shuttles envelopes across the C ABI. Host -> core
 // is `handle`; core -> renderer is the `emit` callback, marshaled to the
 // webview via the delivery rule. One instance per window.
@@ -30,26 +49,7 @@ final class CoreBridge {
         // function pointer. `userdata` carries us back into Swift.
         let userdata = Unmanaged.passUnretained(self).toOpaque()
         configJSON.withCString { cfg in
-            core = skrive_core_create(
-                cfg,
-                { ud, msg in
-                    guard let ud, let msg else { return }
-                    let bridge = Unmanaged<CoreBridge>
-                        .fromOpaque(ud)
-                        .takeUnretainedValue()
-                    // Copy now: `msg` points into core-owned memory (the
-                    // request arena, or the watcher emit's scratch arena)
-                    // valid only for this call.
-                    let json = String(cString: msg)
-                    // Hop to the main thread for delivery: the core may emit
-                    // from its own thread (the watcher poll thread), and the
-                    // webview must be touched on the main thread.
-                    DispatchQueue.main.async {
-                        MainActor.assumeIsolated { bridge.dispatch(json) }
-                    }
-                },
-                userdata
-            )
+            core = skrive_core_create(cfg, skriveCoreEmit, userdata)
         }
     }
 
@@ -203,7 +203,8 @@ final class CoreBridge {
     /// everything else is forwarded per the Part I delivery rule. The cheap
     /// prefix guard keeps every (possibly large) response off the JSON
     /// parser — only host envelopes start with `{"v":1,"host":`.
-    private func dispatch(_ envelopeJSON: String) {
+    /// `fileprivate` so the top-level `skriveCoreEmit` trampoline can reach it.
+    fileprivate func dispatch(_ envelopeJSON: String) {
         if envelopeJSON.hasPrefix("{\"v\":1,\"host\":") {
             handleHostCommand(envelopeJSON)
             return
