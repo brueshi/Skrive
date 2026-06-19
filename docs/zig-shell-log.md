@@ -1255,3 +1255,114 @@ canned data in `shell-zig/web/sample-data.ts`.
 **Next.** Dogfood real writing sessions on the Zig build (friction -> log);
 then Stage 3 (the watcher: `project:watch`/`unwatch` + `project:change`
 events via `watcher-c`), the one shell primitive with real platform depth.
+
+---
+
+## 2026-06-18 — Stage 3 (the watcher): code-complete, manual pass PENDING
+
+**Branch:** `labs/zig-shell-stage-3-watcher` (off `main` after Stage 2 was
+confirmed already merged — see the merge note below). Four commits, one per
+sub-stage, all green.
+
+**Merge note (process).** Setting out to "merge Stage 2 to main first," a
+local fast-forward + push was rejected: `origin/main` already had Stage 2
+via a GitHub rebase-merge (identical trees, new SHAs), so the local
+`labs/zig-shell-stage-2-persistence` tip was a stale pre-merge copy. Lesson
+logged in memory: check `origin/main` before re-merging a stage branch.
+
+**What shipped.**
+- **3.1 — vendor + link.** `e-dant/watcher` vendored in-repo at
+  `shell-zig/core/vendor/watcher/` (decision: in-repo over `build.zig.zon`
+  fetch — offline, reproducible, one `git rm` from a clean kill). It is just
+  three files (the header-only C++ core, the C ABI header, the 77-line C
+  shim) + LICENSE + a provenance README. `build.zig` compiles the one C++ TU
+  into every artifact that pulls in the core, links libc++, and links
+  CoreFoundation/CoreServices (FSEvents) for executables.
+- **3.2 — translate + stabilize.** `watcher.zig` maps watcher-c events to the
+  renderer's `ProjectChange` shape, matching chokidar rather than improving
+  on it. Path filter mirrors chokidar's `ignored` predicate exactly (shared
+  `filter.zig` leaf module: NOISE_DIRS / isMarkdown). Renames disambiguated
+  by existence (gone side -> unlink, present side -> add), so the backend's
+  from/to ordering is irrelevant. Write-finish stabilization rebuilt (80ms
+  stable on size+mtime, 30ms poll — the Electron shell's `awaitWriteFinish`
+  values, which watcher-c does not provide); unlink + dir events emit
+  immediately; create-then-delete before stabilizing is a transient file and
+  emits nothing. A dedicated poll thread owns timing; one `Io.Mutex`
+  serializes the shared queue/pending map and every allocator op so a
+  non-thread-safe allocator stays race-free.
+- **3.3 — dispatch + events.** `project:watch`/`unwatch` wired through a
+  `WatcherCtl` slot on the Core, reached via `Context.watcher_ctl`
+  (single watcher per core; re-watch closes the previous, like the Electron
+  `activeWatcher`). The Core's emit bridge turns each stabilized
+  ProjectChange into a `{v:1,event:"project:change",payload:{kind,path}}`
+  envelope and hands it to the host emit callback.
+- **3.4 — host + renderer.** The CoreBridge C emit callback now copies the
+  message synchronously then marshals delivery with `DispatchQueue.main.async`
+  — the core emits from the watcher's poll thread now, so the callback can no
+  longer assume it is on main (exactly the change CoreBridge's header comment
+  predicted). `project:watch`/`unwatch` added to NATIVE_COMMANDS. `Skrive.app`
+  builds and the Swift host links clean.
+
+**Key decision data — self-write suppression is NOT in the shell.** The
+Electron shell forwards every chokidar event faithfully (`ignoreInitial`
+aside) and the renderer dedups echoes of the app's own saves via content
+hash (`fs.detectExternalChange` against the tab `diskHash`,
+`app/src/stores/project.ts`). Per "mirror Electron first," the Zig core emits
+faithfully too — no in-core suppression. This removed the trickiest item the
+master plan had budgeted for. The plan's guessed 200/50 debounce was also
+corrected to the real 80/30 from `shell/src/ipc/project.ts`.
+
+**Toolchain findings (Zig 0.16).**
+1. `zig test` runs ALL transitively-reachable `test` blocks, not just the
+   root file's. Once dispatch/skrive_core imported watcher, the live e2e test
+   ran inside several test binaries IN PARALLEL — a fixed temp-dir name
+   collided. Fixed by `std.testing.tmpDir` (unique per run). (This also
+   explains the per-target test counts looking inflated since Stage 2.)
+2. Threading/sleep moved under the IO model: `std.Thread.{Mutex,sleep}` are
+   gone; mutual exclusion is `std.Io.Mutex` (atomics + OS futex — real across
+   any OS threads; "single_threaded" in `global_single_threaded` names the
+   async scheduler, not a process-wide claim), sleep is
+   `std.Io.sleep(io, .fromMilliseconds(n), .awake)`.
+3. Cross-target macOS SDK plumbing. Under an explicit `-Dtarget=...macos` Zig
+   cross-compiles and does NOT auto-detect the host SDK (Stage 2's pure-Zig
+   core never hit this — no C headers). The vendored C++ needs the SDK's
+   framework headers AND `usr/include` (Security.framework pulls in
+   `libDER/`). Fix: `build.zig` adds both from `b.sysroot`, `build-macos.sh`
+   passes `--sysroot "$(xcrun --show-sdk-path)"`, and a `lib` step builds only
+   the static archive (the native fixture harness links FSEvents directly and
+   stays native). The archive itself links no frameworks — it has no link
+   step; the Swift host links them.
+
+**Tests.** `watcher.zig` has two live FSEvents end-to-end tests under a
+leak-checking allocator: (1) add / change / unlink + a non-markdown file
+filtered out; (2) mkdir->addDir, nested-path add, file rename (unlink+add),
+file delete, rmdir->unlinkDir. Plus pure unit tests for the filter predicate
+and rel-path mapping. Core suite green; ran the e2e set repeatedly with no
+flakiness. Parity corpus 26/26 throughout (events are not request/response,
+so they are out of corpus scope — see the gap below).
+
+**HONEST PARITY GAP (logged, not hidden).** The JSONL parity corpus is
+request/response only; it cannot cover unsolicited `project:change` events.
+Watcher parity therefore rests on the Zig mutation tests above plus the
+side-by-side manual pass below — not on fixture replay. This is the one
+namespace the corpus does not gate.
+
+**3.5e — MANUAL PASS: PENDING (Joe).** The assembled
+`shell-zig/macos/.build/Skrive.app` is ready. Hands-on gate, side by side
+with the Electron build:
+1. Open a project in the Zig build. In another editor (or Finder), edit a
+   `.md` file in that project -> Skrive's view updates (the watch-sync
+   re-reads + the editor shows the external change / conflict prompt),
+   exactly as Electron does.
+2. Create a new `.md` file externally -> it appears in the sidebar.
+3. Delete a file externally -> it disappears from the sidebar.
+4. Rename a file externally -> old name gone, new name present.
+5. Create a folder + a file inside it externally -> both appear.
+6. Confirm the app's OWN autosaves do NOT cause spurious conflict prompts
+   (renderer hash-dedup working).
+7. Soak: leave it watching during a normal writing session; watch for
+   runaway memory or CPU from the poll thread. Friction -> this log.
+
+**Status: Stage 3 code-complete and headless-verified; 3.5e manual pass is
+the remaining exit gate.** Deferred items unchanged (window pre-paint color;
+dual-shell embed-default drift guard; Stage 4.4 Edit menu).
