@@ -1366,3 +1366,30 @@ with the Electron build:
 **Status: Stage 3 code-complete and headless-verified; 3.5e manual pass is
 the remaining exit gate.** Deferred items unchanged (window pre-paint color;
 dual-shell embed-default drift guard; Stage 4.4 Edit menu).
+
+**3.5e finding #1 (FIXED) — host crash on the first external edit.** First
+dogfood touch (editing a watched `.md` in Obsidian) crashed the Zig build
+(`SIGTRAP`, `dispatch_assert_queue_fail`) while Electron stayed up. Crash
+report: faulting thread = the watcher poll thread,
+`pollPending -> emit -> watcherEmitBridge -> CoreBridge emit closure ->
+swift_task_isCurrentExecutor`. Root cause: the C emit callback was a closure
+created inside the `@MainActor CoreBridge.init`, so Swift 6 treated it as
+MainActor-isolated and asserted the executor AT CLOSURE ENTRY. Synchronous
+responses always enter on main (pass); the watcher emits from its poll thread,
+where the entry check trapped before the body's `DispatchQueue.main.async`
+could hop. Fix (`7eee15c`): hoist the callback to a top-level `nonisolated`
+function (also the only form that makes a C function pointer — a
+static-method reference does not), copy synchronously, dispatch to main.
+**This is a host-layer Swift-concurrency detail, not a Zig-core/architecture
+blocker** — the core's threaded emit was correct; the host just couldn't be
+re-entered off-main (same class of incomplete-host-detail as the 2.5e Cmd-Q
+menu). Gate 3 stays clear. Retest pending.
+
+**Not a bug — expected: editing an OPEN document externally doesn't live-update
+the editor.** Both shells deliberately do not reload an open tab's buffer from
+disk (that would clobber unsaved edits); the watcher updates the project MODEL
+(sidebar/backlinks/lint) and a disk drift surfaces as a conflict prompt on the
+next save (`detectExternalChange` vs the tab `diskHash`). So the watcher pass
+should be judged by SIDEBAR reaction to create/delete/rename, not by an open
+document's text changing. (Joe observed Electron "not showing" an Obsidian edit
+to an open file — that is this by-design behavior, identical in both shells.)
