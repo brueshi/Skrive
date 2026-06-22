@@ -590,45 +590,32 @@ inline auto event_recv_one(ContextData& ctx, char const* path, unsigned flags)
     ctx.callback({path, ety::modify, pt});
   }
   if (flags & fsev_flag_effect_rename) {
-    /*  Assumes that the last "renamed-from" path
-        is "honestly" correlated to the current
-        "rename-to" path.
-        For non-destructive rename events, we
-        usually receive events in this order:
-          1. A rename event on the "from-path"
-          2. A rename event on the "to-path"
-        As long as that pattern holds, we can
-        store the first path in a set, look it
-        up, test it against the current path
-        for inequality, and check that it no
-        longer exists -- In which case, we can
-        say that we were renamed from that path
-        to the current path.
-        We want to store the last rename-from
-        path in a set on the heap because the
-        rename events might not be batched, and
-        we don't want to trample on some other
-        watcher with a static.
-        This pattern breaks down if there are
-        intervening rename events.
-        For thoughts on recognizing destructive
-        rename events, see this directory's
-        notes (in the `notes.md` file).
-    */
-    auto lr_path = *ctx.last_rename_path;
-    auto differs = ! lr_path.empty() && lr_path != path;
-    auto missing = access(lr_path.c_str(), F_OK) == -1;
-    if (differs && missing) {
-      ctx.callback({
-        {lr_path, ety::rename, pt},
-        {   path, ety::rename, pt}
-      });
-      ctx.last_rename_path->clear();
-    } else {
-      *ctx.last_rename_path = path;
+    /*  SKRIVE LOCAL MODIFICATION (see this directory's README "Local
+        modifications"). Upstream pairs the "renamed-from" and "renamed-to"
+        events to synthesize a single rename, stashing the from-path until a
+        to-path arrives inside the watched tree. That drops a rename whose
+        other half is OUTSIDE the tree -- which is exactly a move to the
+        system Trash, i.e. the common macOS file delete: the lone from-event
+        is stashed and never emitted, so the delete is invisible.
+
+        Instead, emit per-path by existence: a renamed path that no longer
+        exists is a destroy (moved away / to Trash); one that exists is a
+        create (moved/renamed into this name). Our consumer already splits a
+        rename into unlink+add, so it needs no pairing, and this also catches
+        moves INTO the tree that the pairing logic missed. chokidar uses the
+        same per-path model. `last_rename_path` is left intact but unused
+        here; the non-Apple backends keep their own rename handling. */
+    if (access(path, F_OK) == -1) {
       auto at = ctx.seen_created_paths->find(path);
       if (at != ctx.seen_created_paths->end())
         ctx.seen_created_paths->erase(at);
+      ctx.callback({path, ety::destroy, pt});
+    } else {
+      auto at = ctx.seen_created_paths->find(path);
+      if (at == ctx.seen_created_paths->end()) {
+        ctx.seen_created_paths->emplace(path);
+        ctx.callback({path, ety::create, pt});
+      }
     }
   }
 }
