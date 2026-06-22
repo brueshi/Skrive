@@ -1450,3 +1450,64 @@ destroy/create regardless of path type; the Zig layer maps `path_type=dir`
 unlinkDir. Branch `labs/zig-shell-stage-3-watcher` fast-forwarded to `main`
 (linear history, no merge commit). Stage 4 (diff via the Rust staticlib,
 then history) is next.
+
+---
+
+## 2026-06-22 — Stage 4 scope decision: diff/checkpoints/git NOT ported
+
+**Branch:** `labs/zig-shell-stage-4-native-shell` (off `main`).
+
+**Decision (Joe).** Stage 4 is reduced to **4.0 (native app-shell parity)
++ 4.4 (host polish + closing sweep)**. Sub-stages **4.1 (diff), 4.2
+(checkpoints), 4.3 (git history) are dropped** — not ported to the Zig
+shell. Reasoning surfaced this session:
+
+- Diff, checkpoints, and git-history are stand-in version-history features
+  that assume Markdown/git conformity (history = git commits or a non-git
+  checkpoint *fallback*; change view = line diff over Markdown source).
+  Skrive is graduating away from that framing (positioning: a writing+notes
+  app, Markdown demoted to storage/transport plumbing).
+- Porting features slated for replacement is exactly the wasted parity work
+  this plan's own kill-criteria name. The labs migration must not "bridge on
+  feature work that is rushed."
+- The current **Electron** diff/git/checkpoint features stay shipping and
+  **untouched** (no rip-out ahead of a replacement, so no no-history
+  regression window). The Zig build keeps them **mocked** in
+  `shell-zig/web/sample-data.ts`; they never enter the Zig core, and the
+  parity corpus never includes them. (The corpus already had no diff/history
+  fixtures — those were to be generated in 4.1-4.3 — so nothing is removed.)
+- A **Skrive-native version history** is a real but **deferred** future
+  feature: document-model-aware (block/semantic, aligned with the editor
+  north-star / bespoke-core direction), git-independent (no repo assumption,
+  owns its storage rather than being the non-git fallback), with git demoted
+  to an optional later integration. Designed fresh, pure-JS-first in `app/`
+  under the feature-placement rule (both shells + a fixture when it earns
+  shell commands) — not now.
+
+**File-open also deferred from 4.0.** Investigating the 4.0 file-open /
+`.md`-association item showed the master plan's claim that it "rides the
+existing contract" is wrong: there is no host->renderer open verb in
+`shared/src/ipc-contracts.ts`, `App.tsx:196` literally calls it "the URL
+handler we don't have yet," and the Electron main has no `app.on('open-file')`
+/ `open-url` handler (the associations are declared in `electron-builder.yml`
+but the open event is unhandled). So opening a double-clicked `.md` and
+focusing it is net-new cross-shell feature work, not host chrome — it belongs
+to the future open-with/version-history track. Deferring it makes 4.0
+genuinely host-only: zero `app/`/core/contract changes. The master plan's
+Stage 4 section was annotated with this scope decision (4.1-4.3 prose kept for
+history, marked DEFERRED; the file-association bullet struck through).
+
+**Stage 4 as it will execute:**
+- **4.0** — host-only Swift in `shell-zig/macos/`: full standard menu bar
+  (Edit/View/Window/Help via first-responder selectors), `WKNavigationDelegate`
+  / `WKUIDelegate` external-link + window-open policy through the existing
+  `links:openExternal` allowlist, `WKWebView.isInspectable` (dev-gated),
+  pre-paint window background corrected to `#161719`/`#e7e8ea`.
+- **4.4** — dock-icon light/dark swap; verify `persistence:revealUserData`;
+  full side-by-side manual parity checklist.
+
+**Housekeeping this commit.** Landed the previously-uncommitted master-plan
+Stage 4 elaboration (4.0 section, native-feel-deference, iOS row) onto the
+branch; reverted dogfooding noise on the `typography-sample` parity fixture
+(stray frontmatter removal). Untracked release artifacts (DMG/zip) and scratch
+`.md` files left alone.

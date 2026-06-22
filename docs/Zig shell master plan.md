@@ -332,32 +332,49 @@ Checklist per shape: lint Web Worker loads and runs (module worker via `import.m
 
 **Inputs:** Stages 2-3. **Outputs:** full-parity macOS build.
 
-#### 4.1 — Diff via Rust staticlib
+> **Scope decision (2026-06-22).** Stage 4 is reduced to **4.0 (native app-shell parity) + 4.4 (host polish + closing sweep)**. Sub-stages **4.1 (diff), 4.2 (checkpoints), 4.3 (git history) are deferred and NOT ported to the Zig shell** — their prose below is retained for history, not executed. Rationale: diff/checkpoints/git are stand-in version-history features that assume Markdown/git conformity, which Skrive is graduating away from (positioning: writing+notes app, Markdown as plumbing). Porting features slated for replacement is the wasted parity work this plan's own kill-criteria warn against, and the labs migration must not bridge on rushed feature work. The current Electron diff/git/checkpoint features stay shipping and untouched; the Zig build keeps them mocked (`shell-zig/web/sample-data.ts`); the parity corpus does not include them. A Skrive-native version history — document-model-aware, git-independent, with git demoted to an optional later integration — is a deferred future feature, designed fresh under the feature-placement rule when its time comes, not here. **The file-open / `.md`-association item in 4.0 is likewise deferred**: it is net-new cross-shell work (a host→renderer open verb the contract does not yet have, and which the Electron shell does not implement either — `App.tsx:196` calls it "the URL handler we don't have yet"), not host chrome, so it belongs to that future feature track, not to substrate parity. 4.0 as executed is therefore genuinely host-only with zero `app/`/core/contract changes.
+
+#### 4.0 — Native app-shell parity (do this FIRST — it gates real dogfooding)
+
+**Why first.** Electron supplies a large amount of standard-app behavior for free that the bespoke Swift host must implement explicitly. Until it exists the Zig build is a spike, not something you can live in — so this sub-stage is sequenced ahead of diff/history even though the original plan back-loaded it into 4.4. Dogfooding is meant to run *throughout* Stage 4 (during 4.1-4.3), which requires the app to feel native-complete first.
+
+The audit (2026-06-22): the Electron main has NO custom menu code, so it inherits Electron's *default* macOS menu (App/File/Edit/View/Window/Help with every standard shortcut wired) plus `setWindowOpenHandler` (external links out) and DevTools. The Swift host today has only an About/Hide/Quit app menu — no Edit/Window/View menus, no link/navigation policy, no Web Inspector.
+
+- **Full standard macOS menu bar**, replicating Electron's *default* menu via the standard AppKit first-responder selectors — App (About/Hide/Quit, already present), Edit (`undo:`/`redo:`/`cut:`/`copy:`/`paste:`/`selectAll:`), View (reload, `toggleFullScreen:`, and a dev-gated DevTools toggle), Window (`performMiniaturize:` Cmd-M, `performZoom:`, `performClose:` Cmd-W), Help. WKWebView forwards these to the web content / first responder. **Scope guard: replicate the DEFAULT menu only — NOT app-specific File items.** Skrive's New/Open/Save/command-palette live in the renderer (shared `app/`) and already work; inventing native menu items would break parity, not improve it.
+- **External-link / window-open policy** in the `WKNavigationDelegate` (`decidePolicyFor navigationAction` + `createWebViewWith`): route `target=_blank` / `window.open` / off-origin navigations through the `links:openExternal` allowlist, and block the main frame navigating off the `skrive-app://` origin (a link click in a note must not nuke the app). This is parity with Electron's `setWindowOpenHandler` and is also a security boundary.
+- **Web Inspector**: set `WKWebView.isInspectable = true` (dev-gated). Not cosmetic — it is the primary tool for diagnosing renderer behavior while dogfooding.
+- **Pre-paint window background** corrected to the current Electron values (`#161719` dark / `#e7e8ea` light); the host currently paints the stale `#1a1a1a`/`#fefcf7`.
+- **[DEFERRED — see the scope decision above.]** ~~File associations + `skrive://` URL scheme in `Info.plist` plus the open event: opening a `.md` opens its containing folder as the project and focuses that file.~~ This is NOT host chrome — there is no existing contract verb for it (the original "rides the existing contract" claim was wrong), and Electron does not implement it either, so it is net-new cross-shell feature work that belongs to the future version-history/open-with track, not to 4.0.
+- **Host-only.** Everything in 4.0 (as executed) is Swift in `shell-zig/macos/`; zero `app/`, core, or contract changes. This is precisely the "per-platform host provides the OS chrome the runtime used to give for free" the Ghostty pattern expects.
+- **Done when:** standard editing shortcuts work in the editor and in dialog text fields; Cmd-W / Cmd-M / zoom / fullscreen work; external links open in the browser without disturbing the app; Web Inspector opens; no stale launch flash. From here, dogfooding is realistic.
+
+#### 4.1 — Diff via Rust staticlib  *(DEFERRED — not ported; see scope decision)*
 
 - Add a `staticlib` crate type + `extern "C"` surface to `native/diff` (new `src/capi.rs`; keep the NAPI surface intact for the Electron build). API shape: compute → opaque handle → op iteration → free (the pattern already designed in `docs/Zig diff experiment.md` §FFI surface — reuse it).
 - `build.zig` builds/links it (invoke `cargo build --release` as a build step or require the artifact prebuilt; document in README).
 - `core/src/diff.zig` wraps it into `diff:computeDiff`/`computeLineDiff`.
 - **Done when:** `fixtures/diff.jsonl` (generated from the existing `native/diff/__test__/fixtures.test.ts` cases) replays green; DiffView renders identically in the running app.
 
-#### 4.2 — History: checkpoints
+#### 4.2 — History: checkpoints  *(DEFERRED — not ported; see scope decision)*
 
 - Port `shell/src/lib/checkpoint.ts` semantics to `core/src/checkpoint.zig`: same storage layout (`projects/<hash>/checkpoints/<fileHash>/<timestamp>_<auto|manual_slug>.md` + `.name` sidecar), same auto-checkpoint interval and content-hash dedup, same retention caps. Byte-compatible layout is required — a user switching shells must keep their history.
 - Auto-checkpoint trigger moves with it: `fs:writeFile` on markup files calls into the checkpoint module exactly as `fs.ts:98-106` does.
 - **Done when:** checkpoint fixtures replay green; a checkpoint store written by the Electron build lists and reads correctly in the Zig build (round-trip test).
 
-#### 4.3 — History: git
+#### 4.3 — History: git  *(DEFERRED — not ported; see scope decision)*
 
 - `core/src/git_history.zig`: spawn system `git` with the same argv as `shell/src/lib/git-history.ts:37-151`, same parsing, same mode detection (`history:getMode`), same enable/disable persistence.
 - **Done when:** history fixtures replay green against a fixture repo with known commits.
 
-#### 4.4 — Host completions
+#### 4.4 — Host completions (residual polish + the closing parity sweep)
 
-- Dock icon light/dark swap on theme change; window background color theme-aware (parity with `shell/src/main/index.ts:41-95`).
-- `persistence:revealUserData` (NSWorkspace), file-association registration for `.md`/`.markdown` and the `skrive://` URL scheme in Info.plist (parity with `electron-builder.yml`).
-- Minimal app menu (About, Quit, Edit menu for native text-field shortcuts inside dialogs).
+Most host work moved to 4.0 (menu bar, link policy, Web Inspector, window background). What remains here is non-dogfood-blocking polish plus the stage-closing manual sweep:
+
+- Dock icon light/dark swap on theme change (parity with `shell/src/main/index.ts:41-95`); the icon itself already ships (Stage 2).
+- Verify `persistence:revealUserData` (already routed via the host `reveal` channel in Stage 2.4) behaves at parity.
 - **Done when:** full manual parity checklist (write one in the log: every audit §2 table row plus every command namespace) passes against the Electron build side by side.
 
-**Stage 4 exit criteria:** entire parity corpus replays green; side-by-side manual checklist green; sustained dogfooding shows no blocker-class friction entries in the log.
+**Stage 4 exit criteria (reduced scope):** 4.0 native-shell parity done (the app is livable); the parity corpus (which by the scope decision excludes diff/history) replays green both directions; side-by-side manual checklist green; sustained dogfooding shows no blocker-class friction entries in the log.
 
 ---
 
@@ -449,6 +466,16 @@ Map whichever is chosen onto the existing `updater:*` contract (`current/check/d
 
 The plan must not paint future Skrive into a corner. These are design constraints on the work above, not work items.
 
+### Native-feel deference (the build's reason for being)
+
+This experiment exists so Skrive is not on borrowed technology that feels *okay*. The bar is that it feels native: the purest scrolling, clicking, typing, and editing the platform can produce. That bar is reachable only because of the substrate choice, and only if the renderer honors it.
+
+**Why the ceiling is higher here.** WKWebView (and WebView2) *is* the operating system's own web engine — the same WebKit Safari uses. Electron ships its own Chromium, which reimplements scroll physics and text interaction rather than inheriting the platform's. So the system webview hands us native momentum and rubber-band scrolling, the OS text stack (smart substitution, Look Up, the dictionary, native context menus, real IME), and platform accessibility essentially for free — things Electron only ever approximates. The native-feel ceiling is genuinely higher on this shell than on Electron.
+
+**The standing rule.** That ceiling is reached only by *not fighting the engine*. On Electron, every place `app/` overrides native behavior is invisible, because Chromium was never native to begin with; on this shell those same overrides are exactly what read as not-quite-native. Therefore: **the renderer defers to the system webview for scroll, text interaction, context menus, spellcheck, and selection unless there is a concrete, logged reason not to.** Any renderer override of native scroll/click/text behavior is a reviewable item — questioned, not assumed. This is not measurable by the latency harness (a regression tripwire) or fully by scripted input; the verdict is hand-and-eye, Joe-judged during dogfooding, in the Gate 1.3 mold. A divergence resolves either as a renderer fix shipped to both shells, or — if WebKit genuinely cannot match — a logged substrate finding.
+
+**Audit snapshot (2026-06-22, entering Stage 4).** The renderer is already disciplined here. Native and intact: scrollbars (no `::-webkit-scrollbar` restyling), scroll physics (every scroll listener is `passive: true`; zero `preventDefault` on `wheel`/`touch`), OS spellcheck/substitutions (handed off in `Editor.tsx`, per-region skips only), the editor's native context menu (custom menu confined to the sidebar file tree), and `user-select`/`touch-action: none` scoped to chrome only. Watch-list of genuine overrides to evaluate on WebKit: (1) `-webkit-font-smoothing: antialiased` on `html, body, #root` (`index.css:165`) forces lighter-than-native text rendering — A/B against removing it, highest perceptual priority since it sits on the text axis; (2) JS `behavior: 'smooth'` scroll-to on programmatic navigation (`Preview.tsx`, outline rail) — validate or make instant if it reads web-y; (3) bespoke pointer-scroll controls with no native equivalent (outline-rail drag-scrub, DiffView synced scroll) — cannot simply defer, so scrutinize their feel directly. Nothing structural fights the platform; the list is tuning, not surgery.
+
 **The feature placement rule.** Every future feature starts pure-JS in `app/`. It earns a shell command only if it needs the filesystem, the OS, or the network — and then it is added as one entry in the command table of BOTH shells in the same change, with a parity fixture. This rule is what keeps the dual-shell period cheap and is enforceable in review: a PR adding a shell command without a fixture and both implementations is incomplete.
 
 | Future direction (from product planning) | Impact on this plan |
@@ -460,6 +487,7 @@ The plan must not paint future Skrive into a corner. These are design constraint
 | Website embed of the editor | The Stage 0.2 mock transport grows into the real web shim: `createSkriveBridge(webTransport)` with in-memory project. Shares 100% of the contract machinery; belongs to the website project, enabled by this plan |
 | Plugins / theming | Themes are CSS (shell-agnostic). Any future plugin runtime lives renderer-side; the closed command table is the security boundary that makes third-party code tractable later |
 | Native text rendering (the ledger's true endgame) | Out of scope by design. If the ledger ever forces it, this plan's contribution is the C-ABI core and per-platform host structure — the webview gets replaced inside the host, the core and contract survive |
+| iPad / iOS (Joe's durable product ambition) | Out of scope here; this plan never targets it. But it is the reason the architecture matters beyond the desktop bake-off: Electron cannot ship to iOS, whereas the C-ABI core + thin-native-host + system-webview pattern can (Ghostty itself ships iOS). What transfers for free: the entire Zig core (it cross-compiles to `aarch64-ios`), the host-agnostic contract + `createSkriveBridge`, and the custom-scheme serving decision (iOS WKWebView is the same WebKit, `WKURLSchemeHandler` is identical API). What is genuinely new and NOT de-risked by this plan: a UIKit/SwiftUI host (no NSWindow/traffic-lights/menu-bar; sandboxed files via UIDocumentPicker + security-scoped bookmarks + iCloud) and — the real cost — a frontend touch-UX pass (touch targets, no-hover, soft-keyboard, ProseMirror/CodeMirror touch+IME behavior in iOS WKWebView). Cheap insurance the desktop work should already be paying: hold the core/host boundary clean (gate 4's "any core change a host demands is a design bug" applies to a future iOS host too) and keep `host:` channel commands abstract verbs, so an iOS host just implements them differently. Verify-before-betting (not assume): Zig→iOS static-lib linking maturity and App Store guideline 4.2 ("minimum functionality") risk for thin webview wrappers |
 
 ---
 
