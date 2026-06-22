@@ -326,7 +326,7 @@ Checklist per shape: lint Web Worker loads and runs (module worker via `import.m
 - Tests: scripted external mutations against a temp project (touch, append, atomic-rename-replace like another editor saving, delete, mkdir, rmdir, file rename) asserting the emitted event sequence; run the loop long enough to confirm stable memory (leak check via `std.testing.allocator` in unit scope plus a soak note in the log).
 - **Done when:** editing a watched file in another editor updates Skrive's UI exactly as the Electron build does, for every mutation type listed.
 
-### Stage 4 — macOS feature parity
+### Stage 4 — macOS feature parity  *(COMPLETE 2026-06-22 — reduced scope; merged to main at `87a903f`)*
 
 **Purpose.** Close every remaining gap so the two builds are feature-indistinguishable on macOS (updater excepted; that is Stage 6).
 
@@ -374,7 +374,7 @@ Most host work moved to 4.0 (menu bar, link policy, Web Inspector, window backgr
 - Verify `persistence:revealUserData` (already routed via the host `reveal` channel in Stage 2.4) behaves at parity.
 - **Done when:** full manual parity checklist (write one in the log: every audit §2 table row plus every command namespace) passes against the Electron build side by side.
 
-**Stage 4 exit criteria (reduced scope):** 4.0 native-shell parity done (the app is livable); the parity corpus (which by the scope decision excludes diff/history) replays green both directions; side-by-side manual checklist green; sustained dogfooding shows no blocker-class friction entries in the log.
+**Stage 4 exit criteria (reduced scope) — MET (2026-06-22).** 4.0 native-shell parity done (the app is a livable daily driver); the parity corpus (which by the scope decision excludes diff/history) replayed green both directions (26/26 vs the Zig core and vs the live Electron oracle); side-by-side manual checklist green ("everything looks and feels good"); dogfooding showed no blocker-class friction. 4.1-4.3 deliberately not ported (see the scope decision); residual non-blocker gaps logged: dock-icon appearance swap, file-open/`.md`-association (deferred cross-shell feature), updater (Stage 6). See `docs/zig-shell-log.md` for the per-sub-stage record and the two macOS substrate findings (the `decidePolicyFor` closure-type trap; `_WKInspector.show()` no-op on macOS 26).
 
 ---
 
