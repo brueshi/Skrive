@@ -1573,3 +1573,71 @@ opening in the browser without disturbing the app, no stale launch flash, and
 the Web Inspector opening via Safari's Develop menu. Stage 4.0 done; 4.4
 (dock-icon light/dark swap, `revealUserData` verify, closing parity sweep) is
 the remaining Stage 4 work.
+
+---
+
+## 2026-06-22 — Stage 4.4: host residual polish + the closing parity sweep
+
+**Branch:** `labs/zig-shell-stage-4-native-shell`.
+
+**Dock-icon light/dark swap — SKIPPED for the labs build (Joe's call).** The
+Electron shell swaps the *running* dock tile between a light and a dark PNG on
+every system-appearance change (`applyDockIcon`, `index.ts:43-57`), because
+macOS never swaps a flat `.icns` for dark mode. Replicating it needs both a
+light and a dark tile, but the Zig host ships only a single dark `skrive.icns`
+(intentionally a distinct brand mark from the Electron build's icon), and no
+light variant of that mark exists. Producing a brand asset for a pure-polish
+swap on the experimental build is exactly the marginal work the Stage 4 scope
+trim says to avoid, so this is deferred. **Logged minor parity gap:** the Zig
+dock tile is static across appearances; revisit if/when the build graduates and
+a light mark exists. No code change.
+
+**`persistence:revealUserData` — verified at parity (code review).** Core
+(`dispatch.zig:184`) handles the command by emitting a `host:reveal` envelope
+carrying the app-data dir; the host (`CoreBridge.swift:244`) opens that folder
+with `NSWorkspace.shared.open(URL)`. Electron (`persistence.ts:52`) does
+`shell.openPath(app.getPath('userData'))`. Both open the same shared folder
+(`~/Library/Application Support/Skrive`) in Finder — a match (open-the-folder,
+not reveal-and-select, on both sides). Already in `NATIVE_COMMANDS`, so served
+by the core. Manual confirm folded into the sweep below. No code change.
+
+**CLOSING PARITY CHECKLIST (run side by side with the Electron build).** This
+is the Stage 4 exit gate. Diff/history are out of scope (the corpus excludes
+them; the Zig build serves them from the mock by design) and the dock-icon
+swap is a logged gap; everything else must match.
+
+*Host chrome (4.0, re-confirm):*
+1. Menu bar: Edit shortcuts work in the editor (Text + Rich) and in a dialog
+   text field; Cmd-W / Cmd-M / Zoom / Toggle Full Screen work.
+2. Links: an http(s) link in a note opens in the browser; a `mailto:` opens
+   Mail; no link click navigates or blanks the app frame; no stray popup.
+3. Web Inspector opens (Safari Develop > this Mac > Skrive).
+4. No stale launch flash; pre-paint background matches first paint.
+
+*Files + editing (`fs`):*
+5. Edit a doc, autosave fires, content survives Cmd-Q + relaunch.
+6. New file, rename (with reference rewrites), delete-to-Trash all behave as
+   in Electron.
+7. Edit a file externally while open -> conflict prompt on next save
+   (`detectExternalChange`).
+8. Images render in preview (`skrive-asset://`).
+
+*Project + persistence:*
+9. Open project (dialog) and create project (with/without git init).
+10. 500-file perf fixture opens and renders the sidebar.
+11. UI state (open tabs, panel widths, theme) restores on relaunch.
+12. `revealUserData` opens `~/Library/Application Support/Skrive` in Finder.
+
+*Renderer worker features (shared `app/`, must be identical):*
+13. Search, backlinks, dead links, orphans, rename-with-references.
+
+*Watcher (Stage 3, re-confirm under a real session):*
+14. External create / delete / rename / folder ops reflect in the sidebar; the
+    app's own autosaves don't trigger spurious conflict prompts.
+
+*Native-feel dogfooding lens (note findings, not a hard gate):*
+15. Scroll/caret/selection/IME/dead-keys feel native on WebKit across both
+    editor surfaces; log any Chromium-vs-WebKit divergence.
+
+**Status: 4.4 code-complete (no code changes — both items resolved by decision
+/ existing wiring); the closing sweep is the remaining exit gate (Joe).**
