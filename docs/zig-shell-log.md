@@ -1639,5 +1639,26 @@ swap is a logged gap; everything else must match.
 15. Scroll/caret/selection/IME/dead-keys feel native on WebKit across both
     editor surfaces; log any Chromium-vs-WebKit divergence.
 
-**Status: 4.4 code-complete (no code changes — both items resolved by decision
-/ existing wiring); the closing sweep is the remaining exit gate (Joe).**
+**Parity corpus: 26/26 GREEN both directions** — against the Zig core
+(`--exec ./shell-zig/core/zig-out/bin/fixture_main`) and against the live
+Electron oracle (`bun run parity:check`). 4.0/4.4 touched no core code, so this
+also confirms no regression.
+
+**CLOSING SWEEP: GREEN (Joe, 2026-06-22). STAGE 4 COMPLETE.** Hands-on
+side-by-side pass against Electron: "everything looks and feels good" — host
+chrome, files/editing, project/persistence (incl. `revealUserData`), worker
+features, and the watcher all at parity; native feel good on WebKit across both
+editor surfaces. The two intentional differences held as designed: diff/history
+served from the mock (deferred, not ported — see the scope decision), and a
+static dock tile across light/dark (logged gap).
+
+**Stage 4 outcome (reduced scope).** macOS native app-shell parity reached: the
+Zig build is feature-indistinguishable from Electron on everything in scope and
+is now a livable daily driver. 4.1-4.3 (diff/checkpoints/git) deliberately not
+ported; a Skrive-native version history is a deferred future feature. Honest
+residual gaps, all logged, none blocker-class: dock-icon appearance swap;
+file-open/`.md`-association (net-new cross-shell feature, deferred); updater
+(Stage 6). Substrate findings this stage: the `decidePolicyFor` closure-type
+trap, and `_WKInspector.show()` no-op on macOS 26 (use Safari Develop /
+right-click). Next: Stage 5 (Windows host) or the deferred feature tracks, per
+Joe's direction.
