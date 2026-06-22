@@ -1511,3 +1511,65 @@ Stage 4 elaboration (4.0 section, native-feel-deference, iOS row) onto the
 branch; reverted dogfooding noise on the `typography-sample` parity fixture
 (stray frontmatter removal). Untracked release artifacts (DMG/zip) and scratch
 `.md` files left alone.
+
+---
+
+## 2026-06-22 — Stage 4.0: native app-shell parity. Manual pass GREEN.
+
+**Branch:** `labs/zig-shell-stage-4-native-shell`. Host-only Swift in
+`shell-zig/macos/`; zero `app/`, core, or contract changes.
+
+**What shipped.**
+- **Full standard menu bar** (`AppDelegate.setupMenu`) replicating Electron's
+  *default* macOS menu via first-responder selectors so WKWebView's first
+  responder handles them in the editor and in dialog fields: App
+  (About/Services/Hide/Hide-Others/Show-All/Quit), Edit
+  (undo/redo/cut/copy/paste/paste-and-match/delete/select-all), View
+  (reload, full screen), Window (minimize/zoom/close-Cmd-W/bring-all-to-front),
+  Help. Default menu only — no app-specific File items (New/Open/Save live in
+  the renderer palette; scope guard from the plan). Close lives in Window (no
+  File menu) so Cmd-W binds.
+- **Link / navigation policy.** `WKNavigationDelegate.decidePolicyFor` allows
+  the app + asset origins and renderer-internal schemes (about/blob/data),
+  routes the Part I allowlist (http/https/mailto/tel/skrive) to the browser
+  and cancels, and refuses any other scheme — the main frame can never leave
+  `skrive-app://`. `WKUIDelegate.createWebViewWith` opens `target=_blank` /
+  `window.open` externally and returns nil (no popup webview). The allowlist
+  is centralized in a new `ExternalLink` helper shared with the bridge's
+  `links:openExternal` (single source of truth).
+- **Pre-paint background** corrected `#1a1a1a`/`#fefcf7` -> `#161719`/`#e7e8ea`
+  (the current Electron values).
+
+**GOTCHA (real bug, caught by a compiler warning).** The first cut of
+`decidePolicyFor` typed its `decisionHandler` as `@escaping (...) -> Void`,
+but the protocol requirement is `@escaping @MainActor @Sendable (...) -> Void`.
+The mismatch made it a *near-miss* overload, NOT the protocol method — WebKit
+would never have dispatched to it and the link guard would silently no-op.
+Swift flagged it as "nearly matches optional requirement"; matching the exact
+closure type fixed it. Lesson: treat "nearly matches optional requirement"
+warnings on delegate conformances as correctness bugs, not style noise.
+
+**SUBSTRATE / HOST FINDING (Web Inspector).** Dogfooding turned up "can't use
+a web inspector." Bisected it with runtime introspection (temporary
+diagnostics, since removed): `webView.isInspectable == true`, `_inspector`
+returns a valid `_WKInspector` that responds to `show`/`isVisible` — but
+calling `show` leaves `isVisible == false`. **The private programmatic
+`_WKInspector.show()` is a silent no-op on macOS 26.** So a menu/keyboard
+"Toggle Developer Tools" affordance cannot work via private API on this OS;
+it was removed rather than left as a dead control. The *supported* entry
+points do work: **Safari's Develop menu** (Develop > this Mac > Skrive —
+confirmed by Joe) and right-click "Inspect Element" (reinforced with the
+legacy `developerExtrasEnabled` preference alongside `isInspectable`, both
+dev-gated). This is a host/OS detail, not an architecture issue — Gate stays
+clear; logged in the native-feel/substrate-finding mold.
+
+**Dev gate.** `#if DEBUG` is confirmed active in the SwiftPM debug build
+(`build-macos.sh` defaults to debug), and `isInspectable`/`developerExtras`
+are gated on it, so a future `-c release` build ships without the inspector.
+
+**Manual pass: GREEN (Joe, side by side with Electron).** Editing shortcuts in
+the editor and dialog fields, Cmd-W/Cmd-M/zoom/full-screen, external links
+opening in the browser without disturbing the app, no stale launch flash, and
+the Web Inspector opening via Safari's Develop menu. Stage 4.0 done; 4.4
+(dock-icon light/dark swap, `revealUserData` verify, closing parity sweep) is
+the remaining Stage 4 work.
