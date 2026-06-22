@@ -109,15 +109,14 @@ final class CoreBridge {
     }
 
     /// Open an external URL in the OS default handler, gated by the Part I
-    /// scheme allowlist. A disallowed scheme is a silent no-op (the contract
+    /// scheme allowlist (shared with the navigation/UI delegates via
+    /// `ExternalLink`). A disallowed scheme is a silent no-op (the contract
     /// returns void either way).
     private func handleOpenExternal(id: Int, payload: [String: Any]) {
         if let urlString = payload["url"] as? String,
-            let url = URL(string: urlString),
-            let scheme = url.scheme?.lowercased(),
-            ["http", "https", "mailto", "tel", "skrive"].contains(scheme)
+            let url = URL(string: urlString)
         {
-            NSWorkspace.shared.open(url)
+            ExternalLink.open(url)
         }
         replyToRenderer(id: id, result: [:])
     }

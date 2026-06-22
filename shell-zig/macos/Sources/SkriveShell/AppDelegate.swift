@@ -8,7 +8,7 @@ import SkriveShellKit
 // (shell/src/main/index.ts): hidden-inset titlebar, traffic lights nudged
 // to the topbar centerline, theme-aware pre-paint background.
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
-    WKScriptMessageHandler, WKNavigationDelegate {
+    WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
     private var bridge: CoreBridge!
@@ -61,8 +61,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         // renderer's light-dark() CSS picks the final palette, but the
         // window paints first.
         window.backgroundColor = isDark
-            ? NSColor(srgbRed: 0x1a / 255, green: 0x1a / 255, blue: 0x1a / 255, alpha: 1)
-            : NSColor(srgbRed: 0xfe / 255, green: 0xfc / 255, blue: 0xf7 / 255, alpha: 1)
+            ? NSColor(srgbRed: 0x16 / 255, green: 0x17 / 255, blue: 0x19 / 255, alpha: 1)
+            : NSColor(srgbRed: 0xe7 / 255, green: 0xe8 / 255, blue: 0xea / 255, alpha: 1)
         window.delegate = self
         window.center()
 
@@ -92,12 +92,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         true
     }
 
-    /// Minimal app menu so the standard shortcuts bind — most importantly
-    /// Quit (Cmd-Q -> terminate:, which runs the flush handshake). A
-    /// programmatic AppKit app has no menu unless one is installed. The Edit
-    /// menu (for native text fields in dialogs) is the rest of Stage 4.4.
+    /// Full standard macOS menu bar (4.0), replicating Electron's *default*
+    /// menu. A programmatic AppKit app has no menu unless one is installed,
+    /// and Electron supplied this for free. Items use the standard
+    /// first-responder selectors (`undo:`, `cut:`, `performClose:`, ...) so
+    /// WKWebView's first responder handles them in the editor and in dialog
+    /// text fields. Scope guard: the DEFAULT menu only — NO app-specific File
+    /// items; Skrive's New/Open/Save live in the renderer command palette.
     private func setupMenu() {
         let mainMenu = NSMenu()
+
+        // App menu. (The first menu's title is replaced with the process
+        // name by AppKit regardless of what we set here.)
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
@@ -108,10 +114,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             keyEquivalent: ""
         )
         appMenu.addItem(.separator())
+        let servicesItem = appMenu.addItem(
+            withTitle: "Services", action: nil, keyEquivalent: ""
+        )
+        let servicesMenu = NSMenu()
+        servicesItem.submenu = servicesMenu
+        NSApp.servicesMenu = servicesMenu
+        appMenu.addItem(.separator())
         appMenu.addItem(
             withTitle: "Hide Skrive",
             action: #selector(NSApplication.hide(_:)),
             keyEquivalent: "h"
+        )
+        let hideOthers = appMenu.addItem(
+            withTitle: "Hide Others",
+            action: #selector(NSApplication.hideOtherApplications(_:)),
+            keyEquivalent: "h"
+        )
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(
+            withTitle: "Show All",
+            action: #selector(NSApplication.unhideAllApplications(_:)),
+            keyEquivalent: ""
         )
         appMenu.addItem(.separator())
         appMenu.addItem(
@@ -119,7 +143,77 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
+
+        // Edit menu — native text editing in the webview and in dialog
+        // fields. Dispatched through the responder chain to WKWebView.
+        let editMenu = addSubmenu(to: mainMenu, title: "Edit")
+        addItem(editMenu, "Undo", "undo:", "z")
+        addItem(editMenu, "Redo", "redo:", "z", [.command, .shift])
+        editMenu.addItem(.separator())
+        addItem(editMenu, "Cut", "cut:", "x")
+        addItem(editMenu, "Copy", "copy:", "c")
+        addItem(editMenu, "Paste", "paste:", "v")
+        addItem(editMenu, "Paste and Match Style", "pasteAsPlainText:", "v",
+                [.command, .option, .shift])
+        addItem(editMenu, "Delete", "delete:", "")
+        addItem(editMenu, "Select All", "selectAll:", "a")
+
+        // View menu — reload, full screen, and (dev builds) the inspector.
+        let viewMenu = addSubmenu(to: mainMenu, title: "View")
+        let reload = viewMenu.addItem(
+            withTitle: "Reload", action: #selector(reloadPage(_:)), keyEquivalent: "r"
+        )
+        reload.target = self
+        addItem(viewMenu, "Toggle Full Screen", "toggleFullScreen:", "f", [.command, .control])
+
+        // Window menu — AppKit manages the window list once assigned.
+        let windowMenu = addSubmenu(to: mainMenu, title: "Window")
+        addItem(windowMenu, "Minimize", "performMiniaturize:", "m")
+        addItem(windowMenu, "Zoom", "performZoom:", "")
+        windowMenu.addItem(.separator())
+        // No File menu (scope guard), so Close lives here to bind Cmd-W.
+        addItem(windowMenu, "Close", "performClose:", "w")
+        windowMenu.addItem(.separator())
+        addItem(windowMenu, "Bring All to Front", "arrangeInFront:", "")
+        NSApp.windowsMenu = windowMenu
+
+        // Help menu — assigning it gives the standard search field.
+        let helpMenu = addSubmenu(to: mainMenu, title: "Help")
+        NSApp.helpMenu = helpMenu
+
         NSApp.mainMenu = mainMenu
+    }
+
+    /// Add a titled submenu to the menu bar and return its NSMenu.
+    private func addSubmenu(to mainMenu: NSMenu, title: String) -> NSMenu {
+        let item = NSMenuItem()
+        mainMenu.addItem(item)
+        let menu = NSMenu(title: title)
+        item.submenu = menu
+        return menu
+    }
+
+    /// Add a first-responder action item (string selector resolved at runtime,
+    /// the standard idiom for code-built menus). `nil` target routes through
+    /// the responder chain to WKWebView / the key window.
+    @discardableResult
+    private func addItem(
+        _ menu: NSMenu,
+        _ title: String,
+        _ selector: String,
+        _ key: String,
+        _ modifiers: NSEvent.ModifierFlags = .command
+    ) -> NSMenuItem {
+        let item = menu.addItem(
+            withTitle: title, action: Selector((selector)), keyEquivalent: key
+        )
+        if !key.isEmpty { item.keyEquivalentModifierMask = modifiers }
+        return item
+    }
+
+    /// View > Reload. Re-requests the renderer from its origin.
+    @objc private func reloadPage(_ sender: Any?) {
+        webView?.reload()
     }
 
     private var quitFlushed = false
@@ -181,11 +275,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             forURLScheme: AssetSchemeHandler.scheme
         )
 
+        #if DEBUG
+        // Belt-and-suspenders for the right-click "Inspect Element" item: the
+        // legacy developer-extras preference, guarded by its private setter
+        // selector so a future SDK change degrades to a no-op rather than a
+        // KVC crash. Pairs with isInspectable below.
+        if config.preferences.responds(to: Selector(("_setDeveloperExtrasEnabled:"))) {
+            config.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        }
+        #endif
+
         let view = WKWebView(frame: .zero, configuration: config)
         view.navigationDelegate = self
+        view.uiDelegate = self
+        #if DEBUG
+        // Dev-gated Web Inspector. The supported entry points are right-click
+        // "Inspect Element" and Safari's Develop menu (Develop > this Mac >
+        // Skrive). NB: the private programmatic _WKInspector.show() is a silent
+        // no-op on macOS 26, so there is deliberately no menu/keyboard toggle.
+        view.isInspectable = true
+        #endif
         // Let the window's pre-paint color show through until first paint.
         view.setValue(false, forKey: "drawsBackground")
         return view
+    }
+
+    // MARK: - Navigation and link policy
+
+    /// Keep the main frame on the app origin and route off-origin links to the
+    /// browser (parity with Electron's `setWindowOpenHandler` deny + the
+    /// implicit will-navigate guard). A link click inside a note must open
+    /// externally, never replace the running app.
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+    ) {
+        guard let url = navigationAction.request.url,
+            let scheme = url.scheme?.lowercased()
+        else {
+            decisionHandler(.allow)
+            return
+        }
+        switch scheme {
+        case AppSchemeHandler.scheme, AssetSchemeHandler.scheme, "about", "blob", "data":
+            // In-app origins and renderer-internal schemes load in place.
+            decisionHandler(.allow)
+        case "http", "https", "mailto", "tel", "skrive":
+            ExternalLink.open(url)
+            decisionHandler(.cancel)
+        default:
+            // Unknown scheme (file://, ftp://, ...): refuse, so the app frame
+            // can never be navigated off its origin. ExternalLink would refuse
+            // it anyway.
+            decisionHandler(.cancel)
+        }
+    }
+
+    /// `target=_blank` / `window.open`: open externally (if allowed) and never
+    /// spawn a child webview.
+    func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        if let url = navigationAction.request.url { ExternalLink.open(url) }
+        return nil
     }
 
     // MARK: - Diagnostics
