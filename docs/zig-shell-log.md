@@ -1436,6 +1436,17 @@ artifact actually contains it (check the SwiftPM bin-path binary mtime vs the
 
 **Stage 3 status now: all known watcher bugs fixed** (crash on external edit
 `7eee15c`; delete-to-Trash `11fc4a4`). Rename, create, delete, and external
-edit all behave at parity with Electron in dogfooding. The full 3.5e checklist
-(soak, mkdir/rmdir via Finder) is still Joe's to close, but the blocker-class
-items are resolved.
+edit all behave at parity with Electron in dogfooding.
+
+**3.5e manual pass: GREEN (2026-06-22). Stage 3 COMPLETE; merged to `main`.**
+Joe's hands-on pass, side by side with Electron: external edit (no crash),
+file create/delete (delete-to-Trash now removes from the sidebar), file
+rename (no duplicate), and — final check — Finder directory operations:
+create folder -> addDir, nested `.md` -> add under it, delete folder
+(to Trash) -> unlinkDir, all at parity, no issues. The directory-trash path
+exercises the same FSEvents move-out the `11fc4a4` patch fixed (it emits
+destroy/create regardless of path type; the Zig layer maps `path_type=dir`
+-> addDir/unlinkDir), and the renderer prunes the subtree cleanly on
+unlinkDir. Branch `labs/zig-shell-stage-3-watcher` fast-forwarded to `main`
+(linear history, no merge commit). Stage 4 (diff via the Rust staticlib,
+then history) is next.
