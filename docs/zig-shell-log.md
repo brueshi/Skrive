@@ -1393,3 +1393,49 @@ next save (`detectExternalChange` vs the tab `diskHash`). So the watcher pass
 should be judged by SIDEBAR reaction to create/delete/rename, not by an open
 document's text changing. (Joe observed Electron "not showing" an Obsidian edit
 to an open file — that is this by-design behavior, identical in both shells.)
+
+**3.5e finding #2 (FIXED, `11fc4a4`) — delete-to-Trash was invisible; the one
+real library limitation in Stage 3.** Dogfooding: deleting a `.md` in Obsidian
+left a stale, un-clickable node in the Zig sidebar (gone on disk, still in the
+model) while Electron removed it; renaming had left a duplicate earlier (same
+root cause — the unlink half lost). Diagnosed with a temporary file-based event
+logger (libc `fopen` to `/tmp/skrive-watch.log`, always-on, thread-safe,
+launch-method-independent — env-gated stderr was too fragile; the logger was
+removed before commit). Ground truth: a real `unlink` (Obsidian's `.OBSIDIANTEST`
+probe) came through as `effect=destroy`, but a move-to-Trash produced NO
+watcher-c callback at all. Root cause in the vendored `watcher.hpp`
+Apple/FSEvents branch: it only emits a rename when it can PAIR a renamed-from
+and renamed-to event inside the watched tree (stashes the from-path in
+`last_rename_path`, waits for the to-path). A move whose destination is outside
+the tree — exactly a delete-to-Trash, the common macOS delete — stashes the
+from-path and never emits. chokidar (Electron) does NOT pair; it checks each
+path's existence and emits unlink/add separately. Fix (Joe-approved, forks the
+vendored lib — documented in `vendor/watcher/README.md` "Local modifications"):
+patch the FSEvents rename branch to emit destroy if the path is now missing,
+create if it exists. Our Zig layer already splits renames into unlink+add, so
+pairing was unneeded; the patch also fixes moves INTO the tree. Verified: a
+move-to-Trash now arrives as `effect=destroy` -> `unlink`, file disappears at
+parity with Electron.
+
+**TWO build-cache traps burned real time this session — both now mitigated, log
+loudly.** (1) **SwiftPM never relinked** the host when only the Zig core
+changed: it does not track the `.a` (linked via `unsafeFlags`) as an input and
+content-hashes sources, so every "rebuild" silently reused an OLD host binary
+linked against a STALE `libskrive_core.a`. Fixes to the core (and the
+nonisolated crash fix, and the logging) appeared to have no effect because the
+running app never contained them. `touch`-ing sources did NOT help (content
+hash, not mtime). FIX (`f891cf9`): `build-macos.sh` removes the linked product
+before `swift build`, forcing a relink (~1s, objects cached). (2) **Zig's C
+cache didn't invalidate `watcher-c.o`** when the included `watcher.hpp` header
+changed, so the patched header didn't reach the `.a` until `rm -rf
+core/.zig-cache`. Rarer (the vendored header almost never changes), so not
+scripted around — but if a `vendor/` header edit ever "doesn't take," clean the
+zig cache. **Lesson: when a native change seems to have no effect, verify the
+artifact actually contains it (check the SwiftPM bin-path binary mtime vs the
+`.a`, or a runtime marker) BEFORE re-debugging the logic.**
+
+**Stage 3 status now: all known watcher bugs fixed** (crash on external edit
+`7eee15c`; delete-to-Trash `11fc4a4`). Rename, create, delete, and external
+edit all behave at parity with Electron in dogfooding. The full 3.5e checklist
+(soak, mkdir/rmdir via Finder) is still Joe's to close, but the blocker-class
+items are resolved.
