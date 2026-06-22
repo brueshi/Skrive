@@ -54,10 +54,18 @@ cp "$WORK/libfixed.a" "$LIB"
 rm -rf "$WORK"
 
 echo "==> 5/6 swift host"
+# Force a relink every build. SwiftPM does NOT track the Zig static lib
+# (linked via unsafeFlags -L/-l) as an input, and it content-hashes sources,
+# so when only the core changes neither `swift build` nor `touch`-ing sources
+# triggers a relink: the OLD binary, linked against a STALE
+# libskrive_core.a, is silently reused — a very confusing failure mode.
+# Removing the linked product makes `swift build` relink (the object files
+# stay cached, so this is ~1s, not a full rebuild) against the fresh .a.
 SWIFT_ARGS=(build)
 [[ "$CONFIG" == "release" ]] && SWIFT_ARGS+=(-c release)
-(cd "$MACOS_DIR" && swift "${SWIFT_ARGS[@]}")
 BIN="$(cd "$MACOS_DIR" && swift build "${SWIFT_ARGS[@]:1}" --show-bin-path)/SkriveShell"
+rm -f "$BIN"
+(cd "$MACOS_DIR" && swift "${SWIFT_ARGS[@]}")
 
 echo "==> 6/6 assemble Skrive.app"
 APP="$MACOS_DIR/.build/Skrive.app"
