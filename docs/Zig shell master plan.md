@@ -426,39 +426,69 @@ The rest of Stage 5 below is written in C++ terms because that is the current de
 - App-data dir: `%APPDATA%/Skrive`.
 - **Done when:** parity corpus replays green on Windows (the corpus is OS-agnostic except path separators — the forward-slash normalization rule in Part I exists for exactly this); manual checklist green; watcher mutation tests green on NTFS.
 
-#### 5.3 — Windows packaging (pre-update)
+#### 5.3 — Windows packaging (pre-update)  *(portable-zip path DONE + merged 2026-06-23; installer moved to Stage 6)*
 
-- Installer: NSIS script (hand-rolled, matching current `Skrive-{version}-Setup.exe` naming and `.md`/`.markdown`/`skrive://` associations) — or Velopack if Stage 6 chooses it for updates; decide there, build the installer there in that case and keep 5.3 to a portable zip for testing.
-- **Done when:** a clean Windows VM goes from installer to writing in under a minute of user effort, WebView2 bootstrap path included.
+- **Shipped (merged to main at `6e5bebb`, FF):** the native-polish + packaging-prep surface — nav backstop, app icon, GUI subsystem, DevTools-off-in-release, custom frameless chrome, window-state persistence — and the **portable zip as the dogfood vehicle**, published as a GitHub **prerelease** (`win-labs-5.3.0`, non-`v*` so `release.yml` never fires). The Windows host is **Zig** (5.0 decision), cross-compiled from macOS.
+- **Installer deferred to Stage 6** (as this section always allowed: "keep 5.3 to a portable zip for testing"). The installer's tech is coupled to the updater choice (Velopack would own both), so it is decided and built in Stage 6, not here.
+- **Done when (revised):** met for the portable path. The installer's "clean machine → writing in under a minute, WebView2 bootstrap included" criterion moves to Stage 6.1.
 
-### Stage 6 — Distribution and updates
+### Stage 6 — Distribution and updates  *(reframed 2026-06-23: the graduation verdict is IN — see Part VI. This stage now BUILDS the locked system and EXECUTES the hand-off; it no longer evaluates whether to graduate.)*
 
-**Purpose.** Signed, notarized, updatable builds from CI, at parity with the current release process (`docs/release-process.md`).
+**Purpose.** A locked-in, repeatable distribution + auto-update system for the Zig family, a proper CI releases workflow, and the actual hand-off from the Electron product to the Zig builds. Parity target: `docs/release-process.md`.
 
-**Inputs:** Stages 4-5 builds. **Outputs:** releasable artifacts + update feed.
+**Inputs:** Stages 4-5 builds — both merged to main; macOS + Windows are livable daily drivers; the thesis is proven on both. **Outputs:** signed/updatable artifacts, a CI release workflow, and Electron users migrated.
 
-#### 6.1 — Update mechanism decision
+**Framing change.** Stage 6 was written as "evaluate the options, then reach a graduation/kill verdict." That verdict is in: **the Zig family is the committed substrate, Electron is on a sunset path** (`project_zig_graduation_commit`). So the sub-stages are now build-and-execute. The one genuinely-open technical choice is the updater engine (6.1), flagged for ratify.
 
-Two verified options (survey §3); pick one and log why:
-- **Sparkle (macOS) + WinSparkle (Windows):** shared appcast format, one `generate_appcast` CI step, enclosures on GitHub Releases. Sparkle via a small ObjC/Swift integration in the host; WinSparkle is a C DLL. Most battle-proven per platform. Verify WinSparkle EdDSA support version first (flagged unverified in the survey).
-- **Velopack:** one system, C ABI, native GitHub Releases feeds, owns installer + delta updates; .NET build-time tool; younger macOS/Gatekeeper story.
+#### 6.1 — The distribution + update system (LOCK IT)
 
-Map whichever is chosen onto the existing `updater:*` contract (`current/check/downloadAndInstall` + `updater:status` events) so `app/` is untouched.
+- **Updater engine — DECIDED (2026-06-23): Sparkle (macOS) + WinSparkle (Windows).** Native per platform, battle-proven (Sparkle is the ~20-year indie-Mac standard), **no managed runtime** — Velopack's build-time .NET is the same runtime we deliberately shed. Deciding logic: auto-update runs silently on every user's machine and rewrites the app, so *proven* beats *fewest-moving-parts*; and the ~2MB app makes delta-update sophistication (Velopack's main draw) irrelevant — just ship the whole binary each time. Shared appcast model, enclosures on GitHub Releases, one `generate_appcast` CI step; Sparkle is a small Swift integration in the macOS host, WinSparkle a C DLL the Zig host loads. Maps onto the existing `updater:*` contract (`current/check/downloadAndInstall` + `updater:status` events) so `app/` is untouched. The network + install is **host-native** (Sparkle/WinSparkle do their own HTTP), NOT through the renderer's `net:*` — that reserved capability is for renderer-driven *sync*, a separate concern. The updater is also a security boundary: the EdDSA *private* signing key is a crown-jewel secret (CI only), the public key ships in the app, and the signature-verify path must be airtight. **One open verification (not a re-decision):** confirm WinSparkle's pinned version supports modern signing (Ed25519/EdDSA); if it cannot sign securely, Velopack is the logged fallback — but the default is Sparkle + WinSparkle.
+- **Installers.** Windows: hand-rolled **NSIS** (`Skrive-{version}-Setup.exe`, `.md`/`.markdown`/`skrive://` associations, WebView2 Evergreen bootstrap, per-user install), built on the Mac with `makensis`. macOS: **DMG** via `create-dmg`/`hdiutil`. The 5.3 portable zip / `win-labs-*` prerelease stays the dogfood vehicle until the installer lands.
+- **Signing.** macOS: Developer ID + notarization (Team Q5Y792924V) in CI — the audience is here and the cert already exists, so do it (effectively free). Windows: **unsigned, demand-gated — do NOT spend on it now.** Signing exists to spare *new* Windows users the SmartScreen "Run anyway" wall, but the demand is ~nil: **26 lifetime Windows installer downloads across every version (v0.0.2→v1.3.0) vs ~85 macOS, as of 2026-06-23 — and much of the 26 is the dev's own test-downloads.** Paying now buys a smoother first-run for an audience that doesn't exist yet. The trigger is the number, not a date: sign when Windows downloads climb materially on their own (dozens/month that aren't you). Re-check anytime:
+  ```
+  gh api --paginate repos/brueshi/Skrive/releases --jq '.[].assets[]|[.name,.download_count]|@tsv' \
+    | awk -F'\t' '$1~/(setup\.exe|Setup\.exe|\.msi)$/&&$1!~/\.sig$/{w+=$2} END{print "Windows lifetime:",w}'
+  ```
+  When that day comes, evaluate (cheapest first) **Azure Trusted Signing** (~$10/mo, cloud, no hardware token, SmartScreen reputation; business-identity eligibility gate) → **OV cert** (~$100–300/yr, Certum is the budget end; reputation warms over downloads, not instant) → **EV cert** (~$300–600/yr, token; best initial standing but the instant-SmartScreen benefit has eroded). Post-2023 rule: all OV/EV keys must live on a token or cloud HSM — no cheap file certs anymore.
+- **Done when:** a clean machine on each OS goes installer → writing in under a minute (WebView2 bootstrap included on Windows), and an N→N+1 auto-update completes on both.
 
-#### 6.2 — Signing, notarization, CI
+#### 6.2 — The releases workflow (proper CI)
 
-- macOS: Developer ID signing + hardened runtime + notarization with the existing identity (Team Q5Y792924V) and entitlements reviewed (the Electron-specific entitlements likely shrink); DMG via `create-dmg` or `hdiutil` scripting.
-- Windows: unsigned (parity with current posture) until the product-level signing decision changes.
-- CI: extend `.github/workflows/` with a `zig-shell` workflow — macOS runner builds core+Swift host, Windows runner builds core+C++ host; both run the parity corpus and unit tests; release path mirrors the current draft-release + stable-alias-upload flow. Pin the Zig toolchain via `mlugg/setup-zig`.
-- **Done when:** a tagged build produces installable, updatable artifacts for both OSes from CI; an update from version N to N+1 completes on both.
+- A new **`zig-shell` GitHub Actions workflow**, separate from the Electron `release.yml` (which stays the Electron product's pipeline and must not be triggered by Zig tags). **A single macOS runner builds the whole Zig family** — the Swift macOS host AND the cross-compiled Windows host (`build-windows.sh`; Zig needs no Windows runner to build). A Windows runner is added only if/when **E2** runs the parity corpus on NTFS. Pin the toolchain via `mlugg/setup-zig`.
+- Steps: build core + both hosts → gates (parity corpus 26/26, `jsescape` + core unit tests, `zig fmt`, renderer typecheck) → assemble installers → sign + notarize macOS → publish to GitHub Releases + generate the appcast feed → upload the stable-name aliases (mirror `release.yml`'s alias step so the landing page gets forever-URLs).
+- **Tag convention:** `labs-*` / `win-labs-*` prereleases now (non-`v*`, so the Electron `release.yml` never fires); promote to the primary release tags once the Zig builds become the headline download (6.3). This replaces the manual `gh release create` stopgap used for `win-labs-5.3.0`.
+- **Done when:** a tagged push produces installable, macOS-signed, auto-updatable artifacts for both OSes from CI, with the appcast feed published.
 
-#### 6.3 — Measurement and write-up
+#### 6.3 — Graduation execution (hand off Electron → Zig)
 
-- Re-measure the Stage 0.7 baselines on the Zig builds: installer size, cold start, RSS on the 500-file fixture. Add: update download size.
-- Write `docs/zig-shell-results.md` in the established memo format: what was built, the numbers vs baseline, the dogfooding log distilled, what was painful, decision recommendation.
-- **Done when:** the memo exists and the comparison table is complete.
+Deliberately low-tech — no risky auto-migration from one app to a different one:
+- The existing Electron `.dmg`/`.zip`/`Setup.exe` releases **stay downloadable** — no existing user is broken.
+- Ship a **final Electron build that shows an in-app update toast**: "A new version of Skrive is available" → links to the new Zig build's download. The Electron auto-updater cannot cross to a different artifact, so this is notify-and-redownload, not in-place auto-update; it pulls users forward at their own pace.
+- **Repoint the primary downloads** (website + `releases/latest` stable aliases) to the Zig builds; the `zig-shell` workflow becomes the headline release.
+- **Electron sunset timeline:** keep Electron as a downloadable fallback through the transition window, then stop building it. Close the open **E1/E2** Windows verification (watcher-on-NTFS + parity corpus) as part of this stage.
+- **Done when:** the Zig builds are the default download on every surface, the Electron migration toast is shipped, and E1/E2 are green.
 
-**Stage 6 exit criteria:** releasable parity builds; results memo written. The graduation decision (Part VI) is now made on evidence.
+#### 6.4 — Dead-code cleanup + measurement memo
+
+- **Cleanup (Electron / docs / Rust):**
+  - *Electron:* the frozen diff/checkpoints/git-history code and its IPC; the bridge mock stubs (`history:*` et al.); ultimately the `shell/` Electron host itself once the sunset window (6.3) closes.
+  - *Docs:* the orphaned planning docs the current direction superseded — `planning/version-history-plan.md` (git-primary), the stale `planning/technical-decisions.md` + the technical specifics in `monetization-plan.md`, and the dead-Tauri/Rust Zig experiment docs — marked deprecated or removed.
+  - *Rust:* `native/diff` is **retained** (a rendering primitive for the future native version history — version-history plan Decision 9) but is currently bound only via napi-rs to Electron; retarget it to a C-ABI staticlib for the Zig family when native history is built, and drop the napi binding at Electron sunset.
+  - Plus: prune the Zig host's leftover bring-up scaffolding (unused diagnostic COM bindings, the `NavigateToString`/inline-test paths) now that first light is long past — keep only what is load-bearing.
+- **Measurement memo (now documentation, not a verdict).** Re-measure the Stage 0.7 baselines on the Zig builds (installer size, cold start, RSS on the 500-file fixture; add update download size) and write `docs/zig-shell-results.md` — the win documented, the decision already made.
+- **Done when:** the cleanup pass is done (or its remaining items are tracked against the sunset window), and the memo exists.
+
+#### 6.5 — Production-readiness: macOS polish pass + crash logs  *(prerequisite for 6.3 graduation)*
+
+- **macOS shipping-readiness pass.** The recent work was Windows-heavy; before graduating the macOS build, give it its own polish/dogfood pass — the macOS analogue of the Windows 5.3 push — so graduation isn't lopsided. Scope: signed + notarized DMG; plus the residual Stage-4 gaps (dock-icon light/dark swap, which needs the light brand asset; macOS `.md` file-open, the same deferred feature as Windows C1).
+- **Crash logs — local, user-grabbable, no telemetry** (privacy-preserving, per Skrive's no-telemetry posture). Write to `%APPDATA%\Skrive\crashes` (Win) / `~/Library/Application Support/Skrive/crashes` (mac):
+  - *Native host/core crashes:* an unhandled-exception handler writes a minidump + text log — `SetUnhandledExceptionFilter` + `MiniDumpWriteDump` (Windows), a signal handler / `NSSetUncaughtExceptionHandler` (macOS), a Zig panic handler (core).
+  - *Renderer errors (the common case):* `window.onerror` / `unhandledrejection` append to a renderer log via a host-owned `log:append` command.
+  - *Webview content-process death:* the host's `ProcessFailed` (WebView2) / `webViewWebContentProcessDidTerminate` (WKWebView) handler logs it.
+  - *User send:* a Settings "Reveal / export diagnostics" button (reuses the existing reveal capability) opens or zips the folder; the user sends it in. No automatic upload. Side benefit: field crashes reach the dev without a Windows boot to reproduce.
+- **Done when:** macOS ships signed + notarized with its polish gaps closed, and a forced crash on each OS leaves a grabbable log.
+
+**Stage 6 exit criteria:** a locked, CI-driven, auto-updating distribution for both Zig builds; macOS production-ready and crash logging in place; Electron users migrated and the shell on a sunset path; the cruft removed or tracked; the results memo written.
 
 ---
 
@@ -491,27 +521,27 @@ This experiment exists so Skrive is not on borrowed technology that feels *okay*
 
 ---
 
-## Part VI — Gates, kill criteria, and graduation
+## Part VI — Gates, kill criteria, and graduation  *(VERDICT IN, 2026-06-23: GRADUATE)*
 
-In the spirit of the experiment-portfolio docs: pick the exit honestly.
+In the spirit of the experiment-portfolio docs: pick the exit honestly. **The exit is picked.** After Stages 1-5 (macOS + Windows both merged to main, both livable daily drivers, parity 26/26 throughout, the core never structurally changed) and a full review of the forward roadmap against the architecture, the decision is to **graduate**: the Zig family is Skrive's committed substrate and Electron is on a sunset path (`project_zig_graduation_commit` memory; the editor north-star is the next real arc). The gates below are retained as the record of how the verdict was reached; the standing kill-criteria still bind during the Stage 6 execution.
 
-**Hard gates (stop-and-decide, in order encountered):**
-1. Stage 1.3 typography: Joe-judged. Failure → CEF fallback or end.
-2. Stage 1 overall: if the skeleton + spike answers cannot be reached without fighting the toolchain disproportionately, the friction IS the finding. Write it up.
-3. Stage 2 end: if dogfooding reveals blocker-class problems traceable to the architecture (not to incomplete features), stop and assess before Stage 3.
-4. Stage 5: if Windows requires changes to the Zig core's design (not additions — changes), the "one core, thin hosts" thesis is damaged; reassess before continuing.
+**Hard gates — how they resolved:**
+1. Stage 1.3 typography (Joe-judged): **PASSED** — no CEF fallback; no fallback ever needed.
+2. Stage 1 toolchain friction: **PASSED** — skeleton + spike answers reached without disproportionate fighting.
+3. Stage 2 dogfooding: **PASSED** — no blocker-class problems traceable to the architecture.
+4. Stage 5 core-change gate: **PASSED** — Windows required *additions* (host capabilities), never a core *design* change; the parity corpus stayed 26/26 and the core stayed byte-identical end to end. The "one core, thin hosts" thesis held on a second OS.
 
-**Standing kill criteria (any time):**
-- Scope creep into porting renderer-side logic to Zig "while in there" — the same disease the experiment docs name. Revert and log.
-- The Electron build breaking and staying broken because of this work. The shipping product always wins.
-- A Zig compiler release forcing a rewrite-scale migration mid-plan: pause, pin harder, finish on the pinned version, migrate after.
+**Standing kill criteria (still apply during Stage 6 execution):**
+- Scope creep into porting renderer-side logic to Zig "while in there." Revert and log.
+- The Electron build breaking and staying broken because of this work — the shipping product wins until the sunset window (6.3) closes.
+- A Zig compiler release forcing a rewrite-scale migration: pause, pin harder, finish on the pinned version, migrate after. (Zig is pre-1.0; this remains a live risk we own — the accepted cost of the lean native substrate.)
 
-**Graduation (all required):**
-- Parity corpus green on both OSes; manual checklists green; dogfooding log shows the Zig build as the daily driver by preference, not discipline.
-- The Stage 6.3 numbers show wins on the axes this architecture actually targets: installer size, cold start, memory baseline. (Editor latency parity is required; improvement is not claimed or expected.)
-- The maintenance story is written down: what the dual-shell tax costs per new feature, and either an acceptance of it or a sunset plan for the Electron shell.
+**Graduation criteria — met / in execution:**
+- Parity green both OSes; manual checklists green; the Zig builds are the daily driver by preference, not discipline. **MET.**
+- The Stage 6.4 numbers (installer size / cold start / memory baseline; editor latency parity required, not improvement). **IN PROGRESS** — now documentation of the win, not an input to the decision.
+- The maintenance story written down: the dual-shell — now **N-host** — tax is **ACCEPTED and reframed as load-bearing discipline** (it keeps the native surface minimal and the logic in the shared renderer; `project_zig_graduation_commit`), with the Electron **sunset plan** in 6.3.
 
-**Instructive failure:** any gate fails honestly → `docs/zig-shell-results.md` records what was learned, the Stage 0 work remains shipped (it was always product work), `shell-zig/` is archived to a branch, and the ledger/case-for-zig documents absorb the findings. Per the portfolio discipline: a decisive negative is worth more than an ambiguous positive.
+**Instructive-failure clause (retained for the record; not exercised).** Had a gate failed honestly, `docs/zig-shell-results.md` would record what was learned, the Stage 0 work stays shipped (always product work), `shell-zig/` is archived to a branch, and the ledger absorbs the findings — a decisive negative worth more than an ambiguous positive. None fired; the path was a decisive positive.
 
 ---
 
