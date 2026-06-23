@@ -17,6 +17,7 @@ import {
   useProjectStore
 } from '../../stores/project';
 import { IconSidebarToggle } from '../icons/IconSidebarToggle';
+import { platformShortcut } from '../../lib/commands/shortcut-display';
 import { PanelMenu } from './PanelMenu';
 import { SaveStatus } from './SaveStatus';
 import { SurfaceToggle } from './SurfaceToggle';
@@ -77,7 +78,7 @@ export function Header() {
           className="header-icon-button sidebar-toggle"
           aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
           aria-pressed={sidebarVisible}
-          title="Toggle sidebar  ⌘["
+          title={platformShortcut('Toggle sidebar  ⌘[')}
           onClick={() => toggleSidebar()}
         >
           <IconSidebarToggle size={16} shown={sidebarVisible} />

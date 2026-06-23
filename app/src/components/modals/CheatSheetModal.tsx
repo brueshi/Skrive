@@ -15,6 +15,7 @@ import {
   type Binding,
   type CommandGroup
 } from '../../lib/commands/registry';
+import { platformShortcut } from '../../lib/commands/shortcut-display';
 
 type Props = {
   open: boolean;
@@ -64,7 +65,9 @@ export function CheatSheetModal({ open, onClose, bindings }: Props) {
                         className="cheatsheet-row"
                       >
                         <span className="cheatsheet-label">{b.label}</span>
-                        <kbd className="cheatsheet-chord">{b.display}</kbd>
+                        <kbd className="cheatsheet-chord">
+                          {platformShortcut(b.display)}
+                        </kbd>
                       </li>
                     ))}
                   </ul>
@@ -74,7 +77,8 @@ export function CheatSheetModal({ open, onClose, bindings }: Props) {
           </div>
 
           <p className="cheatsheet-foot">
-            Press <kbd>Esc</kbd> to close, or <kbd>⌘/</kbd> to toggle.
+            Press <kbd>Esc</kbd> to close, or{' '}
+            <kbd>{platformShortcut('⌘/')}</kbd> to toggle.
           </p>
         </Dialog.Content>
       </Dialog.Portal>

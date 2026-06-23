@@ -8,6 +8,7 @@ import { selectActiveTab, useProjectStore } from '../../stores/project';
 import { IconLayoutPreview } from '../icons/IconLayoutPreview';
 import { IconLayoutRaw } from '../icons/IconLayoutRaw';
 import { IconLayoutSplit } from '../icons/IconLayoutSplit';
+import { platformShortcut } from '../../lib/commands/shortcut-display';
 import type { LayoutMode } from '../editor/SplitView';
 
 export function ModeToggle() {
@@ -32,7 +33,7 @@ export function ModeToggle() {
         type="button"
         className={`mode-button${isMode('raw') ? ' active' : ''}`}
         aria-pressed={isMode('raw')}
-        title="Raw  ⌘1"
+        title={platformShortcut('Raw  ⌘1')}
         onClick={() => setMode('raw')}
       >
         <IconLayoutRaw size={16} />
@@ -41,7 +42,7 @@ export function ModeToggle() {
         type="button"
         className={`mode-button${isMode('split') ? ' active' : ''}`}
         aria-pressed={isMode('split')}
-        title="Split  ⌘2"
+        title={platformShortcut('Split  ⌘2')}
         onClick={() => setMode('split')}
       >
         <IconLayoutSplit size={16} />
@@ -50,7 +51,7 @@ export function ModeToggle() {
         type="button"
         className={`mode-button${isMode('preview') ? ' active' : ''}`}
         aria-pressed={isMode('preview')}
-        title="Preview  ⌘3"
+        title={platformShortcut('Preview  ⌘3')}
         onClick={() => setMode('preview')}
       >
         <IconLayoutPreview size={16} />

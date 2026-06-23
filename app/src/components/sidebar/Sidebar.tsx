@@ -35,6 +35,7 @@ import {
 } from '../../stores/project';
 import { usePreferencesStore } from '../../stores/preferences';
 import { resolveTitle } from '../../lib/title';
+import { platformShortcut } from '../../lib/commands/shortcut-display';
 import { notify } from '../../lib/notify';
 import * as ContextMenu from '@radix-ui/react-context-menu';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -571,14 +572,14 @@ export function Sidebar() {
                     onSelect={() => void openProjectFromDialog()}
                   >
                     <span className="ctx-label">Open project…</span>
-                    <span className="ctx-shortcut">⌘O</span>
+                    <span className="ctx-shortcut">{platformShortcut('⌘O')}</span>
                   </DropdownMenu.Item>
                   <DropdownMenu.Item
                     className="ctx-item"
                     onSelect={() => void closeProject()}
                   >
                     <span className="ctx-label">Close project</span>
-                    <span className="ctx-shortcut">⌘⇧W</span>
+                    <span className="ctx-shortcut">{platformShortcut('⌘⇧W')}</span>
                   </DropdownMenu.Item>
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>
@@ -647,7 +648,8 @@ export function Sidebar() {
 
         {!manifest && (
           <p className="empty-hint">
-            No project open. Use <strong>⌘O</strong> to open a folder.
+            No project open. Use <strong>{platformShortcut('⌘O')}</strong> to
+            open a folder.
           </p>
         )}
 

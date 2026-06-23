@@ -26,6 +26,7 @@ import {
   LINE_HEIGHT_STEPS_X100,
   lineHeightLabel
 } from '../../lib/typography';
+import { platformShortcut } from '../../lib/commands/shortcut-display';
 import { notify } from '../../lib/notify';
 import { openFeedbackForm } from '../../lib/feedback';
 import {
@@ -197,7 +198,9 @@ function GeneralPane() {
         />
         <SettingRow
           label="Allow switching surfaces"
-          desc="Let ⌘⇧E and the command palette flip between the Rich and Text surfaces. Off locks the editor to the default surface."
+          desc={platformShortcut(
+            'Let ⌘⇧E and the command palette flip between the Rich and Text surfaces. Off locks the editor to the default surface.'
+          )}
           control={
             <Toggle
               checked={switching}

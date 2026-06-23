@@ -9,6 +9,7 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { selectActiveTab, useProjectStore } from '../../stores/project';
 import { IconPanels } from '../icons/IconPanels';
+import { platformShortcut } from '../../lib/commands/shortcut-display';
 
 export function PanelMenu() {
   const activeTab = useProjectStore(selectActiveTab);
@@ -67,7 +68,7 @@ export function PanelMenu() {
                 <span className="ctx-meta"> · {frontmatterCount}</span>
               )}
             </span>
-            <span className="ctx-shortcut">⌘⇧F</span>
+            <span className="ctx-shortcut">{platformShortcut('⌘⇧F')}</span>
           </DropdownMenu.CheckboxItem>
           <DropdownMenu.CheckboxItem
             className="ctx-item"
@@ -75,7 +76,7 @@ export function PanelMenu() {
             onCheckedChange={() => toggleBacklinksPanel()}
           >
             <span className="ctx-label">Backlinks</span>
-            <span className="ctx-shortcut">⌘⇧B</span>
+            <span className="ctx-shortcut">{platformShortcut('⌘⇧B')}</span>
           </DropdownMenu.CheckboxItem>
           <DropdownMenu.CheckboxItem
             className="ctx-item"
@@ -89,7 +90,7 @@ export function PanelMenu() {
                 · {historyMode === 'git' ? 'git' : 'checkpoints'}
               </span>
             </span>
-            <span className="ctx-shortcut">⌘⇧H</span>
+            <span className="ctx-shortcut">{platformShortcut('⌘⇧H')}</span>
           </DropdownMenu.CheckboxItem>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

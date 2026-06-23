@@ -9,11 +9,12 @@
 // tracked in the 1.0 build plan's deferred-icons list.
 
 import { usePreferencesStore } from '../../stores/preferences';
+import { platformShortcut } from '../../lib/commands/shortcut-display';
 import type { SurfaceId } from '@skrive/shared';
 
 const OPTIONS: { id: SurfaceId; label: string; hint: string }[] = [
-  { id: 'rich', label: 'Rich', hint: 'Rich surface  ⌘⇧E' },
-  { id: 'text', label: 'Text', hint: 'Text surface  ⌘⇧E' }
+  { id: 'rich', label: 'Rich', hint: platformShortcut('Rich surface  ⌘⇧E') },
+  { id: 'text', label: 'Text', hint: platformShortcut('Text surface  ⌘⇧E') }
 ];
 
 export function SurfaceToggle() {

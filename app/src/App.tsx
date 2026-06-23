@@ -9,6 +9,7 @@ import { SplitView } from './components/editor/SplitView';
 import { TextToolbar } from './components/editor/TextToolbar';
 import { RichEditor } from './components/editor/rich/RichEditor';
 import { flushActiveEditor } from './components/editor/active-editor';
+import { platformShortcut } from './lib/commands/shortcut-display';
 import { DiffView } from './components/editor/DiffView';
 import { Header } from './components/chrome/Header';
 import { BacklinksPanel } from './components/panels/BacklinksPanel';
@@ -459,7 +460,7 @@ export function App() {
               </button>
             </div>
             <p className="hint">
-              Or press <kbd>⌘O</kbd>.
+              Or press <kbd>{platformShortcut('⌘O')}</kbd>.
             </p>
             {recentProjects.length > 0 && (
               <div className="empty-recent">

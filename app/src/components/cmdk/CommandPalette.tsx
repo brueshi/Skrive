@@ -17,6 +17,7 @@ import {
   type CommandDeps,
   type CommandGroup
 } from '../../lib/commands/registry';
+import { platformShortcut } from '../../lib/commands/shortcut-display';
 import { useProjectStore } from '../../stores/project';
 
 type Props = {
@@ -88,7 +89,9 @@ export function CommandPalette({ open, onClose, deps }: Props) {
               >
                 <span className="cmdk-item-label">{cmd.label}</span>
                 {cmd.shortcut && (
-                  <span className="cmdk-item-shortcut">{cmd.shortcut}</span>
+                  <span className="cmdk-item-shortcut">
+                    {cmd.shortcut && platformShortcut(cmd.shortcut)}
+                  </span>
                 )}
               </Cmd.Item>
             ))}
