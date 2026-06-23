@@ -19,6 +19,18 @@ pub fn build(b: *std.Build) void {
     });
     const optimize = b.standardOptimizeOption(.{});
 
+    // A single `dev` switch gates everything that should be absent from a
+    // shipped build: the `skrive-diag.log` file logger (B2) and the WebView2
+    // DevTools/F12 surface (B5) — both answer the same question, "is this a
+    // release the user runs?". Defaults to on for Debug, off otherwise, so a
+    // plain `-Doptimize=ReleaseFast` is release-clean with no extra flag;
+    // `-Ddev=true` forces a triage build (logger + DevTools) on any mode.
+    // (Supersedes the handoff's tentative `-Ddiag` name.)
+    const dev = b.option(bool, "dev", "Enable the diag file logger + DevTools (default: Debug only)") orelse
+        (optimize == .Debug);
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "dev", dev);
+
     const core_dep = b.dependency("skrive_core", .{});
     const core_mod = core_dep.module("skrive_core");
 
@@ -31,6 +43,17 @@ pub fn build(b: *std.Build) void {
         }),
     });
     exe.root_module.addImport("skrive_core", core_mod);
+    exe.root_module.addOptions("build_options", build_options);
+    // The app + taskbar icon, embedded as a Win32 resource. Zig's built-in
+    // resource compiler (resinator) compiles the .rc when cross-building from
+    // macOS — no rc.exe / Windows SDK needed. The .rc points at skrive.ico
+    // (sourced from build/icon.ico); main.zig loads it by the IDI_SKRIVE id.
+    exe.root_module.addWin32ResourceFile(.{ .file = b.path("skrive.rc") });
+    // GUI subsystem: no console window flashes on launch. Zig's
+    // WinMainCRTStartup shim still calls `pub fn main`, so the entry point is
+    // unchanged; startup failures surface via MessageBox instead of stderr
+    // (which is invisible without a console).
+    exe.subsystem = .Windows;
     // The core module brings libc++ (the watcher); libc underlies it and the
     // Win32 CRT, so link it explicitly.
     exe.root_module.link_libc = true;

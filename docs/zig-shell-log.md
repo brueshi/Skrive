@@ -2009,3 +2009,90 @@ that are compile-only-verified and could surface here: the `IFileOpenDialog` COM
 `SHFILEOPSTRUCTW` layout for trash. The `diag.zig` file logger is still in for
 fast triage. After the dogfood: 5.2e (parity corpus run on Windows) closes the
 formal gate, then Stage 5.3 packaging.
+
+---
+
+## 2026-06-23 — Stage 5.3 Milestone 1: correct, native-looking, release-clean (built; dogfood pending)
+
+**Branch:** `labs/zig-shell-stage-5-windows-host` (continued). The shipping push
+begins (scope: `docs/windows-shipping-handoff.md`). Milestone 1 = A1 (nav
+backstop), B1 (icon), B2 (GUI subsystem + diag gating), B5 (DevTools off in
+release). Dogfood bundle: `Skrive-win-5.3-m1.zip` (release build). **Core
+untouched throughout — parity 26/26.**
+
+**Authoritative ABI, not memory.** The new COM surfaces (A1, B5) were anchored
+to the real `WebView2.h` exactly as 5.1 was: re-fetched the NuGet package
+`Microsoft.Web.WebView2` **1.0.3351.48**, extracted the C-style `*Vtbl` structs,
+and transcribed slot numbers verbatim. Verified the *existing* `webview2.zig`
+declarations against the header first (all correct) before extending. The
+audited-filler tactic held: every run length is checked by arithmetic against
+the header slot numbers in comments, so a miscount is visible, not silent.
+
+**A1 — navigation backstop (the one functional gap).** WebView2 has no
+`setWindowOpenHandler` equivalent, so the macOS host's `decidePolicyFor` +
+`createWebViewWith` policy was mirrored with two events on `ICoreWebView2`:
+- `add_NavigationStarting` (slot **8**, typed out of the old `run_8_27` filler;
+  `run_9_27` [19] remains). Handler reads `get_Uri` (args slot 4), and if the
+  target is not in-app (`http://skrive.localhost*`, `about:`/`blob:`/`data:`)
+  calls `put_Cancel(TRUE)` (args slot 9) + `host_cmds.openExternal` — whose
+  scheme allowlist makes a disallowed scheme (`file://`, ...) a safe cancelled
+  no-op. The first navigate to `skrive.localhost/index.html` is in-app, so it
+  is allowed; a link in a note can never replace the running app.
+- `add_NewWindowRequested` (slot **45**, typed out of the old `run_36_51`;
+  now `run_36_44` [9] + slot 45 + `run_46_51` [6]). Handler routes the URI to
+  `openExternal` and sets `put_Handled(TRUE)` (args slot 7) unconditionally, so
+  no popup webview spawns even if the URI can't be read.
+Two new implemented COM objects in `handlers.zig` (same singleton / no-op
+refcount pattern as the other three; QI answers IUnknown + the handler IID —
+`9adbe429-...` NavigationStarting, `d4c185fe-...` NewWindowRequested).
+
+**B5 — DevTools off in release.** Typed `get_Settings` (slot **4**, out of the
+old `run_4_5`) → new `ICoreWebView2Settings` interface → `put_AreDevToolsEnabled`
+(slot **13**, the only method given a real signature). `onControllerCreated`
+calls it with the `dev` flag and releases the owned settings reference. Mirrors
+the macOS `#if DEBUG` inspector gate. F12/right-click-inspect are dead in a
+release build.
+
+**B2 — GUI subsystem + diag gating.** `exe.subsystem = .Windows` in `build.zig`
+(Zig's `WinMainCRTStartup` shim still calls `pub fn main` — entry point
+unchanged), so no console window flashes. A single `dev` build option (default
+`optimize == .Debug`) is threaded in as a `build_options` module and gates BOTH
+the `skrive-diag.log` file logger and B5's DevTools — they answer the same
+question, "is this a release a user runs?". **Supersedes the handoff's tentative
+`-Ddiag` name.** Verified by `strings`: the `skrive-diag.log` literal is present
+in a Debug exe, **absent** in a ReleaseFast exe (comptime dead-code elimination
+of the gated body), and restored with `-Ddev=true` on a release build (the
+triage escape hatch). Because stderr is invisible under the GUI subsystem,
+`main.zig`'s fatal-startup path now raises a `MessageBoxW` instead of
+`std.debug.print` (parity with the macOS `presentFatal` NSAlert).
+
+**B1 — app + window icon.** `build/icon.ico` (multi-res 32+16) copied to
+`shell-zig/windows/skrive.ico`; `skrive.rc` (`IDI_SKRIVE ICON "skrive.ico"`)
+linked via `exe.root_module.addWin32ResourceFile` (0.16 moved it from the
+Compile step to the Module). **Zig's built-in resource compiler (resinator)
+compiles the .rc when cross-building from macOS — no rc.exe / Windows SDK.**
+Confirmed a populated `.rsrc` section (~18.5 KB, matching the .ico) in the PE.
+`createWindow` loads it via `LoadIconW(hinstance, MAKEINTRESOURCEW(IDI_SKRIVE))`
+into `WNDCLASSEXW.hIcon`/`hIconSm` — drives title-bar corner, taskbar, Alt-Tab.
+
+**Gates met on macOS (build-side; the rest is Windows-gated as always).** Host
+cross-compiles to PE32+ for x64 **and** arm64 in both Debug and ReleaseFast;
+`zig fmt --check` clean; `zig build test` (jsescape, native) green; **core
+byte-for-byte unchanged, parity 26/26**; release dist is release-clean
+(subsystem GUI, zero `skrive-diag.log` string).
+
+**Dogfood gate (Joe, on Windows), `Skrive-win-5.3-m1.zip`.** (1) **B1** — the
+Skrive mark shows on the title bar, taskbar, and Alt-Tab. (2) **B2** — no
+console window flashes on launch; no `skrive-diag.log` appears next to the exe.
+(3) **B5** — F12 / right-click Inspect do nothing. (4) **A1** — clicking an
+external `http(s)`/`mailto` link in a note opens the OS browser/mail client and
+the app frame stays put; `target=_blank` opens externally without spawning a
+popup window; a malformed/`file://` link is a no-op, never a frame takeover.
+**Honest unknowns (compile-only, blind COM like the WebView2 vtables were):**
+the three new slots — NavigationStarting@8, NewWindowRequested@45, settings
+put_AreDevToolsEnabled@13. They are behaviorally checkable above; if any
+misbehaves, a triage build with the HRESULT trace + DevTools is one flag away
+(`./shell-zig/build-windows.sh x64 release` then `-Ddev=true`, or just the debug
+config). **Next (Milestone 2):** B3 custom frameless chrome (research WebView2
+non-client-region support first), B4 window-state persistence, C1 file
+associations + argv-forward.

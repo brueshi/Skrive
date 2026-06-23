@@ -27,6 +27,7 @@ const diag = @import("diag.zig");
 const paths = @import("paths.zig");
 const host_cmds = @import("host_cmds.zig");
 const core_mod = @import("skrive_core");
+const build_options = @import("build_options");
 
 const w = win32.w;
 const WINAPI = win32.WINAPI;
@@ -64,7 +65,11 @@ pub const App = struct {
     env_handler: handlers.EnvCompletedHandler = undefined,
     controller_handler: handlers.ControllerCompletedHandler = undefined,
     web_message_handler: handlers.WebMessageHandler = undefined,
+    nav_starting_handler: handlers.NavigationStartingHandler = undefined,
+    new_window_handler: handlers.NewWindowRequestedHandler = undefined,
     web_msg_token: wv.EventRegistrationToken = .{ .value = 0 },
+    nav_starting_token: wv.EventRegistrationToken = .{ .value = 0 },
+    new_window_token: wv.EventRegistrationToken = .{ .value = 0 },
     user_data_dir_w: ?[:0]u16 = null,
 
     /// Build the window + core and kick off async WebView2 creation. The App is
@@ -131,6 +136,8 @@ pub const App = struct {
         self.env_handler = handlers.EnvCompletedHandler.init(onEnvCreated, self);
         self.controller_handler = handlers.ControllerCompletedHandler.init(onControllerCreated, self);
         self.web_message_handler = handlers.WebMessageHandler.init(onWebMessage, self);
+        self.nav_starting_handler = handlers.NavigationStartingHandler.init(onNavigationStarting, self);
+        self.new_window_handler = handlers.NewWindowRequestedHandler.init(onNewWindowRequested, self);
 
         try self.createWindow();
         diag.log("window created", .{});
@@ -143,6 +150,10 @@ pub const App = struct {
     }
 
     fn createWindow(self: *App) !void {
+        // The icon embedded as IDI_SKRIVE (skrive.rc), loaded from this exe's
+        // own module — drives the window's title-bar corner, taskbar button,
+        // and Alt-Tab entry. Same handle for large and small; Windows scales.
+        const icon = win32.LoadIconW(self.hinstance, win32.makeIntResourceW(win32.IDI_SKRIVE));
         const wc = win32.WNDCLASSEXW{
             .cbSize = @sizeOf(win32.WNDCLASSEXW),
             .style = win32.CS_HREDRAW | win32.CS_VREDRAW,
@@ -150,12 +161,12 @@ pub const App = struct {
             .cbClsExtra = 0,
             .cbWndExtra = 0,
             .hInstance = self.hinstance,
-            .hIcon = null,
+            .hIcon = icon,
             .hCursor = win32.LoadCursorW(null, win32.IDC_ARROW),
             .hbrBackground = win32.COLOR_WINDOW_BRUSH,
             .lpszMenuName = null,
             .lpszClassName = CLASS_NAME,
-            .hIconSm = null,
+            .hIconSm = icon,
         };
         if (win32.RegisterClassExW(&wc) == 0) return error.RegisterClassFailed;
 
@@ -237,6 +248,25 @@ pub const App = struct {
         const mhr = webview3.addWebMessageReceived(@ptrCast(&self.web_message_handler), &self.web_msg_token);
         diag.log("addWebMessageReceived hr=0x{x:0>8}", .{diag.hx(mhr)});
 
+        // B5: DevTools/F12 only in dev builds, mirroring the macOS host's
+        // #if DEBUG inspector gate. get_Settings returns an owned reference.
+        var settings_ptr: ?*anyopaque = null;
+        if (webview3.getSettings(&settings_ptr) == wv.S_OK) {
+            if (settings_ptr) |sp| {
+                const settings: *wv.ICoreWebView2Settings = @ptrCast(@alignCast(sp));
+                const dhr = settings.putAreDevToolsEnabled(if (build_options.dev) 1 else 0);
+                diag.log("putAreDevToolsEnabled({}) hr=0x{x:0>8}", .{ build_options.dev, diag.hx(dhr) });
+                _ = wv.asUnknown(sp).release();
+            }
+        }
+
+        // A1: navigation backstop. Pin the main frame to the app origin and
+        // route popups / external links out to the OS browser.
+        const nshr = webview3.addNavigationStarting(@ptrCast(&self.nav_starting_handler), &self.nav_starting_token);
+        diag.log("addNavigationStarting hr=0x{x:0>8}", .{diag.hx(nshr)});
+        const nwhr = webview3.addNewWindowRequested(@ptrCast(&self.new_window_handler), &self.new_window_token);
+        diag.log("addNewWindowRequested hr=0x{x:0>8}", .{diag.hx(nwhr)});
+
         var rc: win32.RECT = undefined;
         _ = win32.GetClientRect(self.hwnd.?, &rc);
         diag.log("client rect = {d}x{d}", .{ rc.right - rc.left, rc.bottom - rc.top });
@@ -244,6 +274,57 @@ pub const App = struct {
 
         const nhr = webview3.navigate(NAV_URL);
         diag.log("navigate hr=0x{x:0>8}", .{diag.hx(nhr)});
+    }
+
+    // ---- navigation backstop (A1) -----------------------------------------
+
+    /// Whether `uri` may load in the main frame. The app origin
+    /// (http://skrive.localhost) and the renderer-internal schemes
+    /// (about:/blob:/data:) are in-app; everything else is off-origin and gets
+    /// cancelled + routed externally. Mirrors the macOS decidePolicyFor switch.
+    fn isInAppOrigin(uri: []const u8) bool {
+        return std.mem.startsWith(u8, uri, "http://skrive.localhost") or
+            std.mem.startsWith(u8, uri, "about:") or
+            std.mem.startsWith(u8, uri, "blob:") or
+            std.mem.startsWith(u8, uri, "data:");
+    }
+
+    /// Cancel any main-frame navigation off the app origin and hand the URI to
+    /// the OS browser (host_cmds.openExternal enforces the scheme allowlist, so
+    /// a disallowed scheme like file:// is simply cancelled with no open). A
+    /// link in a note can never replace the running app.
+    fn onNavigationStarting(ctx: *anyopaque, args_opt: ?*wv.ICoreWebView2NavigationStartingEventArgs) callconv(.c) void {
+        const self: *App = @ptrCast(@alignCast(ctx));
+        const args = args_opt orelse return;
+        var uri_w: ?win32.LPWSTR = null;
+        if (args.getUri(&uri_w) != wv.S_OK) return;
+        const raw = uri_w orelse return;
+        defer win32.CoTaskMemFree(raw);
+        const uri = std.unicode.utf16LeToUtf8Alloc(self.gpa, std.mem.span(raw)) catch return;
+        defer self.gpa.free(uri);
+        if (isInAppOrigin(uri)) return;
+        _ = args.putCancel(1);
+        host_cmds.openExternal(self.gpa, uri);
+        diag.log("nav backstop: cancelled off-origin nav to {s}", .{uri});
+    }
+
+    /// Suppress popups (window.open / target=_blank) and route their target to
+    /// the OS browser. Handled is set unconditionally so no child webview ever
+    /// spawns, even if the URI can't be read. Mirrors createWebViewWith on macOS.
+    fn onNewWindowRequested(ctx: *anyopaque, args_opt: ?*wv.ICoreWebView2NewWindowRequestedEventArgs) callconv(.c) void {
+        const self: *App = @ptrCast(@alignCast(ctx));
+        const args = args_opt orelse return;
+        var uri_w: ?win32.LPWSTR = null;
+        if (args.getUri(&uri_w) == wv.S_OK) {
+            if (uri_w) |raw| {
+                defer win32.CoTaskMemFree(raw);
+                if (std.unicode.utf16LeToUtf8Alloc(self.gpa, std.mem.span(raw))) |uri| {
+                    defer self.gpa.free(uri);
+                    host_cmds.openExternal(self.gpa, uri);
+                } else |_| {}
+            }
+        }
+        _ = args.putHandled(1);
     }
 
     // ---- bridge ------------------------------------------------------------

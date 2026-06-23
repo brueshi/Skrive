@@ -1,0 +1,9 @@
+// Win32 resource script: embeds the Skrive app icon into Skrive.exe.
+//
+// Compiled by Zig's built-in resource compiler (resinator) via
+// `exe.addWin32ResourceFile` in build.zig, so it cross-compiles from macOS
+// with no rc.exe / Windows SDK. IDI_SKRIVE must match win32.IDI_SKRIVE (1);
+// main/app load it with MAKEINTRESOURCEW for the window class + taskbar icon.
+// The .ico is sourced from build/icon.ico (multi-resolution: 32x32 + 16x16).
+#define IDI_SKRIVE 1
+IDI_SKRIVE ICON "skrive.ico"

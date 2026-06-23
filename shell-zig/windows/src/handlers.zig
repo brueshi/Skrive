@@ -130,3 +130,84 @@ pub const WebMessageHandler = extern struct {
         return wv.S_OK;
     }
 };
+
+/// Main-frame navigation backstop (A1): fires before each navigation so the
+/// host can cancel any nav off the app origin and route it externally. Invoke's
+/// first arg is the sender ICoreWebView2* (ignored); the second is the args.
+pub const NavigationStartingHandler = extern struct {
+    lpVtbl: *const Vtbl,
+    callback: *const fn (ctx: *anyopaque, args: ?*wv.ICoreWebView2NavigationStartingEventArgs) callconv(.c) void,
+    ctx: *anyopaque,
+
+    pub const Vtbl = extern struct {
+        QueryInterface: *const fn (*NavigationStartingHandler, *const GUID, *?*anyopaque) callconv(WINAPI) HRESULT,
+        AddRef: *const fn (*NavigationStartingHandler) callconv(WINAPI) u32,
+        Release: *const fn (*NavigationStartingHandler) callconv(WINAPI) u32,
+        Invoke: *const fn (*NavigationStartingHandler, ?*anyopaque, ?*wv.ICoreWebView2NavigationStartingEventArgs) callconv(WINAPI) HRESULT,
+    };
+
+    const vtbl = Vtbl{ .QueryInterface = qi, .AddRef = addRef, .Release = addRef, .Invoke = invoke };
+
+    pub fn init(
+        callback: *const fn (ctx: *anyopaque, args: ?*wv.ICoreWebView2NavigationStartingEventArgs) callconv(.c) void,
+        ctx: *anyopaque,
+    ) NavigationStartingHandler {
+        return .{ .lpVtbl = &vtbl, .callback = callback, .ctx = ctx };
+    }
+
+    fn qi(self: *NavigationStartingHandler, iid: *const GUID, out: *?*anyopaque) callconv(WINAPI) HRESULT {
+        if (wv.guidEql(iid, &wv.IID_IUnknown) or wv.guidEql(iid, &wv.IID_NavigationStartingHandler)) {
+            out.* = @ptrCast(self);
+            return wv.S_OK;
+        }
+        out.* = null;
+        return wv.E_NOINTERFACE;
+    }
+    fn addRef(_: *NavigationStartingHandler) callconv(WINAPI) u32 {
+        return 1;
+    }
+    fn invoke(self: *NavigationStartingHandler, _: ?*anyopaque, args: ?*wv.ICoreWebView2NavigationStartingEventArgs) callconv(WINAPI) HRESULT {
+        self.callback(self.ctx, args);
+        return wv.S_OK;
+    }
+};
+
+/// window.open / target=_blank backstop (A1): fires when the page requests a
+/// new window so the host can suppress the popup and route the URI externally.
+pub const NewWindowRequestedHandler = extern struct {
+    lpVtbl: *const Vtbl,
+    callback: *const fn (ctx: *anyopaque, args: ?*wv.ICoreWebView2NewWindowRequestedEventArgs) callconv(.c) void,
+    ctx: *anyopaque,
+
+    pub const Vtbl = extern struct {
+        QueryInterface: *const fn (*NewWindowRequestedHandler, *const GUID, *?*anyopaque) callconv(WINAPI) HRESULT,
+        AddRef: *const fn (*NewWindowRequestedHandler) callconv(WINAPI) u32,
+        Release: *const fn (*NewWindowRequestedHandler) callconv(WINAPI) u32,
+        Invoke: *const fn (*NewWindowRequestedHandler, ?*anyopaque, ?*wv.ICoreWebView2NewWindowRequestedEventArgs) callconv(WINAPI) HRESULT,
+    };
+
+    const vtbl = Vtbl{ .QueryInterface = qi, .AddRef = addRef, .Release = addRef, .Invoke = invoke };
+
+    pub fn init(
+        callback: *const fn (ctx: *anyopaque, args: ?*wv.ICoreWebView2NewWindowRequestedEventArgs) callconv(.c) void,
+        ctx: *anyopaque,
+    ) NewWindowRequestedHandler {
+        return .{ .lpVtbl = &vtbl, .callback = callback, .ctx = ctx };
+    }
+
+    fn qi(self: *NewWindowRequestedHandler, iid: *const GUID, out: *?*anyopaque) callconv(WINAPI) HRESULT {
+        if (wv.guidEql(iid, &wv.IID_IUnknown) or wv.guidEql(iid, &wv.IID_NewWindowRequestedHandler)) {
+            out.* = @ptrCast(self);
+            return wv.S_OK;
+        }
+        out.* = null;
+        return wv.E_NOINTERFACE;
+    }
+    fn addRef(_: *NewWindowRequestedHandler) callconv(WINAPI) u32 {
+        return 1;
+    }
+    fn invoke(self: *NewWindowRequestedHandler, _: ?*anyopaque, args: ?*wv.ICoreWebView2NewWindowRequestedEventArgs) callconv(WINAPI) HRESULT {
+        self.callback(self.ctx, args);
+        return wv.S_OK;
+    }
+};

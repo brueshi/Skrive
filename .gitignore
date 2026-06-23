@@ -42,3 +42,4 @@ planning/
 /shell-zig/windows/zig-out/
 /shell-zig/windows/.zig-cache/
 /shell-zig/windows/dist/
+/shell-zig/windows/Skrive-win-*.zip

@@ -74,6 +74,8 @@ pub const IID_ICoreWebView2_3 = guid("A0D6DF20-3B92-416D-AA0C-437A9C727857");
 pub const IID_EnvironmentCompletedHandler = guid("4e8a3389-c9d8-4bd2-b6b5-124fee6cc14d");
 pub const IID_ControllerCompletedHandler = guid("6c4819f3-c9b7-4260-8127-c9f5bde7f68c");
 pub const IID_WebMessageReceivedHandler = guid("57213f19-00e6-49fa-8e07-898ea01ecbd2");
+pub const IID_NavigationStartingHandler = guid("9adbe429-f36d-432b-9ddc-f8881fbd76e3");
+pub const IID_NewWindowRequestedHandler = guid("d4c185fe-c81c-4989-97af-2d3fa7ab5651");
 
 // ---- IUnknown (for casting + QueryInterface/Release on any interface) ------
 
@@ -152,12 +154,17 @@ pub const ICoreWebView2_3 = extern struct {
         QueryInterface: Slot,
         AddRef: Slot,
         Release: *const fn (*ICoreWebView2_3) callconv(WINAPI) u32,
-        run_4_5: [2]Slot, // get_Settings, get_Source
+        // 4: get_Settings(out ICoreWebView2Settings**) — owned ref (Release it).
+        get_Settings: *const fn (*ICoreWebView2_3, *?*anyopaque) callconv(WINAPI) HRESULT,
+        run_5: [1]Slot, // get_Source
         // 6: Navigate(uri)
         Navigate: *const fn (*ICoreWebView2_3, LPCWSTR) callconv(WINAPI) HRESULT,
         // 7: NavigateToString(htmlContent) — diagnostic, bypasses serving
         NavigateToString: *const fn (*ICoreWebView2_3, LPCWSTR) callconv(WINAPI) HRESULT,
-        run_8_27: [20]Slot, // add_NavigationStarting .. remove_ProcessFailed
+        // 8: add_NavigationStarting(handler, out token) — the main-frame
+        // navigation backstop (cancel off-origin nav, route it externally).
+        add_NavigationStarting: *const fn (*ICoreWebView2_3, *anyopaque, *EventRegistrationToken) callconv(WINAPI) HRESULT,
+        run_9_27: [19]Slot, // remove_NavigationStarting .. remove_ProcessFailed
         // 28: AddScriptToExecuteOnDocumentCreated(js, handler|null)
         AddScriptToExecuteOnDocumentCreated: *const fn (*ICoreWebView2_3, LPCWSTR, ?*anyopaque) callconv(WINAPI) HRESULT,
         run_29: [1]Slot, // RemoveScriptToExecuteOnDocumentCreated
@@ -166,7 +173,11 @@ pub const ICoreWebView2_3 = extern struct {
         run_31_34: [4]Slot, // CapturePreview, Reload, PostWebMessageAsJson, PostWebMessageAsString
         // 35: add_WebMessageReceived(handler, out token)
         add_WebMessageReceived: *const fn (*ICoreWebView2_3, *anyopaque, *EventRegistrationToken) callconv(WINAPI) HRESULT,
-        run_36_51: [16]Slot, // remove_WebMessageReceived .. get_ContainsFullScreenElement
+        run_36_44: [9]Slot, // remove_WebMessageReceived .. Stop
+        // 45: add_NewWindowRequested(handler, out token) — window.open /
+        // target=_blank backstop (suppress the popup, route the URI externally).
+        add_NewWindowRequested: *const fn (*ICoreWebView2_3, *anyopaque, *EventRegistrationToken) callconv(WINAPI) HRESULT,
+        run_46_51: [6]Slot, // remove_NewWindowRequested .. RemoveHostObjectFromScript
         // 52: OpenDevToolsWindow() — opens DevTools without needing webview focus
         OpenDevToolsWindow: *const fn (*ICoreWebView2_3) callconv(WINAPI) HRESULT,
         run_53_71: [19]Slot, // add_WebResourceRequested .. get_IsSuspended
@@ -189,6 +200,15 @@ pub const ICoreWebView2_3 = extern struct {
     }
     pub fn addWebMessageReceived(self: *ICoreWebView2_3, handler: *anyopaque, token: *EventRegistrationToken) HRESULT {
         return self.lpVtbl.add_WebMessageReceived(self, handler, token);
+    }
+    pub fn getSettings(self: *ICoreWebView2_3, out: *?*anyopaque) HRESULT {
+        return self.lpVtbl.get_Settings(self, out);
+    }
+    pub fn addNavigationStarting(self: *ICoreWebView2_3, handler: *anyopaque, token: *EventRegistrationToken) HRESULT {
+        return self.lpVtbl.add_NavigationStarting(self, handler, token);
+    }
+    pub fn addNewWindowRequested(self: *ICoreWebView2_3, handler: *anyopaque, token: *EventRegistrationToken) HRESULT {
+        return self.lpVtbl.add_NewWindowRequested(self, handler, token);
     }
     pub fn setVirtualHostMapping(self: *ICoreWebView2_3, host: LPCWSTR, folder: LPCWSTR, kind: HostResourceAccessKind) HRESULT {
         return self.lpVtbl.SetVirtualHostNameToFolderMapping(self, host, folder, kind);
@@ -217,6 +237,73 @@ pub const ICoreWebView2WebMessageReceivedEventArgs = extern struct {
     }
     pub fn release(self: *ICoreWebView2WebMessageReceivedEventArgs) u32 {
         return self.lpVtbl.Release(self);
+    }
+};
+
+// ---- ICoreWebView2Settings  (21 own methods, slots 4-24) ------------------
+// Only put_AreDevToolsEnabled (slot 13) is called — to disable DevTools/F12 in
+// release builds (B5), mirroring the macOS host's #if DEBUG inspector gate.
+
+pub const ICoreWebView2Settings = extern struct {
+    lpVtbl: *const Vtbl,
+    pub const Vtbl = extern struct {
+        QueryInterface: Slot,
+        AddRef: Slot,
+        Release: *const fn (*ICoreWebView2Settings) callconv(WINAPI) u32,
+        run_4_12: [9]Slot, // get/put IsScriptEnabled .. get_AreDevToolsEnabled
+        // 13: put_AreDevToolsEnabled(BOOL)
+        put_AreDevToolsEnabled: *const fn (*ICoreWebView2Settings, win32.BOOL) callconv(WINAPI) HRESULT,
+        run_14_21: [8]Slot, // get/put AreDefaultContextMenusEnabled .. IsBuiltInErrorPageEnabled
+    };
+    pub fn putAreDevToolsEnabled(self: *ICoreWebView2Settings, enabled: win32.BOOL) HRESULT {
+        return self.lpVtbl.put_AreDevToolsEnabled(self, enabled);
+    }
+};
+
+// ---- ICoreWebView2NavigationStartingEventArgs  (7 own methods, slots 4-10) -
+
+pub const ICoreWebView2NavigationStartingEventArgs = extern struct {
+    lpVtbl: *const Vtbl,
+    pub const Vtbl = extern struct {
+        QueryInterface: Slot,
+        AddRef: Slot,
+        Release: Slot,
+        // 4: get_Uri(out LPWSTR) — the navigation target (callee-allocated;
+        // free with CoTaskMemFree).
+        get_Uri: *const fn (*ICoreWebView2NavigationStartingEventArgs, *?LPWSTR) callconv(WINAPI) HRESULT,
+        run_5_8: [4]Slot, // get_IsUserInitiated, get_IsRedirected, get_RequestHeaders, get_Cancel
+        // 9: put_Cancel(BOOL) — cancel an off-origin main-frame navigation.
+        put_Cancel: *const fn (*ICoreWebView2NavigationStartingEventArgs, win32.BOOL) callconv(WINAPI) HRESULT,
+        run_10: [1]Slot, // get_NavigationId
+    };
+    pub fn getUri(self: *ICoreWebView2NavigationStartingEventArgs, out: *?LPWSTR) HRESULT {
+        return self.lpVtbl.get_Uri(self, out);
+    }
+    pub fn putCancel(self: *ICoreWebView2NavigationStartingEventArgs, cancel: win32.BOOL) HRESULT {
+        return self.lpVtbl.put_Cancel(self, cancel);
+    }
+};
+
+// ---- ICoreWebView2NewWindowRequestedEventArgs  (8 own methods, slots 4-11) -
+
+pub const ICoreWebView2NewWindowRequestedEventArgs = extern struct {
+    lpVtbl: *const Vtbl,
+    pub const Vtbl = extern struct {
+        QueryInterface: Slot,
+        AddRef: Slot,
+        Release: Slot,
+        // 4: get_Uri(out LPWSTR) — the requested popup target (CoTaskMemFree).
+        get_Uri: *const fn (*ICoreWebView2NewWindowRequestedEventArgs, *?LPWSTR) callconv(WINAPI) HRESULT,
+        run_5_6: [2]Slot, // put_NewWindow, get_NewWindow
+        // 7: put_Handled(BOOL) — true = we handled it, so no popup webview opens.
+        put_Handled: *const fn (*ICoreWebView2NewWindowRequestedEventArgs, win32.BOOL) callconv(WINAPI) HRESULT,
+        run_8_11: [4]Slot, // get_Handled, get_IsUserInitiated, GetDeferral, get_WindowFeatures
+    };
+    pub fn getUri(self: *ICoreWebView2NewWindowRequestedEventArgs, out: *?LPWSTR) HRESULT {
+        return self.lpVtbl.get_Uri(self, out);
+    }
+    pub fn putHandled(self: *ICoreWebView2NewWindowRequestedEventArgs, handled: win32.BOOL) HRESULT {
+        return self.lpVtbl.put_Handled(self, handled);
     }
 };
 

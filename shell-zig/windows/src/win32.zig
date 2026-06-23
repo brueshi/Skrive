@@ -92,6 +92,19 @@ pub extern "user32" fn DispatchMessageW(lpMsg: *const MSG) callconv(WINAPI) LRES
 pub extern "user32" fn PostQuitMessage(nExitCode: i32) callconv(WINAPI) void;
 pub extern "user32" fn PostMessageW(hWnd: ?HWND, Msg: u32, wParam: WPARAM, lParam: LPARAM) callconv(WINAPI) BOOL;
 pub extern "user32" fn LoadCursorW(hInstance: ?HINSTANCE, lpCursorName: LPCWSTR) callconv(WINAPI) ?w.HCURSOR;
+pub extern "user32" fn LoadIconW(hInstance: ?HINSTANCE, lpIconName: LPCWSTR) callconv(WINAPI) ?w.HICON;
+pub extern "user32" fn MessageBoxW(hWnd: ?HWND, lpText: LPCWSTR, lpCaption: LPCWSTR, uType: u32) callconv(WINAPI) i32;
+pub const MB_OK: u32 = 0x0;
+pub const MB_ICONERROR: u32 = 0x10;
+
+/// MAKEINTRESOURCEW: a numeric resource id passed where an LPCWSTR name is
+/// expected (the low word is the id, the rest must be zero). Used to load the
+/// embedded icon (IDI_SKRIVE) from the exe's own module.
+pub fn makeIntResourceW(id: u16) LPCWSTR {
+    return @ptrFromInt(id);
+}
+/// IDI_SKRIVE — the icon resource id, matching skrive.rc.
+pub const IDI_SKRIVE: u16 = 1;
 pub extern "user32" fn GetClientRect(hWnd: HWND, lpRect: *RECT) callconv(WINAPI) BOOL;
 pub extern "user32" fn SetWindowLongPtrW(hWnd: HWND, nIndex: i32, dwNewLong: LPARAM) callconv(WINAPI) LPARAM;
 pub extern "user32" fn GetWindowLongPtrW(hWnd: HWND, nIndex: i32) callconv(WINAPI) LPARAM;
