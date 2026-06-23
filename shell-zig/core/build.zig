@@ -35,6 +35,25 @@ pub fn build(b: *std.Build) void {
     const lib_step = b.step("lib", "Install only the static core library (for the Swift host)");
     lib_step.dependOn(&install_lib.step);
 
+    // Stage 5: expose the core as a consumable Zig module so the Windows host
+    // (shell-zig/windows) can `@import` it and call the native `Core` API
+    // directly — no C-ABI marshaling between a Zig host and a Zig core. The C
+    // ABI above stays reserved for genuinely foreign hosts (the Swift macOS
+    // host). The watcher C++ TU travels with the module, so any dependent
+    // compiles it for its own target (verified cross-building to x86_64-windows
+    // from macOS in Stage 5.0). This is purely additive: nothing in the
+    // existing lib/fixture/test graph depends on it, so native builds are
+    // unaffected; it only compiles when the host exe pulls it in.
+    const core_mod = b.addModule("skrive_core", .{
+        .root_source_file = b.path("src/skrive_core.zig"),
+    });
+    core_mod.addIncludePath(b.path("vendor/watcher/include"));
+    core_mod.addCSourceFile(.{
+        .file = b.path("vendor/watcher/src/watcher-c.cpp"),
+        .flags = &.{ "-std=c++17", "-fno-sanitize=undefined" },
+    });
+    core_mod.link_libcpp = true;
+
     // The parity harness: a small executable reading request JSONL on
     // stdin and writing responses on stdout. Installed to zig-out/bin so
     // the parity runner can invoke it by path with `--exec`. Built and run

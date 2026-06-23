@@ -1,0 +1,21 @@
+.{
+    .name = .skrive_windows_host,
+    .version = "0.1.0",
+    // Placeholder; the toolchain prints the correct value on first build and
+    // it is pasted back. Never changes once set (security/trust per Zig docs).
+    .fingerprint = 0x16416f678a14959,
+    // Pinned to match the core (master plan's Zig-core convention): the host
+    // and core build under the same stable 0.16.x; a compiler bump is its own
+    // commit, never mixed with feature work.
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        // The Zig core, linked in-tree as a path dependency. The host calls
+        // its native `Core` API directly (the C ABI is for the Swift host).
+        .skrive_core = .{ .path = "../core" },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
