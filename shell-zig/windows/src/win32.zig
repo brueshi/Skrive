@@ -99,3 +99,68 @@ pub extern "user32" fn GetWindowLongPtrW(hWnd: HWND, nIndex: i32) callconv(WINAP
 pub extern "ole32" fn CoTaskMemFree(pv: ?*anyopaque) callconv(WINAPI) void;
 pub extern "ole32" fn CoInitializeEx(pvReserved: ?*anyopaque, dwCoInit: u32) callconv(WINAPI) i32;
 pub const COINIT_APARTMENTTHREADED: u32 = 0x2;
+
+// CoCreateInstance for the shell dialog/file-operation COM objects.
+pub extern "ole32" fn CoCreateInstance(
+    rclsid: *const anyopaque,
+    pUnkOuter: ?*anyopaque,
+    dwClsContext: u32,
+    riid: *const anyopaque,
+    ppv: *?*anyopaque,
+) callconv(WINAPI) i32;
+pub const CLSCTX_INPROC_SERVER: u32 = 0x1;
+
+// Shell open (external links, reveal folder). Returns >32 on success.
+pub extern "shell32" fn ShellExecuteW(
+    hwnd: ?HWND,
+    lpOperation: ?LPCWSTR,
+    lpFile: LPCWSTR,
+    lpParameters: ?LPCWSTR,
+    lpDirectory: ?LPCWSTR,
+    nShowCmd: i32,
+) callconv(WINAPI) ?HINSTANCE;
+pub const SW_SHOWNORMAL: i32 = 1;
+
+// Recycle-bin delete via the classic single-call API (no COM vtable to
+// hand-roll, unlike IFileOperation). pFrom is a double-NUL-terminated list.
+pub const SHFILEOPSTRUCTW = extern struct {
+    hwnd: ?HWND,
+    wFunc: u32,
+    pFrom: ?[*:0]const u16,
+    pTo: ?[*:0]const u16,
+    fFlags: u16,
+    fAnyOperationsAborted: BOOL,
+    hNameMappings: ?*anyopaque,
+    lpszProgressTitle: ?LPCWSTR,
+};
+pub extern "shell32" fn SHFileOperationW(lpFileOp: *SHFILEOPSTRUCTW) callconv(WINAPI) i32;
+pub const FO_DELETE: u32 = 0x0003;
+pub const FOF_SILENT: u16 = 0x0004;
+pub const FOF_NOCONFIRMATION: u16 = 0x0010;
+pub const FOF_ALLOWUNDO: u16 = 0x0040;
+pub const FOF_NOERRORUI: u16 = 0x0400;
+
+// Single-instance guard.
+pub extern "kernel32" fn CreateMutexW(lpMutexAttributes: ?*anyopaque, bInitialOwner: BOOL, lpName: LPCWSTR) callconv(WINAPI) ?*anyopaque;
+pub extern "kernel32" fn GetLastError() callconv(WINAPI) u32;
+pub const ERROR_ALREADY_EXISTS: u32 = 183;
+
+// Environment + directory for the %APPDATA%/Skrive data dir.
+pub extern "kernel32" fn GetEnvironmentVariableW(lpName: LPCWSTR, lpBuffer: [*]u16, nSize: u32) callconv(WINAPI) u32;
+pub extern "kernel32" fn CreateDirectoryW(lpPathName: LPCWSTR, lpSecurityAttributes: ?*anyopaque) callconv(WINAPI) BOOL;
+
+// Clipboard.
+pub extern "user32" fn OpenClipboard(hWndNewOwner: ?HWND) callconv(WINAPI) BOOL;
+pub extern "user32" fn CloseClipboard() callconv(WINAPI) BOOL;
+pub extern "user32" fn EmptyClipboard() callconv(WINAPI) BOOL;
+pub extern "user32" fn SetClipboardData(uFormat: u32, hMem: ?*anyopaque) callconv(WINAPI) ?*anyopaque;
+pub extern "user32" fn GetClipboardData(uFormat: u32) callconv(WINAPI) ?*anyopaque;
+pub extern "user32" fn RegisterClipboardFormatW(lpszFormat: LPCWSTR) callconv(WINAPI) u32;
+pub const CF_UNICODETEXT: u32 = 13;
+
+// Global memory for clipboard payloads.
+pub extern "kernel32" fn GlobalAlloc(uFlags: u32, dwBytes: usize) callconv(WINAPI) ?*anyopaque;
+pub extern "kernel32" fn GlobalLock(hMem: *anyopaque) callconv(WINAPI) ?[*]u8;
+pub extern "kernel32" fn GlobalUnlock(hMem: *anyopaque) callconv(WINAPI) BOOL;
+pub extern "kernel32" fn GlobalSize(hMem: *anyopaque) callconv(WINAPI) usize;
+pub const GMEM_MOVEABLE: u32 = 0x2;
