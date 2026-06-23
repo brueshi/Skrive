@@ -23,6 +23,7 @@ const win32 = @import("win32.zig");
 const wv = @import("webview2.zig");
 const handlers = @import("handlers.zig");
 const jsescape = @import("jsescape.zig");
+const diag = @import("diag.zig");
 const core_mod = @import("skrive_core");
 
 const w = win32.w;
@@ -33,13 +34,25 @@ const WINAPI = win32.WINAPI;
 const WM_SKRIVE_EMIT: u32 = win32.WM_APP + 1;
 
 const CLASS_NAME = std.unicode.utf8ToUtf16LeStringLiteral("SkriveWindowClass");
-const WINDOW_TITLE = std.unicode.utf8ToUtf16LeStringLiteral("Skrive");
+const WINDOW_TITLE = std.unicode.utf8ToUtf16LeStringLiteral("Skrive (diag build)");
 // `.localhost` is a reserved TLD (RFC 6761): it never resolves externally (no
 // domain to own) and is exempt from HSTS — unlike `.app`, a real HSTS-preloaded
 // TLD that engines force-upgrade to HTTPS, which would break our http virtual
 // host. Tauri uses `tauri.localhost` for exactly this reason.
 const VIRTUAL_HOST = std.unicode.utf8ToUtf16LeStringLiteral("skrive.localhost");
 const NAV_URL = std.unicode.utf8ToUtf16LeStringLiteral("http://skrive.localhost/index.html");
+
+// Stage 5.1 diagnostic: a self-contained page (no serving, no virtual host, no
+// modules, no external assets) to prove the webview can render + run JS at all.
+const TEST_HTML = blk: {
+    @setEvalBranchQuota(50000);
+    break :blk std.unicode.utf8ToUtf16LeStringLiteral(
+        "<!doctype html><html><body style=\"margin:0;background:#cc0033;color:#fff;font:28px sans-serif\">" ++
+            "<div id=o style=\"padding:48px\">INLINE OK</div>" ++
+            "<script>document.getElementById('o').innerHTML+='<br>js ran<br>chrome.webview: '+(typeof (window.chrome&&window.chrome.webview));</script>" ++
+            "</body></html>",
+    );
+};
 
 pub const App = struct {
     gpa: std.mem.Allocator,
@@ -63,12 +76,19 @@ pub const App = struct {
     /// heap-allocated so its address is stable: the handlers hold `*App`, the
     /// window stores it in GWLP_USERDATA, and the core's emit userdata is it.
     pub fn create(gpa: std.mem.Allocator) !*App {
+        diag.log("=== Skrive host starting (stage 5.1 diag build) ===", .{});
+        // WebView2 creation and its completion callbacks want a COM apartment on
+        // the calling (UI) thread. Initialize STA before anything COM happens.
+        const co = win32.CoInitializeEx(null, win32.COINIT_APARTMENTTHREADED);
+        diag.log("CoInitializeEx hr=0x{x:0>8}", .{diag.hx(co)});
+
         const io = std.Io.Threaded.global_single_threaded.io();
 
         const exe_dir = try getExeDir(gpa);
         defer gpa.free(exe_dir);
         const asset_dir = try std.fs.path.join(gpa, &.{ exe_dir, "renderer" });
         defer gpa.free(asset_dir);
+        diag.log("asset dir: {s}", .{asset_dir});
         const asset_dir_w = try std.unicode.utf8ToUtf16LeAllocZ(gpa, asset_dir);
         errdefer gpa.free(asset_dir_w);
         const app_data_dir = try gpa.dupe(u8, exe_dir);
@@ -92,21 +112,28 @@ pub const App = struct {
         if (std.Io.Dir.cwd().readFileAlloc(io, bridge_path, gpa, .unlimited)) |js| {
             defer gpa.free(js);
             self.bridge_js_w = std.unicode.utf8ToUtf16LeAllocZ(gpa, js) catch null;
+            diag.log("bridge loaded: {d} bytes", .{js.len});
         } else |err| {
-            std.debug.print("[skrive] could not read native-bridge.js: {s}\n", .{@errorName(err)});
+            diag.log("WARN could not read native-bridge.js: {s}", .{@errorName(err)});
         }
 
-        self.create_env = wv.loadCreateEnvironment() orelse return error.WebView2LoaderMissing;
+        self.create_env = wv.loadCreateEnvironment() orelse {
+            diag.log("FATAL WebView2Loader.dll / CreateCoreWebView2EnvironmentWithOptions not found", .{});
+            return error.WebView2LoaderMissing;
+        };
+        diag.log("WebView2Loader resolved", .{});
         self.core = core_mod.Core.create(io, app_data_dir, emitToHost, self) catch return error.CoreCreateFailed;
         self.env_handler = handlers.EnvCompletedHandler.init(onEnvCreated, self);
         self.controller_handler = handlers.ControllerCompletedHandler.init(onControllerCreated, self);
         self.web_message_handler = handlers.WebMessageHandler.init(onWebMessage, self);
 
         try self.createWindow();
+        diag.log("window created", .{});
 
         // userDataFolder = null defaults to a folder next to the exe (writable
         // in dev). Stage 5.2 points this at %APPDATA%/Skrive.
         const hr = self.create_env(null, null, null, @ptrCast(&self.env_handler));
+        diag.log("CreateEnvironment requested, hr=0x{x:0>8}", .{diag.hx(hr)});
         if (hr != wv.S_OK) logHr("CreateCoreWebView2EnvironmentWithOptions", hr);
         return self;
     }
@@ -152,35 +179,60 @@ pub const App = struct {
 
     fn onEnvCreated(ctx: *anyopaque, hr: wv.HRESULT, env_opt: ?*wv.ICoreWebView2Environment) callconv(.c) void {
         const self: *App = @ptrCast(@alignCast(ctx));
+        diag.log("onEnvCreated fired, hr=0x{x:0>8}", .{diag.hx(hr)});
         if (hr != wv.S_OK) return logHr("environment created", hr);
-        const env = env_opt orelse return;
+        const env = env_opt orelse {
+            diag.log("onEnvCreated: env is null despite S_OK", .{});
+            return;
+        };
         const chr = env.createController(self.hwnd, @ptrCast(&self.controller_handler));
+        diag.log("CreateController requested, hr=0x{x:0>8}", .{diag.hx(chr)});
         if (chr != wv.S_OK) logHr("CreateCoreWebView2Controller", chr);
     }
 
     fn onControllerCreated(ctx: *anyopaque, hr: wv.HRESULT, controller_opt: ?*wv.ICoreWebView2Controller) callconv(.c) void {
         const self: *App = @ptrCast(@alignCast(ctx));
+        diag.log("onControllerCreated fired, hr=0x{x:0>8}", .{diag.hx(hr)});
         if (hr != wv.S_OK) return logHr("controller created", hr);
         const controller = controller_opt orelse return;
         self.controller = controller;
 
         var cwv: ?*anyopaque = null;
-        if (controller.getCoreWebView2(&cwv) != wv.S_OK) return logHr("get_CoreWebView2", -1);
+        const ghr = controller.getCoreWebView2(&cwv);
+        diag.log("get_CoreWebView2 hr=0x{x:0>8}", .{diag.hx(ghr)});
+        if (ghr != wv.S_OK) return;
         const cwv_ptr = cwv orelse return;
 
         // QI the base ICoreWebView2 up to _3 for SetVirtualHostNameToFolderMapping.
         var p3: ?*anyopaque = null;
-        if (wv.asUnknown(cwv_ptr).queryInterface(&wv.IID_ICoreWebView2_3, &p3) != wv.S_OK) {
-            return logHr("QueryInterface ICoreWebView2_3", -1);
-        }
+        const qhr = wv.asUnknown(cwv_ptr).queryInterface(&wv.IID_ICoreWebView2_3, &p3);
+        diag.log("QI ICoreWebView2_3 hr=0x{x:0>8}", .{diag.hx(qhr)});
+        if (qhr != wv.S_OK) return;
         const webview3: *wv.ICoreWebView2_3 = @ptrCast(@alignCast(p3 orelse return));
         self.webview3 = webview3;
 
-        _ = webview3.setVirtualHostMapping(VIRTUAL_HOST, self.asset_dir_w.ptr, .allow);
-        if (self.bridge_js_w) |bjs| _ = webview3.addScriptOnDocumentCreated(bjs.ptr);
-        _ = webview3.addWebMessageReceived(@ptrCast(&self.web_message_handler), &self.web_msg_token);
+        const vhr = webview3.setVirtualHostMapping(VIRTUAL_HOST, self.asset_dir_w.ptr, .allow);
+        diag.log("setVirtualHostMapping hr=0x{x:0>8}", .{diag.hx(vhr)});
+        if (self.bridge_js_w) |bjs| {
+            const ahr = webview3.addScriptOnDocumentCreated(bjs.ptr);
+            diag.log("addScriptOnDocumentCreated hr=0x{x:0>8}", .{diag.hx(ahr)});
+        }
+        const mhr = webview3.addWebMessageReceived(@ptrCast(&self.web_message_handler), &self.web_msg_token);
+        diag.log("addWebMessageReceived hr=0x{x:0>8}", .{diag.hx(mhr)});
+
+        var rc: win32.RECT = undefined;
+        _ = win32.GetClientRect(self.hwnd.?, &rc);
+        diag.log("client rect = {d}x{d}", .{ rc.right - rc.left, rc.bottom - rc.top });
         self.resizeWebview();
-        _ = webview3.navigate(NAV_URL);
+
+        // Diagnostic: render a self-contained inline page first, to prove the
+        // webview can paint + run JS independent of serving. If this shows the
+        // red "INLINE OK" page, the pipeline is healthy and the blank real page
+        // is purely a serving issue. NAV_URL is left here (commented) so the
+        // swap back is obvious once serving is fixed.
+        const nhr = webview3.navigateToString(TEST_HTML);
+        diag.log("navigateToString(inline) hr=0x{x:0>8}", .{diag.hx(nhr)});
+        // const nhr = webview3.navigate(NAV_URL);
     }
 
     // ---- bridge ------------------------------------------------------------
@@ -283,5 +335,5 @@ fn getExeDir(gpa: std.mem.Allocator) ![]u8 {
 }
 
 fn logHr(what: []const u8, hr: wv.HRESULT) void {
-    std.debug.print("[skrive] {s} failed: hr=0x{x:0>8}\n", .{ what, @as(u32, @bitCast(hr)) });
+    diag.log("[skrive] {s} failed: hr=0x{x:0>8}", .{ what, diag.hx(hr) });
 }

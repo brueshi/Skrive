@@ -1868,3 +1868,52 @@ ABI-risk spots above are the first suspects.
 dialogs, trash, clipboard CF_HTML, open-external, single-instance, %APPDATA%,
 NTFS watcher) and the asset-origin request interception. If red: the diagnostics
 narrow it to serving, the bridge, or a vtable offset.
+
+---
+
+## 2026-06-23 — Stage 5.1 first Windows runs: blank-render, PAUSED (diagnosis narrowed)
+
+**The whole COM path is verified CORRECT on real Windows.** Added a robust file
+logger (`diag.zig` via libc fopen — stderr is unreliable from a GUI-launched
+process, the same lesson the macOS host learned) plus `CoInitializeEx` (STA).
+The trace from Joe's machine shows **every call returning S_OK**: CoInitializeEx,
+CreateEnvironment, onEnvCreated, CreateController, onControllerCreated,
+get_CoreWebView2, QI to `ICoreWebView2_3`, SetVirtualHostNameToFolderMapping,
+AddScriptToExecuteOnDocumentCreated (bridge: 8244 bytes loaded),
+add_WebMessageReceived, GetClientRect (**1084x681**), navigate. So the
+hand-rolled vtable offsets — including the audited filler runs (slot 72
+SetVirtualHost, 52 OpenDevToolsWindow, 7 NavigateToString) — are RIGHT, and the
+put_Bounds Win64 RECT-by-value lowering (verified earlier by local asm
+inspection) is fine.
+
+**Symptom: the window opens but renders NOTHING.** Ruled out by experiment:
+- *Drive:* blank on both `B:` (a local SSD) and `C:` — not a drive/sandbox issue.
+- *Serving / MIME:* even a self-contained `NavigateToString` inline page (no
+  virtual host, no modules, no external assets — just a red page with inline JS)
+  renders nothing. So the earlier MIME/module theory is RULED OUT.
+- *COM offsets:* all S_OK, so not a vtable mistake.
+- F12 and right-click-Inspect do nothing; `OpenDevToolsWindow()` opens a DevTools
+  window that **immediately closes**.
+
+**Diagnosis:** the WebView2 content is never composited into the window despite a
+created, sized, S_OK controller. "Renders nothing even for an inline page" +
+"DevTools flashes shut" is the classic signature of a **Chromium GPU/compositing
+failure** (the GPU/render process dying) — common under VMs and with some
+graphics drivers.
+
+**Leading hypothesis for resume — WebView2 GPU/compositing.** Cheapest probe:
+set `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--disable-gpu` (or pass `--disable-gpu`
+/ `--disable-gpu-compositing` via `ICoreWebView2EnvironmentOptions`
+`AdditionalBrowserArguments`) before CreateEnvironment. Then wire a **ProcessFailed
+handler** + **NavigationCompleted handler** (definitive: did a process die / did
+nav complete with what status) and try an explicit `put_IsVisible(TRUE)` and
+`NotifyParentWindowPositionChanged`. **Open question for Joe:** is the Windows
+machine a VM or physical, what GPU, and what Windows build? (A VM would make the
+GPU theory near-certain.)
+
+**State.** Paused at Joe's call. Diagnostic scaffolding is committed: `diag.zig`,
+`CoInitializeEx`, the step instrumentation, and the `NavigateToString` /
+`OpenDevToolsWindow` bindings (legit ABI additions to keep). Currently the build
+points `navigateToString` at the inline test page and the title reads "Skrive
+(diag build)" — revert those two diagnostic bits when serving is back in play.
+The core was untouched throughout (parity still 26/26).

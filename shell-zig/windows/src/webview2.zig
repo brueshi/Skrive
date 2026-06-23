@@ -152,7 +152,9 @@ pub const ICoreWebView2_3 = extern struct {
         run_4_5: [2]Slot, // get_Settings, get_Source
         // 6: Navigate(uri)
         Navigate: *const fn (*ICoreWebView2_3, LPCWSTR) callconv(WINAPI) HRESULT,
-        run_7_27: [21]Slot, // NavigateToString .. remove_ProcessFailed
+        // 7: NavigateToString(htmlContent) — diagnostic, bypasses serving
+        NavigateToString: *const fn (*ICoreWebView2_3, LPCWSTR) callconv(WINAPI) HRESULT,
+        run_8_27: [20]Slot, // add_NavigationStarting .. remove_ProcessFailed
         // 28: AddScriptToExecuteOnDocumentCreated(js, handler|null)
         AddScriptToExecuteOnDocumentCreated: *const fn (*ICoreWebView2_3, LPCWSTR, ?*anyopaque) callconv(WINAPI) HRESULT,
         run_29: [1]Slot, // RemoveScriptToExecuteOnDocumentCreated
@@ -161,7 +163,10 @@ pub const ICoreWebView2_3 = extern struct {
         run_31_34: [4]Slot, // CapturePreview, Reload, PostWebMessageAsJson, PostWebMessageAsString
         // 35: add_WebMessageReceived(handler, out token)
         add_WebMessageReceived: *const fn (*ICoreWebView2_3, *anyopaque, *EventRegistrationToken) callconv(WINAPI) HRESULT,
-        run_36_71: [36]Slot, // remove_WebMessageReceived .. get_IsSuspended
+        run_36_51: [16]Slot, // remove_WebMessageReceived .. get_ContainsFullScreenElement
+        // 52: OpenDevToolsWindow() — opens DevTools without needing webview focus
+        OpenDevToolsWindow: *const fn (*ICoreWebView2_3) callconv(WINAPI) HRESULT,
+        run_53_71: [19]Slot, // add_WebResourceRequested .. get_IsSuspended
         // 72: SetVirtualHostNameToFolderMapping(hostName, folderPath, accessKind)
         SetVirtualHostNameToFolderMapping: *const fn (*ICoreWebView2_3, LPCWSTR, LPCWSTR, HostResourceAccessKind) callconv(WINAPI) HRESULT,
         run_73: [1]Slot, // ClearVirtualHostNameToFolderMapping
@@ -169,6 +174,9 @@ pub const ICoreWebView2_3 = extern struct {
 
     pub fn navigate(self: *ICoreWebView2_3, uri: LPCWSTR) HRESULT {
         return self.lpVtbl.Navigate(self, uri);
+    }
+    pub fn navigateToString(self: *ICoreWebView2_3, html: LPCWSTR) HRESULT {
+        return self.lpVtbl.NavigateToString(self, html);
     }
     pub fn addScriptOnDocumentCreated(self: *ICoreWebView2_3, js: LPCWSTR) HRESULT {
         return self.lpVtbl.AddScriptToExecuteOnDocumentCreated(self, js, null);
@@ -181,6 +189,9 @@ pub const ICoreWebView2_3 = extern struct {
     }
     pub fn setVirtualHostMapping(self: *ICoreWebView2_3, host: LPCWSTR, folder: LPCWSTR, kind: HostResourceAccessKind) HRESULT {
         return self.lpVtbl.SetVirtualHostNameToFolderMapping(self, host, folder, kind);
+    }
+    pub fn openDevTools(self: *ICoreWebView2_3) HRESULT {
+        return self.lpVtbl.OpenDevToolsWindow(self);
     }
 };
 
