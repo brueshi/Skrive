@@ -1761,3 +1761,108 @@ out, reusing the delivery rule + a Zig `JSEscape`); the Windows renderer
 transport (`window.chrome.webview`); the injection round-trip. This is the first
 hand-rolled WebView2 COM glue (Turf / `webview2-com` as references) and the first
 Windows-run gate.
+
+---
+
+## 2026-06-22 — Stage 5.1: WebView2 host, the message bridge, serving (code-complete; Windows-run gate pending)
+
+**Branch:** `labs/zig-shell-stage-5-windows-host` (continued).
+
+**The heart of the Zig-host bet: the hand-rolled WebView2 COM glue, all
+cross-compiled from macOS.** None of it RUNS until it is on Windows, so
+correctness comes from references, not the compiler — the ABI is anchored to
+the real `WebView2.h` (SDK 1.0.3351.48): vtable slot orders and IIDs
+transcribed verbatim, not reconstructed.
+
+**Modules (`shell-zig/windows/src/`).**
+- `win32.zig` — the Win32 surface (window class, message loop, dynamic-load +
+  GetProcAddress, GetClientRect, SetWindowLongPtr back-pointer, PostMessageW,
+  CoTaskMemFree). The 0.16 primitives (WPARAM/LRESULT/BOOL) re-declared locally.
+- `webview2.zig` — the COM ABI. Interfaces consumed (Environment, Controller,
+  ICoreWebView2_3, WebMessageReceivedEventArgs) plus IUnknown for QI/Release. A
+  GUID comptime-parser builds the IIDs. **Correctness tactic against the ~73-slot
+  vtables: only the methods the host calls are given real signatures; every
+  other slot is a pointer-sized `Slot` filler grouped into array runs whose
+  lengths are audited against the header slot numbers in comments** — a wrong
+  count is then visible by arithmetic and can't silently shift a real method's
+  offset. The loader entry point is resolved dynamically from
+  `WebView2Loader.dll` (no MSVC import lib at build → clean cross-compile).
+- `handlers.zig` — the three COM objects the host IMPLEMENTS (env-created,
+  controller-created, web-message). Each is an `extern struct` (vtable pointer
+  first, so `*Handler` is a valid interface pointer) + a plain callback + ctx,
+  decoupled from `app.zig` to avoid an import cycle. AddRef/Release are no-ops
+  returning 1 (app owns them for life); QueryInterface answers IUnknown + the
+  handler IID.
+- `app.zig` — orchestration: window -> CreateEnvironment -> onEnvCreated:
+  CreateController(hwnd) -> onControllerCreated: get the webview, QI to _3, map
+  the virtual host, inject the bridge, subscribe to web messages, size +
+  navigate. Bridge: renderer->host via `TryGetWebMessageAsString` -> `Core.handle`;
+  host->renderer via the core's emit.
+- `jsescape.zig` — the delivery-rule escaper, a byte-for-byte port of the macOS
+  `JSEscape.swift`, **with unit tests that RUN on the native build host** (the
+  one part of 5.1 verifiable on macOS — green: structural escapes, `</script>`
+  neutralization, U+2028/2029, C0 controls, UTF-8 passthrough).
+- `shell-zig/web/native-bridge-win.ts` — the Windows renderer transport
+  (`window.chrome.webview.postMessage` out, `__skriveDispatch` in;
+  `app:platform` -> `win32`). Deliberately a separate file from the macOS
+  `native-bridge.ts` so that bundle stays byte-identical; DRYing the two is a
+  later refactor once both shells build in one place.
+
+**Serving decision (deviation from the plan's framing, logged).** The master
+plan describes serving via `WebResourceRequested` interception. For the app
+origin, `ICoreWebView2_3::SetVirtualHostNameToFolderMapping` is the simpler
+equivalent: it maps `http://skrive.app/` to the on-disk `renderer/` dir, giving
+a real web origin (ES modules + module workers load, unlike `file://`) with a
+fraction of the COM surface. Request interception is reserved for the asset
+origin (the `skrive-asset://` equivalent with path containment) in 5.2.
+`index.html` uses relative `./assets/...` paths, so root-mapping serves it as-is.
+
+**UI-thread marshaling implemented now, not deferred.** Every core emit is
+copied (c_allocator, thread-safe) and `PostMessage(WM_SKRIVE_EMIT)`'d to the
+window, so `ExecuteScript` always runs on the UI thread, FIFO-ordered — the
+Windows analogue of the macOS host's `DispatchQueue.main.async`. This is needed
+from the start because once a project opens, the Stage 3 watcher emits
+`project:change` from its own poll thread and WebView2 is UI-thread-affine
+(the macOS host learned this as a SIGTRAP).
+
+**0.16 finding.** `extern struct` fields that are function pointers must specify
+a calling convention, so the handlers' Zig callbacks are typed `callconv(.c)`
+(the `app.zig` `on*` callbacks too). The COM vtable slots use `callconv(.winapi)`
+(the single Win64 convention; the hidden `this` is the first arg).
+
+**ABI-risk spots flagged for the first Windows run (compile-verified only).**
+(1) `ICoreWebView2Controller::put_Bounds(RECT)` passes a 16-byte aggregate by
+value; on Win64 that is lowered to a hidden pointer, which Zig's
+`callconv(.winapi)` should do — first thing to check if the webview renders at
+zero size. (2) The QI from the base `ICoreWebView2` up to `_3`, and the
+`SetVirtualHostNameToFolderMapping` slot at absolute vtable index 72, depend on
+the filler-run arithmetic being exactly right. (3) `userDataFolder` is null
+(defaults next to the exe; 5.2 points it at `%APPDATA%/Skrive`).
+
+**Assembly.** `shell-zig/build-windows.sh [x64|arm64] [debug|release]` mirrors
+`build-macos.sh`: renderer bundle -> bundle `native-bridge-win.ts` to an IIFE ->
+`zig build -Dtarget` -> stage `shell-zig/windows/dist/` (Skrive.exe +
+`renderer/` + `native-bridge.js` + `WebView2Loader.dll`). The whole bundle is
+produced on macOS; `dist/` is what gets copied to Windows. `WebView2Loader.dll`
+for x64/arm64 vendored in-tree (`vendor/webview2/`, from NuGet 1.0.3351.48).
+
+**Gates — MET (build/assembly + Mac-runnable logic).** The full host
+cross-compiles to a PE32+ from macOS; `build-windows.sh x64` assembles a
+runnable `dist/`; the bridge TS bundles (8.4 KB IIFE) clean; `jsescape` unit
+tests green; core unit tests green and **parity 26/26** (core still byte-for-byte
+unchanged — the Stage 5 "no core changes" gate holds); `zig fmt` clean; repo
+typecheck clean.
+
+**PENDING — the 5.1 done-criteria are Windows-gated (Joe).** Copy
+`shell-zig/windows/dist/` to a Windows machine (Win11 has the WebView2 runtime
+by default) and run `Skrive.exe` from a terminal (console subsystem prints
+HRESULT diagnostics). Gate: the UI renders (welcome state), `app:version`
+round-trips renderer -> host -> Zig core -> renderer, no console errors. The
+injection round-trip (`diag:poison`) test harness is deferred to a follow-up
+within 5.1 once first light is confirmed. If the window is blank, the flagged
+ABI-risk spots above are the first suspects.
+
+**Next.** Joe's first Windows run. If green: Stage 5.2 (host feature fill —
+dialogs, trash, clipboard CF_HTML, open-external, single-instance, %APPDATA%,
+NTFS watcher) and the asset-origin request interception. If red: the diagnostics
+narrow it to serving, the bridge, or a vtable offset.
