@@ -87,6 +87,9 @@ pub const IUnknown = extern struct {
     pub fn queryInterface(self: *IUnknown, iid: *const GUID, out: *?*anyopaque) HRESULT {
         return self.lpVtbl.QueryInterface(self, iid, out);
     }
+    pub fn addRef(self: *IUnknown) u32 {
+        return self.lpVtbl.AddRef(self);
+    }
     pub fn release(self: *IUnknown) u32 {
         return self.lpVtbl.Release(self);
     }

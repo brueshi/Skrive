@@ -34,25 +34,13 @@ const WINAPI = win32.WINAPI;
 const WM_SKRIVE_EMIT: u32 = win32.WM_APP + 1;
 
 const CLASS_NAME = std.unicode.utf8ToUtf16LeStringLiteral("SkriveWindowClass");
-const WINDOW_TITLE = std.unicode.utf8ToUtf16LeStringLiteral("Skrive (diag build)");
+const WINDOW_TITLE = std.unicode.utf8ToUtf16LeStringLiteral("Skrive");
 // `.localhost` is a reserved TLD (RFC 6761): it never resolves externally (no
 // domain to own) and is exempt from HSTS — unlike `.app`, a real HSTS-preloaded
 // TLD that engines force-upgrade to HTTPS, which would break our http virtual
 // host. Tauri uses `tauri.localhost` for exactly this reason.
 const VIRTUAL_HOST = std.unicode.utf8ToUtf16LeStringLiteral("skrive.localhost");
 const NAV_URL = std.unicode.utf8ToUtf16LeStringLiteral("http://skrive.localhost/index.html");
-
-// Stage 5.1 diagnostic: a self-contained page (no serving, no virtual host, no
-// modules, no external assets) to prove the webview can render + run JS at all.
-const TEST_HTML = blk: {
-    @setEvalBranchQuota(50000);
-    break :blk std.unicode.utf8ToUtf16LeStringLiteral(
-        "<!doctype html><html><body style=\"margin:0;background:#cc0033;color:#fff;font:28px sans-serif\">" ++
-            "<div id=o style=\"padding:48px\">INLINE OK</div>" ++
-            "<script>document.getElementById('o').innerHTML+='<br>js ran<br>chrome.webview: '+(typeof (window.chrome&&window.chrome.webview));</script>" ++
-            "</body></html>",
-    );
-};
 
 pub const App = struct {
     gpa: std.mem.Allocator,
@@ -64,6 +52,7 @@ pub const App = struct {
     hwnd: ?win32.HWND = null,
     core: ?*core_mod.Core = null,
     create_env: wv.CreateEnvironmentFn = undefined,
+    environment: ?*wv.ICoreWebView2Environment = null,
     controller: ?*wv.ICoreWebView2Controller = null,
     webview3: ?*wv.ICoreWebView2_3 = null,
 
@@ -185,6 +174,11 @@ pub const App = struct {
             diag.log("onEnvCreated: env is null despite S_OK", .{});
             return;
         };
+        // Retain the environment for the app lifetime: the object passed to a
+        // completion handler is borrowed, so storing the raw pointer without
+        // AddRef lets it be destroyed when this callback returns.
+        _ = wv.asUnknown(env).addRef();
+        self.environment = env;
         const chr = env.createController(self.hwnd, @ptrCast(&self.controller_handler));
         diag.log("CreateController requested, hr=0x{x:0>8}", .{diag.hx(chr)});
         if (chr != wv.S_OK) logHr("CreateCoreWebView2Controller", chr);
@@ -195,6 +189,11 @@ pub const App = struct {
         diag.log("onControllerCreated fired, hr=0x{x:0>8}", .{diag.hx(hr)});
         if (hr != wv.S_OK) return logHr("controller created", hr);
         const controller = controller_opt orelse return;
+        // Retain the controller for the app lifetime — THE fix for the webview
+        // tearing down right after creation: it is a borrowed reference, and
+        // dropping it destroys the controller (and the whole WebView2 process
+        // tree) the moment this callback returns.
+        _ = wv.asUnknown(controller).addRef();
         self.controller = controller;
 
         var cwv: ?*anyopaque = null;
@@ -204,11 +203,14 @@ pub const App = struct {
         const cwv_ptr = cwv orelse return;
 
         // QI the base ICoreWebView2 up to _3 for SetVirtualHostNameToFolderMapping.
+        // get_CoreWebView2 returned a reference we own; QI takes its own, so we
+        // release the base interface and keep webview3.
         var p3: ?*anyopaque = null;
         const qhr = wv.asUnknown(cwv_ptr).queryInterface(&wv.IID_ICoreWebView2_3, &p3);
         diag.log("QI ICoreWebView2_3 hr=0x{x:0>8}", .{diag.hx(qhr)});
         if (qhr != wv.S_OK) return;
         const webview3: *wv.ICoreWebView2_3 = @ptrCast(@alignCast(p3 orelse return));
+        _ = wv.asUnknown(cwv_ptr).release();
         self.webview3 = webview3;
 
         const vhr = webview3.setVirtualHostMapping(VIRTUAL_HOST, self.asset_dir_w.ptr, .allow);
@@ -225,14 +227,8 @@ pub const App = struct {
         diag.log("client rect = {d}x{d}", .{ rc.right - rc.left, rc.bottom - rc.top });
         self.resizeWebview();
 
-        // Diagnostic: render a self-contained inline page first, to prove the
-        // webview can paint + run JS independent of serving. If this shows the
-        // red "INLINE OK" page, the pipeline is healthy and the blank real page
-        // is purely a serving issue. NAV_URL is left here (commented) so the
-        // swap back is obvious once serving is fixed.
-        const nhr = webview3.navigateToString(TEST_HTML);
-        diag.log("navigateToString(inline) hr=0x{x:0>8}", .{diag.hx(nhr)});
-        // const nhr = webview3.navigate(NAV_URL);
+        const nhr = webview3.navigate(NAV_URL);
+        diag.log("navigate hr=0x{x:0>8}", .{diag.hx(nhr)});
     }
 
     // ---- bridge ------------------------------------------------------------
