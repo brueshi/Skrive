@@ -1960,3 +1960,52 @@ via `IFileOperation`+recycle, reveal via `ShellExecuteW`); `links:openExternal`
 (`ShellExecuteW` + allowlist) and clipboard (`CF_HTML`/`CF_UNICODETEXT`);
 single-instance (`CreateMutexW`); watcher verification on NTFS; then the parity
 corpus on Windows as the 5.2 gate.
+
+---
+
+## 2026-06-23 — Stage 5.2 host feature fill: BUILT (pending Joe's end-to-end dogfood)
+
+**Joe's directive:** build the full *usable* Windows surface in one bundle, not
+a drip-fed checklist — Windows dev is high-friction (can't run it on the Mac),
+so spend the round-trips efficiently. Done in one comprehensive build.
+
+**Host (commit f42153f), mirroring the macOS CoreBridge:**
+- `%APPDATA%\Skrive` as the core's data dir and the WebView2 user-data folder
+  (`paths.zig`), replacing the next-to-exe default.
+- Host-owned command routing in `onWebMessage` (parse the envelope; host-owned
+  commands answer directly and never reach the core): **project:openDialog**
+  (folder picker — the one piece needing real COM, `IFileOpenDialog` in
+  `shell.zig`, audited filler-run vtables), **links:openExternal** (`ShellExecuteW`
+  + http/https/mailto allowlist), **clipboard** write/read (`CF_HTML` +
+  `CF_UNICODETEXT`, `host_cmds.zig`). Replies go through the delivery rule.
+- The **`host:` channel**: the core delegates **trash** (Recycle Bin via
+  `SHFileOperationW` — flat call, no COM vtable) and **reveal** (`ShellExecuteW`),
+  handled on the UI thread via a `WM_SKRIVE_HOSTCMD` PostMessage (no reentrancy
+  into the core's request arena), then replied on the host channel.
+- **Single-instance** (`CreateMutexW`); argv-forward deferred with file
+  associations. Flat Win32 preferred; only the folder picker is hand-rolled COM.
+
+**Shared renderer (commit 3848cec):** `platformShortcut()`
+(`app/src/lib/commands/shortcut-display.ts`) converts the hardcoded ⌘/⌥/⌃/⇧
+display strings to Ctrl+/Alt+/Shift+ on non-Mac, applied at the command palette
++ cheat sheet (registry-driven) and ~13 inline tooltips. Mac-guarded, so macOS
+and Electron are unchanged; `registry.ts` source strings stay canonical ⌘.
+
+**Platform self-adaptation confirmed (no host work needed):** the renderer keys
+off `navigator.platform` (WebView2 reports `Win32`), so the macOS traffic-light
+chrome auto-skips, editor copy/paste/undo are native, and Mod-shortcuts resolve
+to Ctrl. `app:platform` is not consumed by the renderer. **Decisions (made, not
+asked):** standard Windows title bar for now (custom frameless chrome = deferred
+polish); no native Win menu (palette + WebView2 cover it).
+
+**Gates met on macOS:** full host cross-compiles to PE32+; `dist/` assembles;
+core untouched (parity 26/26); `zig fmt` + repo typecheck clean. **PENDING — the
+5.2 dogfood (Joe), `Skrive-win-5.2.zip`:** actually use it end-to-end — open and
+create a project (folder picker), edit/save, new/rename/delete-to-Recycle-Bin,
+images, search/backlinks, external links, reveal user data, clipboard, Ctrl
+shortcuts in the palette/cheat sheet, watcher reactions on NTFS. Honest unknowns
+that are compile-only-verified and could surface here: the `IFileOpenDialog` COM
+(blind, like the WebView2 vtables were), the `CF_HTML` clipboard offsets, and the
+`SHFILEOPSTRUCTW` layout for trash. The `diag.zig` file logger is still in for
+fast triage. After the dogfood: 5.2e (parity corpus run on Windows) closes the
+formal gate, then Stage 5.3 packaging.
