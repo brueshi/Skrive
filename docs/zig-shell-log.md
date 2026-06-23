@@ -1917,3 +1917,46 @@ GPU theory near-certain.)
 points `navigateToString` at the inline test page and the title reads "Skrive
 (diag build)" — revert those two diagnostic bits when serving is back in play.
 The core was untouched throughout (parity still 26/26).
+
+---
+
+## 2026-06-23 — Stage 5.1 FIRST LIGHT on Windows (root cause: missing AddRef)
+
+**Resolved.** Root cause of the blank window: the controller (and environment)
+handed to the async completion handlers are **borrowed** references. Storing the
+raw pointers without `AddRef` let the controller be destroyed the instant
+`onControllerCreated` returned, which tore down the entire WebView2 process
+tree — so every COM call returned S_OK and worked *during* the callback, then
+the webview vanished, nothing painted, and DevTools couldn't attach. The
+process-tree query was the smoking gun: the host had **zero** `msedgewebview2.exe`
+children despite S_OK creation (all the WebView2 processes on the machine
+belonged to Windows Search). Fix (`16b182e`): `AddRef` the environment +
+controller on receipt and hold them for the app lifetime, releasing the
+intermediate base `ICoreWebView2` after the QI to `_3` — the ComPtr-retain the
+C++ samples get for free. Exactly the refcounting trap the host-language research
+flagged as the bug-prone part of hand-rolled COM.
+
+**Debug trail (what it was NOT):** ruled out the drive (blank on `B:` local SSD
+*and* `C:`), serving/MIME (a self-contained `NavigateToString` inline page was
+also blank — and once fixed, serving via `SetVirtualHostNameToFolderMapping`
+worked with no MIME problem, the module bundle loads), and GPU (`--disable-gpu`
+changed nothing; physical machine, RTX 2070 Super). The robust file logger
+(`diag.zig`) and the process-tree query are what made a fully-blind,
+can't-run-on-Mac bring-up tractable.
+
+**State: the Skrive welcome UI renders on Windows**, app bundle + module workers
+load, and the bridge round-trips both ways (host-owned commands correctly return
+`UNKNOWN_COMMAND` — visible in the console as `project:openDialog` /
+`newProject:browse` "command not implemented", which is precisely the 5.2 surface).
+DevTools work via F12 now that the content process survives. Stage 5.1 done
+criteria MET (UI renders, app:version path works renderer↔core); the injection
+round-trip as a committed test folds into later hardening. Diagnostic scaffolding
+kept as bring-up tooling. Core untouched (parity 26/26).
+
+**Next.** Stage 5.2 — Windows host feature fill (the host-owned command surface
+the welcome screen is already calling): app-data dir at `%APPDATA%/Skrive` +
+folder dialog (`IFileOpenDialog`/`FOS_PICKFOLDERS`); the `host:` channel (trash
+via `IFileOperation`+recycle, reveal via `ShellExecuteW`); `links:openExternal`
+(`ShellExecuteW` + allowlist) and clipboard (`CF_HTML`/`CF_UNICODETEXT`);
+single-instance (`CreateMutexW`); watcher verification on NTFS; then the parity
+corpus on Windows as the 5.2 gate.
