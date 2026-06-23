@@ -34,8 +34,12 @@ const WM_SKRIVE_EMIT: u32 = win32.WM_APP + 1;
 
 const CLASS_NAME = std.unicode.utf8ToUtf16LeStringLiteral("SkriveWindowClass");
 const WINDOW_TITLE = std.unicode.utf8ToUtf16LeStringLiteral("Skrive");
-const VIRTUAL_HOST = std.unicode.utf8ToUtf16LeStringLiteral("skrive.app");
-const NAV_URL = std.unicode.utf8ToUtf16LeStringLiteral("http://skrive.app/index.html");
+// `.localhost` is a reserved TLD (RFC 6761): it never resolves externally (no
+// domain to own) and is exempt from HSTS — unlike `.app`, a real HSTS-preloaded
+// TLD that engines force-upgrade to HTTPS, which would break our http virtual
+// host. Tauri uses `tauri.localhost` for exactly this reason.
+const VIRTUAL_HOST = std.unicode.utf8ToUtf16LeStringLiteral("skrive.localhost");
+const NAV_URL = std.unicode.utf8ToUtf16LeStringLiteral("http://skrive.localhost/index.html");
 
 pub const App = struct {
     gpa: std.mem.Allocator,

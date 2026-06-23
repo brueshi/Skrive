@@ -46,7 +46,7 @@ fi
 
 echo "==> 4/4 assemble dist/"
 # Layout the host expects next to Skrive.exe: renderer/ (served via the
-# skrive.app virtual-host mapping), native-bridge.js (read + injected at
+# skrive.localhost virtual-host mapping), native-bridge.js (read + injected at
 # document-create), WebView2Loader.dll (loaded dynamically at startup).
 rm -rf "$DIST"
 mkdir -p "$DIST/renderer"

@@ -1811,7 +1811,9 @@ transcribed verbatim, not reconstructed.
 **Serving decision (deviation from the plan's framing, logged).** The master
 plan describes serving via `WebResourceRequested` interception. For the app
 origin, `ICoreWebView2_3::SetVirtualHostNameToFolderMapping` is the simpler
-equivalent: it maps `http://skrive.app/` to the on-disk `renderer/` dir, giving
+equivalent: it maps `http://skrive.localhost/` to the on-disk `renderer/` dir
+(`.localhost` is a reserved, HSTS-exempt TLD — `.app` is a real HSTS-preloaded
+TLD that would force an HTTPS upgrade and break the http virtual host), giving
 a real web origin (ES modules + module workers load, unlike `file://`) with a
 fraction of the COM surface. Request interception is reserved for the asset
 origin (the `skrive-asset://` equivalent with path containment) in 5.2.
