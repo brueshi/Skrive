@@ -1662,3 +1662,102 @@ file-open/`.md`-association (net-new cross-shell feature, deferred); updater
 trap, and `_WKInspector.show()` no-op on macOS 26 (use Safari Develop /
 right-click). Next: Stage 5 (Windows host) or the deferred feature tracks, per
 Joe's direction.
+
+---
+
+## 2026-06-22 — Stage 5.0: host-language decision (ZIG) + cross-compiled skeleton
+
+**Branch:** `labs/zig-shell-stage-5-windows-host` (off `main`).
+
+**Decision: the Windows host is written in ZIG**, not the master plan's C++
+default or its C# contender. This was a `[CONFIRM WITH JOE]` gate; Joe's call,
+leaning Zig because it matches the thesis best ("it's from scratch and if it
+doesn't work then we know what we need to do"). The plan's table is corrected
+in place (the dismissal was feasibility-wrong).
+
+**Research that drove it (current 2025-2026 facts, sources in the session).**
+- *Native AOT cannot cross-OS compile* (MS docs, explicit): a win-x64 AOT
+  binary must be built ON Windows. That kills the plan's "C# + CsWin32 + Native
+  AOT middle path" as a *primary dev loop* under the develop-on-Mac constraint.
+- *The official managed `Microsoft.Web.WebView2.Core` is not AOT-clean*
+  (WebView2Feedback #4800); C#+AOT only works via the third-party
+  `smourier/WebView2Aot`. Non-AOT C# *does* `dotnet publish` from macOS — the
+  only first-class Mac-dev path among the managed options, but it re-adds a
+  60-80MB managed runtime (philosophically the same animal the experiment is
+  shedding).
+- *Zig-as-host is feasible, contra the plan's table.* `awesomo4000/turf` is a
+  live pure-Zig, C++-free WebView2 COM binding (hand-declared vtables, ships
+  `WebView2Loader.dll` for x86/x64/aarch64, cross-builds to Windows from Zig
+  alone). Rust's `webview2-com` is the maintained alternative. The hand-rolled
+  COM surface for our thin shim is ~500-1000 LOC; the callback COM objects +
+  refcounting are the bug-prone part.
+- *Same ceiling for every language:* WebView2 is Windows-only, so any host can
+  only be BUILT on macOS, never RUN. The language choice is about build/iteration
+  ergonomics and COM-glue maintenance, not Mac-side running.
+- *Raycast's new platform* (technical deep-dive) independently validates the
+  ARCHITECTURE — native shells wrapping system WebViews (WKWebView / WebView2),
+  one shared React+TS frontend, no Electron — but chose C#+.NET8+WPF, no AOT,
+  350-450MB RSS: the heavy end, different priorities. Validates the shape, not
+  the C# pick for Skrive's lean goal.
+
+**Decision matrix (develop-on-Mac + lean thesis are the deciding axes).**
+
+| Option | Build from Mac | Installer size | COM/maint. risk | New language |
+|---|---|---|---|---|
+| **Zig host (chosen)** | cleanest (no MSVC/SDK/xwin) | smallest, no runtime | own ~500-1000 LOC glue forever | none (matches core) |
+| C# non-AOT | full `dotnet publish` | +60-80MB runtime | lowest (managed wrapper) | +.NET |
+| C# + AOT | cannot (AOT needs Windows) | small native | 3rd-party `WebView2Aot` | +.NET |
+| Rust (webview2-com) | cross-compiles (xwin), can't run | small, no runtime | maintained binding | +Rust |
+| C++ (old default) | cross-compiles, can't debug COM | smallest | hand WRL/COM | +C++ |
+
+**Honest risk accepted:** we own the WebView2 COM binding forever (no upstream),
+and Zig is pre-1.0. Turf de-risks feasibility; maintenance is the standing cost.
+
+**What was built (the question 5.0 answers: does a unify-on-Zig host link the
+EXISTING core — C++ watcher and all — into a runnable Windows binary, built
+entirely on a Mac? YES).**
+- `shell-zig/core/build.zig`: expose the core as a consumable `skrive_core` Zig
+  module (`addModule`), with the vendored watcher C++ TU + libc++ riding along.
+  Purely additive — nothing in the existing lib/fixture/test graph depends on
+  it, so native macOS builds are byte-for-byte unaffected (parity stayed 26/26).
+- `shell-zig/windows/`: a path-dependency package (`build.zig` + `.zon` +
+  `src/main.zig`). The host imports the core module and calls the **native
+  `Core` API directly** — no C-ABI marshaling between a Zig host and a Zig core;
+  the C ABI stays reserved for the foreign Swift host. `main.zig` is a bare
+  Win32 window (RegisterClassExW / CreateWindowExW / standard message loop,
+  Win32 hand-declared in the Turf idiom) plus an `app:version` round-trip
+  through the core before the window opens (emit → stderr for now; 5.1 swaps it
+  for ExecuteScript into WebView2). Defaults to `x86_64-windows-gnu` so a plain
+  `zig build` from macOS produces the exe.
+
+**0.16 std findings (logged as data; no spec deviation — the host owns these
+hand-declarations either way).** `std.os.windows` in 0.16 dropped `WINAPI`
+(use `callconv(.winapi)` / `std.builtin.CallingConvention.winapi`) and
+`WPARAM`/`LRESULT`, and made `BOOL` a wrapper type. Declared the ABI-identical
+primitives locally (`WPARAM=usize`, `LPARAM/LRESULT=isize`, `BOOL=i32`) so the
+message loop compares against plain ints. The base handle/`LPCWSTR`/`ATOM` types
+are still in `std.os.windows` and reused.
+
+**Toolchain de-risk (the big result).** The pre-existing core — every Zig source
+plus the vendored e-dant/watcher C++ TU under libc++ — cross-compiles to
+`x86_64-windows` from Apple-Silicon macOS with no external toolchain
+(`zig build lib -Dtarget=x86_64-windows` produced `skrive_core.lib`). So the
+core needs **zero changes** for Windows; the Stage 5 "any core change is a design
+bug" gate is clear so far. `linkWatcher`'s macOS-framework branch is already
+os-tag-guarded, so it no-ops cleanly on Windows.
+
+**Gates — MET.** `Skrive.exe` is a valid PE32+ cross-compiled from macOS; core
+unit tests exit 0; core native build exit 0; **parity corpus 26/26** against
+`fixture_main` (core unchanged); `zig fmt --check` clean on the host + build
+files; `.gitignore` extended for `shell-zig/windows/{zig-out,.zig-cache}`. The
+exe RUNS only on Windows — the `app:version` proof-of-life and the window first
+appear at the 5.1 first-light gate (Joe, on Windows).
+
+**Next.** Stage 5.1 — WebView2 environment + controller on the HWND; serving
+(empirical pick: virtual-host mapping vs `WebResourceRequested` vs custom scheme,
+mirroring the macOS 1.2 bake-off incl. secure-context / module workers); the
+message bridge (`WebMessageReceived` in → `Core.handle` → emit → `ExecuteScript`
+out, reusing the delivery rule + a Zig `JSEscape`); the Windows renderer
+transport (`window.chrome.webview`); the injection round-trip. This is the first
+hand-rolled WebView2 COM glue (Turf / `webview2-com` as references) and the first
+Windows-run gate.
