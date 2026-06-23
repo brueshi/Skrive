@@ -1,3 +1,5 @@
+> **HISTORICAL — Stage 4 complete (2026-06-22).** This was the starting prompt for Zig shell Stage 4, which is now done (reduced scope: 4.0 native app-shell parity + 4.4 polish; 4.1–4.3 diff/checkpoints/git deferred and not ported). See `docs/zig-shell-log.md` and `docs/zig-shell-results.md`. Kept as the handoff record.
+
 # Stage 4 handoff — Zig shell macOS feature parity
 
 A self-contained starting prompt for a fresh session executing Stage 4 of the

@@ -1,3 +1,5 @@
+> **PARTIALLY STALE (2026-06-22).** Brief, principles, spacing, motion, and radii stand. Two sections are dead: the light-mode **Color** palette (the retired warm cream/brass set — superseded by the cool white-duotone "Overcast" redesign, where Overcast is the aesthetic, not a color set), and **Iconography** ("one Svelte component per icon" — now React).
+
 # Skrive Design System
 
 The visual and behavioral language of Skrive. This document captures the brief, the principles that fall out of it, and the concrete tokens that implement them.

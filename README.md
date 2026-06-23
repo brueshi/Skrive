@@ -1,8 +1,8 @@
 # Skrive
 
-> A Markdown editor for writers. Local-first, offline, portable plain text.
+> A writing and notes app for people who want their words in plain files they own. Local-first, offline, portable.
 
-Skrive is a **Markdown editor** — not an Obsidian clone, not a knowledge base, not a second brain, not an AI writing tool. It opens a folder of `.md` files, lets you write in them cleanly, and adds a small set of project-aware features (search, backlinks, safe renames) that keep your Markdown portable instead of locking you into a proprietary store.
+Skrive is a **writing and notes app** — not an Obsidian clone, not a knowledge base, not a second brain, not an AI writing tool. It opens a folder of plain files, lets you write in them cleanly with a rich rendered surface when you want it, and adds a small set of project-aware features (search, backlinks, safe renames). Markdown is the storage format, not the point — your words stay in portable plain text you own, never a proprietary store.
 
 What makes 1.0 different from every other Markdown app: it is a **document you write in, not a code editor with a preview**. One canonical Markdown file, two surfaces projected over it — a no-syntax rich surface for everyone, and an honest source surface for the Markdown-literate. The bytes on disk are always plain Markdown you could have typed by hand.
 

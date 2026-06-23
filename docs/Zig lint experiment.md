@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-06-22).** Premised on a Rust lint engine under Tauri (`src-tauri/src/lint.rs`). Lint is now a pure-TypeScript Web Worker; the Zig-vs-Rust baseline is gone. Kept for history only — do not implement against this.
+
 # Zig Lint Engine Experiment
 
 **Status.** Scoped. Gated on diff core experiment graduating.

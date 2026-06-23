@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-06-22).** Premised on a Rust diff core under Tauri (`src-tauri/src/diff.rs`), a stack that no longer exists. Diff now lives in `native/diff/` (Rust via NAPI), and a C-ABI staticlib already shipped into the Zig shell (Zig master plan Stage 4.1). Kept for history only — do not implement against this.
+
 # Zig Diff Library Experiment
 
 **Status.** Scoped. Not started.

@@ -1,3 +1,5 @@
+> **STALE (2026-06-22).** This is the Tauri-era release flow (`tauri-updater` signing, `src-tauri/Cargo.toml` + `tauri.conf.json` bumps, `tauri signer`). Current builds are Electron via `bun run package:*`. The Apple signing/notarization *secrets* setup still applies; the Tauri-updater and `src-tauri`/`tauri.conf.json` mechanics do not.
+
 # Release process
 
 Skrive ships via `.github/workflows/release.yml`. Push a `v*` tag, the workflow builds + signs + notarizes macOS, builds Windows (unsigned), and creates a draft GitHub Release with both bundles attached. You then review the release page and publish.

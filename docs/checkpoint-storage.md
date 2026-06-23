@@ -1,3 +1,5 @@
+> **PARTIALLY STALE (2026-06-22).** The on-disk format (path layout, hashing, dedup, retention) describes the Electron checkpoint store, which still exists but is a frozen stand-in — checkpoints were NOT ported to the Zig shell, and version history is being rebuilt natively (`planning/native-version-history-plan.md`). The API vocabulary (Tauri commands, Rust `pub fn` signatures, "Tauri app-data dir") is dead-stack. Treat the data layout as a record, not a target.
+
 # Checkpoint Storage Design
 
 The on-disk shape of Skrive's checkpoint system — the lightweight version history for projects that aren't git repos. Companion to [`3.3-diff-ui-design.md`](3.3-diff-ui-design.md) (reads checkpoints) and [`../planning/phase-3.3-plan.md`](../planning/phase-3.3-plan.md) §1.3–1.4 (writes and lists them).

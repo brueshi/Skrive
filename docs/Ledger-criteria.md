@@ -1,3 +1,5 @@
+> **PARTIALLY STALE (2026-06-22).** The framework (the four tests + the smell test) is still valid and load-bearing — webview ceilings apply to the current Zig + WKWebView shell too. But the concrete examples use the dead substrate's vocabulary ("your Rust core", "the Tauri-side fix", Svelte reactivity, a `tauri-friction.md` companion). Read "Rust/Tauri/Svelte" as "Zig core / native shell / React" when applying it.
+
 Category 1: Webview-fundamental ceilings
 These are the only entries that count as evidence for the Zig rebuild. Everything else goes in a different file.
 A category 1 issue meets all four of these tests:

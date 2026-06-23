@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-06-22).** Premised on a Rust link graph under Tauri (`src-tauri/src/link_graph.rs`). The link graph is now TypeScript; the Zig-vs-Rust baseline is gone. Kept for history only — do not implement against this.
+
 # Zig Link Graph Experiment
 
 **Status.** Scoped. Gated on diff core and lint engine experiments graduating.

@@ -1,3 +1,5 @@
+> **STALE (2026-06-22).** Status and build commands are Tauri/pre-alpha-era (`tauri build`, `.msi`, "pre-alpha"). Skrive is 1.0.0 on Electron (`bun run package:*`). Verify the current Windows installer format before relying on the install steps.
+
 # Installing Skrive
 
 Skrive is pre-alpha. Expect rough edges. Grab the latest build from [Releases](https://github.com/brueshi/Skrive/releases).

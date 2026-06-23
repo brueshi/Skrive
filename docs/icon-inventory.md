@@ -1,3 +1,5 @@
+> **PARTIALLY STALE (2026-06-22).** The icon list, phases, and style spec (24×24 grid, 1.5px stroke, currentColor, 40° constant) stand as the canonical inventory. Stale: the storage/wrapping convention (`Icon{Domain}{Variant}.svelte`, `src/lib/icons/`, the `/icons` dev route) — now React under `app/`.
+
 # Icon Inventory
 
 The complete list of icons Skrive will need across the project lifetime, prioritized by phase. This is a working checklist — mark icons off as you draw them.
