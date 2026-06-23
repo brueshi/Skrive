@@ -34,9 +34,11 @@ pub fn build(b: *std.Build) void {
     // The core module brings libc++ (the watcher); libc underlies it and the
     // Win32 CRT, so link it explicitly.
     exe.root_module.link_libc = true;
-    // Win32 windowing surface (5.0) — WebView2 libs join in 5.1.
+    // Win32 windowing + COM. WebView2 itself is loaded dynamically at runtime
+    // (WebView2Loader.dll via LoadLibrary), so nothing is linked for it here.
     exe.root_module.linkSystemLibrary("user32", .{});
     exe.root_module.linkSystemLibrary("gdi32", .{});
+    exe.root_module.linkSystemLibrary("ole32", .{}); // CoTaskMemFree
     b.installArtifact(exe);
 
     // Convenience step; only does anything on a Windows host. Building from
@@ -44,4 +46,20 @@ pub fn build(b: *std.Build) void {
     const run = b.addRunArtifact(exe);
     const run_step = b.step("run", "Run the Windows host (Windows only)");
     run_step.dependOn(&run.step);
+
+    // Host-side unit tests that are pure logic (no Windows APIs), so they
+    // compile and RUN on the native build host (macOS). Today: the delivery-
+    // rule escaper. Built for the native target, not `target`, so `zig build
+    // test` actually executes them on the dev machine.
+    const test_step = b.step("test", "Run host unit tests (native; pure-logic only)");
+    inline for (.{"src/jsescape.zig"}) |src| {
+        const t = b.addTest(.{
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(src),
+                .target = b.graph.host,
+                .optimize = optimize,
+            }),
+        });
+        test_step.dependOn(&b.addRunArtifact(t).step);
+    }
 }

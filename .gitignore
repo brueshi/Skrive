@@ -41,3 +41,4 @@ planning/
 /shell-zig/web/dist/
 /shell-zig/windows/zig-out/
 /shell-zig/windows/.zig-cache/
+/shell-zig/windows/dist/
