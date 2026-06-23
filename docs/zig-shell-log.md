@@ -2096,3 +2096,100 @@ misbehaves, a triage build with the HRESULT trace + DevTools is one flag away
 config). **Next (Milestone 2):** B3 custom frameless chrome (research WebView2
 non-client-region support first), B4 window-state persistence, C1 file
 associations + argv-forward.
+
+---
+
+## 2026-06-23 — Stage 5.3 Milestone 2: custom frameless chrome + window-state (built; dogfood pending)
+
+**Branch:** `labs/zig-shell-stage-5-windows-host` (continued). Milestone 2 =
+**B3** (full custom frameless chrome) + **B4** (window-state persistence).
+**C1 deferred to Milestone 3 with D1** (Joe's call) — see the scope note below.
+Dogfood bundle: `Skrive-win-5.3-m2.zip` (release). **Core untouched, parity
+26/26.**
+
+**The chrome decision (Joe chose full custom frameless).** Two findings reframed
+B3 before any code. (1) **WebView2 non-client-region support is in our SDK**
+(1.0.3351.48): `ICoreWebView2Settings9.put_IsNonClientRegionSupportEnabled`
+(IID `0528a73b-…`, vtable slot 39) — with it on, the renderer's
+`app-region: drag` regions are forwarded to the host as caption hits
+(drag / double-click-maximize / right-click system menu) with no
+WM_NCHITTEST-through-the-child coordination. But it only covers *dragging*; the
+`NON_CLIENT_REGION_KIND_MINIMIZE/MAXIMIZE/CLOSE` values are for the *windowless*
+composition controller, which we don't use, so min/max/close need
+renderer-drawn buttons + host commands. (2) **The shipping Electron Windows
+build uses the standard native frame** (`titleBarStyle: 'default'`, no
+`frame:false`) and the renderer has no Windows window controls — so "match the
+macOS inset look" is net-new Windows design, not parity replication. Presented
+all three directions (full frameless / DWM-extended-keep-OS-buttons / keep
+standard frame); Joe picked **full custom frameless**.
+
+**Capability handshake (keeps Electron + macOS untouched).** Only this host
+advertises frameless mode: `native-bridge-win.ts` (injected at document-start)
+sets `window.__SKRIVE_FRAMELESS__ = true` and exposes `window.__skriveWindow`
+(minimize/toggleMaximize/close/isMaximized + onMaximizeChanged). The renderer
+reads the flag synchronously (no flicker) and only then renders `WindowControls`
+(`app/src/components/chrome/WindowControls.tsx`) — Skrive-styled min / maximize-
+restore / close at the top-right, `app-region: no-drag` so they stay clickable.
+Electron and the macOS host never set the flag, so the component returns null
+there and the OS title bar stays — **no Electron edits, no shell divergence.**
+The `window:*` commands are host-owned (routed in `app.zig` like the dialogs),
+invoked straight off the native channel rather than the bridge contract, so the
+shared contract is untouched. The settings sub-view re-centers its title via an
+`is-frameless`-scoped rule (the 4th flex child would otherwise shove it
+off-center; identical layout when not frameless).
+
+**Frameless window (host, the genuinely blind part).** On a *windowed* WebView2
+controller you cannot have BOTH pixel-edge full-bleed AND native edge-resize: the
+WebView2 child HWND swallows interior mouse messages, so a full-bleed child
+leaves no perimeter for the parent's resize hit-testing (true full-bleed needs
+the composition/DComp controller — a much bigger rearchitecture). Chosen recipe,
+the robust one: `WM_NCCALCSIZE` lets DefWindowProc compute the standard client
+rect, then reclaims ONLY the caption band (`top -= SM_CYCAPTION`), keeping the
+OS resize frame non-client on all four edges — so **resizing is 100% OS-native
+with zero custom WM_NCHITTEST**, and the maximized case lands the client top at
+the visible work-area top for free. Cost: a thin (~frame-width) themed border
+the webview sits inside; the window background brush is set to the pre-paint
+shell color (`#161719` dark / `#e7e8ea` light, dark/light read from
+HKCU `…\Themes\Personalize\AppsUseLightTheme`) so it reads as intentional padding
+(echoing the renderer's own `--skrive-shell-pad`), not chrome. `WM_GETMINMAXINFO`
+enforces the 720x480 minimum (macOS parity). `SetWindowPos(SWP_FRAMECHANGED)` at
+startup forces the frameless calc before first paint. `WM_SIZE` →
+`setMaximized()` emits `window:maximizeChanged` only on a real transition
+(SIZE_RESTORED fires on every resize step). **Honest risk:** the frameless
+geometry is compile-only — the recipe is well-trodden and logged via diag, but
+the exact frame thickness / maximized fill are tuned on Joe's dogfood; if the
+border reads too heavy, the fallback is the composition controller (bigger) or a
+thinner reclaim.
+
+**B4 window-state persistence.** The macOS host doesn't persist window state (it
+`center()`s each launch), so this is Windows-net-new. `WINDOWPLACEMENT` stores
+the *restored* rect + show state, so a maximized window reopens maximized but
+un-maximizes to its last normal bounds. Saved as JSON to
+`%APPDATA%\Skrive\window-state.json` on `WM_DESTROY`, restored before first show
+(`SetWindowPlacement`, which also shows the window); first launch / unreadable /
+sub-minimum state falls back to the default placement. Minor known gap: no
+multi-monitor off-screen reclamp (a saved position on a since-disconnected
+monitor could land off-screen) — fine to refine later.
+
+**C1 scope note (deferred to M3 with D1).** C1 (open-file-from-OS) and D1
+(installer association registration) are two halves of one "file associations"
+feature: C1's trigger is D1, and Skrive opens *folders* not files, so the
+renderer needs a net-new `app:openPath` contract + a file→project mapping
+(open the parent folder, select the file). Building C1 now — half-wired, only
+CLI-triggerable, with a blind renderer-contract guess — was the wrong seam. Joe:
+"wait". M3 does C1 + D1 together, end-to-end and testable.
+
+**Gates met on macOS.** x64 + arm64 cross-compile in Debug + ReleaseFast; `zig
+fmt` clean; `zig build test` (jsescape) green; repo typecheck (shared/app/shell)
+clean; **core byte-for-byte unchanged, parity 26/26**; dist release-clean
+(subsystem GUI, zero `skrive-diag.log`); frameless wiring present in both bundles.
+
+**Dogfood gate (Joe, on Windows), `Skrive-win-5.3-m2.zip`.** (1) **B3 chrome** —
+no native title bar; the renderer topbar IS the title bar; min / maximize-restore
+(glyph swaps) / close work; dragging the topbar moves the window; double-click
+maximizes; right-click gives the system menu; resize all four edges + corners;
+the thin frame border matches the theme. (2) **B4** — resize/move/maximize, quit,
+relaunch → window returns to the same place/size/maximized state. The honest
+unknown is the frameless geometry (frame thickness, maximized fill) on real
+WebView2 — report how it looks and I'll tune. **Next (Milestone 3):** C1 + D1
+(file associations end-to-end) + the WebView2 bootstrap, then E1/E2 verification.

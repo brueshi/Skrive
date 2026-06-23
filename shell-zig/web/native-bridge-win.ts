@@ -26,11 +26,24 @@ type Envelope = {
 
 type WebView2Host = { postMessage(message: unknown): void };
 
+// The custom-chrome API the renderer's WindowControls uses (B3). Present only
+// in this frameless Windows host; absent on macOS/Electron, where the OS draws
+// the window controls. The renderer feature-detects `__SKRIVE_FRAMELESS__`.
+type SkriveWindowApi = {
+  minimize(): Promise<unknown>;
+  toggleMaximize(): Promise<unknown>;
+  close(): Promise<unknown>;
+  isMaximized(): Promise<{ maximized: boolean }>;
+  onMaximizeChanged(cb: (maximized: boolean) => void): () => void;
+};
+
 declare global {
   interface Window {
     chrome?: { webview?: WebView2Host };
     __skriveDispatch?: (json: string) => void;
     skrive?: ReturnType<typeof createSkriveBridge>;
+    __SKRIVE_FRAMELESS__?: boolean;
+    __skriveWindow?: SkriveWindowApi;
   }
 }
 
@@ -106,6 +119,26 @@ const transport: SkriveTransport = {
 };
 
 window.skrive = createSkriveBridge(transport);
+
+// B3 custom frameless chrome: this host draws no native title bar, so the
+// renderer owns the window controls. Advertise frameless mode (read
+// synchronously by the renderer before first paint, no flicker) and expose the
+// window-control API the WindowControls component calls. These globals exist
+// only here — Electron and the macOS host never set them, so the renderer
+// keeps the OS title bar there. window:* are host-owned commands (routed in
+// app.zig), invoked directly off the native channel rather than the contract.
+window.__SKRIVE_FRAMELESS__ = true;
+window.__skriveWindow = {
+  minimize: () => nativeInvoke('window:minimize', {}),
+  toggleMaximize: () => nativeInvoke('window:toggleMaximize', {}),
+  close: () => nativeInvoke('window:close', {}),
+  isMaximized: () =>
+    nativeInvoke('window:isMaximized', {}) as Promise<{ maximized: boolean }>,
+  onMaximizeChanged: (cb) =>
+    mock.on('window:maximizeChanged', (payload) =>
+      cb(Boolean((payload as { maximized?: boolean }).maximized))
+    )
+};
 
 // Test-only hook: lets a future SKRIVE_DIAG self-test drive the native channel
 // directly (e.g. diag:poison for the delivery-rule round-trip) without adding a

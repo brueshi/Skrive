@@ -22,9 +22,16 @@ import { PanelMenu } from './PanelMenu';
 import { SaveStatus } from './SaveStatus';
 import { SurfaceToggle } from './SurfaceToggle';
 import { TabBar } from './TabBar';
+import { WindowControls } from './WindowControls';
 
 const isMacOS =
   typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
+
+// Frameless Windows host (Zig shell, B3): the renderer owns the window
+// controls, so the header reserves space for them and re-centers the settings
+// title. False in every other shell (the OS draws the title bar there).
+const isFrameless =
+  typeof window !== 'undefined' && window.__SKRIVE_FRAMELESS__ === true;
 
 export function Header() {
   const activeTab = useProjectStore(selectActiveTab);
@@ -33,7 +40,9 @@ export function Header() {
   const activeView = useProjectStore((s) => s.activeView);
   const setActiveView = useProjectStore((s) => s.setActiveView);
 
-  const headerClass = `header${isMacOS ? ' is-macos' : ''}`;
+  const headerClass = `header${isMacOS ? ' is-macos' : ''}${
+    isFrameless ? ' is-frameless' : ''
+  }`;
   const dragStyle: CSSProperties = { WebkitAppRegion: 'drag' } as CSSProperties;
   const noDragStyle: CSSProperties = {
     WebkitAppRegion: 'no-drag'
@@ -66,6 +75,9 @@ export function Header() {
         {/* Empty right cluster balances the left so the title stays
             centered; left draggable (no button to opt out for). */}
         <div className="header-right" />
+        {/* Custom window controls (frameless Windows host only; renders null
+            elsewhere). Kept here too so they persist into the settings view. */}
+        <WindowControls />
       </header>
     );
   }
@@ -98,6 +110,10 @@ export function Header() {
           <PanelMenu />
         </div>
       )}
+
+      {/* Custom window controls (frameless Windows host only; renders null
+          elsewhere) — flush to the top-right window corner. */}
+      <WindowControls />
     </header>
   );
 }

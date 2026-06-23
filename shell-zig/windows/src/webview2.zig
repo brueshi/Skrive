@@ -76,6 +76,7 @@ pub const IID_ControllerCompletedHandler = guid("6c4819f3-c9b7-4260-8127-c9f5bde
 pub const IID_WebMessageReceivedHandler = guid("57213f19-00e6-49fa-8e07-898ea01ecbd2");
 pub const IID_NavigationStartingHandler = guid("9adbe429-f36d-432b-9ddc-f8881fbd76e3");
 pub const IID_NewWindowRequestedHandler = guid("d4c185fe-c81c-4989-97af-2d3fa7ab5651");
+pub const IID_ICoreWebView2Settings9 = guid("0528a73b-e92d-49f4-927a-e547dddaa37d");
 
 // ---- IUnknown (for casting + QueryInterface/Release on any interface) ------
 
@@ -257,6 +258,26 @@ pub const ICoreWebView2Settings = extern struct {
     };
     pub fn putAreDevToolsEnabled(self: *ICoreWebView2Settings, enabled: win32.BOOL) HRESULT {
         return self.lpVtbl.put_AreDevToolsEnabled(self, enabled);
+    }
+};
+
+// ---- ICoreWebView2Settings9  (slots 1-39; inherits Settings .. Settings8) --
+// QI'd from the base ICoreWebView2Settings. Only put_IsNonClientRegionSupport
+// Enabled (slot 39, the last) is called — it lets the renderer's
+// `app-region: drag` regions act as the window caption (B3 custom chrome).
+
+pub const ICoreWebView2Settings9 = extern struct {
+    lpVtbl: *const Vtbl,
+    pub const Vtbl = extern struct {
+        QueryInterface: Slot,
+        AddRef: Slot,
+        Release: *const fn (*ICoreWebView2Settings9) callconv(WINAPI) u32,
+        run_4_38: [35]Slot, // get/put IsScriptEnabled .. get_IsNonClientRegionSupportEnabled
+        // 39: put_IsNonClientRegionSupportEnabled(BOOL)
+        put_IsNonClientRegionSupportEnabled: *const fn (*ICoreWebView2Settings9, win32.BOOL) callconv(WINAPI) HRESULT,
+    };
+    pub fn putIsNonClientRegionSupportEnabled(self: *ICoreWebView2Settings9, enabled: win32.BOOL) HRESULT {
+        return self.lpVtbl.put_IsNonClientRegionSupportEnabled(self, enabled);
     }
 };
 

@@ -20,6 +20,36 @@ pub const LPWSTR = [*:0]u16;
 
 pub const RECT = extern struct { left: i32, top: i32, right: i32, bottom: i32 };
 pub const POINT = extern struct { x: i32, y: i32 };
+
+/// WM_NCCALCSIZE payload (wParam == TRUE): `rgrc[0]` is in/out the proposed
+/// client rect. We reclaim the caption band from its top and leave the resize
+/// frame on all edges, so the OS still drives resizing.
+pub const NCCALCSIZE_PARAMS = extern struct {
+    rgrc: [3]RECT,
+    lppos: ?*anyopaque,
+};
+
+/// WM_GETMINMAXINFO payload — `ptMinTrackSize` enforces the minimum window
+/// size (parity with the macOS host's 720x480 minSize).
+pub const MINMAXINFO = extern struct {
+    ptReserved: POINT,
+    ptMaxSize: POINT,
+    ptMaxPosition: POINT,
+    ptMinTrackSize: POINT,
+    ptMaxTrackSize: POINT,
+};
+
+/// WINDOWPLACEMENT — used by window-state persistence (B4): captures the
+/// normal (restored) rect plus the show state, so a maximized window restores
+/// to the right un-maximized bounds.
+pub const WINDOWPLACEMENT = extern struct {
+    length: u32,
+    flags: u32,
+    showCmd: u32,
+    ptMinPosition: POINT,
+    ptMaxPosition: POINT,
+    rcNormalPosition: RECT,
+};
 pub const MSG = extern struct {
     hwnd: ?HWND,
     message: u32,
@@ -58,7 +88,27 @@ pub const COLOR_WINDOW_BRUSH: w.HBRUSH = @ptrFromInt(6); // COLOR_WINDOW (5) + 1
 // Messages.
 pub const WM_DESTROY: u32 = 0x0002;
 pub const WM_SIZE: u32 = 0x0005;
+pub const WM_CLOSE: u32 = 0x0010;
+pub const WM_GETMINMAXINFO: u32 = 0x0024;
+pub const WM_NCCALCSIZE: u32 = 0x0083;
 pub const WM_APP: u32 = 0x8000;
+
+// WM_SIZE wParam values (which size change occurred).
+pub const SIZE_RESTORED: usize = 0;
+pub const SIZE_MAXIMIZED: usize = 2;
+
+// ShowWindow commands used by the window-control bridge commands.
+pub const SW_MINIMIZE: i32 = 6;
+pub const SW_MAXIMIZE: i32 = 3;
+pub const SW_RESTORE: i32 = 9;
+
+// GetSystemMetrics index: caption (title bar) height — the band the frameless
+// WM_NCCALCSIZE handler reclaims into the client area.
+pub const SM_CYCAPTION: i32 = 4;
+
+// Minimum window size (parity with the macOS host).
+pub const MIN_WIDTH: i32 = 720;
+pub const MIN_HEIGHT: i32 = 480;
 
 // SetWindowLongPtr / GetWindowLongPtr index for our App back-pointer.
 pub const GWLP_USERDATA: i32 = -21;
@@ -108,6 +158,35 @@ pub const IDI_SKRIVE: u16 = 1;
 pub extern "user32" fn GetClientRect(hWnd: HWND, lpRect: *RECT) callconv(WINAPI) BOOL;
 pub extern "user32" fn SetWindowLongPtrW(hWnd: HWND, nIndex: i32, dwNewLong: LPARAM) callconv(WINAPI) LPARAM;
 pub extern "user32" fn GetWindowLongPtrW(hWnd: HWND, nIndex: i32) callconv(WINAPI) LPARAM;
+pub extern "user32" fn GetSystemMetrics(nIndex: i32) callconv(WINAPI) i32;
+pub extern "user32" fn IsZoomed(hWnd: HWND) callconv(WINAPI) BOOL;
+// Frame recompute after the window style/extent assumptions change at startup
+// (forces a fresh WM_NCCALCSIZE so the frameless client rect takes effect).
+pub extern "user32" fn SetWindowPos(hWnd: HWND, hWndInsertAfter: ?HWND, X: i32, Y: i32, cx: i32, cy: i32, uFlags: u32) callconv(WINAPI) BOOL;
+pub const SWP_NOMOVE: u32 = 0x0002;
+pub const SWP_NOSIZE: u32 = 0x0001;
+pub const SWP_NOZORDER: u32 = 0x0004;
+pub const SWP_FRAMECHANGED: u32 = 0x0020;
+// Window placement (B4 persistence): normal rect + show state in one struct.
+pub extern "user32" fn GetWindowPlacement(hWnd: HWND, lpwndpl: *WINDOWPLACEMENT) callconv(WINAPI) BOOL;
+pub extern "user32" fn SetWindowPlacement(hWnd: HWND, lpwndpl: *const WINDOWPLACEMENT) callconv(WINAPI) BOOL;
+
+// Theme-matched window background brush (the frameless resize frame shows this
+// color). gdi32 CreateSolidBrush takes a COLORREF (0x00BBGGRR).
+pub extern "gdi32" fn CreateSolidBrush(color: u32) callconv(WINAPI) ?w.HBRUSH;
+
+// Windows dark/light mode (HKCU ...\Themes\Personalize\AppsUseLightTheme).
+pub extern "advapi32" fn RegGetValueW(
+    hkey: ?*anyopaque,
+    lpSubKey: LPCWSTR,
+    lpValue: LPCWSTR,
+    dwFlags: u32,
+    pdwType: ?*u32,
+    pvData: ?*anyopaque,
+    pcbData: ?*u32,
+) callconv(WINAPI) i32;
+pub const HKEY_CURRENT_USER: *anyopaque = @ptrFromInt(0x80000001);
+pub const RRF_RT_REG_DWORD: u32 = 0x00000010;
 
 pub extern "ole32" fn CoTaskMemFree(pv: ?*anyopaque) callconv(WINAPI) void;
 pub extern "ole32" fn CoInitializeEx(pvReserved: ?*anyopaque, dwCoInit: u32) callconv(WINAPI) i32;

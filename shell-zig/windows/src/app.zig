@@ -71,6 +71,10 @@ pub const App = struct {
     nav_starting_token: wv.EventRegistrationToken = .{ .value = 0 },
     new_window_token: wv.EventRegistrationToken = .{ .value = 0 },
     user_data_dir_w: ?[:0]u16 = null,
+    /// Last maximized state delivered to the renderer; dedups the WM_SIZE
+    /// stream (SIZE_RESTORED fires on every resize step) so window:maximize
+    /// Changed is emitted only on a real transition.
+    is_maximized: bool = false,
 
     /// Build the window + core and kick off async WebView2 creation. The App is
     /// heap-allocated so its address is stable: the handlers hold `*App`, the
@@ -154,6 +158,11 @@ pub const App = struct {
         // own module — drives the window's title-bar corner, taskbar button,
         // and Alt-Tab entry. Same handle for large and small; Windows scales.
         const icon = win32.LoadIconW(self.hinstance, win32.makeIntResourceW(win32.IDI_SKRIVE));
+        // Theme-matched background: the frameless window keeps a thin OS resize
+        // frame (B3), and this is the color it shows — chosen to match the
+        // renderer's pre-paint shell bg (#161719 dark / #e7e8ea light, same as
+        // the macOS host) so the frame reads as intentional padding, not chrome.
+        const bg = themeBackgroundBrush() orelse win32.COLOR_WINDOW_BRUSH;
         const wc = win32.WNDCLASSEXW{
             .cbSize = @sizeOf(win32.WNDCLASSEXW),
             .style = win32.CS_HREDRAW | win32.CS_VREDRAW,
@@ -163,7 +172,7 @@ pub const App = struct {
             .hInstance = self.hinstance,
             .hIcon = icon,
             .hCursor = win32.LoadCursorW(null, win32.IDC_ARROW),
-            .hbrBackground = win32.COLOR_WINDOW_BRUSH,
+            .hbrBackground = bg,
             .lpszMenuName = null,
             .lpszClassName = CLASS_NAME,
             .hIconSm = icon,
@@ -186,7 +195,16 @@ pub const App = struct {
         ) orelse return error.CreateWindowFailed;
         self.hwnd = hwnd;
         _ = win32.SetWindowLongPtrW(hwnd, win32.GWLP_USERDATA, @bitCast(@intFromPtr(self)));
-        _ = win32.ShowWindow(hwnd, win32.SW_SHOWDEFAULT);
+        // Force a WM_NCCALCSIZE pass so the frameless client rect (caption
+        // reclaimed) takes effect before the first paint, not on the first
+        // resize.
+        _ = win32.SetWindowPos(hwnd, null, 0, 0, 0, 0, win32.SWP_NOMOVE | win32.SWP_NOSIZE | win32.SWP_NOZORDER | win32.SWP_FRAMECHANGED);
+        // B4: restore the saved size/position/maximized state (which also shows
+        // the window via its showCmd). First launch (or unreadable state) falls
+        // back to the default placement.
+        if (!self.restoreWindowState()) {
+            _ = win32.ShowWindow(hwnd, win32.SW_SHOWDEFAULT);
+        }
         _ = win32.UpdateWindow(hwnd);
     }
 
@@ -256,6 +274,19 @@ pub const App = struct {
                 const settings: *wv.ICoreWebView2Settings = @ptrCast(@alignCast(sp));
                 const dhr = settings.putAreDevToolsEnabled(if (build_options.dev) 1 else 0);
                 diag.log("putAreDevToolsEnabled({}) hr=0x{x:0>8}", .{ build_options.dev, diag.hx(dhr) });
+                // B3: enable non-client-region support so the renderer's
+                // `app-region: drag` topbar acts as the window caption (drag,
+                // double-click maximize, right-click system menu) — the clean
+                // path vs hand-rolled WM_NCHITTEST through the WebView2 child.
+                var s9_ptr: ?*anyopaque = null;
+                if (wv.asUnknown(sp).queryInterface(&wv.IID_ICoreWebView2Settings9, &s9_ptr) == wv.S_OK) {
+                    if (s9_ptr) |s9p| {
+                        const s9: *wv.ICoreWebView2Settings9 = @ptrCast(@alignCast(s9p));
+                        const ncr = s9.putIsNonClientRegionSupportEnabled(1);
+                        diag.log("putIsNonClientRegionSupportEnabled hr=0x{x:0>8}", .{diag.hx(ncr)});
+                        _ = wv.asUnknown(s9p).release();
+                    }
+                }
                 _ = wv.asUnknown(sp).release();
             }
         }
@@ -382,6 +413,36 @@ pub const App = struct {
                 defer self.gpa.free(result);
                 self.sendOk(id, result);
             } else self.sendOk(id, "{\"path\":null}");
+            return true;
+        }
+        // B3 window controls: the renderer's custom min/max/close buttons
+        // (frameless chrome) drive these. Host-owned, like the dialogs.
+        if (std.mem.eql(u8, cmd, "window:minimize")) {
+            if (self.hwnd) |h| _ = win32.ShowWindow(h, win32.SW_MINIMIZE);
+            self.sendOk(id, "{}");
+            return true;
+        }
+        if (std.mem.eql(u8, cmd, "window:toggleMaximize")) {
+            if (self.hwnd) |h| {
+                if (win32.IsZoomed(h) != 0) {
+                    _ = win32.ShowWindow(h, win32.SW_RESTORE);
+                } else {
+                    _ = win32.ShowWindow(h, win32.SW_MAXIMIZE);
+                }
+            }
+            self.sendOk(id, "{}");
+            return true;
+        }
+        if (std.mem.eql(u8, cmd, "window:close")) {
+            if (self.hwnd) |h| _ = win32.PostMessageW(h, win32.WM_CLOSE, 0, 0);
+            self.sendOk(id, "{}");
+            return true;
+        }
+        if (std.mem.eql(u8, cmd, "window:isMaximized")) {
+            const m = if (self.hwnd) |h| win32.IsZoomed(h) != 0 else false;
+            const result = std.fmt.allocPrint(self.gpa, "{{\"maximized\":{s}}}", .{if (m) "true" else "false"}) catch return true;
+            defer self.gpa.free(result);
+            self.sendOk(id, result);
             return true;
         }
         if (std.mem.eql(u8, cmd, "links:openExternal")) {
@@ -520,6 +581,85 @@ pub const App = struct {
         _ = controller.putBounds(rc);
     }
 
+    /// Tell the renderer the window's maximize state changed, so its custom
+    /// maximize/restore glyph stays in sync. Deduped against the last delivered
+    /// state (WM_SIZE/SIZE_RESTORED fires on every resize step). Safe before the
+    /// webview exists (sendToRenderer no-ops until then).
+    fn setMaximized(self: *App, maximized: bool) void {
+        if (self.is_maximized == maximized) return;
+        self.is_maximized = maximized;
+        const env = std.fmt.allocPrint(
+            self.gpa,
+            "{{\"event\":\"window:maximizeChanged\",\"payload\":{{\"maximized\":{s}}}}}",
+            .{if (maximized) "true" else "false"},
+        ) catch return;
+        defer self.gpa.free(env);
+        self.sendToRenderer(env);
+    }
+
+    // ---- window-state persistence (B4) ------------------------------------
+
+    /// %APPDATA%\Skrive\window-state.json. Caller owns the result.
+    fn windowStatePath(self: *App, gpa: std.mem.Allocator) ![]u8 {
+        return std.fs.path.join(gpa, &.{ self.app_data_dir, "window-state.json" });
+    }
+
+    /// Persist the restored (un-maximized) rect + maximized flag on close.
+    /// WINDOWPLACEMENT.rcNormalPosition is the normal rect even when the window
+    /// is currently maximized, so a maximized window reopens maximized but
+    /// un-maximizes to where it last was. Best-effort; failures are silent.
+    fn saveWindowState(self: *App) void {
+        const hwnd = self.hwnd orelse return;
+        var wp: win32.WINDOWPLACEMENT = std.mem.zeroes(win32.WINDOWPLACEMENT);
+        wp.length = @sizeOf(win32.WINDOWPLACEMENT);
+        if (win32.GetWindowPlacement(hwnd, &wp) == 0) return;
+        const r = wp.rcNormalPosition;
+        const maximized = wp.showCmd == 3; // SW_SHOWMAXIMIZED
+        const json = std.fmt.allocPrint(
+            self.gpa,
+            "{{\"x\":{d},\"y\":{d},\"w\":{d},\"h\":{d},\"maximized\":{s}}}",
+            .{ r.left, r.top, r.right - r.left, r.bottom - r.top, if (maximized) "true" else "false" },
+        ) catch return;
+        defer self.gpa.free(json);
+        const path = self.windowStatePath(self.gpa) catch return;
+        defer self.gpa.free(path);
+        const io = std.Io.Threaded.global_single_threaded.io();
+        std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = json }) catch {};
+    }
+
+    /// Restore the saved placement (and show the window). Returns whether it
+    /// restored — false means no/invalid state, and the caller shows the window
+    /// with the default placement instead.
+    fn restoreWindowState(self: *App) bool {
+        const hwnd = self.hwnd orelse return false;
+        const path = self.windowStatePath(self.gpa) catch return false;
+        defer self.gpa.free(path);
+        const io = std.Io.Threaded.global_single_threaded.io();
+        const bytes = std.Io.Dir.cwd().readFileAlloc(io, path, self.gpa, .unlimited) catch return false;
+        defer self.gpa.free(bytes);
+        var arena = std.heap.ArenaAllocator.init(self.gpa);
+        defer arena.deinit();
+        const parsed = std.json.parseFromSliceLeaky(std.json.Value, arena.allocator(), bytes, .{}) catch return false;
+        if (parsed != .object) return false;
+        const o = parsed.object;
+        const x = jsonInt(o, "x") orelse return false;
+        const y = jsonInt(o, "y") orelse return false;
+        const wdt = jsonInt(o, "w") orelse return false;
+        const hgt = jsonInt(o, "h") orelse return false;
+        if (wdt < win32.MIN_WIDTH or hgt < win32.MIN_HEIGHT) return false;
+        const maximized = switch (o.get("maximized") orelse std.json.Value{ .null = {} }) {
+            .bool => |b| b,
+            else => false,
+        };
+        var wp: win32.WINDOWPLACEMENT = std.mem.zeroes(win32.WINDOWPLACEMENT);
+        wp.length = @sizeOf(win32.WINDOWPLACEMENT);
+        wp.showCmd = if (maximized) 3 else 1; // SW_SHOWMAXIMIZED : SW_SHOWNORMAL
+        wp.rcNormalPosition = .{ .left = x, .top = y, .right = x + wdt, .bottom = y + hgt };
+        wp.ptMinPosition = .{ .x = -1, .y = -1 };
+        wp.ptMaxPosition = .{ .x = -1, .y = -1 };
+        return win32.SetWindowPlacement(hwnd, &wp) != 0;
+    }
+
     pub fn run(_: *App) void {
         var msg: win32.MSG = undefined;
         while (win32.GetMessageW(&msg, null, 0, 0) != 0) {
@@ -528,6 +668,14 @@ pub const App = struct {
         }
     }
 };
+
+/// Read an i32 field from a parsed JSON object, or null if missing/wrong type.
+fn jsonInt(o: std.json.ObjectMap, key: []const u8) ?i32 {
+    return switch (o.get(key) orelse return null) {
+        .integer => |i| std.math.cast(i32, i),
+        else => null,
+    };
+}
 
 fn wndProc(hwnd: win32.HWND, msg: u32, wparam: win32.WPARAM, lparam: win32.LPARAM) callconv(WINAPI) win32.LRESULT {
     const ud = win32.GetWindowLongPtrW(hwnd, win32.GWLP_USERDATA);
@@ -541,11 +689,52 @@ fn wndProc(hwnd: win32.HWND, msg: u32, wparam: win32.WPARAM, lparam: win32.LPARA
             if (app) |a| a.handleHostCommand(wparam);
             return 0;
         },
+        win32.WM_NCCALCSIZE => {
+            // Frameless chrome (B3). DefWindowProc computes the standard client
+            // rect (insets all four edges for the resize frame + caption); we
+            // then reclaim the top into the client area. The left/right/bottom
+            // resize frames stay non-client, so resizing those edges + corners
+            // is OS-native with no custom WM_NCHITTEST (the WebView2 child would
+            // otherwise swallow interior hits).
+            if (wparam != 0) {
+                const p: *win32.NCCALCSIZE_PARAMS = @ptrFromInt(@as(usize, @bitCast(lparam)));
+                const requested_top = p.rgrc[0].top;
+                const ret = win32.DefWindowProcW(hwnd, msg, wparam, lparam);
+                if (win32.IsZoomed(hwnd) == 0) {
+                    // Not maximized: reclaim the ENTIRE top edge so the topbar
+                    // runs flush to the window top. Leaving even the thin top
+                    // resize-frame strip non-client makes DWM paint it with the
+                    // user's accent color (the reported green bar). Cost: no
+                    // top-edge resize (corners/sides still resize).
+                    p.rgrc[0].top = requested_top;
+                } else {
+                    // Maximized: keep DefWindowProc's inset (it accounts for the
+                    // off-screen overhang) and reclaim just the caption, which
+                    // lands the client top exactly at the visible work-area top.
+                    p.rgrc[0].top -= win32.GetSystemMetrics(win32.SM_CYCAPTION);
+                }
+                return ret;
+            }
+            return win32.DefWindowProcW(hwnd, msg, wparam, lparam);
+        },
+        win32.WM_GETMINMAXINFO => {
+            const mmi: *win32.MINMAXINFO = @ptrFromInt(@as(usize, @bitCast(lparam)));
+            mmi.ptMinTrackSize = .{ .x = win32.MIN_WIDTH, .y = win32.MIN_HEIGHT };
+            return 0;
+        },
         win32.WM_SIZE => {
-            if (app) |a| a.resizeWebview();
+            if (app) |a| {
+                a.resizeWebview();
+                if (wparam == win32.SIZE_MAXIMIZED) {
+                    a.setMaximized(true);
+                } else if (wparam == win32.SIZE_RESTORED) {
+                    a.setMaximized(false);
+                }
+            }
             return 0;
         },
         win32.WM_DESTROY => {
+            if (app) |a| a.saveWindowState();
             win32.PostQuitMessage(0);
             return 0;
         },
@@ -567,6 +756,27 @@ fn getExeDir(gpa: std.mem.Allocator) ![]u8 {
 
 fn logHr(what: []const u8, hr: wv.HRESULT) void {
     diag.log("[skrive] {s} failed: hr=0x{x:0>8}", .{ what, diag.hx(hr) });
+}
+
+/// A solid brush in the pre-paint shell color for the current OS theme. COLORREF
+/// is 0x00BBGGRR; #161719 -> 0x00191716, #e7e8ea -> 0x00eae8e7 (matches the
+/// macOS host's window.backgroundColor). Caller treats null as "fall back".
+fn themeBackgroundBrush() ?win32.w.HBRUSH {
+    const dark: u32 = 0x00191716;
+    const light: u32 = 0x00eae8e7;
+    return win32.CreateSolidBrush(if (isLightTheme()) light else dark);
+}
+
+/// Whether Windows is in light app mode (HKCU Personalize\AppsUseLightTheme).
+/// Defaults to dark on any read failure — a safe neutral for the frame sliver.
+fn isLightTheme() bool {
+    const subkey = std.unicode.utf8ToUtf16LeStringLiteral("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+    const value = std.unicode.utf8ToUtf16LeStringLiteral("AppsUseLightTheme");
+    var data: u32 = 0;
+    var cb: u32 = @sizeOf(u32);
+    const rc = win32.RegGetValueW(win32.HKEY_CURRENT_USER, subkey, value, win32.RRF_RT_REG_DWORD, null, &data, &cb);
+    if (rc != 0) return false;
+    return data != 0;
 }
 
 /// Quote + JSON-escape a string for embedding as a JSON value (paths contain

@@ -521,6 +521,53 @@ body {
   flex-shrink: 0;
 }
 
+/* ---- Custom window controls (frameless Windows host only, B3) ----
+   The Header renders <WindowControls/>, which is null in every other shell
+   (macOS / Electron keep their OS title bar), so these rules are inert there.
+   The cluster is the header's last flex child: it sits flush in the top-right
+   window corner, stretches the full 40px band (no rounded buttons — they run
+   edge-to-edge like native caption buttons), and cancels the header's right
+   padding so it reaches the window edge. Each button is `no-drag` (set inline)
+   so it stays clickable inside the otherwise-draggable header. */
+.window-controls {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  margin-right: -0.75rem;
+}
+
+.window-control {
+  width: 44px;
+  background: transparent;
+  border: none;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.window-control:hover {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+/* Close follows the Windows convention: red wash on hover, light glyph. */
+.window-control-close:hover {
+  color: #fff;
+  background: var(--skrive-danger-fill);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .window-control {
+    transition: none;
+  }
+}
+
 .mode-toggle {
   display: inline-flex;
   border: 1px solid var(--skrive-rule);
@@ -3298,6 +3345,20 @@ body {
   font-size: 13px;
   font-weight: 600;
   color: var(--skrive-fg);
+}
+
+/* Frameless host only: the window-controls cluster is a 4th flex child on the
+   right, which would shove the flex-centered title off-center. Pin the title to
+   the true header center instead (identical result when not frameless, where
+   the two flanking flex:1 columns are already equal). */
+.header-settings.is-frameless {
+  position: relative;
+}
+
+.header-settings.is-frameless .header-settings-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .settings-back {

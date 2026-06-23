@@ -60,8 +60,9 @@ pub fn build(b: *std.Build) void {
     // Win32 windowing + COM. WebView2 itself is loaded dynamically at runtime
     // (WebView2Loader.dll via LoadLibrary), so nothing is linked for it here.
     exe.root_module.linkSystemLibrary("user32", .{});
-    exe.root_module.linkSystemLibrary("gdi32", .{});
+    exe.root_module.linkSystemLibrary("gdi32", .{}); // CreateSolidBrush (themed frame)
     exe.root_module.linkSystemLibrary("ole32", .{}); // CoTaskMemFree
+    exe.root_module.linkSystemLibrary("advapi32", .{}); // RegGetValueW (dark-mode)
     b.installArtifact(exe);
 
     // Convenience step; only does anything on a Windows host. Building from
