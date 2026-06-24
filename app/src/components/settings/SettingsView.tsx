@@ -883,7 +883,7 @@ function AboutPane({ appVersion }: { appVersion: string }) {
   }
   return (
     <>
-      <PaneHead title="About" sub="Skrive — a Markdown editor for writers." />
+      <PaneHead title="About" sub="Skrive — rich, rendered writing in plain files you own." />
       <SettingsSection cap="Build">
         <SettingRow
           label="Version"

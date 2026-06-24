@@ -491,7 +491,7 @@ export function App() {
         ) : (
           <div className="empty-state">
             <h1>Skrive</h1>
-            <p>A markdown editor for writers. Open a project to begin.</p>
+            <p>A writing app for notes, drafts, and documents. Open a project to begin.</p>
             <div className="empty-actions">
               <button
                 type="button"
