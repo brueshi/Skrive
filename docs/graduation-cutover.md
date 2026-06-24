@@ -122,6 +122,32 @@ appcasts as a **non-prerelease**, so:
   public key).
 - Confirm the website download (skrive.md/download) lands on the native build.
 
+## Known consequence — old Electron updaters 404 after the flip (expected)
+
+Flipping `releases/latest` to the native build means the latest release no
+longer carries electron-updater's `latest-mac.yml` / `latest.yml` (it has the
+appcasts + native artifacts instead). So any **still-on-Electron** app whose
+version is **older than the final Electron toast build** (Step 1) will 404 on
+its next update check — it asks `releases/latest/download/latest-mac.yml`, which
+isn't there. This is **benign**: the old app keeps working, nothing is broken,
+and Skrive only surfaces an *available* update as a toast (an error shows only
+in Settings → Check for Updates), so it's near-invisible to users. Observed live
+2026-06-24 on a `v1.3.0` install.
+
+Who's affected: only Electron users who did NOT auto-update to the toast build
+(Step 1) during the brief window it was "latest." Users already on the toast
+build saw the migration notice; their 404 afterward just means "no more Electron
+updates," which is correct.
+
+Default: **accept it** — the website is the download funnel now, and the
+exposure is tiny. If clean auto-routing for stragglers is wanted, the mitigation
+is to copy the toast build's `latest-mac.yml` + `latest.yml` + their referenced
+Electron artifacts into the native (latest) release, so old updaters auto-update
+to the toast build → see the notice → move to native. Loop-safe (a toast-build
+user reads its own version and reports up-to-date), but it parks Electron
+artifacts in the clean graduation release, so only do it if the straggler count
+justifies it.
+
 ## Rollback
 
 The cutover is two CI edits + tags. To revert before Step 3's tag, restore the
