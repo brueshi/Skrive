@@ -80,6 +80,24 @@ Measured on the dev Mac (Apple Silicon): Electron **v1.6.0** vs native **v1.7.1*
 
 Windows cold-start/RSS remain open — same method on Joe's box when convenient; the macOS numbers already close the quantitative case.
 
+## Skrive vs the field — Notion, Obsidian, Zed (macOS, 2026-06-24)
+
+Footprint + startup against Skrive's nearest neighbors, on the dev Mac (Apple Silicon). Size = on-disk `du -sh /Applications/*.app` (identical method for all); startup = stopwatch to usable, median of 3, cold (`killall` between). Skrive = native v1.7.1.
+
+| App | Install (on-disk) | Cold start (median/3) |
+|---|---|---|
+| **Skrive** | **10 MB** (3.4 MB download) | **0.61 s** |
+| Notion | 283 MB (~28x) | 2.36 s (~3.9x) |
+| Zed | 373 MB (~37x) | 0.81 s (~1.3x) |
+| Obsidian | 482 MB (~48x) | 1.36 s (~2.2x) |
+
+**Reading (honest).**
+- Skrive is the smallest by 28-48x — including vs the Rust-native one.
+- Skrive is the fastest to start; it edges Zed (0.61 vs 0.81 s), though that gap is within the stopwatch's ~0.1-0.2 s human margin — call it a tie-to-slight-lead. Matching a Rust+GPU native editor from a system-webview app is the surprising part; vs Obsidian/Notion the 2-4x lead is beyond noise.
+- The Zed datapoint subverts "native = small": Rust buys Zed its speed but not its footprint (373 MB, heavier than Notion). Footprint is about what you SHIP, not the language. Skrive is tiny because it reuses the OS's already-resident WebKit instead of bundling a renderer/runtime; Electron ships Chromium, Zed ships its own GPU renderer + tree-sitter/LSP machinery, Skrive ships almost nothing.
+
+**Fairness caveats.** Different scopes (Notion: databases/collab/cloud; Obsidian: plugin ecosystem; Zed: full code editor + LSP; Skrive: focused writing). "Usable" is defined per app, and Notion's startup is partly network-bound (cloud workspace load). It's a "desktop app you open to write in" comparison, not feature-for-feature. Startup is stopwatch-grade (±~0.1-0.2 s); a scripted launch-to-first-paint timer would tighten it for public use.
+
 ## Decision — COMMITTED (2026-06-23): graduate
 
 The graduation call is made: the Zig shell is the architecture, Electron is on a sunset path. The evidence that carried it:
