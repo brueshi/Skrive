@@ -41,6 +41,9 @@ final class CoreBridge {
     nonisolated(unsafe) private var core: OpaquePointer?
     private weak var webView: WKWebView?
     private let activeProject: ActiveProject
+    /// Set by AppDelegate to trigger a user-initiated Sparkle check (the native
+    /// update dialog) from the renderer's Settings "Check for updates" button.
+    var onCheckForUpdates: (() -> Void)?
 
     init(webView: WKWebView, configJSON: String, activeProject: ActiveProject) {
         self.webView = webView
@@ -102,6 +105,36 @@ final class CoreBridge {
         case "app:flushComplete":
             // The renderer's pre-quit flush ack — fire-and-forget, no reply.
             finishFlush()
+            return true
+        case "log:append":
+            // Renderer diagnostics (window.onerror / unhandledrejection) — the
+            // sandboxed renderer can't write files, so the host appends to the
+            // local crash log. Local only, never uploaded.
+            if let line = payload["line"] as? String { CrashLog.append(line) }
+            replyToRenderer(id: id, result: [:])
+            return true
+        case "log:reveal":
+            CrashLog.reveal()
+            replyToRenderer(id: id, result: [:])
+            return true
+        case "updater:check":
+            // Renderer's Settings "Check for updates" button — trigger the
+            // native Sparkle dialog. Status is shown by Sparkle's own UI, not
+            // streamed back through updater:status (the Zig shell uses the
+            // native updater, not the contract-driven in-app flow).
+            onCheckForUpdates?()
+            replyToRenderer(id: id, result: [:])
+            return true
+        case "app:version":
+            // Host-owned per the contract: return the bundle's real version
+            // (stamped from package.json), the same value Sparkle compares
+            // against the appcast. The core's handler returns a spike string
+            // and is not parity-tested, so intercepting here keeps the
+            // displayed version consistent with the updater.
+            let version = Bundle.main
+                .object(forInfoDictionaryKey: "CFBundleShortVersionString")
+                as? String ?? "0.0.0"
+            replyToRenderer(id: id, result: ["version": version])
             return true
         default:
             return false

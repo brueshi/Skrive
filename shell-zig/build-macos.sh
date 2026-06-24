@@ -18,6 +18,13 @@ MACOS_DIR="$SCRIPT_DIR/macos"
 WEB_DIR="$SCRIPT_DIR/web"
 RENDERER_DIR="$REPO_ROOT/out/renderer"
 
+# Single source of truth for the app version: the repo root package.json.
+# Stamped into the bundled Info.plist below so Sparkle compares the right
+# version against the appcast. Parsed without node/bun to keep this dependency-
+# free; falls back to the Info.plist template's value if the parse fails.
+APP_VERSION="$(sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' \
+    "$REPO_ROOT/package.json" | head -1)"
+
 echo "==> 1/6 renderer bundle"
 if [[ ! -f "$RENDERER_DIR/index.html" ]]; then
     echo "    out/renderer missing; running bun run start:build"
@@ -67,20 +74,52 @@ BIN="$(cd "$MACOS_DIR" && swift build "${SWIFT_ARGS[@]:1}" --show-bin-path)/Skri
 rm -f "$BIN"
 (cd "$MACOS_DIR" && swift "${SWIFT_ARGS[@]}")
 
-echo "==> 6/6 assemble Skrive.app"
+echo "==> 6/7 assemble Skrive.app"
 APP="$MACOS_DIR/.build/Skrive.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/renderer" \
-    "$APP/Contents/Resources/project"
+    "$APP/Contents/Resources/project" "$APP/Contents/Frameworks"
 cp "$MACOS_DIR/Info.plist" "$APP/Contents/Info.plist"
+# Stamp the real version (package.json) over the Info.plist template values.
+if [[ -n "$APP_VERSION" ]]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" \
+        "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_VERSION" \
+        "$APP/Contents/Info.plist"
+    echo "    stamped version $APP_VERSION"
+else
+    echo "    WARN: could not read version from package.json; using Info.plist default" >&2
+fi
 # App icon (CFBundleIconFile=skrive -> Resources/skrive.icns); the dark
 # brand mark, distinct from the Electron build's build/icon.icns.
 cp "$MACOS_DIR/skrive.icns" "$APP/Contents/Resources/skrive.icns"
+# Dock-tile light/dark variants (same source PNGs the Electron build swaps).
+# macOS never swaps a flat .icns for dark mode, so the host swaps the running
+# dock tile itself per system appearance — see AppDelegate.applyDockIcon.
+cp "$REPO_ROOT/build/icon.png" "$APP/Contents/Resources/icon.png"
+cp "$REPO_ROOT/build/icon-dark.png" "$APP/Contents/Resources/icon-dark.png"
 cp "$BIN" "$APP/Contents/MacOS/SkriveShell"
 cp "$WEB_DIR/dist/native-bridge.js" "$APP/Contents/Resources/native-bridge.js"
 cp -R "$RENDERER_DIR/." "$APP/Contents/Resources/renderer/"
 # Sample project supplies images for the skrive-asset:// origin (1.2).
 cp -R "$SCRIPT_DIR/fixtures/sample-project/." "$APP/Contents/Resources/project/"
+
+echo "==> 7/7 embed Sparkle.framework"
+# SwiftPM links Sparkle but doesn't bundle it into our hand-assembled .app.
+# Copy the macOS slice of the resolved XCFramework into Contents/Frameworks
+# (the executable's @rpath points there). ditto preserves the framework's
+# versioned-bundle symlinks and its pre-signed nested XPC services / helper
+# apps; the release script re-signs them under Developer ID.
+SPARKLE_FW="$(find "$MACOS_DIR/.build/artifacts" \
+    -path '*Sparkle.xcframework/macos*/Sparkle.framework' -type d -prune \
+    2>/dev/null | head -1)"
+if [[ -z "$SPARKLE_FW" ]]; then
+    echo "    ERROR: Sparkle.framework not found under .build/artifacts." >&2
+    echo "    Run 'swift package resolve' in $MACOS_DIR first." >&2
+    exit 1
+fi
+ditto "$SPARKLE_FW" "$APP/Contents/Frameworks/Sparkle.framework"
+echo "    embedded $(basename "$(dirname "$SPARKLE_FW")")/Sparkle.framework"
 
 echo ""
 echo "Built $APP"

@@ -2,7 +2,12 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { perfEnabled } from './lib/perf';
+import { installCrashLog } from './lib/crash-log';
 import './index.css';
+
+// Forward uncaught renderer errors to the host's local crash log. Installed
+// before render so a crash during mount is still captured.
+installCrashLog();
 
 // Phase-12b cold-open marker. App.tsx reads this off window when the
 // auto-opened project's manifest first becomes available, then logs

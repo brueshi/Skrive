@@ -27,6 +27,7 @@ import { registerDiffHandlers } from '../ipc/diff';
 import { registerHistoryHandlers } from '../ipc/history';
 import { registerPersistenceHandlers } from '../ipc/persistence';
 import { registerUpdaterHandlers } from '../ipc/updater';
+import { registerLogHandlers } from '../ipc/log';
 // App-icon tiles bundled via electron-vite's `?asset` (resolves in dev and
 // packaged). icon.png is the brand's light tile — the variant electron-
 // builder also bakes into the bundle .icns; icon-dark.png is the dark tile.
@@ -154,6 +155,7 @@ function registerIpcHandlers(): void {
   registerPersistenceHandlers();
   registerHistoryHandlers();
   registerUpdaterHandlers();
+  registerLogHandlers();
 }
 
 void app.whenReady().then(() => {

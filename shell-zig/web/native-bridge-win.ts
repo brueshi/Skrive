@@ -105,6 +105,13 @@ mock.stub('history:getMode', { mode: 'checkpoint' });
 mock.stub('history:setGitHistoryEnabled', { mode: 'checkpoint' });
 mock.stub('app:platform', { platform: 'win32' });
 mock.stub('updater:current', { kind: 'idle' });
+// Interim no-op stubs for the Stage 6.5 diagnostics commands. The Windows host
+// gains real log:append (renderer crash capture) + log:reveal (open the crashes
+// folder) in Stage 6 Milestone 3 alongside WinSparkle; until then these keep
+// the shared renderer's error handler + "Reveal diagnostics" button from
+// erroring on Windows.
+mock.stub('log:append', {});
+mock.stub('log:reveal', {});
 
 // ---- composite transport --------------------------------------------------
 

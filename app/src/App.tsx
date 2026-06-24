@@ -151,6 +151,10 @@ export function App() {
     if (launchUpdateRef.current) return;
     if (!preferencesHydrated) return;
     launchUpdateRef.current = true;
+    // Native-updater shells (Sparkle/WinSparkle) run their own launch check
+    // and show their own dialog, so the renderer must not also poll the
+    // updater contract (which the Zig bridges don't implement).
+    if (window.__SKRIVE_NATIVE_UPDATER__ === true) return;
     if (!usePreferencesStore.getState().autoUpdateOnLaunch) return;
     const seen = new Set<string>();
     const unsubscribe = window.skrive.updater.onStatus((status) => {

@@ -41,6 +41,20 @@ import {
   Toggle
 } from './kit';
 
+// The Zig shells drive updates through the OS-native updater (Sparkle on
+// macOS, WinSparkle on Windows) with its own dialogs and a "Check for
+// Updates…" menu item, rather than the in-app contract-driven controls below.
+// When the host injects this flag, the Updates pane shows the native posture
+// instead. Absent on macOS/Windows Electron, where the contract drives the UI.
+declare global {
+  interface Window {
+    __SKRIVE_NATIVE_UPDATER__?: boolean;
+  }
+}
+
+const NATIVE_UPDATER =
+  typeof window !== 'undefined' && window.__SKRIVE_NATIVE_UPDATER__ === true;
+
 type SectionId =
   | 'general'
   | 'appearance'
@@ -664,6 +678,51 @@ function LicensePane() {
 }
 
 function UpdatesPane({ appVersion }: { appVersion: string }) {
+  if (NATIVE_UPDATER) return <NativeUpdatesPane appVersion={appVersion} />;
+  return <ContractUpdatesPane appVersion={appVersion} />;
+}
+
+// The native-updater posture (Zig shells): Sparkle/WinSparkle own the check,
+// download, verify, and install flow with their own dialogs, so the pane is
+// informational — current version plus a note. No contract calls.
+function NativeUpdatesPane({ appVersion }: { appVersion: string }) {
+  function checkNow() {
+    void window.skrive.updater
+      .check()
+      .catch((err) => logProjectError('updater:check', err));
+  }
+  return (
+    <>
+      <PaneHead
+        title="Updates"
+        sub="Skrive checks for updates automatically and verifies each one before installing."
+      />
+      <SettingsSection cap="Status">
+        <SettingRow
+          label="Current version"
+          desc="The build you're running now."
+          control={<span className="settings-value-text">v{appVersion}</span>}
+        />
+        <div className="settings-card-pad">
+          <p className="settings-updater-status">
+            Skrive checks GitHub Releases on its own and notifies you when a new
+            version is ready. Updates are signed and verified before they
+            install.
+          </p>
+          <button
+            type="button"
+            className="settings-secondary-button"
+            onClick={checkNow}
+          >
+            Check for updates…
+          </button>
+        </div>
+      </SettingsSection>
+    </>
+  );
+}
+
+function ContractUpdatesPane({ appVersion }: { appVersion: string }) {
   const autoUpdate = usePreferencesStore((s) => s.autoUpdateOnLaunch);
   const setAutoUpdate = usePreferencesStore((s) => s.setAutoUpdateOnLaunch);
   const [status, setStatus] = useState<UpdaterStatus>({ kind: 'idle' });
@@ -815,6 +874,13 @@ function AboutPane({ appVersion }: { appVersion: string }) {
       notify.error("Couldn't reveal preferences", err);
     }
   }
+  async function revealDiagnostics() {
+    try {
+      await window.skrive.log.reveal();
+    } catch (err) {
+      notify.error("Couldn't reveal diagnostics", err);
+    }
+  }
   return (
     <>
       <PaneHead title="About" sub="Skrive — a Markdown editor for writers." />
@@ -838,6 +904,21 @@ function AboutPane({ appVersion }: { appVersion: string }) {
             Reveal preferences in Finder
           </button>
         </div>
+      </SettingsSection>
+      <SettingsSection cap="Diagnostics">
+        <SettingRow
+          label="Crash & error logs"
+          desc="Local only — nothing is ever uploaded. If Skrive misbehaves, reveal the folder and send us the files."
+          control={
+            <button
+              type="button"
+              className="settings-secondary-button"
+              onClick={() => void revealDiagnostics()}
+            >
+              Reveal diagnostics
+            </button>
+          }
+        />
       </SettingsSection>
       <SettingsSection cap="Feedback">
         <SettingRow

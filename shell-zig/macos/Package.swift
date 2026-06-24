@@ -13,6 +13,15 @@ let coreLibDir = "\(packageDir)/../core/zig-out/lib"
 let package = Package(
     name: "SkriveShell",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        // Sparkle is the ~20-year indie-Mac auto-update standard (Stage 6.1,
+        // updater engine LOCKED). It vends a binary XCFramework; SwiftPM links
+        // it here and Package.resolved pins the exact build, but because we
+        // hand-assemble Skrive.app (not Xcode), build-macos.sh copies
+        // Sparkle.framework into Contents/Frameworks and signs its nested XPC
+        // services / helper apps itself.
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.3")
+    ],
     targets: [
         // Header-only wrapper around the Zig core's C ABI. The actual
         // symbols are linked from libskrive_core.a by the executable.
@@ -23,7 +32,11 @@ let package = Package(
         .target(name: "SkriveShellKit"),
         .executableTarget(
             name: "SkriveShell",
-            dependencies: ["CSkriveCore", "SkriveShellKit"],
+            dependencies: [
+                "CSkriveCore",
+                "SkriveShellKit",
+                .product(name: "Sparkle", package: "Sparkle")
+            ],
             linkerSettings: [
                 // -lc++ and the CoreServices/CoreFoundation frameworks are
                 // for the vendored e-dant/watcher C++ TU linked into
@@ -31,6 +44,14 @@ let package = Package(
                 // FSEvents (CoreServices). The static archive defers these
                 // symbols to this final link.
                 .unsafeFlags(["-L\(coreLibDir)", "-lskrive_core", "-lc++"]),
+                // Sparkle.framework lives in Contents/Frameworks of the
+                // assembled app; its install name is @rpath-relative, so the
+                // executable needs this rpath to find it at launch. -rpath is a
+                // linker flag, so route it through the driver with -Xlinker.
+                .unsafeFlags([
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "@executable_path/../Frameworks"
+                ]),
                 .linkedFramework("AppKit"),
                 .linkedFramework("WebKit"),
                 .linkedFramework("CoreServices"),

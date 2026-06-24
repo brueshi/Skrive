@@ -25,9 +25,11 @@ export const SAMPLE_ROOT = '/Skrive/Parity Sample';
  *  host-owned ones). Everything else is served from the canned data below.
  *  Stage 2.5 migrated the fs/project/persistence namespaces out of the mock;
  *  Stage 3 migrated the watcher (project:watch/unwatch + project:change
- *  events). What remains canned is app:platform (2.5b) and history/updater
- *  (Stages 4/6). `project:openDialog` is native but host-owned (NSOpenPanel)
- *  — CoreBridge handles it, the core never sees it. */
+ *  events). Stage 6 added the host-owned updater + diagnostics commands
+ *  (`updater:check` triggers the native Sparkle dialog; `log:append`/
+ *  `log:reveal` are the crash-log path). What remains canned is app:platform
+ *  (2.5b) and history (Stage 4). `project:openDialog` is native but host-owned
+ *  (NSOpenPanel) — CoreBridge handles it, the core never sees it. */
 export const NATIVE_COMMANDS = new Set<string>([
   'app:version',
   'diag:poison',
@@ -52,7 +54,10 @@ export const NATIVE_COMMANDS = new Set<string>([
   'links:openExternal',
   'clipboard:writeRich',
   'clipboard:writeText',
-  'clipboard:readText'
+  'clipboard:readText',
+  'updater:check',
+  'log:append',
+  'log:reveal'
 ]);
 
 const BODIES: Record<string, string> = {

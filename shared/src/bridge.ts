@@ -240,6 +240,14 @@ export function createSkriveBridge(transport: SkriveTransport): SkriveIpc {
       revealUserData: async () => {
         await invoke('persistence:revealUserData');
       }
+    },
+    log: {
+      append: async (line: string) => {
+        await invoke('log:append', { line });
+      },
+      reveal: async () => {
+        await invoke('log:reveal');
+      }
     }
   };
 }

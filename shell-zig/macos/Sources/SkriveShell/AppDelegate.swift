@@ -1,5 +1,6 @@
 import AppKit
 import WebKit
+import Sparkle
 import SkriveShellKit
 
 // Stage 1 host: one transparent-titlebar NSWindow holding a WKWebView that
@@ -12,6 +13,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private var window: NSWindow!
     private var webView: WKWebView!
     private var bridge: CoreBridge!
+    // Sparkle auto-updater (Stage 6.1). The standard controller bundles the
+    // updater engine with Sparkle's native UI (the "update available" alert,
+    // download progress, install prompt) and drives the "Check for Updates…"
+    // menu item. It reads SUFeedURL / SUPublicEDKey from Info.plist and is
+    // retained for the app's lifetime. Held strongly — Sparkle schedules
+    // background checks off it.
+    private var updaterController: SPUStandardUpdaterController!
     // Shared between the bridge (sets it on project:snapshot) and the asset
     // scheme handler (serves images from it).
     private let activeProject = ActiveProject()
@@ -29,6 +37,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private let trafficLightGap: CGFloat = 14
     private var rendererLoaded = false
 
+    // KVO token for the system-appearance observation that re-swaps the dock
+    // tile (the flat .icns can't carry a dark variant; we swap the running
+    // tile ourselves, parity with the Electron shell's applyDockIcon).
+    private var appearanceObservation: NSKeyValueObservation?
+
     // Headless smoke test, enabled with SKRIVE_DIAG=1: relays the webview
     // console to stdout and, once the renderer settles, round-trips
     // app:version / app:platform and probes the rendered DOM. Repeatable
@@ -41,6 +54,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private let servingMode = ProcessInfo.processInfo.environment["SKRIVE_SERVE"] ?? "scheme"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Start Sparkle before building the menu so the "Check for Updates…"
+        // item can target the controller. `startingUpdater: true` kicks off
+        // the scheduled background check loop per Info.plist.
+        updaterController = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
         setupMenu()
 
         let isDark = NSApp.effectiveAppearance
@@ -80,12 +101,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             configJSON: Resources.configJSON(),
             activeProject: activeProject
         )
+        // The renderer's Settings "Check for updates" button routes here.
+        bridge.onCheckForUpdates = { [weak self] in
+            self?.updaterController.checkForUpdates(nil)
+        }
 
         loadRenderer()
 
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         positionTrafficLights()
+
+        // Dock tile follows the system appearance, re-swapped on change.
+        applyDockIcon()
+        appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.applyDockIcon() }
+        }
+    }
+
+    /// Swap the running dock tile to the dark brand mark under a dark system
+    /// appearance, the light mark otherwise (parity with the Electron shell:
+    /// macOS never swaps a flat .icns for dark mode, so we do it ourselves).
+    /// Dock-only — Finder/Launchpad keep the bundle .icns.
+    private func applyDockIcon() {
+        let isDark = NSApp.effectiveAppearance
+            .bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let resource = isDark ? "icon-dark" : "icon"
+        guard let url = Bundle.main.url(forResource: resource, withExtension: "png"),
+            let image = NSImage(contentsOf: url)
+        else { return }
+        NSApp.applicationIconImage = image
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool {
@@ -113,6 +158,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
             keyEquivalent: ""
         )
+        appMenu.addItem(.separator())
+        // Sparkle's standard menu action. The controller validates the item
+        // (disabling it mid-check) and shows the native update UI on click.
+        let checkForUpdates = appMenu.addItem(
+            withTitle: "Check for Updates…",
+            action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
+            keyEquivalent: ""
+        )
+        checkForUpdates.target = updaterController
         appMenu.addItem(.separator())
         let servicesItem = appMenu.addItem(
             withTitle: "Services", action: nil, keyEquivalent: ""
@@ -345,6 +399,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
 
     // MARK: - Diagnostics
+
+    /// The WebKit content process died (OOM, a renderer crash, a GPU fault).
+    /// This is not a host crash, so the OS writes no report for it — log a
+    /// breadcrumb and reload so the user gets their app back rather than a
+    /// blank window (Stage 6.5 crash logs).
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        CrashLog.logWebviewTermination()
+        loadRenderer()
+    }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         rendererLoaded = true

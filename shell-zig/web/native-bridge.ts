@@ -34,6 +34,9 @@ declare global {
     webkit?: { messageHandlers?: { skriveInvoke?: InvokeHost } };
     __skriveDispatch?: (json: string) => void;
     skrive?: ReturnType<typeof createSkriveBridge>;
+    // Tells the renderer the host owns updates (Sparkle), so it hides its
+    // in-app updater controls. See SettingsView's NativeUpdatesPane.
+    __SKRIVE_NATIVE_UPDATER__?: boolean;
   }
 }
 
@@ -84,15 +87,18 @@ window.__skriveDispatch = (json: string) => {
 // ---- canned project -------------------------------------------------------
 
 // fs/project/persistence are native as of Stage 2.5 (see NATIVE_COMMANDS).
-// What remains canned: app:platform (2.5b), history (Stage 4), updater
-// (Stage 6). The app boots to its welcome state — native persistence returns
-// the default app-state with no last-opened project, so nothing auto-opens
-// until the user picks a folder via project:openDialog.
+// What remains canned: app:platform (2.5b), history (Stage 4). Updates are
+// no longer mocked here: Stage 6 drives them through Sparkle natively (its
+// own dialogs + the host's "Check for Updates…" menu item), and the renderer
+// hides its in-app updater controls via __SKRIVE_NATIVE_UPDATER__ below, so
+// the updater:* contract methods are simply never invoked on this shell. The
+// app boots to its welcome state — native persistence returns the default
+// app-state with no last-opened project, so nothing auto-opens until the user
+// picks a folder via project:openDialog.
 const mock = new MockTransport();
 mock.stub('history:getMode', { mode: 'checkpoint' });
 mock.stub('history:setGitHistoryEnabled', { mode: 'checkpoint' });
 mock.stub('app:platform', { platform: 'darwin' });
-mock.stub('updater:current', { kind: 'idle' });
 
 // ---- composite transport --------------------------------------------------
 
@@ -107,6 +113,10 @@ const transport: SkriveTransport = {
 };
 
 window.skrive = createSkriveBridge(transport);
+
+// Updates are host-native (Sparkle): hide the renderer's in-app updater
+// controls and skip its launch-time check. Set before the app module runs.
+window.__SKRIVE_NATIVE_UPDATER__ = true;
 
 // Test-only hook: lets the SKRIVE_DIAG self-test drive the native channel
 // directly (e.g. diag:poison for the 1.4 delivery-rule round-trip) without

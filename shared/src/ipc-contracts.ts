@@ -657,4 +657,17 @@ export interface SkriveIpc {
      *  preferences" in Settings → About). */
     revealUserData(): Promise<void>;
   };
+  log: {
+    /** Append a line to the host's local renderer-diagnostics log under the
+     *  crashes folder. Host-owned because the sandboxed renderer can't write
+     *  files; called by the global window.onerror / unhandledrejection
+     *  handlers. Local only — never uploaded (Skrive's no-telemetry posture).
+     *  Best-effort: callers swallow failures so a shell that doesn't
+     *  implement it degrades silently. */
+    append(line: string): Promise<void>;
+    /** Open the crashes/diagnostics folder in the OS file browser, for the
+     *  Settings "Reveal diagnostics" button. The user grabs the logs and
+     *  sends them in by hand; there is no automatic upload. */
+    reveal(): Promise<void>;
+  };
 }

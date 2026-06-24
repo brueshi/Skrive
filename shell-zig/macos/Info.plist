@@ -14,15 +14,32 @@
     <string>skrive</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <!-- Version is stamped from the repo root package.json by build-macos.sh
+         (single source of truth). The values here are the fallback when the
+         script can't read it. Sparkle compares these against the appcast. -->
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>1.3.0</string>
     <key>CFBundleVersion</key>
-    <string>0.1.0</string>
+    <string>1.3.0</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <!-- Sparkle auto-update (Stage 6.1). The EdDSA public key verifies every
+         downloaded update; its private half is a CI-only secret (Keychain on
+         the dev box). SUFeedURL mirrors release.yml's forever-URL alias
+         pattern; M2/CI finalizes the appcast hosting. Automatic checks are on
+         and silent — Sparkle sends no system profile by default, matching
+         Skrive's no-telemetry posture. -->
+    <key>SUFeedURL</key>
+    <string>https://github.com/brueshi/Skrive/releases/latest/download/appcast-zig.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>/Z4rW21cwvaAKKHcM1BBxY8P84PIuOAPw9hfQh/CYuA=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
 </dict>
 </plist>
