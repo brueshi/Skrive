@@ -59,6 +59,12 @@ jobs:
         with:
           version: 0.16.0
 
+      # Compiles the NSIS Windows installer on the macOS runner (no rc.exe /
+      # Windows SDK). Always installed so a dispatch smoke run still builds the
+      # installer; appcast signing is gated on the EdDSA secret below.
+      - name: Install makensis
+        run: brew install makensis
+
       - name: Install JS deps
         run: bun install --frozen-lockfile
 
@@ -121,6 +127,26 @@ jobs:
             echo "packed Skrive-Windows-${VER}-${arch}.zip"
           done
 
+      # --- Windows installer (x64) + appcast -------------------------------
+      # NSIS Setup.exe via makensis. Built always (good smoke test); the appcast
+      # is signed + generated only on a signed tag push. arm64 ships as the
+      # portable zip — the installer + WinSparkle feed are x64-first (the dogfood
+      # arch); an arm64 installer is a later add.
+      - name: Build Windows installer (x64)
+        run: bash shell-zig/package-windows.sh x64
+
+      - name: Generate Windows appcast (x64)
+        if: github.event_name == 'push' && env.HAS_SIGNING == 'true'
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          VER="$(sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' package.json | head -1)"
+          SETUP="shell-zig/windows/installer/Skrive-${VER}-Setup.exe"
+          URL="${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}/Skrive-${VER}-Setup.exe"
+          bash shell-zig/windows/installer/make-appcast.sh "$SETUP" "$VER" "$URL" \
+            "shell-zig/windows/installer/appcast-win.xml"
+
       # --- Stage + publish (tag push, signed only) -------------------------
       - name: Stage release assets
         if: github.event_name == 'push' && env.HAS_SIGNING == 'true'
@@ -133,6 +159,12 @@ jobs:
           # (releases/latest/download/Skrive-zig.dmg post-graduation).
           DMG="$(ls "$REL"/*.dmg | head -1)"
           cp "$DMG" "$REL/Skrive-zig.dmg"
+          # Version-less Windows installer alias (releases/latest/download/
+          # Skrive-Setup.exe). The appcast enclosure still points at the
+          # versioned Setup.exe in this tag's release.
+          VER="$(sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' package.json | head -1)"
+          cp "shell-zig/windows/installer/Skrive-${VER}-Setup.exe" \
+             "shell-zig/windows/installer/Skrive-Setup.exe"
 
       - name: Publish release
         if: github.event_name == 'push' && env.HAS_SIGNING == 'true'
@@ -145,6 +177,9 @@ jobs:
             shell-zig/macos/.build/release/*.dmg
             shell-zig/macos/.build/release/appcast-zig.xml
             dist-win/*.zip
+            shell-zig/windows/installer/Skrive-*-Setup.exe
+            shell-zig/windows/installer/Skrive-Setup.exe
+            shell-zig/windows/installer/appcast-win.xml
 
       # --- Dispatch: artifacts without a release ---------------------------
       - name: Upload build artifacts (dispatch)
@@ -156,5 +191,6 @@ jobs:
             shell-zig/macos/.build/release/*.dmg
             shell-zig/macos/.build/Skrive.app
             dist-win/*.zip
+            shell-zig/windows/installer/Skrive-*-Setup.exe
           if-no-files-found: warn
           retention-days: 14
