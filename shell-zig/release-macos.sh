@@ -124,5 +124,9 @@ fi
 
 echo ""
 echo "Release artifact: $DMG"
-[[ ${#notarize_args[@]} -eq 0 ]] && \
+# A bare `[[ cond ]] && echo` as the final statement would return the test's
+# exit status — non-zero (and so fail the whole script under the CI runner)
+# whenever notarization DID run. Use an explicit if so success exits 0.
+if [[ ${#notarize_args[@]} -eq 0 ]]; then
     echo "NOTE: not notarized — Gatekeeper will warn on first launch until you notarize."
+fi
