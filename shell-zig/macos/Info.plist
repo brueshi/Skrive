@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Skrive (Zig)</string>
+    <string>Skrive</string>
     <key>CFBundleDisplayName</key>
-    <string>Skrive (Zig)</string>
+    <string>Skrive</string>
     <key>CFBundleIdentifier</key>
     <string>dev.skrive.zig-shell</string>
     <key>CFBundleExecutable</key>
