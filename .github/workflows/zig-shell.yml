@@ -1,0 +1,160 @@
+# Build + sign + publish the Zig-shell family (Stage 6.2). SEPARATE from the
+# Electron release.yml: this fires on `labs-*` / `win-labs-*` tags ONLY (never
+# `v*`), so cutting a Zig release can't trigger the Electron pipeline and vice
+# versa. Replaces the manual `gh release create` stopgap used for win-labs-5.3.0.
+#
+# ONE macOS runner builds the WHOLE family — the Swift macOS host AND the
+# cross-compiled Windows host (Zig needs no Windows runner to build). A Windows
+# runner is added only if/when E2 runs the parity corpus on NTFS.
+#
+# macOS: signed (Developer ID) + notarized DMG, EdDSA-signed, with a generated
+# appcast (the Sparkle feed). Windows: the unsigned portable zip per arch
+# (NSIS installer + WinSparkle land in Milestone 3). The shipping logic lives in
+# shell-zig/release-macos.sh — the same script Joe runs locally; CI just feeds it
+# secrets, so there is one source of truth.
+#
+# Secrets (the five Apple ones already exist for release.yml):
+#   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD  Developer ID .p12 (base64) + pw
+#   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID        notarytool credentials
+#   SPARKLE_ED_PRIVATE_KEY                           EdDSA update-signing key
+#       (export once: shell-zig/macos/.build/.../bin/generate_keys -x key.txt,
+#        paste the contents as the secret, delete the file). Absent → the
+#        appcast step is skipped but the DMG is still built + signed.
+# When APPLE_CERTIFICATE is absent (e.g. a fork's dispatch run), the job still
+# builds both hosts and runs every gate, but skips signing and publishing.
+
+name: Zig Shell Release
+
+on:
+  push:
+    tags:
+      - "labs-*"
+      - "win-labs-*"
+  # Build + gate without cutting a release; artifacts come back as a run
+  # artifact, nothing is published (mirrors release.yml's dispatch path).
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    permissions:
+      contents: write # create the release + upload assets
+    env:
+      # Secrets aren't allowed in `if:` directly; surface presence as a plain
+      # boolean string the steps can gate on.
+      HAS_SIGNING: ${{ secrets.APPLE_CERTIFICATE != '' }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Pin Zig to the toolchain the hosts are developed against; must match
+      # the local `zig version`.
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Install JS deps
+        run: bun install --frozen-lockfile
+
+      - name: Build renderer
+        run: bun run start:build
+
+      # --- Gates (block the release) ---------------------------------------
+      # The Zig-relevant typecheck is shared + app (the shared renderer); shell/
+      # is the Electron product and would pull in the napi diff module.
+      - name: Gate — typecheck (shared + app)
+        run: |
+          bunx tsc -p shared/tsconfig.json
+          bunx tsc -p app/tsconfig.json
+
+      - name: Gate — zig fmt
+        run: |
+          (cd shell-zig/core && zig fmt --check src)
+          (cd shell-zig/windows && zig fmt --check src)
+
+      - name: Gate — core + jsescape unit tests
+        run: (cd shell-zig/core && zig build test)
+
+      - name: Gate — parity corpus (26/26)
+        run: bun run parity:check
+
+      # --- macOS host: sign + notarize + DMG + appcast ---------------------
+      - name: Import Developer ID certificate
+        if: env.HAS_SIGNING == 'true'
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Build macOS (signed release, or unsigned smoke build)
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          # Enclosure URL prefix: the DMG is uploaded to this tag's release.
+          # Only set on a tag push (dispatch has no tag → appcast skipped).
+          APPCAST_URL: ${{ github.event_name == 'push' && format('{0}/{1}/releases/download/{2}/', github.server_url, github.repository, github.ref_name) || '' }}
+        run: |
+          if [[ "$HAS_SIGNING" == "true" ]]; then
+            bash shell-zig/release-macos.sh
+          else
+            echo "No signing secrets present — unsigned smoke build only."
+            bash shell-zig/build-macos.sh release
+          fi
+
+      # --- Windows hosts: cross-compiled portable zips ---------------------
+      - name: Build Windows hosts (x64 + arm64)
+        run: |
+          set -euo pipefail
+          VER="$(sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' package.json | head -1)"
+          mkdir -p dist-win
+          for arch in x64 arm64; do
+            bash shell-zig/build-windows.sh "$arch" release
+            (cd shell-zig/windows/dist && zip -qr "$GITHUB_WORKSPACE/dist-win/Skrive-Windows-${VER}-${arch}.zip" .)
+            echo "packed Skrive-Windows-${VER}-${arch}.zip"
+          done
+
+      # --- Stage + publish (tag push, signed only) -------------------------
+      - name: Stage release assets
+        if: github.event_name == 'push' && env.HAS_SIGNING == 'true'
+        run: |
+          set -euo pipefail
+          REL="shell-zig/macos/.build/release"
+          # generate_appcast writes appcast.xml; the feed name is appcast-zig.xml.
+          [[ -f "$REL/appcast.xml" ]] && mv "$REL/appcast.xml" "$REL/appcast-zig.xml"
+          # Version-less DMG alias for the landing page's forever-URL
+          # (releases/latest/download/Skrive-zig.dmg post-graduation).
+          DMG="$(ls "$REL"/*.dmg | head -1)"
+          cp "$DMG" "$REL/Skrive-zig.dmg"
+
+      - name: Publish release
+        if: github.event_name == 'push' && env.HAS_SIGNING == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          # labs-* / win-labs-* are prereleases during the migration window.
+          prerelease: true
+          fail_on_unmatched_files: false
+          files: |
+            shell-zig/macos/.build/release/*.dmg
+            shell-zig/macos/.build/release/appcast-zig.xml
+            dist-win/*.zip
+
+      # --- Dispatch: artifacts without a release ---------------------------
+      - name: Upload build artifacts (dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: skrive-zig-dispatch
+          path: |
+            shell-zig/macos/.build/release/*.dmg
+            shell-zig/macos/.build/Skrive.app
+            dist-win/*.zip
+          if-no-files-found: warn
+          retention-days: 14
