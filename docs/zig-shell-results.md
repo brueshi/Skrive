@@ -1,6 +1,6 @@
 # Zig Shell Results Memo
 
-**Status.** In progress — a *running* memo, current through **Stage 4** (macOS native app-shell parity, reduced scope; merged to `main` at `87a903f`). The master plan names this file as the Stage 6.3 close-out, but per the log's own discipline ("so later stages and the results memo don't have to reconstruct them") it accumulates findings as stages land. The quantitative baseline comparison (installer size, cold start, RSS, update download) and the final graduation decision are the Stage 6.3 sections and are marked PENDING below — they need the Windows host and a re-measure on the Zig builds.
+**Status.** Running memo, now current through **Stage 6 Milestone 3** (Windows host complete + distribution: macOS Sparkle + Windows WinSparkle updaters, signed/notarized macOS DMG, NSIS installer, both appcasts; M1-M3 on `main`, M4 graduation underway). Stage 5 brought up the Zig Windows host (dogfood-confirmed); Stage 6 M1/M2 shipped the macOS updater + CI pipeline, M3 the Windows side. The **size** baseline comparison is now MEASURED (below); **cold start + RSS** remain PENDING (they were never captured for Electron either, so they need a packaged-vs-packaged measure of both shells). The graduation **decision is already committed** (2026-06-23) — see the Decision section; these numbers document the win rather than deciding it.
 
 **Resolves (so far).** Whether the Ghostty pattern — one Zig core behind a C ABI, a thin per-platform native host, the system webview running the byte-identical React frontend — can reach feature parity with the shipping Electron build on macOS. **Through Stage 4: yes, for everything in the reduced scope, with no architecture-class blockers.**
 
@@ -50,10 +50,38 @@ The macOS Zig build is a **livable daily driver**: Joe's hands-on side-by-side p
 
 **Residual gaps after Stage 4 (all logged, none blocker-class):** dock-icon light/dark swap (skipped — needs a light brand asset the Zig build lacks); file-open / `.md`-association (net-new cross-shell feature, deferred — no open-path verb exists in either shell today); the updater (Stage 6).
 
-## Numbers vs baseline — PENDING (Stage 6.3)
+## Numbers vs baseline (Stage 6.3 / M4d)
 
-Not yet measured on the Zig builds. The Stage 0.7 Electron baselines (installer DMG size, cold start to first keystroke, RSS on the 500-file fixture) are recorded in the log and are the comparison targets. The Zig-build re-measure + update-download size are Stage 6.3, after Windows and distribution land. The graduation axes this architecture actually targets are installer size, cold start, and memory baseline (editor-latency *parity* is required; improvement is not claimed).
+Per the master plan, perf comparison is packaged-vs-packaged only. The graduation axes this architecture targets are installer size, cold start, and memory baseline (editor-latency *parity* is required; improvement is not claimed).
 
-## Decision recommendation — PENDING (Stage 6.3), interim read
+### Size — MEASURED (the headline win)
 
-Too early for the graduation call (it is evidence-based at 6.3, needs the numbers and the Windows data point). **Interim:** through Stage 4 the experiment has produced no architecture-class blocker — the core/host boundary has held clean (every host need was an addition, never a core change), parity is corpus-gated and manually confirmed on macOS, and the build is preferred-usable. The open risk with the widest error bars remains Stage 5 (Windows host); per the plan, any *change* (not addition) the Windows host forces on the core's design would damage the "one core, thin hosts" thesis and is the next real gate.
+| Metric | Electron (0.7 baseline) | Zig shell | Delta |
+|---|---|---|---|
+| macOS installer (DMG) | 132 MB | **3.4 MB** | ~39x smaller |
+| macOS update download (full artifact) | 127 MB (updater zip) | **3.4 MB** | ~37x smaller |
+| Windows installer (Setup.exe) | not captured at 0.7 | **3.8 MB** | — |
+| Windows portable (zip, x64) | — | **1.7 MB** | — |
+
+The Zig macOS DMG and Windows zips are the signed/published `labs-1.5.0` assets; the Setup.exe is the M3 NSIS installer. The Setup.exe bundles the 1.6 MB WebView2 Evergreen bootstrapper, which runs only if the runtime is absent — the runtime itself is shared OS infrastructure, not shipped in the app.
+
+**Update download is the full artifact, by design.** Sparkle/WinSparkle ship the whole binary each release (no delta machinery) precisely because a ~2-4 MB artifact makes deltas irrelevant — so an auto-update pulls single-digit MB, versus Electron's ~127 MB. (The Electron *Windows* installer baseline was never captured at 0.7; only the macOS DMG was, so that cell is left blank rather than guessed.)
+
+### Cold start + RSS — still PENDING (packaged-vs-packaged, both shells)
+
+Neither was captured for Electron at 0.7 either (logged PENDING Joe), so both need a fresh measure of BOTH packaged builds on the same machine, same method:
+
+- **Cold start to first keystroke** — stopwatch the packaged build cold (fresh login or `killall`), dock-bounce to caret-ready, median of 3. macOS: both builds run on the dev box. Windows: on Joe's box.
+- **RSS after opening the perf fixture** — open `docs/fixtures/perf-100` (100 files; the plan's "500" is stale prose — the generator makes 100), let lint settle (~2s), sum the main + renderer/webview process RSS (`ps -o rss=` / Activity Monitor / Task Manager). Measure the SAME fixture on both shells.
+
+These two are the only numbers left to fully close the quantitative case; the size axis is already decisively in the Zig column (and, with system-webview reuse instead of a bundled Chromium, RSS is expected to follow — to be confirmed, not claimed).
+
+## Decision — COMMITTED (2026-06-23): graduate
+
+The graduation call is made: the Zig shell is the architecture, Electron is on a sunset path. The evidence that carried it:
+
+- **No architecture-class blocker, on BOTH platforms.** The core/host boundary held clean through Stage 5 — every host need (macOS Swift AND Windows Zig) was an *addition*, never a *change* to the core's design. The widest-error-bars risk (the Windows host forcing a core change) did not materialize: parity stayed 26/26, the core byte-identical end to end. Stage 6 (updaters, crash logs, installer, CI) was likewise all host/renderer/build-side.
+- **The size thesis is confirmed** (above): ~132 MB → ~3.4 MB installer, ~127 MB → ~3.4 MB update download. The Chromium tax the experiment set out to shed is gone.
+- **Both builds are livable daily drivers**, dogfood-confirmed by Joe on macOS and Windows.
+
+Still to close (NOT blockers — confirming, not deciding): cold start + RSS, packaged-vs-packaged on both shells; and the live N→N+1 auto-update install proof, which unblocks at the cutover (when a Zig build publishes as the non-prerelease headline — see `docs/graduation-cutover.md`). Editor-latency parity is the one axis where the bar is "match, not beat," and it has held hand-and-eye across both editor surfaces.
