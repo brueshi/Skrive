@@ -2517,3 +2517,29 @@ ship the final Electron toast release (`v*` via release.yml), apply the cutover
 commit, cut the first graduated Zig `v*` (non-prerelease headline), then prove
 N→N+1 auto-update live on both platforms. Capture cold start + RSS. Later sunset
 (NOT M4): delete `shell/`, drop the Rust napi binding, stop building Electron.
+
+## 2026-06-24 — GRADUATION LIVE: the Electron→native cutover executed end to end
+
+The staged cutover ran clean, in order, all green. **Skrive is now a native app
+off Electron.**
+
+- **Step 1 — final Electron build.** Bumped to 1.6.0 (`8696239`), Joe pushed
+  `v1.6.0` → `release.yml` published the LAST Electron release (non-prerelease,
+  with the migration toast + `latest-mac.yml`/`latest.yml` so existing users
+  auto-update into the notice). Only `release.yml` fired; `zig-shell.yml` stayed
+  out. CI green.
+- **Step 2 — pipeline flip** (`0d4b617` ci + `c2cd858` chore→1.7.0). Moved `v*`
+  from `release.yml` (now dispatch-only) to `zig-shell.yml` (now `v*` +
+  `prerelease: ${{ !startsWith(github.ref_name, 'v') }}`).
+- **Step 3 — native headline.** Joe pushed `v1.7.0` → ONLY `zig-shell.yml` fired
+  (the flip held), published **v1.7.0 as non-prerelease**: signed+notarized DMG,
+  Windows Setup.exe, both appcasts, forever-name aliases. CI green.
+- **Verified.** `releases/latest` = `v1.7.0` (prerelease=false). All four
+  forever-URLs return HTTP 200: `Skrive-zig.dmg`, `Skrive-Setup.exe`,
+  `appcast-zig.xml`, `appcast-win.xml` → the live Sparkle/WinSparkle feeds are
+  on and the website downloads resolve.
+
+**Remaining (Joe):** publish the website (downloads now resolve); the N→N+1
+auto-update install proof (a prior native build → Check for Updates → offered
+1.7.0) on mac + win; cold start + RSS numbers. **Later sunset (separate, not
+now):** delete `shell/`, drop the Rust napi binding, stop building Electron.
