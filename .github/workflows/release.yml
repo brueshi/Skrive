@@ -22,14 +22,11 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
-  # Manual dispatch for testing the build without cutting a tag. No
-  # release is created (--publish never); the signed, notarized build
-  # is uploaded as a run artifact instead (see the upload step below),
-  # so a packaged build can be dogfooded without touching the release
-  # feed or existing users' updater.
+  # Electron is on a sunset path (Stage 6 graduation): v* moved to
+  # zig-shell.yml (the native headline). This pipeline no longer auto-builds on
+  # tags — manual dispatch only, for a transition-window Electron rebuild if
+  # ever needed. On dispatch no release is created (--publish never); the
+  # signed, notarized build is uploaded as a run artifact instead.
   workflow_dispatch:
 
 jobs:

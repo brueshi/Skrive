@@ -1,7 +1,7 @@
 # Build + sign + publish the Zig-shell family (Stage 6.2). SEPARATE from the
-# Electron release.yml: this fires on `labs-*` / `win-labs-*` tags ONLY (never
-# `v*`), so cutting a Zig release can't trigger the Electron pipeline and vice
-# versa. Replaces the manual `gh release create` stopgap used for win-labs-5.3.0.
+# Electron release.yml. At graduation (Stage 6 M4) `v*` moved HERE: a `v*` tag
+# now publishes the native build as the non-prerelease headline; `labs-*` /
+# `win-labs-*` remain prereleases. release.yml no longer triggers on tags.
 #
 # ONE macOS runner builds the WHOLE family — the Swift macOS host AND the
 # cross-compiled Windows host (Zig needs no Windows runner to build). A Windows
@@ -28,8 +28,9 @@ name: Zig Shell Release
 on:
   push:
     tags:
-      - "labs-*"
-      - "win-labs-*"
+      - "v*"          # graduated native headline (non-prerelease)
+      - "labs-*"      # labs prereleases (macOS family)
+      - "win-labs-*"  # labs prereleases (Windows)
   # Build + gate without cutting a release; artifacts come back as a run
   # artifact, nothing is published (mirrors release.yml's dispatch path).
   workflow_dispatch:
@@ -170,8 +171,10 @@ jobs:
         if: github.event_name == 'push' && env.HAS_SIGNING == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          # labs-* / win-labs-* are prereleases during the migration window.
-          prerelease: true
+          # v* = the graduated headline (non-prerelease, so releases/latest +
+          # the forever-URL aliases resolve and the live auto-update feed turns
+          # on). labs-* / win-labs-* stay prereleases.
+          prerelease: ${{ !startsWith(github.ref_name, 'v') }}
           fail_on_unmatched_files: false
           files: |
             shell-zig/macos/.build/release/*.dmg
