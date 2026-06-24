@@ -76,6 +76,7 @@ pub const IID_ControllerCompletedHandler = guid("6c4819f3-c9b7-4260-8127-c9f5bde
 pub const IID_WebMessageReceivedHandler = guid("57213f19-00e6-49fa-8e07-898ea01ecbd2");
 pub const IID_NavigationStartingHandler = guid("9adbe429-f36d-432b-9ddc-f8881fbd76e3");
 pub const IID_NewWindowRequestedHandler = guid("d4c185fe-c81c-4989-97af-2d3fa7ab5651");
+pub const IID_ProcessFailedHandler = guid("79e0aea4-990b-42d9-aa1d-0fcc2e5bc7f1");
 pub const IID_ICoreWebView2Settings9 = guid("0528a73b-e92d-49f4-927a-e547dddaa37d");
 
 // ---- IUnknown (for casting + QueryInterface/Release on any interface) ------
@@ -165,13 +166,20 @@ pub const ICoreWebView2_3 = extern struct {
         // 8: add_NavigationStarting(handler, out token) — the main-frame
         // navigation backstop (cancel off-origin nav, route it externally).
         add_NavigationStarting: *const fn (*ICoreWebView2_3, *anyopaque, *EventRegistrationToken) callconv(WINAPI) HRESULT,
-        run_9_27: [19]Slot, // remove_NavigationStarting .. remove_ProcessFailed
+        run_9_25: [17]Slot, // remove_NavigationStarting .. remove_PermissionRequested
+        // 26: add_ProcessFailed(handler, out token) — browser/renderer/GPU
+        // process death; we log a breadcrumb and reload (CrashLog parity).
+        add_ProcessFailed: *const fn (*ICoreWebView2_3, *anyopaque, *EventRegistrationToken) callconv(WINAPI) HRESULT,
+        run_27: [1]Slot, // remove_ProcessFailed
         // 28: AddScriptToExecuteOnDocumentCreated(js, handler|null)
         AddScriptToExecuteOnDocumentCreated: *const fn (*ICoreWebView2_3, LPCWSTR, ?*anyopaque) callconv(WINAPI) HRESULT,
         run_29: [1]Slot, // RemoveScriptToExecuteOnDocumentCreated
         // 30: ExecuteScript(js, handler|null)
         ExecuteScript: *const fn (*ICoreWebView2_3, LPCWSTR, ?*anyopaque) callconv(WINAPI) HRESULT,
-        run_31_34: [4]Slot, // CapturePreview, Reload, PostWebMessageAsJson, PostWebMessageAsString
+        run_31: [1]Slot, // CapturePreview
+        // 32: Reload() — re-run the renderer after a content-process death.
+        Reload: *const fn (*ICoreWebView2_3) callconv(WINAPI) HRESULT,
+        run_33_34: [2]Slot, // PostWebMessageAsJson, PostWebMessageAsString
         // 35: add_WebMessageReceived(handler, out token)
         add_WebMessageReceived: *const fn (*ICoreWebView2_3, *anyopaque, *EventRegistrationToken) callconv(WINAPI) HRESULT,
         run_36_44: [9]Slot, // remove_WebMessageReceived .. Stop
@@ -210,6 +218,12 @@ pub const ICoreWebView2_3 = extern struct {
     }
     pub fn addNewWindowRequested(self: *ICoreWebView2_3, handler: *anyopaque, token: *EventRegistrationToken) HRESULT {
         return self.lpVtbl.add_NewWindowRequested(self, handler, token);
+    }
+    pub fn addProcessFailed(self: *ICoreWebView2_3, handler: *anyopaque, token: *EventRegistrationToken) HRESULT {
+        return self.lpVtbl.add_ProcessFailed(self, handler, token);
+    }
+    pub fn reload(self: *ICoreWebView2_3) HRESULT {
+        return self.lpVtbl.Reload(self);
     }
     pub fn setVirtualHostMapping(self: *ICoreWebView2_3, host: LPCWSTR, folder: LPCWSTR, kind: HostResourceAccessKind) HRESULT {
         return self.lpVtbl.SetVirtualHostNameToFolderMapping(self, host, folder, kind);

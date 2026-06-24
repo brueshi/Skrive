@@ -28,8 +28,15 @@ pub fn build(b: *std.Build) void {
     // (Supersedes the handoff's tentative `-Ddiag` name.)
     const dev = b.option(bool, "dev", "Enable the diag file logger + DevTools (default: Debug only)") orelse
         (optimize == .Debug);
+    // The app version, stamped from the repo-root package.json by
+    // build-windows.sh (single source of truth, mirroring the macOS host). It
+    // is reported to WinSparkle (set_app_details) for its appcast comparison and
+    // returned by the host-owned app:version command. Defaults to 0.0.0 for a
+    // bare `zig build` so a dev build still links.
+    const version = b.option([]const u8, "version", "App version (stamped from package.json)") orelse "0.0.0";
     const build_options = b.addOptions();
     build_options.addOption(bool, "dev", dev);
+    build_options.addOption([]const u8, "version", version);
 
     const core_dep = b.dependency("skrive_core", .{});
     const core_mod = core_dep.module("skrive_core");
@@ -63,6 +70,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("gdi32", .{}); // CreateSolidBrush (themed frame)
     exe.root_module.linkSystemLibrary("ole32", .{}); // CoTaskMemFree
     exe.root_module.linkSystemLibrary("advapi32", .{}); // RegGetValueW (dark-mode)
+    exe.root_module.linkSystemLibrary("dbghelp", .{}); // MiniDumpWriteDump (crash logs)
     b.installArtifact(exe);
 
     // Convenience step; only does anything on a Windows host. Building from

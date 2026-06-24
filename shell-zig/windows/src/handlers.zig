@@ -211,3 +211,43 @@ pub const NewWindowRequestedHandler = extern struct {
         return wv.S_OK;
     }
 };
+
+/// WebView2 process-death backstop (Stage 6.5): fires when the browser,
+/// renderer, or GPU process fails. We don't inspect the args (kind/reason) —
+/// the callback logs a breadcrumb and reloads — so both Invoke params are
+/// ignored. Invoke's first arg is the sender ICoreWebView2*, the second the
+/// ICoreWebView2ProcessFailedEventArgs*.
+pub const ProcessFailedHandler = extern struct {
+    lpVtbl: *const Vtbl,
+    callback: *const fn (ctx: *anyopaque) callconv(.c) void,
+    ctx: *anyopaque,
+
+    pub const Vtbl = extern struct {
+        QueryInterface: *const fn (*ProcessFailedHandler, *const GUID, *?*anyopaque) callconv(WINAPI) HRESULT,
+        AddRef: *const fn (*ProcessFailedHandler) callconv(WINAPI) u32,
+        Release: *const fn (*ProcessFailedHandler) callconv(WINAPI) u32,
+        Invoke: *const fn (*ProcessFailedHandler, ?*anyopaque, ?*anyopaque) callconv(WINAPI) HRESULT,
+    };
+
+    const vtbl = Vtbl{ .QueryInterface = qi, .AddRef = addRef, .Release = addRef, .Invoke = invoke };
+
+    pub fn init(callback: *const fn (ctx: *anyopaque) callconv(.c) void, ctx: *anyopaque) ProcessFailedHandler {
+        return .{ .lpVtbl = &vtbl, .callback = callback, .ctx = ctx };
+    }
+
+    fn qi(self: *ProcessFailedHandler, iid: *const GUID, out: *?*anyopaque) callconv(WINAPI) HRESULT {
+        if (wv.guidEql(iid, &wv.IID_IUnknown) or wv.guidEql(iid, &wv.IID_ProcessFailedHandler)) {
+            out.* = @ptrCast(self);
+            return wv.S_OK;
+        }
+        out.* = null;
+        return wv.E_NOINTERFACE;
+    }
+    fn addRef(_: *ProcessFailedHandler) callconv(WINAPI) u32 {
+        return 1;
+    }
+    fn invoke(self: *ProcessFailedHandler, _: ?*anyopaque, _: ?*anyopaque) callconv(WINAPI) HRESULT {
+        self.callback(self.ctx);
+        return wv.S_OK;
+    }
+};

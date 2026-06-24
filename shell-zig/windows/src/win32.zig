@@ -256,3 +256,82 @@ pub extern "kernel32" fn GlobalLock(hMem: *anyopaque) callconv(WINAPI) ?[*]u8;
 pub extern "kernel32" fn GlobalUnlock(hMem: *anyopaque) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn GlobalSize(hMem: *anyopaque) callconv(WINAPI) usize;
 pub const GMEM_MOVEABLE: u32 = 0x2;
+
+// ---- crash logging (Stage 6.5) --------------------------------------------
+// The native side of the local, no-telemetry crash log: a top-level exception
+// filter writes a minidump (dbghelp) plus a breadcrumb, the twin of the macOS
+// host's signal handler. File I/O here uses raw Win32 (CreateFileW/WriteFile)
+// so the renderer-log append and the crash breadcrumb share one path that is
+// safe to call from the exception filter (no allocator, no libc buffering).
+
+pub const HANDLE = w.HANDLE;
+pub const LONG = i32;
+pub const INVALID_HANDLE_VALUE: HANDLE = @ptrFromInt(std.math.maxInt(usize));
+
+/// The top-level exception filter's argument is `EXCEPTION_POINTERS*`; we never
+/// dereference it, only forward it to MiniDumpWriteDump, so it stays opaque.
+pub const PTOP_LEVEL_EXCEPTION_FILTER = *const fn (?*anyopaque) callconv(WINAPI) LONG;
+pub const EXCEPTION_CONTINUE_SEARCH: LONG = 0; // let default WER still run
+pub extern "kernel32" fn SetUnhandledExceptionFilter(
+    lpTopLevelExceptionFilter: ?PTOP_LEVEL_EXCEPTION_FILTER,
+) callconv(WINAPI) ?PTOP_LEVEL_EXCEPTION_FILTER;
+
+pub extern "kernel32" fn GetCurrentProcess() callconv(WINAPI) HANDLE;
+pub extern "kernel32" fn GetCurrentProcessId() callconv(WINAPI) u32;
+pub extern "kernel32" fn GetCurrentThreadId() callconv(WINAPI) u32;
+
+/// MINIDUMP_EXCEPTION_INFORMATION (dbghelp.h). Default packing: on x64 the
+/// pointer forces 8-byte alignment, so there is 4 bytes of padding after
+/// ThreadId — `extern struct` reproduces that layout.
+pub const MINIDUMP_EXCEPTION_INFORMATION = extern struct {
+    ThreadId: u32,
+    ExceptionPointers: ?*anyopaque,
+    ClientPointers: BOOL,
+};
+pub const MiniDumpNormal: u32 = 0;
+pub extern "dbghelp" fn MiniDumpWriteDump(
+    hProcess: HANDLE,
+    ProcessId: u32,
+    hFile: HANDLE,
+    DumpType: u32,
+    ExceptionParam: ?*MINIDUMP_EXCEPTION_INFORMATION,
+    UserStreamParam: ?*anyopaque,
+    CallbackParam: ?*anyopaque,
+) callconv(WINAPI) BOOL;
+
+pub extern "kernel32" fn CreateFileW(
+    lpFileName: LPCWSTR,
+    dwDesiredAccess: u32,
+    dwShareMode: u32,
+    lpSecurityAttributes: ?*anyopaque,
+    dwCreationDisposition: u32,
+    dwFlagsAndAttributes: u32,
+    hTemplateFile: ?HANDLE,
+) callconv(WINAPI) HANDLE;
+pub extern "kernel32" fn WriteFile(
+    hFile: HANDLE,
+    lpBuffer: [*]const u8,
+    nNumberOfBytesToWrite: u32,
+    lpNumberOfBytesWritten: ?*u32,
+    lpOverlapped: ?*anyopaque,
+) callconv(WINAPI) BOOL;
+pub extern "kernel32" fn CloseHandle(hObject: HANDLE) callconv(WINAPI) BOOL;
+pub const GENERIC_WRITE: u32 = 0x40000000;
+pub const FILE_APPEND_DATA: u32 = 0x0004;
+pub const FILE_SHARE_READ: u32 = 0x1;
+pub const FILE_SHARE_WRITE: u32 = 0x2;
+pub const CREATE_ALWAYS: u32 = 2;
+pub const OPEN_ALWAYS: u32 = 4;
+pub const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
+
+pub const SYSTEMTIME = extern struct {
+    wYear: u16,
+    wMonth: u16,
+    wDayOfWeek: u16,
+    wDay: u16,
+    wHour: u16,
+    wMinute: u16,
+    wSecond: u16,
+    wMilliseconds: u16,
+};
+pub extern "kernel32" fn GetLocalTime(lpSystemTime: *SYSTEMTIME) callconv(WINAPI) void;

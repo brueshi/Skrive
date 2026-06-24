@@ -43,6 +43,7 @@ declare global {
     __skriveDispatch?: (json: string) => void;
     skrive?: ReturnType<typeof createSkriveBridge>;
     __SKRIVE_FRAMELESS__?: boolean;
+    __SKRIVE_NATIVE_UPDATER__?: boolean;
     __skriveWindow?: SkriveWindowApi;
   }
 }
@@ -95,23 +96,16 @@ window.__skriveDispatch = (json: string) => {
 
 // ---- canned project -------------------------------------------------------
 
-// fs/project/persistence/watcher are native (see NATIVE_COMMANDS). What remains
-// canned: app:platform, history (Stage 4, not ported), updater (Stage 6). The
-// app boots to its welcome state — native persistence returns the default
-// app-state with no last-opened project, so nothing auto-opens until the user
-// picks a folder.
+// fs/project/persistence/watcher are native (see NATIVE_COMMANDS), as are the
+// host-owned updater + diagnostics commands (updater:check, log:append,
+// log:reveal — handled by the Zig host: WinSparkle + the crash log). What
+// remains canned: app:platform and history (Stage 4, not ported). The app boots
+// to its welcome state — native persistence returns the default app-state with
+// no last-opened project, so nothing auto-opens until the user picks a folder.
 const mock = new MockTransport();
 mock.stub('history:getMode', { mode: 'checkpoint' });
 mock.stub('history:setGitHistoryEnabled', { mode: 'checkpoint' });
 mock.stub('app:platform', { platform: 'win32' });
-mock.stub('updater:current', { kind: 'idle' });
-// Interim no-op stubs for the Stage 6.5 diagnostics commands. The Windows host
-// gains real log:append (renderer crash capture) + log:reveal (open the crashes
-// folder) in Stage 6 Milestone 3 alongside WinSparkle; until then these keep
-// the shared renderer's error handler + "Reveal diagnostics" button from
-// erroring on Windows.
-mock.stub('log:append', {});
-mock.stub('log:reveal', {});
 
 // ---- composite transport --------------------------------------------------
 
@@ -135,6 +129,11 @@ window.skrive = createSkriveBridge(transport);
 // keeps the OS title bar there. window:* are host-owned commands (routed in
 // app.zig), invoked directly off the native channel rather than the contract.
 window.__SKRIVE_FRAMELESS__ = true;
+// The host owns the updater (WinSparkle), so the renderer hides its in-app
+// updater controls and never invokes the updater:* contract — exactly like the
+// macOS host. updater:check is still routed natively (the Settings "Check for
+// updates" button -> WinSparkle's own dialog).
+window.__SKRIVE_NATIVE_UPDATER__ = true;
 window.__skriveWindow = {
   minimize: () => nativeInvoke('window:minimize', {}),
   toggleMaximize: () => nativeInvoke('window:toggleMaximize', {}),

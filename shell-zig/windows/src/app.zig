@@ -26,6 +26,8 @@ const jsescape = @import("jsescape.zig");
 const diag = @import("diag.zig");
 const paths = @import("paths.zig");
 const host_cmds = @import("host_cmds.zig");
+const updater = @import("updater.zig");
+const crashlog = @import("crashlog.zig");
 const core_mod = @import("skrive_core");
 const build_options = @import("build_options");
 
@@ -67,9 +69,11 @@ pub const App = struct {
     web_message_handler: handlers.WebMessageHandler = undefined,
     nav_starting_handler: handlers.NavigationStartingHandler = undefined,
     new_window_handler: handlers.NewWindowRequestedHandler = undefined,
+    process_failed_handler: handlers.ProcessFailedHandler = undefined,
     web_msg_token: wv.EventRegistrationToken = .{ .value = 0 },
     nav_starting_token: wv.EventRegistrationToken = .{ .value = 0 },
     new_window_token: wv.EventRegistrationToken = .{ .value = 0 },
+    process_failed_token: wv.EventRegistrationToken = .{ .value = 0 },
     user_data_dir_w: ?[:0]u16 = null,
     /// Last maximized state delivered to the renderer; dedups the WM_SIZE
     /// stream (SIZE_RESTORED fires on every resize step) so window:maximize
@@ -81,6 +85,10 @@ pub const App = struct {
     /// window stores it in GWLP_USERDATA, and the core's emit userdata is it.
     pub fn create(gpa: std.mem.Allocator) !*App {
         diag.log("=== Skrive host starting (stage 5.1 diag build) ===", .{});
+        // Install the native crash handler first thing, before the window, the
+        // webview, or any worker thread — so a crash during startup is still
+        // captured (Stage 6.5, parity with the macOS host's early CrashLog).
+        crashlog.install(gpa);
         // WebView2 creation and its completion callbacks want a COM apartment on
         // the calling (UI) thread. Initialize STA before anything COM happens.
         const co = win32.CoInitializeEx(null, win32.COINIT_APARTMENTTHREADED);
@@ -142,9 +150,15 @@ pub const App = struct {
         self.web_message_handler = handlers.WebMessageHandler.init(onWebMessage, self);
         self.nav_starting_handler = handlers.NavigationStartingHandler.init(onNavigationStarting, self);
         self.new_window_handler = handlers.NewWindowRequestedHandler.init(onNewWindowRequested, self);
+        self.process_failed_handler = handlers.ProcessFailedHandler.init(onProcessFailed, self);
 
         try self.createWindow();
         diag.log("window created", .{});
+
+        // Start the WinSparkle auto-updater on the UI thread now the window
+        // exists. Host-native: WinSparkle does its own HTTPS + dialog and never
+        // touches the renderer's net:* seam. Best-effort (no DLL -> no updater).
+        updater.start(gpa, build_options.version);
 
         const user_data: ?win32.LPCWSTR = if (self.user_data_dir_w) |d| d.ptr else null;
         const hr = self.create_env(null, user_data, null, @ptrCast(&self.env_handler));
@@ -298,6 +312,11 @@ pub const App = struct {
         const nwhr = webview3.addNewWindowRequested(@ptrCast(&self.new_window_handler), &self.new_window_token);
         diag.log("addNewWindowRequested hr=0x{x:0>8}", .{diag.hx(nwhr)});
 
+        // 6.5: webview process-death backstop. On a browser/renderer/GPU
+        // process failure, log a breadcrumb and reload the renderer.
+        const pfhr = webview3.addProcessFailed(@ptrCast(&self.process_failed_handler), &self.process_failed_token);
+        diag.log("addProcessFailed hr=0x{x:0>8}", .{diag.hx(pfhr)});
+
         var rc: win32.RECT = undefined;
         _ = win32.GetClientRect(self.hwnd.?, &rc);
         diag.log("client rect = {d}x{d}", .{ rc.right - rc.left, rc.bottom - rc.top });
@@ -356,6 +375,16 @@ pub const App = struct {
             }
         }
         _ = args.putHandled(1);
+    }
+
+    /// WebView2 process death (6.5). Record a local breadcrumb and reload the
+    /// renderer to recover — the Windows twin of the macOS host's
+    /// webViewWebContentProcessDidTerminate. Best-effort; runs on the UI thread.
+    fn onProcessFailed(ctx: *anyopaque) callconv(.c) void {
+        const self: *App = @ptrCast(@alignCast(ctx));
+        diag.log("webview ProcessFailed; reloading", .{});
+        crashlog.logWebviewTermination(self.gpa);
+        if (self.webview3) |wv3| _ = wv3.reload();
     }
 
     // ---- bridge ------------------------------------------------------------
@@ -486,6 +515,43 @@ pub const App = struct {
             const result = std.fmt.allocPrint(self.gpa, "{{\"text\":{s}}}", .{q}) catch return true;
             defer self.gpa.free(result);
             self.sendOk(id, result);
+            return true;
+        }
+        // Host-owned per the contract: return the build version (stamped from
+        // package.json via -Dversion), the same value WinSparkle compares
+        // against the appcast. The core's app:version is a spike string, so we
+        // intercept here to keep the displayed version consistent with the
+        // updater (parity with the macOS CoreBridge).
+        if (std.mem.eql(u8, cmd, "app:version")) {
+            const q = jsonQuote(self.gpa, build_options.version) catch return true;
+            defer self.gpa.free(q);
+            const result = std.fmt.allocPrint(self.gpa, "{{\"version\":{s}}}", .{q}) catch return true;
+            defer self.gpa.free(result);
+            self.sendOk(id, result);
+            return true;
+        }
+        // 6.5 diagnostics. Renderer errors (window.onerror / unhandledrejection)
+        // can't be written by the sandboxed renderer, so the host appends them
+        // to the local crash log; "Reveal diagnostics" opens that folder. Both
+        // local only, never uploaded.
+        if (std.mem.eql(u8, cmd, "log:append")) {
+            if (payload) |p| if (p.get("line")) |l| switch (l) {
+                .string => |s| crashlog.appendRenderer(self.gpa, s),
+                else => {},
+            };
+            self.sendOk(id, "{}");
+            return true;
+        }
+        if (std.mem.eql(u8, cmd, "log:reveal")) {
+            crashlog.reveal(self.gpa);
+            self.sendOk(id, "{}");
+            return true;
+        }
+        // The Settings "Check for updates" button -> WinSparkle's own dialog.
+        // Status is shown by WinSparkle's UI, not streamed via updater:status.
+        if (std.mem.eql(u8, cmd, "updater:check")) {
+            updater.check();
+            self.sendOk(id, "{}");
             return true;
         }
         return false;
@@ -735,6 +801,8 @@ fn wndProc(hwnd: win32.HWND, msg: u32, wparam: win32.WPARAM, lparam: win32.LPARA
         },
         win32.WM_DESTROY => {
             if (app) |a| a.saveWindowState();
+            // Flush WinSparkle's background thread before the loop exits.
+            updater.shutdown();
             win32.PostQuitMessage(0);
             return 0;
         },

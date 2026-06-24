@@ -24,6 +24,12 @@ WEB_DIR="$SCRIPT_DIR/web"
 RENDERER_DIR="$REPO_ROOT/out/renderer"
 DIST="$WIN_DIR/dist"
 
+# Version from the repo-root package.json (single source of truth, mirroring
+# build-macos.sh). Stamped into the host via -Dversion so WinSparkle reports the
+# right current version for its appcast comparison and app:version is accurate.
+VERSION="$(grep '"version"' "$REPO_ROOT/package.json" | head -1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+echo "==> version $VERSION (from package.json)"
+
 echo "==> 1/4 renderer bundle"
 if [[ ! -f "$RENDERER_DIR/index.html" ]]; then
     echo "    out/renderer missing; running bun run start:build"
@@ -39,21 +45,23 @@ bun build "$WEB_DIR/native-bridge-win.ts" \
 
 echo "==> 3/4 zig host ($ZIG_TARGET, $CONFIG)"
 if [[ "$CONFIG" == "release" ]]; then
-    (cd "$WIN_DIR" && zig build -Dtarget="$ZIG_TARGET" -Doptimize=ReleaseFast)
+    (cd "$WIN_DIR" && zig build -Dtarget="$ZIG_TARGET" -Dversion="$VERSION" -Doptimize=ReleaseFast)
 else
-    (cd "$WIN_DIR" && zig build -Dtarget="$ZIG_TARGET")
+    (cd "$WIN_DIR" && zig build -Dtarget="$ZIG_TARGET" -Dversion="$VERSION")
 fi
 
 echo "==> 4/4 assemble dist/"
 # Layout the host expects next to Skrive.exe: renderer/ (served via the
 # skrive.localhost virtual-host mapping), native-bridge.js (read + injected at
-# document-create), WebView2Loader.dll (loaded dynamically at startup).
+# document-create), WebView2Loader.dll + WinSparkle.dll (both loaded dynamically
+# at startup via LoadLibrary).
 rm -rf "$DIST"
 mkdir -p "$DIST/renderer"
 cp "$WIN_DIR/zig-out/bin/Skrive.exe" "$DIST/Skrive.exe"
 cp "$WEB_DIR/dist/native-bridge-win.js" "$DIST/native-bridge.js"
 cp -R "$RENDERER_DIR/." "$DIST/renderer/"
 cp "$WIN_DIR/vendor/webview2/$ARCH/WebView2Loader.dll" "$DIST/WebView2Loader.dll"
+cp "$WIN_DIR/vendor/winsparkle/$ARCH/WinSparkle.dll" "$DIST/WinSparkle.dll"
 
 echo ""
 echo "Built $DIST"
