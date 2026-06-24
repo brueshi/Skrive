@@ -18,9 +18,9 @@
          (single source of truth). The values here are the fallback when the
          script can't read it. Sparkle compares these against the appcast. -->
     <key>CFBundleShortVersionString</key>
-    <string>1.3.0</string>
+    <string>1.5.0</string>
     <key>CFBundleVersion</key>
-    <string>1.3.0</string>
+    <string>1.5.0</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
