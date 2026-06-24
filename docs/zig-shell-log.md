@@ -2453,3 +2453,67 @@ done. Windows code-signing stays demand-gated (unsigned by design).
 primary downloads (skrive.md + `releases/latest`), the Electron sunset, the
 cleanup pass (frozen diff/checkpoints/git + bridge mock stubs + orphaned docs),
 and the results memo (re-measure the Stage 0.7 baselines).
+
+## 2026-06-24 — Stage 6 Milestone 4: graduation (M4a-d built + on main; live cutover gated on Joe)
+
+The graduation milestone, built and merged (`d5a10b4`..`11a8187`, FF to main).
+Decisions locked with Joe up front: **staged cutover**, migration toast →
+**skrive.md/download**, and the **website repoint is folded into the separate
+website makeover** (Joe runs it in tandem). M4a-d are implemented; the live
+release flip is intentionally NOT done here — it's timing-coupled and Joe's
+trigger (see the runbook). Plan/decisions: [[project_zig_m4_graduation_plan]].
+
+**M4a — migration toast (`feat`, renderer-only).** Electron build is on a sunset
+path; its electron-updater can't auto-cross to a different artifact (the native
+app), so notify-and-redownload: a sonner toast → skrive.md/download, shown once
+per launch until followed (dismissing it lets it return so the migration isn't
+silently lost). Electron-only via the existing `__SKRIVE_NATIVE_UPDATER__` gate
+(both Zig hosts set it). **The dismissal bit lives in `localStorage`, NOT
+`AppUiState`** — deliberately, so the cross-shell persistence schema, its parity
+corpus, and the Zig core default stay untouched (adding an AppUiState field would
+be a core change). `app/src/App.tsx` only.
+
+**M4b — cutover runbook (`docs`, `docs/graduation-cutover.md`).** The flip can't
+be safely pre-merged: existing Electron users auto-update via electron-updater's
+`latest*.yml`, so the final toast-bearing build must ship via `release.yml` on a
+`v*` tag (its last run) BEFORE `v*` moves to `zig-shell.yml` — else both
+pipelines fire on the same tag. Captured the exact staged sequence + precise CI
+diffs (drop `v*` from release.yml → workflow_dispatch only; add `v*` +
+`prerelease: ${{ !startsWith(github.ref_name, 'v') }}` to zig-shell.yml) +
+verification + rollback, so the live cutover is a mechanical apply.
+
+**M4c — cleanup (`refactor` + a surfaced doc decision).** Code: pruned the dead
+`navigateToString` / `openDevTools` WebView2 wrappers (5.1 bring-up leftovers; no
+callers — serving is live, DevTools is F12/settings-gated); the vtable SLOTS stay
+(positional COM ABI). Both arches still build. **Bridge stubs: nothing stale** —
+the only remaining mocks are `history:*` (Stage 4 not ported, legitimately
+mocked) and `app:platform` (not host-implemented); M3/M1 already cleaned
+`updater:*`/`log:*`. **Docs: deliberately NOT deleted.** The handoff-named
+orphans (`version-history-plan.md`, the three `Zig *experiment.md`) ALL already
+carry prominent "SUPERSEDED … kept for history only" banners — they're
+intentional historical records, not confusing orphans, so deleting them only
+loses the paper trail. And the handoff flags `technical-decisions.md` +
+`monetization-plan.md` as stale, but the monetization memory cites BOTH as the
+master docs — a direct conflict. Recommendation surfaced to Joe: leave them;
+deletion is his call.
+
+**M4d — results memo (`docs`, `docs/zig-shell-results.md`).** Filled the size
+baseline (the headline graduation axis): **macOS installer 132 MB → 3.4 MB
+(~39×), update download 127 MB → 3.4 MB** (full artifact — Sparkle/WinSparkle
+ship the whole binary, no deltas, because a ~3 MB artifact makes deltas
+pointless), Windows Setup.exe 3.8 MB / portable 1.7 MB. Cold start + RSS stay
+PENDING — they were never captured for Electron at 0.7 either, so they need a
+packaged-vs-packaged measure of both shells (mac on the dev box, Windows on
+Joe's). Reframed the decision section: graduation is COMMITTED; the memo now
+documents the win.
+
+**Gates.** `bun run typecheck` (shared+app+shell) clean after M4a; Windows host
+x64+arm64 still build + `zig fmt` clean after the M4c prune; core untouched,
+parity unaffected (M4a is renderer-only and gated; M4c is host-only dead-code).
+
+**Remaining (Joe's triggers, gated — NOT this session):** the live cutover —
+run the runbook's Steps 1-4 once skrive.md/download serves the native build:
+ship the final Electron toast release (`v*` via release.yml), apply the cutover
+commit, cut the first graduated Zig `v*` (non-prerelease headline), then prove
+N→N+1 auto-update live on both platforms. Capture cold start + RSS. Later sunset
+(NOT M4): delete `shell/`, drop the Rust napi binding, stop building Electron.
