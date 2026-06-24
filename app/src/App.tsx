@@ -48,6 +48,20 @@ const FEEDBACK_PROMPT_MIN_LAUNCHES = 3;
 // startup render / auto-opened project.
 const FEEDBACK_PROMPT_DELAY_MS = 2500;
 
+// Stage 6 graduation (M4a): the Electron build is on a sunset path. Its
+// auto-updater can't cross to the new native (Zig-shell) app — a different
+// artifact — so we notify-and-redownload: a toast that links to the download
+// page, shown until the writer follows it. Electron-only (the native shells
+// gate out via __SKRIVE_NATIVE_UPDATER__). The "followed it" bit lives in
+// localStorage, NOT AppUiState, so the cross-shell persistence schema (and its
+// parity corpus + the Zig core default) stays untouched. NOTE: this URL must
+// resolve to the native build before the toast-bearing release ships — it is
+// repointed as part of the website makeover; until then, swap it for the
+// GitHub Releases URL.
+const MIGRATION_DOWNLOAD_URL = 'https://skrive.md/download';
+const MIGRATION_ACTIONED_KEY = 'skrive.migrationActioned';
+const MIGRATION_PROMPT_DELAY_MS = 2500;
+
 export function App() {
   const manifest = useProjectStore((s) => s.manifest);
   const activeTab = useProjectStore(selectActiveTab);
@@ -193,6 +207,41 @@ export function App() {
         () => openFeedbackForm()
       );
     }, FEEDBACK_PROMPT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [preferencesHydrated]);
+
+  // Graduation notice (M4a): point Electron users at the new native build.
+  // Shown once per launch until followed; dismissing it (the X) lets it return
+  // next launch so the migration isn't silently lost. No-op on the native
+  // shells (they ARE the destination) and once the writer has followed it.
+  const migrationPromptRef = useRef(false);
+  useEffect(() => {
+    if (migrationPromptRef.current) return;
+    if (!preferencesHydrated) return;
+    migrationPromptRef.current = true;
+    if (window.__SKRIVE_NATIVE_UPDATER__ === true) return;
+    try {
+      if (localStorage.getItem(MIGRATION_ACTIONED_KEY) === '1') return;
+    } catch {
+      // localStorage unavailable — fall through and show it anyway (surfacing
+      // the migration matters more than de-duping it).
+    }
+    const timer = setTimeout(() => {
+      notify.prompt(
+        "Skrive has moved to a new, faster app — this version won't get future updates.",
+        'Download the new Skrive',
+        () => {
+          try {
+            localStorage.setItem(MIGRATION_ACTIONED_KEY, '1');
+          } catch {
+            // ignore — worst case the notice returns next launch
+          }
+          void window.skrive.links
+            .openExternal(MIGRATION_DOWNLOAD_URL)
+            .catch((err) => logProjectError('migration:open', err));
+        }
+      );
+    }, MIGRATION_PROMPT_DELAY_MS);
     return () => clearTimeout(timer);
   }, [preferencesHydrated]);
 
