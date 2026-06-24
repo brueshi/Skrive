@@ -128,6 +128,18 @@ fn linkWatcher(b: *std.Build, mod: *std.Build.Module, target: std.Build.Resolved
         mod.addSystemIncludePath(.{
             .cwd_relative = b.pathJoin(&.{ sysroot, "usr/include" }),
         });
+        // The macOS host links this archive against the SYSTEM libc++, which on
+        // older releases doesn't export std::__1::__hash_memory (Zig's newer
+        // bundled libc++ references it from the watcher). Supply it. Only here:
+        // native/Windows builds link Zig's libc++, which already defines it, so
+        // adding the shim there would be a duplicate symbol. See the file.
+        mod.addCSourceFile(.{
+            .file = b.path("src/libcxx_compat.cpp"),
+            // -fno-sanitize=undefined like the watcher: Debug's default UBSan
+            // would otherwise instrument the hash arithmetic and reference
+            // UBSan runtime symbols absent from this archive's final link.
+            .flags = &.{ "-std=c++17", "-fno-sanitize=undefined" },
+        });
     }
     if (link_frameworks and target.result.os.tag == .macos) {
         mod.linkFramework("CoreFoundation", .{});
