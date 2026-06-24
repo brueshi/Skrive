@@ -2296,3 +2296,73 @@ signing:** the N→N+1 auto-update install — needs a signed build + an appcast
 prove the install path). **Next:** the local two-build appcast harness for the
 N→N+1 proof, then Milestone 2 (`zig-shell.yml` CI — automates notarization +
 appcast generation).
+
+## 2026-06-23 — Stage 6 Milestone 2: the CI release pipeline, green end to end (prerelease `labs-1.5.0` published)
+
+`.github/workflows/zig-shell.yml` + a CI-reusable `shell-zig/release-macos.sh`.
+**One `macos-latest` runner builds the whole family** on `labs-*` / `win-labs-*`
+tags (non-`v*`, so the Electron `release.yml` never fires; verified — a parallel
+`release.yml` run did not trigger): build renderer → gates (shared+app
+typecheck, `zig fmt`, core+jsescape tests, **parity 26/26**) → import the
+Developer ID cert (`apple-actions/import-codesign-certs`) → `release-macos.sh`
+(sign inside-out incl. Sparkle's nested helpers, hardened runtime → DMG →
+notarize → staple → EdDSA-sign the appcast) → cross-compile both Windows hosts
+(`build-windows.sh x64`+`arm64`) → publish a prerelease. `release-macos.sh` takes
+notarization creds via a keychain profile (local) **or** env secrets (CI) and the
+EdDSA key via the Keychain (local) or `SPARKLE_ED_PRIVATE_KEY` piped to
+`generate_appcast --ed-key-file -` (CI, never on disk) — one script, both paths.
+Secrets: the five Apple ones already existed for `release.yml`; the one new one
+is `SPARKLE_ED_PRIVATE_KEY` (exported once via `generate_keys -x`). The job
+skip-and-publishes-nothing when the cert secret is absent (fork/dispatch smoke
+runs still build + gate). `softprops/action-gh-release` publishes; assets get
+forever-name aliases (`Skrive-zig.dmg`, `appcast-zig.xml`) so
+`releases/latest/download/...` resolves post-graduation.
+
+**Feed hosting decision (Joe):** `SUFeedURL` stays the
+`releases/latest/download/appcast-zig.xml` forever-URL. Because `labs-*` builds
+are GitHub *prereleases* and `releases/latest` only resolves to non-prereleases,
+the live auto-update feed goes live at **graduation** (when the Zig build becomes
+the headline non-prerelease); during the labs window the appcast is real and
+published but the N→N+1 proof rides the local harness or the tagged feed URL.
+Windows scope (Joe): M2 **does** build + publish the portable zips per arch
+(automating the manual `gh release` stopgap); the NSIS installer + WinSparkle are
+M3.
+
+**Two real bugs the first CI runs surfaced (both `fix:`, both verified):**
+(1) **Cross-environment libc++ ABI gap.** Zig 0.16 compiles the vendored watcher
+against its newest bundled libc++, whose string hashing calls the out-of-line
+`std::__1::__hash_memory`; the macOS host links the core's static archive against
+the SYSTEM libc++, and the CI runner's macOS is older than the dev box (macOS 26)
+so its system libc++ doesn't export that symbol → `Undefined symbols ...
+__hash_memory`, green locally / red on CI. Fix: `shell-zig/core/src/
+libcxx_compat.cpp` defines `__hash_memory` (FNV-1a; any deterministic memory hash
+suffices for libc++'s internal containers), compiled **only** into the macOS host
+lib (the `--sysroot` cross-build in `build.zig`) — native and Windows builds
+statically link Zig's own libc++ which already defines it, so the shim is excluded
+there to avoid a duplicate; where a newer system libc++ does export it, the
+dynamic copy coexists under the two-level namespace (proven by the dev box
+linking with both present). Dead ends ruled out first: compiling the watcher
+against the SDK's libc++ (`-nostdinc++` + SDK `c++/v1`) fought Zig's hermetic
+`#include_next` ordering; merging Zig's cached `libc++.a` was non-deterministic
+(`zig build lib` doesn't even materialize it). Parity-neutral: 26/26 holds, core
+request/response unchanged. (2) **Release-script exit-code footgun.** A trailing
+`[[ ${#notarize_args[@]} -eq 0 ]] && echo ...` returned the test's status (1)
+as the script's final exit code precisely when notarization *did* run — so a fully
+successful sign+notarize(Accepted)+staple+appcast reported failure. Fixed to an
+explicit `if`.
+
+**External blocker (not ours):** the first notarize attempts returned Apple
+`403 "A required agreement is missing or has expired"` — the Apple Developer
+Program License Agreement needed re-accepting; it cleared on propagation (~15
+min), after which notarization returned `status: Accepted` and stapling worked.
+
+**Result.** Run green end to end (~6 min): all gates, signed+**notarized** DMG,
+appcast, both Windows zips, published prerelease **`labs-1.5.0`** with assets
+`Skrive-1.5.0-arm64.dmg`, `Skrive-zig.dmg`, `appcast-zig.xml`,
+`Skrive-Windows-1.5.0-{x64,arm64}.zip`. Branch
+`labs/zig-shell-stage-6-distribution` (M1+M2+both fixes) **fast-forwarded to
+`main`** at `5e37e1d` (linear-history rule honored). **Next:** Milestone 3 —
+Windows NSIS installer + WebView2 bootstrap + WinSparkle + the real Windows
+`log:*` host impl + C1/D1 file associations; then Milestone 4 — graduation (the
+Electron migration toast, repoint downloads, the live feed at `releases/latest`,
+E1/E2, the cleanup pass + the results memo).
