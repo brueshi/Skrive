@@ -2193,3 +2193,106 @@ relaunch → window returns to the same place/size/maximized state. The honest
 unknown is the frameless geometry (frame thickness, maximized fill) on real
 WebView2 — report how it looks and I'll tune. **Next (Milestone 3):** C1 + D1
 (file associations end-to-end) + the WebView2 bootstrap, then E1/E2 verification.
+
+## 2026-06-23 — Stage 6 Milestone 1: macOS readiness + updater (Sparkle, crash logs, dock icon, signing path)
+
+Stage 6 is closeout, not a decision (the graduation verdict is in —
+`project_zig_graduation_commit`). Milestone 1 builds the macOS-testable slice
+first because it has no can't-run-it friction and proves the updater path before
+the blind Windows side (M3). Branch `labs/zig-shell-stage-6-distribution` off
+`main`. Two locked decisions drove the shape: **native Sparkle/WinSparkle
+dialogs** (not a contract-mapped headless driver — WinSparkle owns its dialogs
+and resists headless use, so symmetric-native is the consistent, least-code,
+defer-to-the-engine choice, Joe's call); and the renderer's in-app updater UI is
+**hidden on the Zig shells**, replaced by the native flow.
+
+**Updater (Sparkle 2.9.3).** Added via SPM (`Package.swift` dependency, pinned
+in `Package.resolved`); since the `.app` is hand-assembled, `build-macos.sh`
+copies the macOS slice of the resolved XCFramework into `Contents/Frameworks`
+and the executable links with `-rpath @executable_path/../Frameworks` (routed
+through `-Xlinker`; `otool -L` confirms `@rpath/Sparkle.framework/.../Sparkle`
+2.9.3 + the rpath resolves). `SPUStandardUpdaterController(startingUpdater:true)`
+bundles the engine + native UI; a "Check for Updates…" item sits in the app menu
+(Apple-standard spot) targeting the controller. EdDSA keypair generated
+(`generate_keys`): the public `SUPublicEDKey` ships in Info.plist, the private
+half lives in the login Keychain — a crown-jewel CI secret, never committed.
+Info.plist gains `SUFeedURL` (the `releases/latest/download/appcast-zig.xml`
+forever-URL convention, mirroring `release.yml`'s alias step; final hosting is an
+M2/CI detail), `SUEnableAutomaticChecks` (silent, no system profile —
+no-telemetry), and the version is stamped from the repo-root `package.json`
+(`1.3.0`) over the template, the single source of truth. `app:version` is now
+**host-owned** in `CoreBridge` (returns `CFBundleShortVersionString`) instead of
+the core's spike string, so the displayed version matches what Sparkle compares
+— the contract already declared it host-implemented, and it's not in the parity
+corpus, so the core stays untouched.
+
+**Renderer posture (app/, all shells, Electron untouched).** A
+`__SKRIVE_NATIVE_UPDATER__` flag set by the mac bridge makes `SettingsView`
+render a `NativeUpdatesPane` (informational + a "Check for updates…" button that
+fires the native dialog) instead of the contract-driven status UI, and
+`App.tsx`'s launch-time updater poll is skipped — the native updater runs its
+own launch check. The `updater:current` mock stub is removed (the contract
+methods are simply never invoked on the native path, except `updater:check`,
+which is host-routed to Sparkle).
+
+**Crash logs (Stage 6.5, local, no telemetry).** `~/Library/Application
+Support/Skrive/crashes/`. `CrashLog.swift` installs at the top of `main.swift`:
+a signal handler (SIGSEGV/ABRT/ILL/BUS/FPE/TRAP) that writes a fixed marker +
+`backtrace_symbols_fd` to a pre-resolved path using only async-signal-safe calls,
+then restores the default disposition and re-raises so the OS still writes its
+full symbolicated `.ips`; and `NSSetUncaughtExceptionHandler` (normal context →
+a rich report with `callStackSymbols`). Renderer errors flow through a new
+host-owned `log:append` (the sandboxed renderer can't write files):
+`app/src/lib/crash-log.ts` forwards `window.onerror` / `unhandledrejection`,
+best-effort. Webview content-process death →
+`webViewWebContentProcessDidTerminate` logs + reloads. A Settings → About →
+Diagnostics "Reveal diagnostics" button (`log:reveal`) opens the folder. Per the
+feature-placement rule the `log:*` commands are added to the contract + the
+Electron shell (`shell/src/ipc/log.ts`) in the same change; the Windows host
+gets the real impl in M3 (interim no-op stubs in the win bridge so the shared
+renderer doesn't error). **Conscious deviations from the plan's letter, both to
+honor the core-unchanged invariant / avoid behavior changes:** (1) the Zig
+*core* panic handler is deferred — core panics already land in the host signal
+handler as a trap, and a richer in-core panic-*message* capture is a deliberate
+future core change, not snuck in now; (2) `NSApplicationCrashOnExceptions` is
+left unset — forcing it would change the app's survival behavior, and renderer
+errors flow through `window.onerror` regardless.
+
+**Dock icon.** Mirrors the Electron `applyDockIcon`: bundles `build/icon.png` /
+`build/icon-dark.png`, swaps `NSApp.applicationIconImage` per
+`effectiveAppearance` via a KVO observation. Dock-only; closes the residual
+Stage-4 gap (it was skipped then for lacking the light asset — the assets were
+in the repo all along).
+
+**Signing path.** `shell-zig/release-macos.sh` (separate from the fast
+unsigned dev loop): release build → codesign inside-out (Sparkle's
+Autoupdate/Updater.app/XPC services, then the framework, then the app; hardened
+runtime, timestamp; not `--deep`) → `codesign --verify` → DMG (`hdiutil`, with an
+`/Applications` symlink) → notarize (`notarytool submit --wait`, skip-and-instruct
+when no `NOTARY_PROFILE`) → staple → EdDSA-sign + `generate_appcast`. Built for
+Joe to run — it uses his Developer ID cert and uploads to Apple. Syntax-checked;
+the signing/notarization themselves are his-credential territory, not run here.
+
+**The dogfood bug (caught live, fixed).** First dogfood: "Reveal diagnostics"
+did nothing and the updater check wasn't reachable. Root cause — `log:append` /
+`log:reveal` / `updater:check` were not in `NATIVE_COMMANDS` (`sample-data.ts`),
+so the mac bridge routed them to the canned MockTransport instead of the Swift
+host: the reveal silently no-op'd and renderer crash-logging hit the same dead
+end. Added the three to `NATIVE_COMMANDS`; verified the rebundled
+`native-bridge.js` carries them. Second dogfood: both work.
+
+**Gates.** `bun run typecheck` (shared/app/shell) clean; `zig fmt --check` clean;
+`zig build test` (core + jsescape) green; **parity 26/26, core byte-for-byte
+unchanged** (every Stage-6 change is host- or renderer-side); debug + release
+`.app` both assemble with Sparkle embedded + version stamped.
+
+**Dogfood gate (Joe, macOS, debug `.app`).** Confirmed: the Settings "Check for
+updates…" button and the menu-bar item both reach Sparkle's native dialog;
+"Reveal diagnostics" opens the crashes folder. Quick checks still open
+(non-blocking): a triggered `window.onerror` lands in `renderer.log`; the dock
+tile swaps on a light↔dark appearance toggle. **The one done-criterion gated on
+signing:** the N→N+1 auto-update install — needs a signed build + an appcast
+(EdDSA-verified, so a *local* appcast suffices; no Apple notarization required to
+prove the install path). **Next:** the local two-build appcast harness for the
+N→N+1 proof, then Milestone 2 (`zig-shell.yml` CI — automates notarization +
+appcast generation).
