@@ -43,3 +43,9 @@ planning/
 /shell-zig/windows/.zig-cache/
 /shell-zig/windows/dist/
 /shell-zig/windows/Skrive-win-*.zip
+/shell-zig/windows/Skrive-Windows-*.zip
+# Installer outputs (reproducible via package-windows.sh / make-appcast.sh). The
+# .nsi, the scripts, and the vendored DLLs/bootstrapper under vendor/ ARE
+# tracked; only the compiled Setup.exe + generated feed are ignored.
+/shell-zig/windows/installer/*.exe
+/shell-zig/windows/installer/appcast-win.xml
