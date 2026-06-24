@@ -2366,3 +2366,90 @@ Windows NSIS installer + WebView2 bootstrap + WinSparkle + the real Windows
 `log:*` host impl + C1/D1 file associations; then Milestone 4 — graduation (the
 Electron migration toast, repoint downloads, the live feed at `releases/latest`,
 E1/E2, the cleanup pass + the results memo).
+
+## 2026-06-24 — Stage 6 Milestone 3: Windows distribution (WinSparkle + crash logs + NSIS installer + appcast), dogfood-confirmed
+
+The Windows side brought up to the macOS M1 bar, plus the installer macOS got
+"for free" via the DMG. Two dogfood-able bundles, both **confirmed working on
+Joe's x64 Windows box** ("everything works good"). Every change is host- or
+renderer-side — **the core stayed byte-identical, parity 26/26 holds**.
+
+**The gate, cleared first (as the handoff demanded).** WinSparkle v0.9.3
+supports **EdDSA over Ed25519** (`win_sparkle_set_eddsa_public_key`, reads
+`sparkle:edSignature`) — same curve + same appcast attribute as Sparkle. So the
+locked Sparkle+WinSparkle plan held; no Velopack fallback. It ships prebuilt
+**x64 + ARM64** DLLs; both vendored under `shell-zig/windows/vendor/winsparkle/`.
+
+**Bundle A — host feature-fill.**
+- `updater.zig` — WinSparkle bound via the **runtime `LoadLibrary` idiom** (the
+  WebView2Loader precedent), which sidesteps the MSVC-import-lib cross-compile
+  problem entirely; all entry points are `__cdecl` (`callconv(.c)`, NOT the COM
+  `.winapi`). Wired to `updater:check`; auto-checks + 86400s interval matching
+  mac; **the SAME EdDSA public key as macOS** (`/Z4rW21...`), the same
+  `releases/latest` forever-URL (`appcast-win.xml`).
+- `crashlog.zig` — `%APPDATA%\Skrive\crashes`, the twin of CrashLog.swift:
+  `SetUnhandledExceptionFilter` → `MiniDumpWriteDump` (`native-crash.dmp`) +
+  breadcrumb, allocation-free with pre-stashed wide paths; real `log:append`
+  (renderer.log) + `log:reveal`; WebView2 `ProcessFailed` → breadcrumb + reload.
+- COM: promoted `add_ProcessFailed` (slot 26) + `Reload` (slot 32) in
+  `ICoreWebView2_3`, the audited filler arithmetic preserved (`run_9_25[17]` +
+  `add_ProcessFailed` + `run_27[1]` = 19; `run_31[1]` + `Reload` + `run_33_34[2]`
+  = 4). `ProcessFailedHandler` added.
+- `app:version` now host-intercepted (mac parity, updater-consistent);
+  `-Dversion` stamped from package.json (`build.zig` option + build-windows.sh).
+- `native-bridge-win.ts`: `__SKRIVE_NATIVE_UPDATER__ = true`, dead stubs removed.
+
+**Decision (parity, not a shortcut): no custom Zig panic handler.** A Zig
+panic `@trap`s → illegal-instruction exception → caught by the SEH filter →
+minidump. That is the exact analogue of the mac path (core panic → SIGABRT →
+signal handler), so it needs no separate handler and stays off Zig's volatile
+panic API. The in-core panic-*message* capture remains the same deferred future
+core change as on mac.
+
+**Bundle B — installer + appcast.**
+- `installer/skrive.nsi` — hand-written NSIS, **per-user** (no admin/UAC) into
+  `%LOCALAPPDATA%\Programs\Skrive`: files + Start Menu shortcut + HKCU
+  Add/Remove-Programs entry + uninstaller (MUI2). **WebView2 Evergreen
+  bootstrap** — detects the runtime via the `EdgeUpdate` "pv" registry value and
+  runs the **bundled** `MicrosoftEdgeWebview2Setup.exe` silently if absent.
+  Uninstall leaves `%APPDATA%\Skrive` (user data) intact.
+- `package-windows.sh` — release dist + `makensis` (Homebrew, on the Mac — no
+  rc.exe/SDK), warning-free → `Skrive-{version}-Setup.exe` (~3.8 MB).
+- `installer/make-appcast.sh` — generates + EdDSA-signs `appcast-win.xml` using
+  Sparkle's `sign_update` with the **same key** as the macOS appcast (no
+  Windows-only `winsparkle-tool`; one key, one tool, mac-side). **Round-trip
+  proven locally:** signed the real Setup.exe, `sign_update --verify` passed.
+- `zig-shell.yml` extended: install `makensis`; build the x64 installer always
+  (smoke); sign + generate `appcast-win.xml` on a signed tag push; publish
+  `Setup.exe` + versionless `Skrive-Setup.exe` alias + `appcast-win.xml`
+  (forever-URL `releases/latest/download/appcast-win.xml`, the SUFeedURL in
+  `updater.zig`). `.gitignore` updated (vendored DLLs/bootstrapper + scripts
+  tracked; compiled Setup.exe + generated feed ignored).
+
+**Decisions (made, not blocked).** (1) **Bundled** WebView2 bootstrapper over
+an online download — self-contained, no NSIS HTTPS plugin for the Mac
+cross-build (online needs `inetc`, unreliable in Homebrew's makensis). (2)
+**x64-first** installer + Windows appcast; arm64 still ships as the portable zip
+(an arm64 installer is a clean later add — near-zero arm64-Windows audience). (3)
+Dropped **file associations / `app:openPath` (C1/D1)** from M3 per Joe's call
+("for now just do not worry about the open folder at all").
+
+**Gates.** Clean cross-compile **x64 + arm64**; `zig fmt`; host unit tests;
+`bun run typecheck` (shared+app+shell); bridge bundles clean (flag set, stubs
+gone); installer compiles warning-free; appcast signs + verifies. **Dogfood
+(Joe, x64):** installer runs (SmartScreen "Run anyway", per-user, no admin),
+Start Menu + ARP entry, app writes, the watcher reflects external NTFS edits
+(E1) — all good.
+
+**Still open / deferred (not blocking M3).** The N→N+1 auto-update *install*
+proof is gated on the live feed, which only resolves at graduation (labs builds
+are prereleases; `releases/latest` skips them) — same situation as mac. **E2**
+(parity corpus *run* on Windows) was deliberately not built into harness infra:
+the core is byte-identical + 26/26 on the Mac + live dogfood, so it is
+belt-and-suspenders; a self-contained Windows harness is a flagged option, not
+done. Windows code-signing stays demand-gated (unsigned by design).
+
+**Next:** Milestone 4 — graduation: the Electron→Zig update toast, repoint the
+primary downloads (skrive.md + `releases/latest`), the Electron sunset, the
+cleanup pass (frozen diff/checkpoints/git + bridge mock stubs + orphaned docs),
+and the results memo (re-measure the Stage 0.7 baselines).
