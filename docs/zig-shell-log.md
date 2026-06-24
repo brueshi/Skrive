@@ -2543,3 +2543,27 @@ off Electron.**
 auto-update install proof (a prior native build → Check for Updates → offered
 1.7.0) on mac + win; cold start + RSS numbers. **Later sunset (separate, not
 now):** delete `shell/`, drop the Rust napi binding, stop building Electron.
+
+## 2026-06-24 — Graduation fully verified: website live + N→N+1 auto-update proven
+
+Post-graduation close-out, all green:
+- **Website published** (skrive.md): `/download` resolves (200) and links to the
+  forever-URLs `Skrive-zig.dmg` / `Skrive-Setup.exe`, which serve the native
+  headline — the full funnel (Electron toast → skrive.md/download → native) is
+  wired end to end.
+- **Cleanup release v1.7.1** (`b2446a4`, tag `v1.7.1`): dropped the `(Zig)`
+  suffix from the macOS bundle name (identifier `dev.skrive.zig-shell` left
+  intact — update/notarization identity), refreshed the stale "Markdown editor"
+  copy (Settings About + welcome) to the positioning. Only `zig-shell.yml`
+  fired (cutover holds on a normal release); published non-prerelease,
+  `releases/latest` → v1.7.1.
+- **N→N+1 auto-update PROVEN LIVE** (Joe: "done it works"): a v1.7.0 install
+  offered + installed v1.7.1 via the native updater. This was the last gated
+  item, open since M1 — the self-update path is real end to end.
+
+Stage 6 / the whole Zig-shell migration (Stages 0-6) is now **complete and
+verified in production**. Only-remaining: cold start + RSS numbers (optional
+polish for the results memo) and the later Electron sunset (delete `shell/`,
+drop the Rust napi binding, stop building Electron) — both separate, neither
+blocking. Next real arc (Joe's call): version history / sync / iPad — the doors
+the small native core opens.
