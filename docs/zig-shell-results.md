@@ -1,6 +1,6 @@
 # Zig Shell Results Memo
 
-**Status.** Running memo, now current through **Stage 6 Milestone 3** (Windows host complete + distribution: macOS Sparkle + Windows WinSparkle updaters, signed/notarized macOS DMG, NSIS installer, both appcasts; M1-M3 on `main`, M4 graduation underway). Stage 5 brought up the Zig Windows host (dogfood-confirmed); Stage 6 M1/M2 shipped the macOS updater + CI pipeline, M3 the Windows side. The **size** baseline comparison is now MEASURED (below); **cold start + RSS** remain PENDING (they were never captured for Electron either, so they need a packaged-vs-packaged measure of both shells). The graduation **decision is already committed** (2026-06-23) — see the Decision section; these numbers document the win rather than deciding it.
+**Status.** Running memo, now current through **Stage 6 Milestone 3** (Windows host complete + distribution: macOS Sparkle + Windows WinSparkle updaters, signed/notarized macOS DMG, NSIS installer, both appcasts; M1-M3 on `main`, M4 graduation underway). Stage 5 brought up the Zig Windows host (dogfood-confirmed); Stage 6 M1/M2 shipped the macOS updater + CI pipeline, M3 the Windows side. The **size, cold-start, and RSS** comparisons are now MEASURED on macOS (below; packaged Electron v1.6.0 vs native v1.7.1) — only the Windows cold-start/RSS pair is still open. The graduation **decision is already committed** (2026-06-23) — see the Decision section; these numbers document the win rather than deciding it. Headline: installer ~39x smaller, cold start ~2x faster, RSS ~12% lower.
 
 **Resolves (so far).** Whether the Ghostty pattern — one Zig core behind a C ABI, a thin per-platform native host, the system webview running the byte-identical React frontend — can reach feature parity with the shipping Electron build on macOS. **Through Stage 4: yes, for everything in the reduced scope, with no architecture-class blockers.**
 
@@ -67,14 +67,18 @@ The Zig macOS DMG and Windows zips are the signed/published `labs-1.5.0` assets;
 
 **Update download is the full artifact, by design.** Sparkle/WinSparkle ship the whole binary each release (no delta machinery) precisely because a ~2-4 MB artifact makes deltas irrelevant — so an auto-update pulls single-digit MB, versus Electron's ~127 MB. (The Electron *Windows* installer baseline was never captured at 0.7; only the macOS DMG was, so that cell is left blank rather than guessed.)
 
-### Cold start + RSS — still PENDING (packaged-vs-packaged, both shells)
+### Cold start + RSS — MEASURED (macOS, packaged-vs-packaged)
 
-Neither was captured for Electron at 0.7 either (logged PENDING Joe), so both need a fresh measure of BOTH packaged builds on the same machine, same method:
+Measured on the dev Mac (Apple Silicon): Electron **v1.6.0** vs native **v1.7.1**, same machine, same `docs/fixtures/perf-100` (100 files; the plan's "500" is stale — the generator makes 100). Cold start: `killall` between runs, stopwatch to caret-ready, median of 3. RSS: a before/after **PID diff** (macOS reparents WebKit content processes to launchd, so parent-PID attribution fails), summed after lint settled (~3s). Native counts `SkriveShell` + its WebKit content process and **excludes** the system-shared WebKit GPU/Networking (generous to native, but honest — that infra is shared across all WKWebView apps); Electron counts main + renderer + GPU + utility (all dedicated).
 
-- **Cold start to first keystroke** — stopwatch the packaged build cold (fresh login or `killall`), dock-bounce to caret-ready, median of 3. macOS: both builds run on the dev box. Windows: on Joe's box.
-- **RSS after opening the perf fixture** — open `docs/fixtures/perf-100` (100 files; the plan's "500" is stale prose — the generator makes 100), let lint settle (~2s), sum the main + renderer/webview process RSS (`ps -o rss=` / Activity Monitor / Task Manager). Measure the SAME fixture on both shells.
+| Metric | Electron (1.6.0) | Native (1.7.1) | Delta |
+|---|---|---|---|
+| Cold start to caret (median of 3) | 1.25 s (1.06 / 1.25 / 1.41) | 0.61 s (0.56 / 0.61 / 0.81) | **~2x faster** |
+| RSS on perf-100 | 542.9 MB (main 171.6 + renderer 239.5 + GPU 84.7 + utility 46.9) | 480.4 MB (host 93.2 + content 387.1) | **~12% lower (~62 MB)** |
 
-These two are the only numbers left to fully close the quantitative case; the size axis is already decisively in the Zig column (and, with system-webview reuse instead of a bundled Chromium, RSS is expected to follow — to be confirmed, not claimed).
+**Honest reading.** The decisive wins are **size** (installer ~39x, update download ~37x) and **cold start** (~2x faster — the thin native shell has far less to spin up than Electron's main+helper Chromium fleet; the Electron runs even crept *up* across repeats, likely the sunset build's launch update-check now 404ing the flipped feed). **RSS is a modest win (~12%), not dramatic** — and notably the native WebKit *content* process (387 MB) is heavier than Electron's renderer (239 MB); native wins on total only because Electron also runs a dedicated GPU + utility process and a heavier main. That tracks with the architecture: once the same web UI is loaded, runtime memory is broadly comparable whether the browser is bundled or the system's. So the memory benefit is real but small; the footprint and startup benefits are large.
+
+Windows cold-start/RSS remain open — same method on Joe's box when convenient; the macOS numbers already close the quantitative case.
 
 ## Decision — COMMITTED (2026-06-23): graduate
 
