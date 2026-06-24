@@ -161,7 +161,8 @@ pub const ICoreWebView2_3 = extern struct {
         run_5: [1]Slot, // get_Source
         // 6: Navigate(uri)
         Navigate: *const fn (*ICoreWebView2_3, LPCWSTR) callconv(WINAPI) HRESULT,
-        // 7: NavigateToString(htmlContent) — diagnostic, bypasses serving
+        // 7: NavigateToString(htmlContent) — kept for ABI alignment only (the
+        // 5.1 bring-up inline-test wrapper was pruned; serving is the live path).
         NavigateToString: *const fn (*ICoreWebView2_3, LPCWSTR) callconv(WINAPI) HRESULT,
         // 8: add_NavigationStarting(handler, out token) — the main-frame
         // navigation backstop (cancel off-origin nav, route it externally).
@@ -187,7 +188,9 @@ pub const ICoreWebView2_3 = extern struct {
         // target=_blank backstop (suppress the popup, route the URI externally).
         add_NewWindowRequested: *const fn (*ICoreWebView2_3, *anyopaque, *EventRegistrationToken) callconv(WINAPI) HRESULT,
         run_46_51: [6]Slot, // remove_NewWindowRequested .. RemoveHostObjectFromScript
-        // 52: OpenDevToolsWindow() — opens DevTools without needing webview focus
+        // 52: OpenDevToolsWindow() — kept for ABI alignment only (DevTools is
+        // gated via put_AreDevToolsEnabled + F12; the explicit-open wrapper was
+        // pruned).
         OpenDevToolsWindow: *const fn (*ICoreWebView2_3) callconv(WINAPI) HRESULT,
         run_53_71: [19]Slot, // add_WebResourceRequested .. get_IsSuspended
         // 72: SetVirtualHostNameToFolderMapping(hostName, folderPath, accessKind)
@@ -197,9 +200,6 @@ pub const ICoreWebView2_3 = extern struct {
 
     pub fn navigate(self: *ICoreWebView2_3, uri: LPCWSTR) HRESULT {
         return self.lpVtbl.Navigate(self, uri);
-    }
-    pub fn navigateToString(self: *ICoreWebView2_3, html: LPCWSTR) HRESULT {
-        return self.lpVtbl.NavigateToString(self, html);
     }
     pub fn addScriptOnDocumentCreated(self: *ICoreWebView2_3, js: LPCWSTR) HRESULT {
         return self.lpVtbl.AddScriptToExecuteOnDocumentCreated(self, js, null);
@@ -227,9 +227,6 @@ pub const ICoreWebView2_3 = extern struct {
     }
     pub fn setVirtualHostMapping(self: *ICoreWebView2_3, host: LPCWSTR, folder: LPCWSTR, kind: HostResourceAccessKind) HRESULT {
         return self.lpVtbl.SetVirtualHostNameToFolderMapping(self, host, folder, kind);
-    }
-    pub fn openDevTools(self: *ICoreWebView2_3) HRESULT {
-        return self.lpVtbl.OpenDevToolsWindow(self);
     }
 };
 
