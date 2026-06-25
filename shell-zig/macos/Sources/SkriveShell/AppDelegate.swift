@@ -25,7 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private let activeProject = ActiveProject()
 
     // Electron parity (shell/src/main/index.ts): trafficLightPosition
-    // { x: 12, y: 13 } against a 40px topbar.
+    // { x: 12, y: 13 } against a 40px topbar. Confirmed by eye on macOS Tahoe:
+    // AppKit's native cluster at this inset is the desired look.
     private let trafficLightInset = NSPoint(x: 12, y: 13)
 
     // Clear gap between the rightmost light and the renderer's first
@@ -78,6 +79,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         window.titleVisibility = .hidden
         window.title = "Skrive"
         window.minSize = NSSize(width: 720, height: 480)
+        // Stay-resident lifecycle: closing the window keeps the app (and this
+        // window object, with its live webview) alive so a dock-click reopen is
+        // instant and preserves the renderer's open tabs and scroll. Without
+        // this, AppKit releases the window on close and the reopen path would
+        // dereference a freed window.
+        window.isReleasedWhenClosed = false
         // Pre-paint flash color, theme-aware like the Electron shell: the
         // renderer's light-dark() CSS picks the final palette, but the
         // window paints first.
@@ -133,8 +140,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         NSApp.applicationIconImage = image
     }
 
+    // Stay resident when the last window closes (macOS standard): the app keeps
+    // running in the dock and only a real Quit (Cmd-Q) terminates. Closing the
+    // window is then instant — it never routes through the pre-quit flush
+    // handshake — and reopening is a cheap re-show rather than a cold start.
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool {
-        true
+        false
+    }
+
+    /// Dock-icon click (or any reopen) with no visible window re-shows the
+    /// existing window. The window and its webview were kept alive on close
+    /// (isReleasedWhenClosed = false), so this restores the prior session
+    /// instantly instead of reloading the renderer.
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication, hasVisibleWindows flag: Bool
+    ) -> Bool {
+        if !flag {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        return true
     }
 
     /// Full standard macOS menu bar (4.0), replicating Electron's *default*
@@ -270,16 +295,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         webView?.reload()
     }
 
-    private var quitFlushed = false
+    private var quitting = false
 
-    /// Pre-quit flush handshake (parity with shell/src/main/index.ts): pause
-    /// the quit once, ask the renderer to flush pending saves, and proceed on
-    /// its ack or after a 2s backstop so a wedged renderer can't trap the app.
+    /// Pre-quit flush, then an immediate exit. Pause the quit once, ask the
+    /// renderer to flush pending saves, and exit(0) on its ack (or after the
+    /// flush's own 2s backstop so a wedged renderer can't trap the app).
+    ///
+    /// exit(0) instead of `reply(toApplicationShouldTerminate:)` is the fix for
+    /// the sluggish Cmd-Q: once the ack confirms every save is on disk, AppKit's
+    /// graceful teardown (tearing down the WKWebView content process and
+    /// Sparkle's XPC services) only adds a visible beat and protects nothing we
+    /// haven't already persisted, so we skip it. The core's writes are
+    /// synchronous fs that completed before the ack, so nothing is buffered.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if quitFlushed || bridge == nil { return .terminateNow }
-        bridge.beginFlush { [weak self] in
-            self?.quitFlushed = true
-            NSApp.reply(toApplicationShouldTerminate: true)
+        if bridge == nil { return .terminateNow }
+        if quitting { return .terminateLater }   // a second Cmd-Q mid-flush
+        quitting = true
+        let start = diagEnabled ? Date() : nil
+        bridge.beginFlush {
+            if let start {
+                NSLog("[skrive] pre-quit flush took %.0f ms",
+                      Date().timeIntervalSince(start) * 1000)
+            }
+            exit(0)
         }
         return .terminateLater
     }
