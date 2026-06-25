@@ -15,6 +15,12 @@
 // just because something worked. If you find yourself wanting to,
 // see planning/react-electron-phase-13-audit.md (PUNT P3).
 
+import {
+  createElement,
+  type KeyboardEvent,
+  type MouseEvent,
+  type WheelEvent
+} from 'react';
 import { toast } from 'sonner';
 
 export const notify = {
@@ -54,5 +60,90 @@ export const notify = {
       closeButton: true,
       action: { label: actionLabel, onClick: () => void onAction() }
     });
+  },
+  /**
+   * Two-tier notification card: a small grey eyebrow over a bold headline, in a
+   * soft rounded surface with no button or visible close control (see the
+   * `.toast-card` rules in index.css). Rendered as a fully custom, `unstyled`
+   * sonner toast so none of sonner's default title/description/action/close
+   * chrome interferes with the card look. When `onClick` is given the whole
+   * card is the affordance — clicking runs it and dismisses — and the toast
+   * persists until acted on or swiped away; otherwise it auto-expires.
+   */
+  card(eyebrow: string, title: string, onClick?: () => void): void {
+    const activate = (id: string | number) => {
+      onClick?.();
+      toast.dismiss(id);
+    };
+    // Trackpad two-finger swipe fires wheel events, not the pointer-drag that
+    // sonner's built-in swipe listens for, so dismiss on a horizontal wheel
+    // gesture past a small threshold. Accumulated and reset on a brief idle so
+    // ordinary scroll momentum doesn't trip it.
+    let wheelAccum = 0;
+    let wheelReset: ReturnType<typeof setTimeout> | undefined;
+    toast.custom(
+      (id) =>
+        createElement(
+          'div',
+          {
+            className: 'toast-card',
+            onWheel: (e: WheelEvent<HTMLDivElement>) => {
+              if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+              wheelAccum += e.deltaX;
+              if (wheelReset) clearTimeout(wheelReset);
+              wheelReset = setTimeout(() => {
+                wheelAccum = 0;
+              }, 160);
+              if (Math.abs(wheelAccum) > 70) {
+                wheelAccum = 0;
+                toast.dismiss(id);
+              }
+            },
+            ...(onClick
+              ? {
+                  role: 'button',
+                  tabIndex: 0,
+                  onClick: () => activate(id),
+                  onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      activate(id);
+                    }
+                  }
+                }
+              : {})
+          },
+          createElement(
+            'button',
+            {
+              type: 'button',
+              className: 'toast-card-dismiss',
+              'aria-label': 'Dismiss',
+              // Stop the card's own onClick from also firing (open Settings).
+              onClick: (e: MouseEvent<HTMLButtonElement>) => {
+                e.stopPropagation();
+                toast.dismiss(id);
+              }
+            },
+            '×'
+          ),
+          createElement('div', { className: 'toast-card-eyebrow' }, eyebrow),
+          createElement('div', { className: 'toast-card-title' }, title)
+        ),
+      {
+        duration: onClick ? Infinity : 6000,
+        unstyled: true,
+        // Neutralize the Toaster's global wrapper style (bg/border/padding) so
+        // the .toast-card div is the only surface; per-toast style wins the
+        // merge. Keep a fixed width so the card sizes like the other toasts.
+        style: {
+          width: '356px',
+          background: 'transparent',
+          border: 'none',
+          boxShadow: 'none',
+          padding: 0
+        }
+      }
+    );
   }
 };

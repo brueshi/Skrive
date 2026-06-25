@@ -774,7 +774,7 @@ function ContractUpdatesPane({ appVersion }: { appVersion: string }) {
           control={<span className="settings-value-text">v{appVersion}</span>}
         />
         <div className="settings-card-pad">
-          <UpdaterControls
+          <UpdaterCard
             status={status}
             onCheck={triggerCheck}
             onAction={triggerAction}
@@ -785,7 +785,26 @@ function ContractUpdatesPane({ appVersion }: { appVersion: string }) {
   );
 }
 
-function UpdaterControls({
+/** Human-readable transfer rate, e.g. "3.1 MB/s". Empty when unknown. */
+function formatSpeed(bytesPerSecond: number): string {
+  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return '';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytesPerSecond;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const rounded = value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1);
+  return `${rounded} ${units[unit]}/s`;
+}
+
+/**
+ * The contract-driven updater surface, as a state-aware card. `available` and
+ * `ready` lift to an accent-edged card with a primary CTA; `downloading` shows
+ * a live progress bar. The plain states (idle/checking/no-update) stay quiet.
+ */
+function UpdaterCard({
   status,
   onCheck,
   onAction
@@ -794,74 +813,127 @@ function UpdaterControls({
   onCheck: () => void;
   onAction: () => void;
 }) {
+  const reduceMotion = useReducedMotion();
+  const accented = status.kind === 'available' || status.kind === 'ready';
+  const className = [
+    'updater-card',
+    accented ? 'is-accent' : '',
+    status.kind === 'error' ? 'is-error' : ''
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    <div className={className}>
+      {renderUpdaterBody(status, onCheck, onAction, reduceMotion ?? false)}
+    </div>
+  );
+}
+
+function renderUpdaterBody(
+  status: UpdaterStatus,
+  onCheck: () => void,
+  onAction: () => void,
+  reduceMotion: boolean
+) {
   switch (status.kind) {
     case 'idle':
       return (
-        <button type="button" className="settings-secondary-button" onClick={onCheck}>
-          Check for updates…
-        </button>
+        <div className="updater-card-row">
+          <span className="updater-card-title">Check for updates</span>
+          <button type="button" className="settings-secondary-button" onClick={onCheck}>
+            Check now
+          </button>
+        </div>
       );
     case 'checking':
       return (
-        <button type="button" className="settings-secondary-button" disabled>
-          Checking…
-        </button>
+        <div className="updater-card-row">
+          <span className="updater-card-title">
+            <span className="updater-spinner" aria-hidden="true" />
+            Checking for updates…
+          </span>
+        </div>
       );
     case 'no-update':
       return (
-        <>
-          <p className="settings-updater-status">
-            You're up to date. Last checked{' '}
-            {new Date(status.checkedAtMs).toLocaleTimeString()}.
-          </p>
+        <div className="updater-card-row">
+          <span className="updater-card-title">
+            You&rsquo;re up to date
+            <span className="updater-card-sub">
+              Last checked{' '}
+              {new Date(status.checkedAtMs).toLocaleTimeString([], {
+                hour: 'numeric',
+                minute: '2-digit'
+              })}
+            </span>
+          </span>
           <button type="button" className="settings-secondary-button" onClick={onCheck}>
             Check again
           </button>
-        </>
+        </div>
       );
     case 'available':
       return (
         <>
-          <p className="settings-updater-status">
-            Update available: <strong>v{status.version}</strong>
-          </p>
-          <button type="button" className="settings-secondary-button" onClick={onAction}>
-            Download
-          </button>
+          <div className="updater-card-row">
+            <span className="updater-card-title">
+              Update available
+              <span className="updater-card-version">Skrive {status.version}</span>
+            </span>
+            <button type="button" className="settings-primary-button" onClick={onAction}>
+              Download
+            </button>
+          </div>
+          {status.releaseNotes ? (
+            <div className="updater-card-notes">{status.releaseNotes}</div>
+          ) : null}
         </>
       );
     case 'downloading':
       return (
-        <>
-          <p className="settings-updater-status">
-            Downloading v{status.version} — {Math.round(status.percent)}%
-          </p>
-          <button type="button" className="settings-secondary-button" disabled>
-            Downloading…
-          </button>
-        </>
+        <div className="updater-card-stack">
+          <span className="updater-card-title">Downloading Skrive {status.version}</span>
+          <div
+            className="updater-progress"
+            role="progressbar"
+            aria-valuenow={Math.round(status.percent)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <motion.div
+              className="updater-progress-fill"
+              animate={{ width: `${Math.min(100, Math.max(0, status.percent))}%` }}
+              transition={reduceMotion ? { duration: 0 } : { duration: 0.25, ease: 'easeOut' }}
+            />
+          </div>
+          <span className="updater-card-meta">
+            {Math.round(status.percent)}%
+            {formatSpeed(status.bytesPerSecond) ? ` · ${formatSpeed(status.bytesPerSecond)}` : ''}
+          </span>
+        </div>
       );
     case 'ready':
       return (
-        <>
-          <p className="settings-updater-status">
-            v{status.version} ready to install on next launch.
-          </p>
-          <button type="button" className="settings-secondary-button" onClick={onAction}>
+        <div className="updater-card-row">
+          <span className="updater-card-title">
+            Ready to install
+            <span className="updater-card-version">Skrive {status.version}</span>
+          </span>
+          <button type="button" className="settings-primary-button" onClick={onAction}>
             Restart to install
           </button>
-        </>
+        </div>
       );
     case 'error':
       return (
-        <>
-          <p className="settings-updater-status settings-updater-error">
-            {status.message}
-          </p>
+        <div className="updater-card-stack">
+          <span className="updater-card-title">Update failed</span>
+          <p className="updater-card-error">{status.message}</p>
           <button type="button" className="settings-secondary-button" onClick={onCheck}>
             Try again
           </button>
-        </>
+        </div>
       );
   }
 }

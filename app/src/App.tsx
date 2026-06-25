@@ -160,30 +160,43 @@ export function App() {
   // transition surfaces — as a sonner prompt that links to Settings.
   // Subsequent transitions (download progress, ready, error) flow
   // through the Settings UI's own subscription; we don't double-toast.
-  const launchUpdateRef = useRef(false);
+  const launchCheckRef = useRef(false);
   useEffect(() => {
-    if (launchUpdateRef.current) return;
     if (!preferencesHydrated) return;
-    launchUpdateRef.current = true;
-    // Native-updater shells (Sparkle/WinSparkle) run their own launch check
-    // and show their own dialog, so the renderer must not also poll the
-    // updater contract (which the Zig bridges don't implement).
+    // Shells that own their own update UI (WinSparkle) opt out via this flag.
+    // The macOS Zig host drives the contract UI instead, so it leaves the flag
+    // unset and we surface updates here.
     if (window.__SKRIVE_NATIVE_UPDATER__ === true) return;
-    if (!usePreferencesStore.getState().autoUpdateOnLaunch) return;
-    const seen = new Set<string>();
+
+    // Surface `available` / `ready` as actionable toasts regardless of the
+    // launch-check preference — a background check (Sparkle's own schedule) can
+    // find an update too. The toast carries the next action inline (Download /
+    // Restart); dismissing it is "Later". Deduped per version so a re-emitted
+    // status (e.g. progress ticks resolving back to ready) doesn't re-toast.
+    const toasted = new Set<string>();
+    // Clicking a card opens Settings > Updates, where the explicit Download /
+    // Restart controls live — keeping the toast itself button-free.
+    const openUpdates = () => {
+      const store = useProjectStore.getState();
+      if (store.activeView !== 'settings') store.toggleSettings();
+    };
     const unsubscribe = window.skrive.updater.onStatus((status) => {
-      if (status.kind !== 'available') return;
-      if (seen.has(status.version)) return;
-      seen.add(status.version);
-      notify.prompt(
-        `Skrive v${status.version} is available.`,
-        'Open Settings',
-        () => useProjectStore.getState().toggleSettings()
-      );
+      if (status.kind === 'available' && !toasted.has(`a:${status.version}`)) {
+        toasted.add(`a:${status.version}`);
+        notify.card('Update available', `Skrive ${status.version}`, openUpdates);
+      } else if (status.kind === 'ready' && !toasted.has(`r:${status.version}`)) {
+        toasted.add(`r:${status.version}`);
+        notify.card('Ready to install', `Skrive ${status.version}`, openUpdates);
+      }
     });
-    void window.skrive.updater
-      .check()
-      .catch((err) => logProjectError('updater:launch-check', err));
+
+    // The launch-time check itself stays opt-in (fires once).
+    if (!launchCheckRef.current && usePreferencesStore.getState().autoUpdateOnLaunch) {
+      launchCheckRef.current = true;
+      void window.skrive.updater
+        .check()
+        .catch((err) => logProjectError('updater:launch-check', err));
+    }
     return unsubscribe;
   }, [preferencesHydrated]);
 

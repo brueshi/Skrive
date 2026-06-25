@@ -50,6 +50,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     // evidence for the 1.1 done-criteria without a screen.
     private let diagEnabled = ProcessInfo.processInfo.environment["SKRIVE_DIAG"] == "1"
 
+    // Update-UI preview harness (SKRIVE_UPDATER_DEMO=1): once the renderer is
+    // up, emit a scripted updater:status sequence so the custom update card and
+    // toasts can be seen without a real newer release. Observe-only — clicking
+    // Download/Restart drops out of the demo into the real updater flow.
+    private let updaterDemo =
+        ProcessInfo.processInfo.environment["SKRIVE_UPDATER_DEMO"] == "1"
+    private var updaterDemoRan = false
+
     // 1.2 serving-mode bake-off, switchable at runtime: "scheme" (custom
     // skrive-app:// origin, the default) or "file" (loadFileURL, which the
     // 1.1 spike found cannot execute the renderer's ES-module bundle).
@@ -493,6 +501,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         rendererLoaded = true
         applyTitlebarInset()
+        runUpdaterDemoIfRequested()
         guard diagEnabled else { return }
         // Give the React boot sequence (loadAppState -> snapshot -> worker
         // -> render) time to settle before probing.
@@ -522,6 +531,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             // execute the ES-module bundle (1.1 finding).
             webView.loadFileURL(index, allowingReadAccessTo: root)
         }
+    }
+
+    /// SKRIVE_UPDATER_DEMO=1: walk the renderer through the update states once
+    /// the page is up, so the custom update card + toasts can be reviewed
+    /// without a real release. Emits straight onto the updater:status channel
+    /// (the same path the driver uses); the real updater is untouched.
+    private func runUpdaterDemoIfRequested() {
+        guard updaterDemo, !updaterDemoRan, let bridge else { return }
+        updaterDemoRan = true
+        let version = "9.9.9"
+        func emit(_ payload: [String: Any], at delay: Double) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak bridge] in
+                bridge?.emitEvent("updater:status", payload: payload)
+            }
+        }
+        // Give the renderer's boot + updater subscription time to settle.
+        emit(["kind": "checking"], at: 2.0)
+        emit([
+            "kind": "available", "version": version,
+            "releaseNotes": "What's new in Skrive \(version)\n\n"
+                + "• Custom in-app update experience\n"
+                + "• Instant quit and stay-resident windows\n"
+                + "• A tidier drag-to-install window\n"
+                + "• Assorted fixes and polish"
+        ], at: 3.2)
+        var t = 4.8
+        for pct in stride(from: 0, through: 100, by: 4) {
+            emit([
+                "kind": "downloading", "version": version,
+                "percent": Double(pct),
+                "bytesPerSecond": Double(2_400_000 + pct * 22_000)
+            ], at: t)
+            t += 0.16
+        }
+        emit(["kind": "ready", "version": version], at: t + 0.5)
     }
 
     // MARK: - Bridge in
