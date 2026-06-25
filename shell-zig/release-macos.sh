@@ -70,11 +70,65 @@ echo "    signature valid"
 echo "==> 4/7 build DMG"
 mkdir -p "$OUT_DIR"
 STAGE="$(mktemp -d)"
-cp -R "$APP" "$STAGE/"
+cp -R "$APP" "$STAGE/Skrive.app"
 ln -s /Applications "$STAGE/Applications"   # drag-to-install affordance
-rm -f "$DMG"
-hdiutil create -volname "Skrive" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+
+# Lay the install window out so the drag reads left -> right: Skrive.app on the
+# left, the Applications symlink on the right. A bare `hdiutil create` ships no
+# icon positions, so Finder sorts the two items alphabetically — "Applications"
+# (A) lands on the left and "Skrive" (S) on the right, the wrong direction to
+# drag. Positioned icons live in the volume's .DS_Store, which only Finder can
+# write, so we build a read-write image, mount it, lay it out via Finder, then
+# convert to the compressed read-only image we ship.
+VOLNAME="Skrive"
+RW_DMG="$(mktemp -u).dmg"
+hdiutil create -volname "$VOLNAME" -srcfolder "$STAGE" -fs HFS+ \
+    -format UDRW -ov "$RW_DMG" >/dev/null
 rm -rf "$STAGE"
+
+# Mount read-write and resolve the real mount point (a stale "Skrive" volume
+# would push this to "/Volumes/Skrive 1"); derive the volume name Finder
+# scripts against from it so the layout targets the image we just mounted.
+ATTACH_OUT="$(hdiutil attach "$RW_DMG" -readwrite -noverify -noautoopen)"
+MOUNT_DIR="$(printf '%s\n' "$ATTACH_OUT" | grep -Eo '/Volumes/.*' | head -1)"
+MOUNT_VOL="$(basename "$MOUNT_DIR")"
+
+# Non-fatal: if Finder scripting is unavailable (some headless CI sessions) we
+# ship the un-positioned DMG rather than failing the release — at worst the
+# layout reverts to today's behavior, never a broken artifact.
+if ! osascript - "$MOUNT_VOL" <<'APPLESCRIPT' >/dev/null 2>&1
+on run argv
+  set volName to item 1 of argv
+  tell application "Finder"
+    tell disk volName
+      open
+      set current view of container window to icon view
+      set toolbar visible of container window to false
+      set statusbar visible of container window to false
+      set the bounds of container window to {200, 150, 740, 480}
+      set opts to the icon view options of container window
+      set arrangement of opts to not arranged
+      set icon size of opts to 128
+      set position of item "Skrive.app" of container window to {150, 175}
+      set position of item "Applications" of container window to {390, 175}
+      update without registering applications
+      delay 1
+      close
+    end tell
+  end tell
+end run
+APPLESCRIPT
+then
+    echo "    WARN: Finder layout step failed; shipping un-positioned DMG"
+fi
+
+sync
+hdiutil detach "$MOUNT_DIR" >/dev/null \
+    || hdiutil detach "$MOUNT_DIR" -force >/dev/null
+
+rm -f "$DMG"
+hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG" >/dev/null
+rm -f "$RW_DMG"
 sign "$DMG"
 echo "    built $DMG"
 
