@@ -1,0 +1,25 @@
+# Creates a Linear Release on each production version tag.
+# On a `v*` tag, the action scans commits since the previous release for
+# `SKR-NN` references, creates a release named after the tag, attaches those
+# issues, and marks it complete. Requires a Continuous pipeline in Linear
+# (Settings -> Releases) and the LINEAR_ACCESS_KEY repo secret.
+name: Linear Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  linear-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so the action can scan since the last release
+
+      - uses: linear/linear-release-action@v0
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
+          version: ${{ github.ref_name }} # e.g. v1.8.0
+          name: ${{ github.ref_name }}
