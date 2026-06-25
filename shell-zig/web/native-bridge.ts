@@ -114,9 +114,12 @@ const transport: SkriveTransport = {
 
 window.skrive = createSkriveBridge(transport);
 
-// Updates are host-native (Sparkle): hide the renderer's in-app updater
-// controls and skip its launch-time check. Set before the app module runs.
-window.__SKRIVE_NATIVE_UPDATER__ = true;
+// The macOS host drives Sparkle through a custom SPUUserDriver that streams
+// update state over the updater:status contract, so the renderer's own
+// contract-driven updater UI (Settings pane + launch toast) is in charge — not
+// Sparkle's stock dialogs. Leave this flag unset so that UI renders. (The
+// Windows host still uses WinSparkle's native dialogs and keeps the flag true.)
+window.__SKRIVE_NATIVE_UPDATER__ = false;
 
 // Test-only hook: lets the SKRIVE_DIAG self-test drive the native channel
 // directly (e.g. diag:poison for the 1.4 delivery-rule round-trip) without

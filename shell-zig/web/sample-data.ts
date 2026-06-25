@@ -61,6 +61,8 @@ export const NATIVE_COMMANDS = new Set<string>([
   'clipboard:writeText',
   'clipboard:readText',
   'updater:check',
+  'updater:current',
+  'updater:downloadAndInstall',
   'log:append',
   'log:reveal'
 ]);

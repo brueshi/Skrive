@@ -13,13 +13,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private var window: NSWindow!
     private var webView: WKWebView!
     private var bridge: CoreBridge!
-    // Sparkle auto-updater (Stage 6.1). The standard controller bundles the
-    // updater engine with Sparkle's native UI (the "update available" alert,
-    // download progress, install prompt) and drives the "Check for Updates…"
-    // menu item. It reads SUFeedURL / SUPublicEDKey from Info.plist and is
-    // retained for the app's lifetime. Held strongly — Sparkle schedules
-    // background checks off it.
-    private var updaterController: SPUStandardUpdaterController!
+    // Sparkle auto-updater. We drive the updater engine (SPUUpdater) with a
+    // *custom* user driver (SkriveUpdaterDriver) instead of Sparkle's stock UI,
+    // so update state flows into Skrive's own renderer components via the
+    // updater:status contract rather than Sparkle's grey alerts. SPUUpdater
+    // reads SUFeedURL / SUPublicEDKey from Info.plist and schedules background
+    // checks; both are held for the app's lifetime.
+    private var updater: SPUUpdater!
+    private var updaterDriver: SkriveUpdaterDriver!
     // Shared between the bridge (sets it on project:snapshot) and the asset
     // scheme handler (serves images from it).
     private let activeProject = ActiveProject()
@@ -55,13 +56,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private let servingMode = ProcessInfo.processInfo.environment["SKRIVE_SERVE"] ?? "scheme"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Start Sparkle before building the menu so the "Check for Updates…"
-        // item can target the controller. `startingUpdater: true` kicks off
-        // the scheduled background check loop per Info.plist.
-        updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
-            updaterDelegate: nil,
-            userDriverDelegate: nil
+        // Build the updater engine with our custom driver before the menu (the
+        // "Check for Updates…" item drives it). startUpdater() is deferred until
+        // after the bridge exists so the driver's status events have somewhere
+        // to go before any (background) check can fire.
+        updaterDriver = SkriveUpdaterDriver()
+        updater = SPUUpdater(
+            hostBundle: Bundle.main,
+            applicationBundle: Bundle.main,
+            userDriver: updaterDriver,
+            delegate: nil
         )
         setupMenu()
 
@@ -108,9 +112,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             configJSON: Resources.configJSON(),
             activeProject: activeProject
         )
-        // The renderer's Settings "Check for updates" button routes here.
-        bridge.onCheckForUpdates = { [weak self] in
-            self?.updaterController.checkForUpdates(nil)
+        // Wire the updater <-> renderer contract. The driver streams status to
+        // the renderer through the bridge; the renderer's check / download /
+        // install actions route back to the engine and driver.
+        updaterDriver.onStatus = { [weak self] payload in
+            self?.bridge.emitEvent("updater:status", payload: payload)
+        }
+        bridge.onUpdaterCheck = { [weak self] in
+            guard let self, self.updater.canCheckForUpdates else { return }
+            self.updater.checkForUpdates()
+        }
+        bridge.onUpdaterDownloadAndInstall = { [weak self] in
+            guard let self else { return }
+            self.updaterDriver.downloadAndInstall {
+                if self.updater.canCheckForUpdates { self.updater.checkForUpdates() }
+            }
+        }
+        bridge.onUpdaterCurrent = { [weak self] in
+            self?.updaterDriver.current ?? ["kind": "idle"]
+        }
+
+        // Now that status has somewhere to go, start the engine (schedules the
+        // background check loop per Info.plist). A failure here is non-fatal —
+        // the app runs, it just won't self-update — so log and continue.
+        do {
+            try updater.start()
+        } catch {
+            CrashLog.append("updater failed to start: \(error.localizedDescription)")
         }
 
         loadRenderer()
@@ -184,14 +212,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             keyEquivalent: ""
         )
         appMenu.addItem(.separator())
-        // Sparkle's standard menu action. The controller validates the item
-        // (disabling it mid-check) and shows the native update UI on click.
+        // Drives our SPUUpdater via checkForUpdatesAction; validateMenuItem
+        // disables it while a check/session is in progress (canCheckForUpdates).
         let checkForUpdates = appMenu.addItem(
             withTitle: "Check for Updates…",
-            action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
+            action: #selector(checkForUpdatesAction(_:)),
             keyEquivalent: ""
         )
-        checkForUpdates.target = updaterController
+        checkForUpdates.target = self
         appMenu.addItem(.separator())
         let servicesItem = appMenu.addItem(
             withTitle: "Services", action: nil, keyEquivalent: ""
@@ -293,6 +321,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     /// View > Reload. Re-requests the renderer from its origin.
     @objc private func reloadPage(_ sender: Any?) {
         webView?.reload()
+    }
+
+    /// App menu > Check for Updates… — a user-initiated check, surfaced through
+    /// the custom driver's status events (not Sparkle's stock dialog).
+    @objc private func checkForUpdatesAction(_ sender: Any?) {
+        guard updater?.canCheckForUpdates == true else { return }
+        updater.checkForUpdates()
+    }
+
+    /// Disable "Check for Updates…" while a check/session is already running.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(checkForUpdatesAction(_:)) {
+            return updater?.canCheckForUpdates ?? false
+        }
+        return true
     }
 
     private var quitting = false

@@ -41,9 +41,16 @@ final class CoreBridge {
     nonisolated(unsafe) private var core: OpaquePointer?
     private weak var webView: WKWebView?
     private let activeProject: ActiveProject
-    /// Set by AppDelegate to trigger a user-initiated Sparkle check (the native
-    /// update dialog) from the renderer's Settings "Check for updates" button.
-    var onCheckForUpdates: (() -> Void)?
+    // Updater hooks, set by AppDelegate (which owns the SPUUpdater + driver).
+    // The contract-driven flow now runs on the Zig shell: the renderer triggers
+    // checks / downloads / installs and the driver streams status back through
+    // `emitEvent("updater:status", …)`.
+    /// `updater:check` — start a user-initiated check.
+    var onUpdaterCheck: (() -> Void)?
+    /// `updater:downloadAndInstall` — download (if available) or install (if ready).
+    var onUpdaterDownloadAndInstall: (() -> Void)?
+    /// `updater:current` — the driver's latest status snapshot.
+    var onUpdaterCurrent: (() -> [String: Any])?
 
     init(webView: WKWebView, configJSON: String, activeProject: ActiveProject) {
         self.webView = webView
@@ -118,11 +125,20 @@ final class CoreBridge {
             replyToRenderer(id: id, result: [:])
             return true
         case "updater:check":
-            // Renderer's Settings "Check for updates" button — trigger the
-            // native Sparkle dialog. Status is shown by Sparkle's own UI, not
-            // streamed back through updater:status (the Zig shell uses the
-            // native updater, not the contract-driven in-app flow).
-            onCheckForUpdates?()
+            // Start a user-initiated Sparkle check. The custom SPUUserDriver
+            // streams the result back through updater:status events, which the
+            // renderer's contract-driven UI renders (no native Sparkle dialog).
+            onUpdaterCheck?()
+            replyToRenderer(id: id, result: [:])
+            return true
+        case "updater:current":
+            // Snapshot query so the UI can render the right state on mount.
+            replyToRenderer(id: id, result: onUpdaterCurrent?() ?? ["kind": "idle"])
+            return true
+        case "updater:downloadAndInstall":
+            // Renderer's Download / Restart-to-install action; the driver maps
+            // it to the right Sparkle reply for the current stage.
+            onUpdaterDownloadAndInstall?()
             replyToRenderer(id: id, result: [:])
             return true
         case "app:version":
@@ -200,8 +216,10 @@ final class CoreBridge {
     }
 
     /// Deliver an unsolicited event envelope to the renderer.
-    private func emitEvent(_ event: String) {
-        let envelope: [String: Any] = ["v": 1, "event": event, "payload": [:]]
+    /// Core/host -> renderer event. `internal` so the updater driver can emit
+    /// `updater:status` through the same delivery rule as everything else.
+    func emitEvent(_ event: String, payload: [String: Any] = [:]) {
+        let envelope: [String: Any] = ["v": 1, "event": event, "payload": payload]
         guard let data = try? JSONSerialization.data(withJSONObject: envelope),
             let json = String(data: data, encoding: .utf8)
         else { return }
