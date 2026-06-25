@@ -32,6 +32,11 @@ export const SAMPLE_ROOT = '/Skrive/Parity Sample';
  *  (NSOpenPanel) — CoreBridge handles it, the core never sees it. */
 export const NATIVE_COMMANDS = new Set<string>([
   'app:version',
+  // The pre-quit flush ack. Must route to the host (which calls finishFlush
+  // to release the paused quit) — without this it falls through to the mock
+  // transport, the host never sees the ack, and every Cmd-Q waits the full
+  // 2s flush backstop. Fire-and-forget by contract; the host sends no reply.
+  'app:flushComplete',
   'diag:poison',
   'fs:readFile',
   'fs:writeFile',
