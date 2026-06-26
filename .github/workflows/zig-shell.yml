@@ -73,8 +73,7 @@ jobs:
         run: bun run start:build
 
       # --- Gates (block the release) ---------------------------------------
-      # The Zig-relevant typecheck is shared + app (the shared renderer); shell/
-      # is the Electron product and would pull in the napi diff module.
+      # Typecheck the renderer and the shared contracts (shared + app).
       - name: Gate — typecheck (shared + app)
         run: |
           bunx tsc -p shared/tsconfig.json

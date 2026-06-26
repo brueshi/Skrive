@@ -1,5 +1,5 @@
 // Build-resolution shim, aliased in for `decode-named-character-reference`
-// (see electron.vite.config.ts). That package — a transitive dependency of
+// (see vite.config.ts). That package — a transitive dependency of
 // `mdast-util-from-markdown` via micromark — ships a DOM build, selected by its
 // `browser` export condition, that calls `document.createElement` at module
 // load to decode HTML entities. The lint engine runs in a Web Worker, which is
