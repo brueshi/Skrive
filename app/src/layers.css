@@ -1,0 +1,12 @@
+/* Cascade-layer order for the component system (SKR-107). Declared here, and
+ * imported first in main.tsx, so the order is fixed before any layered rule
+ * regardless of CSS injection order.
+ *
+ * The existing global stylesheet (index.css) is deliberately UNLAYERED: an
+ * unlayered rule beats every layered one, so the current app styling keeps
+ * winning untouched while the component library grows underneath it. New
+ * primitives live in `components`; a consumer override (a passed-through
+ * className, unlayered, or one placed in `overrides`) beats them
+ * deterministically. `tokens` and `base` are reserved for when we layer more
+ * of the sheet later. */
+@layer tokens, base, components, overrides;

@@ -1,9 +1,11 @@
+import './layers.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { perfEnabled } from './lib/perf';
 import { installCrashLog } from './lib/crash-log';
 import './index.css';
+import './components/ui/tokens.css';
 
 // Forward uncaught renderer errors to the host's local crash log. Installed
 // before render so a crash during mount is still captured.

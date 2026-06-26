@@ -1,0 +1,22 @@
+/* Component-tier design tokens (SKR-107). The knobs primitives consume,
+ * expressed in terms of the semantic tokens in index.css. Primitives read
+ * these (never the raw semantic values), so a primitive's look can be retuned
+ * in one place and a future theme can reach the component layer without
+ * touching component code.
+ *
+ * No `light-dark()` here: these reference semantic tokens that already resolve
+ * per scheme, so the component tier is scheme-agnostic by construction. */
+:root {
+  /* Button — design lifted from the existing .modal-button language. */
+  --button-radius: var(--skrive-radius-md);
+  --button-font-size: 0.8125rem;
+  --button-pad-y: 0.5rem;
+  --button-pad-x: 1rem;
+  --button-fg: var(--skrive-fg);
+  --button-bg: transparent;
+  --button-border: var(--skrive-rule);
+  --button-primary-fg: var(--skrive-bg);
+  --button-primary-bg: var(--skrive-fg);
+  --button-danger-fg: var(--skrive-danger);
+  --button-danger-bg-hover: var(--skrive-danger-fill);
+}
