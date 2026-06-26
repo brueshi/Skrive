@@ -157,6 +157,13 @@ export class BlockSurface {
       }
       return;
     }
+    // Enter is handled here (not beforeinput): preventDefault on keydown reliably
+    // stops the browser's own newline, so the block splits exactly once.
+    if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      this.applyEnter();
+      return;
+    }
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
     const key = e.key.toLowerCase();
     if (key === 'b') {
@@ -452,8 +459,9 @@ export class BlockSurface {
       e.preventDefault();
       this.applyInsertText(e.data);
     } else if (type === 'insertParagraph' || type === 'insertLineBreak') {
+      // Enter is handled in keydown; swallow any native paragraph so it can't
+      // produce a second line break.
       e.preventDefault();
-      this.applyEnter();
     } else if (type === 'deleteContentBackward') {
       e.preventDefault();
       this.applyDeleteBackward();
@@ -925,7 +933,13 @@ export class BlockSurface {
     if (this.debounceTimer != null) clearTimeout(this.debounceTimer);
     this.debounceTimer = window.setTimeout(() => {
       this.debounceTimer = null;
-      this.onDocChange?.(this.doc);
+      // Run the cold path (serialize + store write + lint + app re-render) during
+      // an idle gap so it never lands between keystrokes — the "type 3, pause,
+      // 4th" hitch. flush() (Cmd-S / quit) still runs it synchronously.
+      const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void })
+        .requestIdleCallback;
+      if (typeof ric === 'function') ric(() => this.onDocChange?.(this.doc), { timeout: 1000 });
+      else this.onDocChange?.(this.doc);
     }, SERIALIZE_DEBOUNCE_MS);
   }
 }

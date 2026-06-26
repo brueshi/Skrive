@@ -16,6 +16,10 @@
   box-sizing: border-box;
   outline: none;
   caret-color: var(--skrive-fg);
+  /* Render spaces verbatim — without this a trailing space collapses and does
+     not paint until the next character (the "space doesn't show" bug). */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
   font-family: var(--skrive-editor-font);
   font-size: var(--skrive-editor-font-size);
   line-height: var(--skrive-editor-line-height);
