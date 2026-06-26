@@ -20,6 +20,8 @@ import { createRoot } from 'react-dom/client';
 import { RichEditor } from '../components/editor/rich/RichEditor';
 import { Editor } from '../components/editor/Editor';
 import { mountBespoke, type BespokeVariant } from './bespoke/surface';
+import { BlockSurface } from '../lib/blocksurface';
+import { parseDocument, serializeDocument, type Document as BlockDocument } from '../lib/blockmodel';
 import {
   buildAdversarialDoc,
   enableLatencyProbe,
@@ -31,7 +33,7 @@ import {
 import '../index.css';
 import './harness.css';
 
-type SurfaceId = 'rich' | 'text' | 'bespoke-single' | 'bespoke-perblock';
+type SurfaceId = 'rich' | 'text' | 'bespoke-single' | 'bespoke-perblock' | 'block';
 
 type HarnessApi = {
   surface: SurfaceId;
@@ -57,7 +59,7 @@ function readParams() {
   const q = new URLSearchParams(window.location.search);
   const raw = q.get('surface');
   const surface: SurfaceId =
-    raw === 'text' || raw === 'bespoke-single' || raw === 'bespoke-perblock' ? raw : 'rich';
+    raw === 'text' || raw === 'bespoke-single' || raw === 'bespoke-perblock' || raw === 'block' ? raw : 'rich';
   const blocks = Math.max(1, Number(q.get('blocks') ?? '200') | 0);
   const anchorEvery = Math.max(0, Number(q.get('anchors') ?? '0') | 0);
   const seed = q.get('seed') ? Number(q.get('seed')) | 0 : undefined;
@@ -115,6 +117,8 @@ function Harness({ surface, body }: { surface: SurfaceId; body: string }) {
     <div className="harness-surface">
       {bespokeVariant ? (
         <BespokeMount body={body} variant={bespokeVariant} />
+      ) : surface === 'block' ? (
+        <BlockSurfaceMount body={body} />
       ) : surface === 'rich' ? (
         <RichEditor body={body} onChange={() => {}} />
       ) : (
@@ -132,6 +136,34 @@ function BespokeMount({ body, variant }: { body: string; variant: BespokeVariant
   useEffect(() => {
     if (ref.current) mountBespoke(ref.current, body, variant);
   }, [body, variant]);
+  return <div ref={ref} className="bespoke-root" />;
+}
+
+// Mounts the real Stage 3 surface. Exposes it on window so the matrix can read
+// the serialized Markdown back for the fidelity check.
+declare global {
+  interface Window {
+    __skriveBlockSurface?: {
+      serialize(): string;
+      blockCount(): number;
+    };
+  }
+}
+function BlockSurfaceMount({ body }: { body: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    const doc: BlockDocument = parseDocument(body);
+    const surface = new BlockSurface({ container: ref.current, doc });
+    window.__skriveBlockSurface = {
+      serialize: () => serializeDocument(surface.getDocument()),
+      blockCount: () => surface.getDocument().blocks.length
+    };
+    return () => {
+      surface.destroy();
+      delete window.__skriveBlockSurface;
+    };
+  }, [body]);
   return <div ref={ref} className="bespoke-root" />;
 }
 
