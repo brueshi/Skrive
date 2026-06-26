@@ -338,6 +338,35 @@ test('Stage 3f: Enter in a quote adds a line', async ({ page }) => {
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
+test('Stage 3g: insert a table and fill cells with Tab', async ({ page }) => {
+  await open(page, 5);
+  await insertViaMenu(page, 'table');
+  await page.keyboard.type('H1');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('H2');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('a');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('b');
+  await page.waitForTimeout(80);
+  const md = await serialized(page);
+  expect(md, 'header row').toContain('| H1 | H2 |');
+  expect(md, 'body row').toContain('| a | b |');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('Stage 3g: marks work inside a table cell', async ({ page }) => {
+  await open(page, 5);
+  await insertViaMenu(page, 'table');
+  await page.keyboard.type('BOLDCELL');
+  for (let i = 0; i < 8; i++) await page.keyboard.press('Shift+ArrowLeft');
+  await page.keyboard.press('ControlOrMeta+b');
+  await page.waitForTimeout(80);
+  const md = await serialized(page);
+  expect(md, 'bold applied in the cell').toContain('**BOLDCELL**');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
 test('Stage 3a: IME composition lands in the model', async ({ page, context }) => {
   await open(page, 200);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');

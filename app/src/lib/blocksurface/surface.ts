@@ -12,7 +12,7 @@
 
 import { generateBlockId, type BlockNode, type Document, type InlineNode } from '../blockmodel';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto } from './render';
-import { caretContext, focusedLeafElement, leafCaretContext, setCaret, setSelectionRange } from './selection';
+import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, setCaret, setSelectionRange } from './selection';
 import { findBlockById, updateBlockById } from './tree';
 import { enterInContainer, exitContainer, type StructuralResult } from './structural';
 import {
@@ -37,6 +37,7 @@ export type BlockTypeSpec =
   | { kind: 'bullet_list' }
   | { kind: 'ordered_list' }
   | { kind: 'code' }
+  | { kind: 'table' }
   | { kind: 'divider' };
 
 /** What the insert (slash) menu needs: where to anchor, and the query typed after
@@ -140,6 +141,15 @@ export class BlockSurface {
 
   private onKeyDown = (event: Event): void => {
     const e = event as KeyboardEvent;
+    // Tab moves between table cells (no modifier).
+    if (e.key === 'Tab') {
+      const cell = this.cellTarget();
+      if (cell) {
+        e.preventDefault();
+        this.moveCell(cell, e.shiftKey ? -1 : 1);
+      }
+      return;
+    }
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
     const key = e.key.toLowerCase();
     if (key === 'b') {
@@ -196,6 +206,16 @@ export class BlockSurface {
   }
 
   private applyToSelection(transform: (inline: InlineNode[], start: number, end: number) => InlineNode[]): void {
+    const cell = this.cellTarget();
+    if (cell) {
+      if (cell.collapsed || cell.spansCells) return;
+      const inline = transform(cell.inline, cell.start, cell.end);
+      this.commitCell(cell, inline, cell.end);
+      setSelectionRange(cell.cellEl, cell.start, cell.end);
+      this.scheduleSerialize();
+      this.emitSelection();
+      return;
+    }
     const t = this.leafTarget();
     if (!t || t.collapsed || t.spansBlocks || !isInlineText(t.leaf)) return;
     const inline = transform(t.leaf.inline, t.start, t.end);
@@ -251,6 +271,10 @@ export class BlockSurface {
       case 'code':
         next = { type: 'code_block', ...base, lang: '', meta: null, fence: null, text: inlinePlainText(inline) };
         break;
+      case 'table':
+        // A starter 2x2 table (header row + one body row), empty cells.
+        next = { type: 'table', ...base, align: [null, null], rows: [[[], []], [[], []]] };
+        break;
       case 'paragraph':
       default:
         next = { type: 'paragraph', ...base, inline };
@@ -261,10 +285,17 @@ export class BlockSurface {
     const newEl = renderBlock(next);
     cur.blockEl.replaceWith(newEl);
     this.registry.set(cur.block.id, newEl);
-    const caretEl = caretLeafId
-      ? ((newEl.querySelector(`[${BLOCK_ID_ATTR}="${caretLeafId}"]`) as HTMLElement | null) ?? newEl)
-      : newEl;
-    setCaret(caretEl, Math.min(cur.caret, inlineLength(inline)));
+    this.renderedFrom.set(cur.block.id, next);
+
+    if (spec.kind === 'table') {
+      const firstCell = newEl.querySelector('[data-cell-row="0"][data-cell-col="0"]') as HTMLElement | null;
+      if (firstCell) setCaret(firstCell, 0);
+    } else {
+      const caretEl = caretLeafId
+        ? ((newEl.querySelector(`[${BLOCK_ID_ATTR}="${caretLeafId}"]`) as HTMLElement | null) ?? newEl)
+        : newEl;
+      setCaret(caretEl, Math.min(cur.caret, inlineLength(inline)));
+    }
     this.scheduleSerialize();
   }
 
@@ -364,6 +395,24 @@ export class BlockSurface {
   private emitSelection(): void {
     const cb = this.selectionCb;
     if (!cb) return;
+    const cell = this.cellTarget();
+    if (cell) {
+      const sel = window.getSelection();
+      if (cell.collapsed || cell.spansCells || !sel || sel.rangeCount === 0) {
+        cb(null);
+        return;
+      }
+      cb({
+        rect: sel.getRangeAt(0).getBoundingClientRect(),
+        marks: {
+          strong: rangeHasMark(cell.inline, cell.start, cell.end, 'strong'),
+          em: rangeHasMark(cell.inline, cell.start, cell.end, 'em'),
+          code: rangeHasMark(cell.inline, cell.start, cell.end, 'code'),
+          link: rangeHasLink(cell.inline, cell.start, cell.end)
+        }
+      });
+      return;
+    }
     const t = this.leafTarget();
     if (!t || t.collapsed || t.spansBlocks || !isInlineText(t.leaf)) {
       cb(null);
@@ -440,6 +489,16 @@ export class BlockSurface {
   };
 
   private applyInsertText(text: string): void {
+    const cell = this.cellTarget();
+    if (cell) {
+      if (cell.spansCells) return;
+      let inline = cell.inline;
+      if (!cell.collapsed) inline = deleteRangeInInline(inline, cell.start, cell.end);
+      inline = insertTextInInline(inline, cell.start, text);
+      this.commitCell(cell, inline, cell.start + text.length);
+      this.scheduleSerialize();
+      return;
+    }
     const t = this.leafTarget();
     if (!t || t.spansBlocks) return;
     if (t.leaf.type === 'code_block') {
@@ -457,6 +516,15 @@ export class BlockSurface {
   }
 
   private applyDeleteBackward(): void {
+    const cell = this.cellTarget();
+    if (cell) {
+      if (cell.spansCells || (cell.collapsed && cell.start === 0)) return; // no merge across cells
+      const from = cell.collapsed ? cell.start - 1 : cell.start;
+      const to = cell.collapsed ? cell.start : cell.end;
+      this.commitCell(cell, deleteRangeInInline(cell.inline, from, to), from);
+      this.scheduleSerialize();
+      return;
+    }
     const t = this.leafTarget();
     if (!t || t.spansBlocks) return;
 
@@ -484,6 +552,16 @@ export class BlockSurface {
   }
 
   private applyDeleteForward(): void {
+    const cell = this.cellTarget();
+    if (cell) {
+      const cellLen = inlineLength(cell.inline);
+      if (cell.spansCells || (cell.collapsed && cell.start >= cellLen)) return;
+      const from = cell.start;
+      const to = cell.collapsed ? cell.start + 1 : cell.end;
+      this.commitCell(cell, deleteRangeInInline(cell.inline, from, to), from);
+      this.scheduleSerialize();
+      return;
+    }
     const t = this.leafTarget();
     if (!t || t.spansBlocks) return;
     const len = t.leaf.type === 'code_block' ? t.leaf.text.length : isInlineText(t.leaf) ? inlineLength(t.leaf.inline) : 0;
@@ -638,6 +716,76 @@ export class BlockSurface {
     const leaf = findBlockById(this.doc.blocks, id);
     if (!leaf) return null;
     return { leaf, blockEl: ctx.blockEl, start: ctx.start, end: ctx.end, collapsed: ctx.collapsed, spansBlocks: ctx.spansBlocks };
+  }
+
+  // The focused table cell, addressed by (table id, row, col). Cells are inline
+  // regions, not blocks, so they get their own target type parallel to leafTarget.
+  private cellTarget(): {
+    tableId: string;
+    row: number;
+    col: number;
+    cellEl: HTMLElement;
+    inline: InlineNode[];
+    start: number;
+    end: number;
+    collapsed: boolean;
+    spansCells: boolean;
+  } | null {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    let node: Node | null = sel.getRangeAt(0).startContainer;
+    let cellEl: HTMLElement | null = null;
+    while (node && node !== this.container) {
+      if (node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).dataset.cellRow != null) {
+        cellEl = node as HTMLElement;
+        break;
+      }
+      node = node.parentNode;
+    }
+    if (!cellEl) return null;
+    const tableEl = cellEl.closest(`[${BLOCK_ID_ATTR}]`) as HTMLElement | null;
+    const tableId = tableEl?.getAttribute(BLOCK_ID_ATTR);
+    if (!tableId) return null;
+    const table = findBlockById(this.doc.blocks, tableId);
+    if (!table || table.type !== 'table') return null;
+    const row = Number(cellEl.dataset.cellRow);
+    const col = Number(cellEl.dataset.cellCol);
+    const inline = table.rows[row]?.[col] ?? [];
+    const range = sel.getRangeAt(0);
+    const start = flatOffsetFromDOM(cellEl, range.startContainer, range.startOffset);
+    const collapsed = range.collapsed;
+    const endInCell = cellEl.contains(range.endContainer);
+    const end = collapsed || !endInCell ? start : flatOffsetFromDOM(cellEl, range.endContainer, range.endOffset);
+    return { tableId, row, col, cellEl, inline, start, end, collapsed, spansCells: !endInCell };
+  }
+
+  private commitCell(c: { tableId: string; row: number; col: number; cellEl: HTMLElement }, inline: InlineNode[], caret: number): void {
+    this.doc = {
+      ...this.doc,
+      blocks: updateBlockById(this.doc.blocks, c.tableId, (b) => {
+        if (b.type !== 'table') return b;
+        const rows = b.rows.map((r, ri) => (ri === c.row ? r.map((cell, ci) => (ci === c.col ? inline : cell)) : r));
+        return { ...b, rows, dirty: true };
+      })
+    };
+    renderInlineInto(c.cellEl, inline);
+    setCaret(c.cellEl, caret);
+  }
+
+  // Move the caret to the next/previous cell in row-major order. Off the ends it
+  // stops (row/column insertion is a later refinement).
+  private moveCell(cell: { tableId: string; row: number; col: number }, dir: 1 | -1): void {
+    const table = findBlockById(this.doc.blocks, cell.tableId);
+    if (!table || table.type !== 'table') return;
+    const cols = table.rows[0]?.length ?? 0;
+    if (cols === 0) return;
+    const flat = cell.row * cols + cell.col + dir;
+    if (flat < 0 || flat >= table.rows.length * cols) return;
+    const nr = Math.floor(flat / cols);
+    const nc = flat % cols;
+    const tableEl = this.leafElementById(cell.tableId);
+    const target = tableEl?.querySelector(`[data-cell-row="${nr}"][data-cell-col="${nc}"]`) as HTMLElement | null;
+    if (target) setCaret(target, 0);
   }
 
   private leafElementById(id: string): HTMLElement | null {
