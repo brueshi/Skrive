@@ -77,6 +77,23 @@ export function deleteRangeInInline(nodes: InlineNode[], start: number, end: num
   return out;
 }
 
+/** Total flat length of an inline run (text only; matches the offset model). */
+export function inlineLength(nodes: InlineNode[]): number {
+  let n = 0;
+  for (const node of nodes) if (isText(node)) n += node.text.length;
+  return n;
+}
+
+/** Split inline content at a flat offset into [left, right], each preserving its
+ *  runs' marks. Built from the delete primitive so the split obeys the same
+ *  offset/mark rules as every other edit. */
+export function splitInline(nodes: InlineNode[], offset: number): [InlineNode[], InlineNode[]] {
+  const len = inlineLength(nodes);
+  const left = deleteRangeInInline(nodes, offset, len);
+  const right = deleteRangeInInline(nodes, 0, offset);
+  return [left, right];
+}
+
 function markEl(tag: string, marks: InlineMarks): InlineMarks {
   switch (tag) {
     case 'strong':

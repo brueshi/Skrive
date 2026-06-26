@@ -10,10 +10,10 @@
 // are no-ops until Stage 3b — never letting the browser mutate structure behind
 // the model's back.
 
-import type { BlockNode, Document, InlineNode } from '../blockmodel';
-import { BLOCK_ID_ATTR, BlockViewRegistry, renderDocument, renderInlineInto } from './render';
+import { generateBlockId, type BlockNode, type Document, type InlineNode } from '../blockmodel';
+import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto } from './render';
 import { caretContext, focusedBlockElement, setCaret } from './selection';
-import { deleteRangeInInline, insertTextInInline, readInlineFromDOM } from './inline-ops';
+import { deleteRangeInInline, inlineLength, insertTextInInline, readInlineFromDOM, splitInline } from './inline-ops';
 
 const SERIALIZE_DEBOUNCE_MS = 400;
 
@@ -84,12 +84,18 @@ export class BlockSurface {
     if (type === 'insertText' && typeof e.data === 'string') {
       e.preventDefault();
       this.applyInsertText(e.data);
+    } else if (type === 'insertParagraph' || type === 'insertLineBreak') {
+      e.preventDefault();
+      this.applyEnter();
     } else if (type === 'deleteContentBackward') {
       e.preventDefault();
       this.applyDeleteBackward();
+    } else if (type === 'deleteContentForward') {
+      e.preventDefault();
+      this.applyDeleteForward();
     } else if (type.startsWith('insert') || type.startsWith('delete')) {
-      // Unmodeled structural edit (Enter, forward/word delete) — block it so the
-      // browser cannot mutate structure behind the model. Implemented in 3b.
+      // Still-unmodeled edits (word/line delete) — block them so the browser
+      // cannot mutate structure behind the model. Mapped to commands later.
       e.preventDefault();
     }
   };
@@ -142,22 +148,126 @@ export class BlockSurface {
     const found = this.findBlock(ctx.blockEl);
     if (!found || !isInlineText(found.block) || ctx.spansBlocks) return;
 
+    if (ctx.collapsed && ctx.start === 0) {
+      this.mergeWithPrevious(found.index, ctx.blockEl);
+      return;
+    }
+
     let inline = found.block.inline;
     let caret: number;
     if (!ctx.collapsed) {
       inline = deleteRangeInInline(inline, ctx.start, ctx.end);
       caret = ctx.start;
-    } else if (ctx.start > 0) {
+    } else {
       inline = deleteRangeInInline(inline, ctx.start - 1, ctx.start);
       caret = ctx.start - 1;
-    } else {
-      return; // caret at block start: boundary merge is Stage 3b
     }
 
     this.commitBlock(found.index, { ...found.block, inline, dirty: true });
     renderInlineInto(ctx.blockEl, inline);
     setCaret(ctx.blockEl, caret);
     this.scheduleSerialize();
+  }
+
+  private applyDeleteForward(): void {
+    const ctx = caretContext(this.container, this.registry);
+    if (!ctx) return;
+    const found = this.findBlock(ctx.blockEl);
+    if (!found || !isInlineText(found.block) || ctx.spansBlocks) return;
+
+    const len = inlineLength(found.block.inline);
+    if (ctx.collapsed && ctx.start >= len) {
+      this.mergeWithNext(found.index, ctx.blockEl);
+      return;
+    }
+
+    const inline = ctx.collapsed
+      ? deleteRangeInInline(found.block.inline, ctx.start, ctx.start + 1)
+      : deleteRangeInInline(found.block.inline, ctx.start, ctx.end);
+    this.commitBlock(found.index, { ...found.block, inline, dirty: true });
+    renderInlineInto(ctx.blockEl, inline);
+    setCaret(ctx.blockEl, ctx.start);
+    this.scheduleSerialize();
+  }
+
+  // Enter: split the focused block at the caret. The original keeps its id and the
+  // first half; the new block mints a fresh id and takes the second half (the
+  // id-survival contract: split mints).
+  private applyEnter(): void {
+    const ctx = caretContext(this.container, this.registry);
+    if (!ctx) return;
+    const found = this.findBlock(ctx.blockEl);
+    if (!found || !isInlineText(found.block) || ctx.spansBlocks) return;
+
+    let inline = found.block.inline;
+    if (!ctx.collapsed) inline = deleteRangeInInline(inline, ctx.start, ctx.end);
+    const [left, right] = splitInline(inline, ctx.start);
+
+    const leftBlock: BlockNode = { ...found.block, inline: left, dirty: true };
+    const level = found.block.type === 'heading' ? found.block.level : 1;
+    const rightBlock = this.newInlineBlock(found.block.type, right, level);
+
+    const blocks = this.doc.blocks.slice();
+    blocks.splice(found.index, 1, leftBlock, rightBlock);
+    this.doc = { ...this.doc, blocks };
+
+    renderInlineInto(ctx.blockEl, left);
+    const rightEl = renderBlock(rightBlock);
+    ctx.blockEl.after(rightEl);
+    this.registry.set(rightBlock.id, rightEl);
+    setCaret(rightEl, 0);
+    this.scheduleSerialize();
+  }
+
+  // Backspace at a block start: append this block's content to the previous one.
+  // The previous block is the survivor and keeps its id (merge keeps survivor);
+  // this block is removed.
+  private mergeWithPrevious(index: number, currEl: HTMLElement): void {
+    if (index === 0) return;
+    const prev = this.doc.blocks[index - 1]!;
+    const curr = this.doc.blocks[index]!;
+    if (!isInlineText(prev) || !isInlineText(curr)) return;
+
+    const joinOffset = inlineLength(prev.inline);
+    const merged: BlockNode = { ...prev, inline: [...prev.inline, ...curr.inline], dirty: true };
+    const blocks = this.doc.blocks.slice();
+    blocks.splice(index - 1, 2, merged);
+    this.doc = { ...this.doc, blocks };
+
+    const prevEl = this.registry.get(prev.id);
+    this.registry.delete(curr.id);
+    currEl.remove();
+    if (prevEl) {
+      renderInlineInto(prevEl, merged.inline);
+      setCaret(prevEl, joinOffset);
+    }
+    this.scheduleSerialize();
+  }
+
+  // Forward-delete at a block end: append the next block's content to this one.
+  // This block survives and keeps its id; the next block is removed.
+  private mergeWithNext(index: number, currEl: HTMLElement): void {
+    const curr = this.doc.blocks[index]!;
+    const next = this.doc.blocks[index + 1];
+    if (!next || !isInlineText(curr) || !isInlineText(next)) return;
+
+    const joinOffset = inlineLength(curr.inline);
+    const merged: BlockNode = { ...curr, inline: [...curr.inline, ...next.inline], dirty: true };
+    const blocks = this.doc.blocks.slice();
+    blocks.splice(index, 2, merged);
+    this.doc = { ...this.doc, blocks };
+
+    const nextEl = this.registry.get(next.id);
+    this.registry.delete(next.id);
+    nextEl?.remove();
+    renderInlineInto(currEl, merged.inline);
+    setCaret(currEl, joinOffset);
+    this.scheduleSerialize();
+  }
+
+  private newInlineBlock(type: 'paragraph' | 'heading', inline: InlineNode[], level: number): BlockNode {
+    const base = { id: generateBlockId(), durable: false, src: null, gapBefore: null, dirty: true };
+    return type === 'heading' ? { type: 'heading', ...base, level, inline } : { type: 'paragraph', ...base, inline };
   }
 
   // --- model plumbing ------------------------------------------------------
