@@ -86,6 +86,45 @@ test('Stage 3a: the model stays authoritative and faithful', async ({ page }) =>
   expect(serializeDocument(parseDocument(after)), 'edited output is round-trip stable').toBe(after);
 });
 
+test('Stage 3b: Enter splits a block and Backspace merges it back', async ({ page }) => {
+  await open(page, 5);
+  const before = await page.evaluate(() => window.__skriveBlockSurface!.blockCount());
+
+  // Caret at the end of the first block, split with Enter, type into the new block.
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('NEWBLOCKZZ', { delay: 8 });
+  await page.waitForTimeout(80);
+
+  expect(await page.evaluate(() => window.__skriveBlockSurface!.blockCount())).toBe(before + 1);
+  let md = await serialized(page);
+  expect(md, 'split block content present').toContain('NEWBLOCKZZ');
+  expect(serializeDocument(parseDocument(md)), 'stable after split').toBe(md);
+
+  // Backspace at the start of the new block merges it back into the first.
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(80);
+
+  expect(await page.evaluate(() => window.__skriveBlockSurface!.blockCount())).toBe(before);
+  md = await serialized(page);
+  expect(md, 'merged content retained').toContain('NEWBLOCKZZ');
+  expect(serializeDocument(parseDocument(md)), 'stable after merge').toBe(md);
+});
+
+test('Stage 3b: Delete at a block end merges the next block in', async ({ page }) => {
+  await open(page, 5);
+  const before = await page.evaluate(() => window.__skriveBlockSurface!.blockCount());
+
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK'); // caret at end of block 1
+  await page.keyboard.press('Delete'); // pull block 2 up into block 1
+  await page.waitForTimeout(80);
+
+  expect(await page.evaluate(() => window.__skriveBlockSurface!.blockCount())).toBe(before - 1);
+  const md = await serialized(page);
+  expect(serializeDocument(parseDocument(md)), 'stable after forward-merge').toBe(md);
+});
+
 test('Stage 3a: IME composition lands in the model', async ({ page, context }) => {
   await open(page, 200);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');

@@ -3,7 +3,12 @@
 // runs on every keystroke, independent of a DOM.
 
 import { describe, it, expect } from 'vitest';
-import { deleteRangeInInline, insertTextInInline } from '../../../src/lib/blocksurface/inline-ops';
+import {
+  deleteRangeInInline,
+  inlineLength,
+  insertTextInInline,
+  splitInline
+} from '../../../src/lib/blocksurface/inline-ops';
 import type { InlineNode } from '../../../src/lib/blockmodel';
 
 const text = (t: string, marks: InlineNode['marks'] = {}): InlineNode => ({ kind: 'text', text: t, marks });
@@ -62,5 +67,28 @@ describe('deleteRangeInInline', () => {
   it('is a no-op when start >= end', () => {
     const nodes = [text('x')];
     expect(deleteRangeInInline(nodes, 2, 2)).toBe(nodes);
+  });
+});
+
+describe('inlineLength', () => {
+  it('sums text run lengths', () => {
+    expect(inlineLength([text('ab'), text('cde', { strong: true })])).toBe(5);
+    expect(inlineLength([])).toBe(0);
+  });
+});
+
+describe('splitInline', () => {
+  it('splits a run at the offset', () => {
+    expect(splitInline([text('hello')], 2)).toEqual([[text('he')], [text('llo')]]);
+  });
+
+  it('preserves marks on both halves across a run boundary', () => {
+    const out = splitInline([text('ab'), text('cd', { em: true })], 3);
+    expect(out).toEqual([[text('ab'), text('c', { em: true })], [text('d', { em: true })]]);
+  });
+
+  it('splits at the start (empty left) and end (empty right)', () => {
+    expect(splitInline([text('hi')], 0)).toEqual([[], [text('hi')]]);
+    expect(splitInline([text('hi')], 2)).toEqual([[text('hi')], []]);
   });
 });
