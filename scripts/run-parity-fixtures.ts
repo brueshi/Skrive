@@ -1,12 +1,11 @@
-// Replay the parity corpus against a dispatcher and diff normalized
-// responses. Default dispatcher is the in-process Electron-shell handlers
-// (electron stubbed via the preload); a foreign dispatcher (the Zig core)
-// is driven over stdin/stdout with `--exec "<command>"`, one request
-// JSON per line in, one response JSON per line out.
+// Replay the parity corpus against the Zig core and diff normalized
+// responses. The core's fixture_main harness is driven over stdin/stdout
+// (one request JSON per line in, one response JSON per line out) — by
+// default the freshly built zig-out/bin/fixture_main, overridable with
+// `--exec "<command>"`.
 //
-// Run with:  bun --preload ./scripts/parity/preload.ts \
-//                ./scripts/run-parity-fixtures.ts [--exec "<cmd>"]
-// (or `bun run parity:check`).
+// Run with:  bun ./scripts/run-parity-fixtures.ts [--exec "<cmd>"]
+// (or `bun run parity:check`, which builds the core first).
 
 import { spawn } from 'node:child_process';
 import {
@@ -20,18 +19,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import {
-  expandRequest,
-  groups,
-  inProcessDispatcher,
-  normalize,
-  withRoot
-} from './parity/corpus';
+import { expandRequest, groups, normalize, withRoot } from './parity/corpus';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
 const sampleProject = path.join(repoRoot, 'shell-zig/fixtures/sample-project');
 const fixturesDir = path.join(repoRoot, 'shell-zig/fixtures');
+const defaultExec = path.join(repoRoot, 'shell-zig/core/zig-out/bin/fixture_main');
 
 type Dispatcher = {
   dispatch: (request: string) => Promise<string>;
@@ -57,9 +51,9 @@ function execDispatcher(command: string): Dispatcher {
   };
 }
 
-function parseArgs(): { exec: string | null } {
+function parseArgs(): { exec: string } {
   const i = process.argv.indexOf('--exec');
-  return { exec: i !== -1 ? (process.argv[i + 1] ?? null) : null };
+  return { exec: i !== -1 ? (process.argv[i + 1] ?? defaultExec) : defaultExec };
 }
 
 async function main(): Promise<void> {
@@ -68,9 +62,7 @@ async function main(): Promise<void> {
   cpSync(sampleProject, tempRoot, { recursive: true });
   const roots = [tempRoot, realpathSync(tempRoot)];
 
-  const dispatcher: Dispatcher = exec
-    ? execDispatcher(exec)
-    : { dispatch: inProcessDispatcher() };
+  const dispatcher: Dispatcher = execDispatcher(exec);
 
   type Mismatch = { namespace: string; name: string; expected: string; got: string };
   const mismatches: Mismatch[] = [];

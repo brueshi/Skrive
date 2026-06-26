@@ -1,11 +1,10 @@
 # Parity corpus
 
-The cross-implementation oracle for the shell command contract. Each
-`<namespace>.jsonl` file holds one `{ name, request, response }` per line:
-a request envelope and the **normalized** response the Electron shell
-produced for it. Any conforming dispatcher — the Electron shell today,
-the Zig core later — must reproduce these responses byte-for-byte after
-normalization. This is the harness the Stage 2 Zig work validates against.
+The frozen oracle for the shell command contract. Each `<namespace>.jsonl`
+file holds one `{ name, request, response }` per line: a request envelope
+and the **normalized** response the contract requires. The goldens were
+captured from the original reference shell; they now guard the Zig core,
+which must reproduce every response byte-for-byte after normalization.
 
 ## Files
 
@@ -50,35 +49,25 @@ matches a foreign dispatcher:
 32 MiB), so its fixture carries the sentinel `__SKRIVE_OVERSIZE__` and
 the harness expands it to a real oversize request at dispatch time.
 
-## Regenerate
-
-```
-bun run parity:gen
-```
-
-Drives the real Electron-shell handlers (with `electron` stubbed via
-`scripts/parity/preload.ts`) over a fresh copy of `sample-project/` and
-rewrites every `<namespace>.jsonl`. Regenerate only when a command's
-contract intentionally changes — and review the diff, since it is the
-spec made concrete.
-
-## Replay against the Electron shell
+## Replay
 
 ```
 bun run parity:check
 ```
 
-Replays the corpus through the in-process JS dispatcher and diffs
-normalized responses. Exits non-zero on any mismatch.
+Builds the Zig core and drives its `fixture_main` harness — a process that
+reads one request-envelope JSON per line on stdin and writes one
+response-envelope JSON per line on stdout — over a fresh copy of
+`sample-project/`, substituting a real project root into each request and
+diffing normalized responses against the goldens. Exits non-zero on any
+mismatch. Point it at a different dispatcher with
+`bun run parity:check -- --exec "<command>"`.
 
-## Replay against a foreign (Zig) dispatcher
+## Regenerate
 
-```
-bun run parity:check -- --exec "<command>"
-```
-
-`<command>` is a process that reads one request-envelope JSON per line on
-stdin and writes one response-envelope JSON per line on stdout (the Zig
-core's `fixture_main` harness, Stage 2.1). The runner substitutes a real
-project root into each request, so the foreign process operates on the
-same on-disk sample tree the JS run used. Same normalization, same diff.
+The goldens are frozen. They were captured from the original reference
+shell, which was removed when Electron was retired (SKR-106), so there is
+no regenerator today: a command's contract changing intentionally means
+updating the affected `<namespace>.jsonl` lines by hand — review the diff,
+since it is the spec made concrete. A Zig-core-driven regenerator can be
+re-added against `fixture_main` if that churn becomes frequent.

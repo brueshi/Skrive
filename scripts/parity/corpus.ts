@@ -1,6 +1,7 @@
-// The parity corpus: the ordered request groups, the normalization that
-// makes responses machine-independent, and the in-process dispatcher
-// that drives the real shell handlers (electron stubbed via preload).
+// The parity corpus: the ordered request groups and the normalization that
+// makes responses machine-independent. The Zig core is the sole dispatcher,
+// driven over stdin/stdout by run-parity-fixtures.ts (the foreign-dispatcher
+// contract in shell-zig/fixtures/README.md).
 //
 // Determinism contract — a fixture must be reproducible on any machine
 // and matchable against a foreign (Zig) dispatcher:
@@ -14,26 +15,13 @@
 //   - content hashes (SHA-256) ARE kept — they are the strong
 //     cross-implementation signal that two cores read/wrote byte-equal.
 
-import { MAX_REQUEST_BYTES } from '@skrive/shared';
-import { dispatchJson } from '../../shell/src/main/dispatch';
-import { registerFsHandlers } from '../../shell/src/ipc/fs';
-import { registerProjectHandlers } from '../../shell/src/ipc/project';
-import { registerPersistenceHandlers } from '../../shell/src/ipc/persistence';
+import { MAX_REQUEST_BYTES } from '../../shared/src/index';
 
 export const ROOT_TOKEN = '__SKRIVE_ROOT__';
 /** A request that must exceed MAX_REQUEST_BYTES — too large to store
  *  literally, so the fixture carries this sentinel and the edges expand
  *  it to a real oversize string at dispatch time. */
 export const OVERSIZE_SENTINEL = '__SKRIVE_OVERSIZE__';
-
-let handlersReady = false;
-export function ensureHandlers(): void {
-  if (handlersReady) return;
-  registerFsHandlers();
-  registerProjectHandlers();
-  registerPersistenceHandlers();
-  handlersReady = true;
-}
 
 export type Spec = { name: string; request: string };
 export type Group = { namespace: string; specs: Spec[] };
@@ -163,12 +151,4 @@ export function normalize(jsonStr: string, roots: string[]): string {
     return v;
   };
   return JSON.stringify(walk(parsed));
-}
-
-/** The in-process dispatcher: drives the real handlers. The foreign
- *  (Zig) dispatcher will implement the same `(requestJson) => responseJson`
- *  shape over stdin/stdout (see run-parity-fixtures.ts --exec). */
-export function inProcessDispatcher(): (request: string) => Promise<string> {
-  ensureHandlers();
-  return (request: string) => dispatchJson(request);
 }

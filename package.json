@@ -20,8 +20,7 @@
     "package:win": "electron-vite build && electron-builder --win",
     "typecheck": "tsc -p shared/tsconfig.json && tsc -p app/tsconfig.json && tsc -p shell/tsconfig.json",
     "perf:fixture": "bun scripts/build-perf-fixture.ts",
-    "parity:gen": "bun --preload ./scripts/parity/preload.ts ./scripts/generate-parity-fixtures.ts",
-    "parity:check": "bun --preload ./scripts/parity/preload.ts ./scripts/run-parity-fixtures.ts"
+    "parity:check": "(cd shell-zig/core && zig build) && bun ./scripts/run-parity-fixtures.ts"
   },
   "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
