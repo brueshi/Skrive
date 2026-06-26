@@ -56,6 +56,11 @@ pub const App = struct {
     asset_dir_w: [:0]u16,
     bridge_js_w: ?[:0]u16 = null,
     app_data_dir: []const u8,
+    /// Native HMR: when SKRIVE_DEV_URL is set the host navigates here (the Vite
+    /// dev server) instead of the bundled skrive.localhost virtual host, and the
+    /// nav backstop treats this origin as in-app. Null in normal/release runs.
+    dev_url: ?[]const u8 = null,
+    dev_url_w: ?[:0]u16 = null,
 
     hwnd: ?win32.HWND = null,
     core: ?*core_mod.Core = null,
@@ -137,6 +142,25 @@ pub const App = struct {
             diag.log("bridge loaded: {d} bytes", .{js.len});
         } else |err| {
             diag.log("WARN could not read native-bridge.js: {s}", .{@errorName(err)});
+        }
+
+        // Native HMR: SKRIVE_DEV_URL points the webview at the Vite dev server
+        // instead of the bundled renderer. window.skrive is still injected at
+        // document-create, so the bridge works against it. Absent in normal runs.
+        // Read via the Win32 env API (mirrors paths.appDataDir). dev_url (UTF-8,
+        // for the nav backstop) and dev_url_w (UTF-16, for navigate) are set
+        // together so the backstop can never reject a URL we navigate to.
+        {
+            var env_buf: [4096]u16 = undefined;
+            const dev_name = std.unicode.utf8ToUtf16LeStringLiteral("SKRIVE_DEV_URL");
+            const dn = win32.GetEnvironmentVariableW(dev_name, &env_buf, env_buf.len);
+            if (dn != 0 and dn < env_buf.len) {
+                if (std.unicode.utf16LeToUtf8Alloc(gpa, env_buf[0..dn])) |u8url| {
+                    self.dev_url = u8url;
+                    self.dev_url_w = std.unicode.utf8ToUtf16LeAllocZ(gpa, u8url) catch null;
+                    diag.log("dev URL: {s}", .{u8url});
+                } else |_| {}
+            }
         }
 
         self.create_env = wv.loadCreateEnvironment() orelse {
@@ -322,8 +346,13 @@ pub const App = struct {
         diag.log("client rect = {d}x{d}", .{ rc.right - rc.left, rc.bottom - rc.top });
         self.resizeWebview();
 
-        const nhr = webview3.navigate(NAV_URL);
-        diag.log("navigate hr=0x{x:0>8}", .{diag.hx(nhr)});
+        if (self.dev_url_w) |d| {
+            const nhr = webview3.navigate(d.ptr);
+            diag.log("navigate (dev) hr=0x{x:0>8}", .{diag.hx(nhr)});
+        } else {
+            const nhr = webview3.navigate(NAV_URL);
+            diag.log("navigate hr=0x{x:0>8}", .{diag.hx(nhr)});
+        }
     }
 
     // ---- navigation backstop (A1) -----------------------------------------
@@ -353,6 +382,10 @@ pub const App = struct {
         const uri = std.unicode.utf16LeToUtf8Alloc(self.gpa, std.mem.span(raw)) catch return;
         defer self.gpa.free(uri);
         if (isInAppOrigin(uri)) return;
+        // Native HMR: the dev-server origin is in-app when SKRIVE_DEV_URL is set.
+        if (self.dev_url) |d| {
+            if (std.mem.startsWith(u8, uri, d)) return;
+        }
         _ = args.putCancel(1);
         host_cmds.openExternal(self.gpa, uri);
         diag.log("nav backstop: cancelled off-origin nav to {s}", .{uri});

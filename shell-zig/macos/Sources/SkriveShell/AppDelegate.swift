@@ -460,6 +460,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             decisionHandler(.allow)
             return
         }
+        // Native HMR: the SKRIVE_DEV_URL origin loads in place. Without this the
+        // http case below would bounce the dev server to the browser, leaving
+        // the app window blank. Mirrors the Windows host's nav backstop.
+        if let dev = Resources.devURL(),
+            url.scheme == dev.scheme, url.host == dev.host, url.port == dev.port {
+            decisionHandler(.allow)
+            return
+        }
         switch scheme {
         case AppSchemeHandler.scheme, AssetSchemeHandler.scheme, "about", "blob", "data":
             // In-app origins and renderer-internal schemes load in place.
@@ -519,6 +527,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
 
     private func loadRenderer() {
+        // Native HMR: SKRIVE_DEV_URL points the webview at the Vite dev server
+        // instead of the bundled renderer. The bridge is injected via
+        // WKUserScript (origin-independent), so window.skrive still works.
+        if let dev = Resources.devURL() {
+            webView.load(URLRequest(url: dev))
+            return
+        }
         guard let index = Resources.rendererIndexURL(),
               let root = Resources.rendererRootURL() else {
             presentFatal("Renderer bundle not found. Set SKRIVE_RENDERER_DIR or bundle it under Resources/renderer.")
