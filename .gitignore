@@ -49,3 +49,10 @@ planning/
 # tracked; only the compiled Setup.exe + generated feed are ignored.
 /shell-zig/windows/installer/*.exe
 /shell-zig/windows/installer/appcast-win.xml
+
+# Playwright latency-harness output (SKR-108). The baseline JSON is tracked;
+# the run artifacts are reproducible via `bun run test:latency`.
+/test-results/
+/playwright-report/
+/harness/test-results/
+/harness/playwright-report/

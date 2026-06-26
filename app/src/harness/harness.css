@@ -1,0 +1,24 @@
+/* Latency harness layout (SKR-108). A plain scrollable writing column so the
+   surface lays out and paints the way it does in the app, without the chrome,
+   panels, or split view that aren't part of the hot path being measured. */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--skrive-bg, #fff);
+  color: var(--skrive-fg, #111);
+}
+
+.harness-surface {
+  height: 100%;
+  overflow: auto;
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 3rem 2rem;
+  box-sizing: border-box;
+}
