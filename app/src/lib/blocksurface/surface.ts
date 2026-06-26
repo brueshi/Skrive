@@ -12,7 +12,8 @@
 
 import { generateBlockId, type BlockNode, type Document, type InlineNode } from '../blockmodel';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto } from './render';
-import { caretContext, focusedBlockElement, setCaret, setSelectionRange } from './selection';
+import { caretContext, focusedLeafElement, leafCaretContext, setCaret, setSelectionRange } from './selection';
+import { findBlockById, updateBlockById } from './tree';
 import {
   type BooleanMark,
   deleteRangeInInline,
@@ -28,7 +29,14 @@ import {
 } from './inline-ops';
 
 /** A block type the insert menu / commands can apply to the current block. */
-export type BlockTypeSpec = { kind: 'paragraph' } | { kind: 'heading'; level: number } | { kind: 'divider' };
+export type BlockTypeSpec =
+  | { kind: 'paragraph' }
+  | { kind: 'heading'; level: number }
+  | { kind: 'blockquote' }
+  | { kind: 'bullet_list' }
+  | { kind: 'ordered_list' }
+  | { kind: 'code' }
+  | { kind: 'divider' };
 
 /** What the insert (slash) menu needs: where to anchor, and the query typed after
  *  the `/`. Null when the menu is closed. */
@@ -158,11 +166,9 @@ export class BlockSurface {
    *  moves to a URL input (which would otherwise collapse the live selection).
    *  Returns false when there is no within-block selection to link. */
   beginLink(): boolean {
-    const ctx = caretContext(this.container, this.registry);
-    if (!ctx || ctx.collapsed || ctx.spansBlocks) return false;
-    const found = this.findBlock(ctx.blockEl);
-    if (!found || !isInlineText(found.block)) return false;
-    this.savedLink = { blockId: found.block.id, start: ctx.start, end: ctx.end };
+    const t = this.leafTarget();
+    if (!t || t.collapsed || t.spansBlocks || !isInlineText(t.leaf)) return false;
+    this.savedLink = { blockId: t.leaf.id, start: t.start, end: t.end };
     return true;
   }
 
@@ -171,13 +177,11 @@ export class BlockSurface {
     const saved = this.savedLink;
     this.savedLink = null;
     if (!saved || href == null || href.length === 0) return;
-    const index = this.doc.blocks.findIndex((b) => b.id === saved.blockId);
-    if (index < 0) return;
-    const block = this.doc.blocks[index]!;
-    if (!isInlineText(block)) return;
+    const block = findBlockById(this.doc.blocks, saved.blockId);
+    if (!block || !isInlineText(block)) return;
     const inline = setLinkInInline(block.inline, saved.start, saved.end, { href, title: null });
-    this.commitBlock(index, { ...block, inline, dirty: true });
-    const el = this.registry.get(saved.blockId);
+    this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, saved.blockId, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
+    const el = this.leafElementById(saved.blockId);
     if (el) {
       renderInlineInto(el, inline);
       setSelectionRange(el, saved.start, saved.end);
@@ -187,15 +191,12 @@ export class BlockSurface {
   }
 
   private applyToSelection(transform: (inline: InlineNode[], start: number, end: number) => InlineNode[]): void {
-    const ctx = caretContext(this.container, this.registry);
-    if (!ctx || ctx.collapsed || ctx.spansBlocks) return;
-    const found = this.findBlock(ctx.blockEl);
-    if (!found || !isInlineText(found.block)) return;
-
-    const inline = transform(found.block.inline, ctx.start, ctx.end);
-    this.commitBlock(found.index, { ...found.block, inline, dirty: true });
-    renderInlineInto(ctx.blockEl, inline);
-    setSelectionRange(ctx.blockEl, ctx.start, ctx.end);
+    const t = this.leafTarget();
+    if (!t || t.collapsed || t.spansBlocks || !isInlineText(t.leaf)) return;
+    const inline = transform(t.leaf.inline, t.start, t.end);
+    this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, t.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
+    renderInlineInto(t.blockEl, inline);
+    setSelectionRange(t.blockEl, t.start, t.end);
     this.scheduleSerialize();
     this.emitSelection(); // refresh the bubble's active state
   }
@@ -214,16 +215,51 @@ export class BlockSurface {
     // A type change invalidates the captured src (it would re-serialize as the old
     // construct), so drop it; the seam gap is unchanged.
     const base = { id: cur.block.id, durable: cur.block.durable, src: null, gapBefore: cur.block.gapBefore, dirty: true };
-    const next: BlockNode =
-      spec.kind === 'heading'
-        ? { type: 'heading', ...base, level: spec.level, inline: cur.block.inline }
-        : { type: 'paragraph', ...base, inline: cur.block.inline };
+    const inline = cur.block.inline;
+
+    // Container conversions wrap the inline in a fresh nested paragraph (which gets
+    // its own id) so the caret lands in an editable leaf inside the container.
+    let next: BlockNode;
+    let caretLeafId: string | null = null;
+    switch (spec.kind) {
+      case 'heading':
+        next = { type: 'heading', ...base, level: spec.level, inline };
+        break;
+      case 'blockquote': {
+        const inner = this.newInlineBlock('paragraph', inline, 1);
+        caretLeafId = inner.id;
+        next = { type: 'blockquote', ...base, children: [inner] };
+        break;
+      }
+      case 'bullet_list': {
+        const inner = this.newInlineBlock('paragraph', inline, 1);
+        caretLeafId = inner.id;
+        next = { type: 'bullet_list', ...base, marker: '-', spread: false, items: [{ spread: false, children: [inner] }] };
+        break;
+      }
+      case 'ordered_list': {
+        const inner = this.newInlineBlock('paragraph', inline, 1);
+        caretLeafId = inner.id;
+        next = { type: 'ordered_list', ...base, start: 1, delimiter: '.', spread: false, items: [{ spread: false, children: [inner] }] };
+        break;
+      }
+      case 'code':
+        next = { type: 'code_block', ...base, lang: '', meta: null, fence: null, text: inlinePlainText(inline) };
+        break;
+      case 'paragraph':
+      default:
+        next = { type: 'paragraph', ...base, inline };
+        break;
+    }
 
     this.commitBlock(cur.index, next);
     const newEl = renderBlock(next);
     cur.blockEl.replaceWith(newEl);
     this.registry.set(cur.block.id, newEl);
-    setCaret(newEl, Math.min(cur.caret, inlineLength(cur.block.inline)));
+    const caretEl = caretLeafId
+      ? ((newEl.querySelector(`[${BLOCK_ID_ATTR}="${caretLeafId}"]`) as HTMLElement | null) ?? newEl)
+      : newEl;
+    setCaret(caretEl, Math.min(cur.caret, inlineLength(inline)));
     this.scheduleSerialize();
   }
 
@@ -323,13 +359,8 @@ export class BlockSurface {
   private emitSelection(): void {
     const cb = this.selectionCb;
     if (!cb) return;
-    const ctx = caretContext(this.container, this.registry);
-    if (!ctx || ctx.collapsed || ctx.spansBlocks) {
-      cb(null);
-      return;
-    }
-    const found = this.findBlock(ctx.blockEl);
-    if (!found || !isInlineText(found.block)) {
+    const t = this.leafTarget();
+    if (!t || t.collapsed || t.spansBlocks || !isInlineText(t.leaf)) {
       cb(null);
       return;
     }
@@ -338,14 +369,14 @@ export class BlockSurface {
       cb(null);
       return;
     }
-    const inline = found.block.inline;
+    const inline = t.leaf.inline;
     cb({
       rect: sel.getRangeAt(0).getBoundingClientRect(),
       marks: {
-        strong: rangeHasMark(inline, ctx.start, ctx.end, 'strong'),
-        em: rangeHasMark(inline, ctx.start, ctx.end, 'em'),
-        code: rangeHasMark(inline, ctx.start, ctx.end, 'code'),
-        link: rangeHasLink(inline, ctx.start, ctx.end)
+        strong: rangeHasMark(inline, t.start, t.end, 'strong'),
+        em: rangeHasMark(inline, t.start, t.end, 'em'),
+        code: rangeHasMark(inline, t.start, t.end, 'code'),
+        link: rangeHasLink(inline, t.start, t.end)
       }
     });
   }
@@ -393,105 +424,115 @@ export class BlockSurface {
     this.composing = false;
     // The IME mutated the focused block's DOM natively; read it back into the
     // model without re-rendering (the caret the IME left is correct).
-    const blockEl = focusedBlockElement(this.container, this.registry);
+    const blockEl = focusedLeafElement(this.container);
     if (!blockEl) return;
-    const found = this.findBlock(blockEl);
-    if (!found || !isInlineText(found.block)) return;
-    this.commitBlock(found.index, { ...found.block, inline: readInlineFromDOM(blockEl), dirty: true });
+    const id = blockEl.getAttribute(BLOCK_ID_ATTR);
+    if (id == null) return;
+    const leaf = findBlockById(this.doc.blocks, id);
+    if (!leaf || !isInlineText(leaf)) return;
+    this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, id, (b) => ({ ...b, inline: readInlineFromDOM(blockEl), dirty: true }) as BlockNode) };
     this.scheduleSerialize();
   };
 
   private applyInsertText(text: string): void {
-    const ctx = caretContext(this.container, this.registry);
-    if (!ctx) return;
-    const found = this.findBlock(ctx.blockEl);
-    if (!found || !isInlineText(found.block) || ctx.spansBlocks) return;
-
-    let inline = found.block.inline;
-    if (!ctx.collapsed) inline = deleteRangeInInline(inline, ctx.start, ctx.end);
-    inline = insertTextInInline(inline, ctx.start, text);
-
-    this.commitBlock(found.index, { ...found.block, inline, dirty: true });
-    renderInlineInto(ctx.blockEl, inline);
-    setCaret(ctx.blockEl, ctx.start + text.length);
+    const t = this.leafTarget();
+    if (!t || t.spansBlocks) return;
+    if (t.leaf.type === 'code_block') {
+      this.editCodeText(t.leaf, t.blockEl, t.leaf.text.slice(0, t.start) + text + t.leaf.text.slice(t.end), t.start + text.length);
+      this.scheduleSerialize();
+      return;
+    }
+    if (!isInlineText(t.leaf)) return;
+    let inline = t.leaf.inline;
+    if (!t.collapsed) inline = deleteRangeInInline(inline, t.start, t.end);
+    inline = insertTextInInline(inline, t.start, text);
+    this.commitInline(t.leaf.id, inline, t.blockEl, t.start + text.length);
     this.scheduleSerialize();
     this.handleSlashAfterInsert(text);
   }
 
   private applyDeleteBackward(): void {
-    const ctx = caretContext(this.container, this.registry);
-    if (!ctx) return;
-    const found = this.findBlock(ctx.blockEl);
-    if (!found || !isInlineText(found.block) || ctx.spansBlocks) return;
+    const t = this.leafTarget();
+    if (!t || t.spansBlocks) return;
 
-    if (ctx.collapsed && ctx.start === 0) {
-      this.mergeWithPrevious(found.index, ctx.blockEl);
+    if (t.collapsed && t.start === 0) {
+      // Boundary: top-level inline-text merge only in 3e; nested merge / exit is 3f.
+      if (isInlineText(t.leaf) && this.isTopLevel(t.blockEl, t.leaf.id)) {
+        const index = this.doc.blocks.findIndex((b) => b.id === t.leaf.id);
+        if (index >= 0) this.mergeWithPrevious(index, t.blockEl);
+      }
       this.closeSlash();
       return;
     }
 
-    let inline = found.block.inline;
-    let caret: number;
-    if (!ctx.collapsed) {
-      inline = deleteRangeInInline(inline, ctx.start, ctx.end);
-      caret = ctx.start;
-    } else {
-      inline = deleteRangeInInline(inline, ctx.start - 1, ctx.start);
-      caret = ctx.start - 1;
+    const from = t.collapsed ? t.start - 1 : t.start;
+    const to = t.collapsed ? t.start : t.end;
+    if (t.leaf.type === 'code_block') {
+      this.editCodeText(t.leaf, t.blockEl, t.leaf.text.slice(0, from) + t.leaf.text.slice(to), from);
+      this.scheduleSerialize();
+      return;
     }
-
-    this.commitBlock(found.index, { ...found.block, inline, dirty: true });
-    renderInlineInto(ctx.blockEl, inline);
-    setCaret(ctx.blockEl, caret);
+    if (!isInlineText(t.leaf)) return;
+    this.commitInline(t.leaf.id, deleteRangeInInline(t.leaf.inline, from, to), t.blockEl, from);
     this.scheduleSerialize();
     this.refreshSlash();
   }
 
   private applyDeleteForward(): void {
-    const ctx = caretContext(this.container, this.registry);
-    if (!ctx) return;
-    const found = this.findBlock(ctx.blockEl);
-    if (!found || !isInlineText(found.block) || ctx.spansBlocks) return;
+    const t = this.leafTarget();
+    if (!t || t.spansBlocks) return;
+    const len = t.leaf.type === 'code_block' ? t.leaf.text.length : isInlineText(t.leaf) ? inlineLength(t.leaf.inline) : 0;
 
-    const len = inlineLength(found.block.inline);
-    if (ctx.collapsed && ctx.start >= len) {
-      this.mergeWithNext(found.index, ctx.blockEl);
+    if (t.collapsed && t.start >= len) {
+      if (isInlineText(t.leaf) && this.isTopLevel(t.blockEl, t.leaf.id)) {
+        const index = this.doc.blocks.findIndex((b) => b.id === t.leaf.id);
+        if (index >= 0) this.mergeWithNext(index, t.blockEl);
+      }
       return;
     }
 
-    const inline = ctx.collapsed
-      ? deleteRangeInInline(found.block.inline, ctx.start, ctx.start + 1)
-      : deleteRangeInInline(found.block.inline, ctx.start, ctx.end);
-    this.commitBlock(found.index, { ...found.block, inline, dirty: true });
-    renderInlineInto(ctx.blockEl, inline);
-    setCaret(ctx.blockEl, ctx.start);
+    const from = t.start;
+    const to = t.collapsed ? t.start + 1 : t.end;
+    if (t.leaf.type === 'code_block') {
+      this.editCodeText(t.leaf, t.blockEl, t.leaf.text.slice(0, from) + t.leaf.text.slice(to), from);
+      this.scheduleSerialize();
+      return;
+    }
+    if (!isInlineText(t.leaf)) return;
+    this.commitInline(t.leaf.id, deleteRangeInInline(t.leaf.inline, from, to), t.blockEl, from);
     this.scheduleSerialize();
   }
 
-  // Enter: split the focused block at the caret. The original keeps its id and the
-  // first half; the new block mints a fresh id and takes the second half (the
-  // id-survival contract: split mints).
+  // Enter: in a code block, insert a newline. Otherwise split the block — but in
+  // Stage 3e only at top level (nested split / list-item Enter is 3f); the
+  // original keeps its id and first half, the new block mints an id (split mints).
   private applyEnter(): void {
-    const ctx = caretContext(this.container, this.registry);
-    if (!ctx) return;
-    const found = this.findBlock(ctx.blockEl);
-    if (!found || !isInlineText(found.block) || ctx.spansBlocks) return;
+    const t = this.leafTarget();
+    if (!t || t.spansBlocks) return;
+    if (t.leaf.type === 'code_block') {
+      this.editCodeText(t.leaf, t.blockEl, t.leaf.text.slice(0, t.start) + '\n' + t.leaf.text.slice(t.end), t.start + 1);
+      this.scheduleSerialize();
+      return;
+    }
+    if (!isInlineText(t.leaf) || !this.isTopLevel(t.blockEl, t.leaf.id)) return;
+    const index = this.doc.blocks.findIndex((b) => b.id === t.leaf.id);
+    if (index < 0) return;
 
-    let inline = found.block.inline;
-    if (!ctx.collapsed) inline = deleteRangeInInline(inline, ctx.start, ctx.end);
-    const [left, right] = splitInline(inline, ctx.start);
+    let inline = t.leaf.inline;
+    if (!t.collapsed) inline = deleteRangeInInline(inline, t.start, t.end);
+    const [left, right] = splitInline(inline, t.start);
 
-    const leftBlock: BlockNode = { ...found.block, inline: left, dirty: true };
-    const level = found.block.type === 'heading' ? found.block.level : 1;
-    const rightBlock = this.newInlineBlock(found.block.type, right, level);
+    const leftBlock: BlockNode = { ...t.leaf, inline: left, dirty: true };
+    const level = t.leaf.type === 'heading' ? t.leaf.level : 1;
+    const rightBlock = this.newInlineBlock(t.leaf.type, right, level);
 
     const blocks = this.doc.blocks.slice();
-    blocks.splice(found.index, 1, leftBlock, rightBlock);
+    blocks.splice(index, 1, leftBlock, rightBlock);
     this.doc = { ...this.doc, blocks };
 
-    renderInlineInto(ctx.blockEl, left);
+    renderInlineInto(t.blockEl, left);
     const rightEl = renderBlock(rightBlock);
-    ctx.blockEl.after(rightEl);
+    t.blockEl.after(rightEl);
     this.registry.set(rightBlock.id, rightEl);
     setCaret(rightEl, 0);
     this.scheduleSerialize();
@@ -562,6 +603,51 @@ export class BlockSurface {
     const blocks = this.doc.blocks.slice();
     blocks[index] = next;
     this.doc = { ...this.doc, blocks };
+  }
+
+  // The focused editable leaf (inline-text or code), which may be nested inside a
+  // container. The editing hot path targets this; structural ops still target the
+  // top-level block (see isTopLevel).
+  private leafTarget(): {
+    leaf: BlockNode;
+    blockEl: HTMLElement;
+    start: number;
+    end: number;
+    collapsed: boolean;
+    spansBlocks: boolean;
+  } | null {
+    const ctx = leafCaretContext(this.container);
+    if (!ctx) return null;
+    const id = ctx.blockEl.getAttribute(BLOCK_ID_ATTR);
+    if (id == null) return null;
+    const leaf = findBlockById(this.doc.blocks, id);
+    if (!leaf) return null;
+    return { leaf, blockEl: ctx.blockEl, start: ctx.start, end: ctx.end, collapsed: ctx.collapsed, spansBlocks: ctx.spansBlocks };
+  }
+
+  private leafElementById(id: string): HTMLElement | null {
+    return this.registry.get(id) ?? (this.container.querySelector(`[${BLOCK_ID_ATTR}="${id}"]`) as HTMLElement | null);
+  }
+
+  private isTopLevel(blockEl: HTMLElement, id: string): boolean {
+    return this.registry.get(id) === blockEl;
+  }
+
+  // Replace a (possibly nested) block's inline content, re-render that one block,
+  // and place the caret. updateBlockById marks the block and its ancestors dirty.
+  private commitInline(id: string, inline: InlineNode[], blockEl: HTMLElement, caret: number): void {
+    this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
+    renderInlineInto(blockEl, inline);
+    setCaret(blockEl, caret);
+  }
+
+  // Replace a code block's text, re-render its <code> child, and place the caret.
+  private editCodeText(leaf: BlockNode, blockEl: HTMLElement, next: string, caret: number): void {
+    if (leaf.type !== 'code_block') return;
+    this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, leaf.id, (b) => ({ ...b, text: next, dirty: true }) as BlockNode) };
+    const code = blockEl.querySelector('code') ?? blockEl;
+    code.textContent = next;
+    setCaret(blockEl, caret);
   }
 
   private scheduleSerialize(): void {
