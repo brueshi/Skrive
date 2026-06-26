@@ -22,3 +22,18 @@ body {
   padding: 3rem 2rem;
   box-sizing: border-box;
 }
+
+/* The keystroke spike (SKR-109). Plain prose blocks; the only thing that matters
+   for the measurement is that a block is a normal-flow paragraph so a keystroke
+   triggers realistic layout/paint. The editable host (the container in 'single',
+   each block in 'perblock') drops the focus outline. */
+.bespoke,
+.bespoke-block {
+  outline: none;
+}
+.bespoke-block {
+  margin: 0 0 1rem 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

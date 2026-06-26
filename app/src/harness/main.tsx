@@ -15,10 +15,11 @@
 //   anchors = <int>              anchor comment every Nth block, 0 = none (default 0)
 //   seed    = <int>              corpus PRNG seed (default 0xc0ffee)
 
-import { StrictMode, useEffect } from 'react';
+import { StrictMode, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RichEditor } from '../components/editor/rich/RichEditor';
 import { Editor } from '../components/editor/Editor';
+import { mountBespoke, type BespokeVariant } from './bespoke/surface';
 import {
   buildAdversarialDoc,
   enableLatencyProbe,
@@ -30,7 +31,7 @@ import {
 import '../index.css';
 import './harness.css';
 
-type SurfaceId = 'rich' | 'text';
+type SurfaceId = 'rich' | 'text' | 'bespoke-single' | 'bespoke-perblock';
 
 type HarnessApi = {
   surface: SurfaceId;
@@ -54,7 +55,9 @@ declare global {
 
 function readParams() {
   const q = new URLSearchParams(window.location.search);
-  const surface: SurfaceId = q.get('surface') === 'text' ? 'text' : 'rich';
+  const raw = q.get('surface');
+  const surface: SurfaceId =
+    raw === 'text' || raw === 'bespoke-single' || raw === 'bespoke-perblock' ? raw : 'rich';
   const blocks = Math.max(1, Number(q.get('blocks') ?? '200') | 0);
   const anchorEvery = Math.max(0, Number(q.get('anchors') ?? '0') | 0);
   const seed = q.get('seed') ? Number(q.get('seed')) | 0 : undefined;
@@ -105,9 +108,14 @@ function Harness({ surface, body }: { surface: SurfaceId; body: string }) {
     return () => cancelAnimationFrame(id);
   }, []);
 
+  const bespokeVariant: BespokeVariant | null =
+    surface === 'bespoke-single' ? 'single' : surface === 'bespoke-perblock' ? 'perblock' : null;
+
   return (
     <div className="harness-surface">
-      {surface === 'rich' ? (
+      {bespokeVariant ? (
+        <BespokeMount body={body} variant={bespokeVariant} />
+      ) : surface === 'rich' ? (
         <RichEditor body={body} onChange={() => {}} />
       ) : (
         <Editor value={body} onChange={() => {}} filePath={null} projectRoot="" lintFindings={[]} />
@@ -115,6 +123,16 @@ function Harness({ surface, body }: { surface: SurfaceId; body: string }) {
       <LatencyOverlay />
     </div>
   );
+}
+
+// Mounts the framework-free spike imperatively. React only does the initial mount;
+// the keystroke hot path runs in plain DOM, never through React.
+function BespokeMount({ body, variant }: { body: string; variant: BespokeVariant }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ref.current) mountBespoke(ref.current, body, variant);
+  }, [body, variant]);
+  return <div ref={ref} className="bespoke-root" />;
 }
 
 function main(): void {
