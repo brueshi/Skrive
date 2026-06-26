@@ -38,6 +38,7 @@ import { useTypographyVars } from './lib/typography-css';
 import { notify } from './lib/notify';
 import { openFeedbackForm } from './lib/feedback';
 import { logDuration, perfEnabled } from './lib/perf';
+import { enableLatencyProbe, LatencyOverlay } from './lib/instrumentation';
 
 // One-time feedback nudge. Surfaces once the writer has opened Skrive
 // enough times to have an opinion worth sharing — not on first run, when
@@ -126,6 +127,16 @@ export function App() {
   // (recorded in main.tsx via window.__skriveMountStart) to the first
   // render where `manifest` is non-null — i.e. an auto-opened project
   // is loaded and ready to write into. Logs once per cold start.
+  // SKR-108 Stage 0: attach the keystroke→paint probe at the document level so
+  // it covers every editor surface (Rich, Text, and the future bespoke one)
+  // with no per-surface wiring. Behind the same perf flag — no listener in a
+  // normal session. The matching live readout is rendered below.
+  useEffect(() => {
+    if (!perfEnabled) return;
+    const probe = enableLatencyProbe();
+    return () => probe.stop();
+  }, []);
+
   const coldOpenLoggedRef = useRef(false);
   useEffect(() => {
     if (!perfEnabled) return;
@@ -602,6 +613,7 @@ export function App() {
           }
         }}
       />
+      {perfEnabled && <LatencyOverlay />}
     </div>
   );
 }
