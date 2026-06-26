@@ -84,6 +84,14 @@ export function inlineLength(nodes: InlineNode[]): number {
   return n;
 }
 
+/** Flat plain text of an inline run (no marks). Used to read the `/query` of the
+ *  slash menu out of the focused block. */
+export function inlinePlainText(nodes: InlineNode[]): string {
+  let s = '';
+  for (const node of nodes) if (isText(node)) s += node.text;
+  return s;
+}
+
 /** Split inline content at a flat offset into [left, right], each preserving its
  *  runs' marks. Built from the delete primitive so the split obeys the same
  *  offset/mark rules as every other edit. */

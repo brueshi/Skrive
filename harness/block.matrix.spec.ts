@@ -187,6 +187,59 @@ test('Stage 3c: the select->bubble applies bold and a link', async ({ page }) =>
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
+test('Stage 3d: slash menu converts a block to a heading', async ({ page }) => {
+  await open(page, 5);
+  // Make a fresh empty block, then open the insert menu with `/`.
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('/');
+  await expect(page.getByRole('listbox', { name: 'Insert block' }), 'menu opens on /').toBeVisible();
+
+  // Filter to headings and pick the first (Heading 1) with Enter.
+  await page.keyboard.type('head');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(50);
+  await page.keyboard.type('My Title');
+  await page.waitForTimeout(80);
+
+  const md = await serialized(page);
+  expect(md, 'block became a heading').toContain('# My Title');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('Stage 3d: slash menu inserts a divider', async ({ page }) => {
+  await open(page, 5);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('/');
+  await expect(page.getByRole('listbox', { name: 'Insert block' })).toBeVisible();
+  await page.keyboard.type('div');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(50);
+  await page.keyboard.type('below the rule');
+  await page.waitForTimeout(80);
+
+  const md = await serialized(page);
+  expect(md, 'a thematic break was inserted').toMatch(/(^|\n)---(\n|$)/);
+  expect(md).toContain('below the rule');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('Stage 3d: Escape closes the menu and a mid-text slash does not open it', async ({ page }) => {
+  await open(page, 5);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('/');
+  const menu = page.getByRole('listbox', { name: 'Insert block' });
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu, 'Escape closes the menu').toBeHidden();
+
+  // A `/` typed in the middle of prose is just a slash, not a trigger.
+  await page.keyboard.type('a/b');
+  await expect(menu, 'no menu mid-text').toBeHidden();
+});
+
 test('Stage 3a: IME composition lands in the model', async ({ page, context }) => {
   await open(page, 200);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');
