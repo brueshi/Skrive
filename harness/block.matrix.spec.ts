@@ -297,6 +297,47 @@ test('Stage 3e: marks work inside a container', async ({ page }) => {
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
+test('Stage 3f: Enter in a list starts a new item', async ({ page }) => {
+  await open(page, 5);
+  await insertViaMenu(page, 'bullet');
+  await page.keyboard.type('first');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('second');
+  await page.waitForTimeout(80);
+  const md = await serialized(page);
+  expect(md).toContain('- first');
+  expect(md).toContain('- second');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('Stage 3f: Enter on an empty list item exits the list', async ({ page }) => {
+  await open(page, 5);
+  await insertViaMenu(page, 'bullet');
+  await page.keyboard.type('only item');
+  await page.keyboard.press('Enter'); // new empty item
+  await page.keyboard.press('Enter'); // empty -> exit the list
+  await page.keyboard.type('after the list');
+  await page.waitForTimeout(80);
+  const md = await serialized(page);
+  expect(md).toContain('- only item');
+  expect(md, 'escaped text is a paragraph, not a list item').toContain('after the list');
+  expect(md).not.toContain('- after the list');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('Stage 3f: Enter in a quote adds a line', async ({ page }) => {
+  await open(page, 5);
+  await insertViaMenu(page, 'quote');
+  await page.keyboard.type('line one');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('line two');
+  await page.waitForTimeout(80);
+  const md = await serialized(page);
+  expect(md).toContain('> line one');
+  expect(md).toContain('> line two');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
 test('Stage 3a: IME composition lands in the model', async ({ page, context }) => {
   await open(page, 200);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');

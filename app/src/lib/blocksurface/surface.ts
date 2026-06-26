@@ -14,6 +14,7 @@ import { generateBlockId, type BlockNode, type Document, type InlineNode } from 
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto } from './render';
 import { caretContext, focusedLeafElement, leafCaretContext, setCaret, setSelectionRange } from './selection';
 import { findBlockById, updateBlockById } from './tree';
+import { enterInContainer, exitContainer, type StructuralResult } from './structural';
 import {
   type BooleanMark,
   deleteRangeInInline,
@@ -77,6 +78,9 @@ export class BlockSurface {
   private savedLink: { blockId: string; start: number; end: number } | null = null;
   private slash: { blockId: string; slashOffset: number } | null = null;
   private slashCb: ((state: SlashMenuState | null) => void) | null = null;
+  // The block object each top-level element was last rendered from, so the
+  // incremental reconciler re-renders only the top-level blocks that changed.
+  private readonly renderedFrom = new Map<string, BlockNode>();
 
   constructor(opts: BlockSurfaceOptions) {
     this.container = opts.container;
@@ -86,6 +90,7 @@ export class BlockSurface {
     this.container.contentEditable = 'true';
     this.container.spellcheck = false;
     renderDocument(this.container, this.doc.blocks, this.registry);
+    for (const block of this.doc.blocks) this.renderedFrom.set(block.id, block);
 
     this.container.addEventListener('beforeinput', this.onBeforeInput, { capture: true });
     this.container.addEventListener('paste', this.onPaste, { capture: true });
@@ -514,6 +519,16 @@ export class BlockSurface {
       this.scheduleSerialize();
       return;
     }
+    // Enter inside a container: split into a new list item / quote paragraph, or
+    // exit the container when the block is empty.
+    if (isInlineText(t.leaf) && !this.isTopLevel(t.blockEl, t.leaf.id)) {
+      const result =
+        inlineLength(t.leaf.inline) === 0
+          ? exitContainer(this.doc.blocks, t.leaf.id, generateBlockId)
+          : enterInContainer(this.doc.blocks, t.leaf.id, t.start, generateBlockId);
+      if (result) this.applyStructural(result);
+      return;
+    }
     if (!isInlineText(t.leaf) || !this.isTopLevel(t.blockEl, t.leaf.id)) return;
     const index = this.doc.blocks.findIndex((b) => b.id === t.leaf.id);
     if (index < 0) return;
@@ -648,6 +663,50 @@ export class BlockSurface {
     const code = blockEl.querySelector('code') ?? blockEl;
     code.textContent = next;
     setCaret(blockEl, caret);
+  }
+
+  // Apply a structural result (Enter/exit inside a container): swap in the new
+  // tree, reconcile the top-level DOM, and place the caret at the new leaf.
+  private applyStructural(result: StructuralResult): void {
+    this.doc = { ...this.doc, blocks: result.blocks };
+    this.reconcile();
+    const el = this.container.querySelector(`[${BLOCK_ID_ATTR}="${result.caret.id}"]`) as HTMLElement | null;
+    if (el) setCaret(el, result.caret.offset);
+    this.scheduleSerialize();
+  }
+
+  // Incremental top-level render: bring the container's direct children in line
+  // with this.doc.blocks, reusing the element for an unchanged block (same object)
+  // and re-rendering one whose block object changed. Add/remove/reorder by id.
+  // Runs on structural ops only — never on the typing hot path.
+  private reconcile(): void {
+    const parent = this.container;
+    const have = new Map<string, HTMLElement>();
+    for (const child of Array.from(parent.children)) {
+      const id = (child as HTMLElement).getAttribute(BLOCK_ID_ATTR);
+      if (id) have.set(id, child as HTMLElement);
+    }
+
+    let i = 0;
+    for (const block of this.doc.blocks) {
+      let el = have.get(block.id);
+      if (!el || this.renderedFrom.get(block.id) !== block) {
+        const fresh = renderBlock(block);
+        this.registry.set(block.id, fresh);
+        if (el) el.replaceWith(fresh);
+        el = fresh;
+      }
+      this.renderedFrom.set(block.id, block);
+      if (parent.children[i] !== el) parent.insertBefore(el, parent.children[i] ?? null);
+      have.delete(block.id);
+      i++;
+    }
+
+    for (const [id, el] of have) {
+      el.remove();
+      this.registry.delete(id);
+      this.renderedFrom.delete(id);
+    }
   }
 
   private scheduleSerialize(): void {
