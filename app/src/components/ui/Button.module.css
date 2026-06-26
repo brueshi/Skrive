@@ -1,0 +1,70 @@
+/* Button — the reference primitive (SKR-107). Lives in `@layer components` so
+ * consumer overrides (unlayered, or `@layer overrides`) win deterministically.
+ * Variants compose by resetting the component-tier tokens from tokens.css; the
+ * base rule applies them, so adding a variant is a token swap, not a re-spec. */
+@layer components {
+  .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    font: inherit;
+    font-size: var(--button-font-size);
+    padding: var(--button-pad-y) var(--button-pad-x);
+    border-radius: var(--button-radius);
+    border: 1px solid var(--button-border);
+    background: var(--button-bg);
+    color: var(--button-fg);
+    cursor: pointer;
+    transition:
+      background-color var(--skrive-duration-quick) var(--skrive-easing),
+      border-color var(--skrive-duration-quick) var(--skrive-easing),
+      color var(--skrive-duration-quick) var(--skrive-easing),
+      opacity var(--skrive-duration-quick) var(--skrive-easing);
+  }
+
+  .button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  /* Sizes */
+  .sm {
+    --button-font-size: 0.75rem;
+    --button-pad-y: 0.3rem;
+    --button-pad-x: 0.7rem;
+    --button-radius: var(--skrive-radius-sm);
+  }
+
+  /* Variants */
+  .secondary {
+    --button-fg: var(--skrive-muted);
+  }
+  .secondary:not(:disabled):hover {
+    --button-border: var(--skrive-muted);
+    --button-fg: var(--skrive-fg);
+  }
+
+  .primary {
+    --button-border: transparent;
+    --button-bg: var(--button-primary-bg);
+    --button-fg: var(--button-primary-fg);
+  }
+  .primary:not(:disabled):hover {
+    opacity: 0.85;
+  }
+
+  /* Tone: danger. Solid on primary; red text/border otherwise. */
+  .danger.primary {
+    --button-bg: transparent;
+    --button-border: var(--button-danger-fg);
+    --button-fg: var(--button-danger-fg);
+  }
+  .danger.primary:not(:disabled):hover {
+    --button-bg: var(--button-danger-bg-hover);
+    --button-fg: #fff;
+  }
+  .danger:not(.primary) {
+    --button-fg: var(--button-danger-fg);
+  }
+}
