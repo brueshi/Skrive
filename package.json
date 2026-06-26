@@ -3,10 +3,8 @@
   "version": "1.7.2",
   "description": "A writing app for notes, drafts, and documents — rich, rendered writing in plain files you own.",
   "type": "module",
-  "main": "out/main/index.js",
   "workspaces": [
     "app",
-    "shell",
     "shared",
     "native/diff"
   ],
@@ -15,10 +13,7 @@
     "dev": "vite",
     "start:build": "vite build",
     "start:preview": "vite preview",
-    "package": "electron-vite build && electron-builder --mac --win",
-    "package:mac": "electron-vite build && electron-builder --mac",
-    "package:win": "electron-vite build && electron-builder --win",
-    "typecheck": "tsc -p shared/tsconfig.json && tsc -p app/tsconfig.json && tsc -p shell/tsconfig.json",
+    "typecheck": "tsc -p shared/tsconfig.json && tsc -p app/tsconfig.json",
     "perf:fixture": "bun scripts/build-perf-fixture.ts",
     "parity:check": "(cd shell-zig/core && zig build) && bun ./scripts/run-parity-fixtures.ts"
   },
@@ -29,9 +24,7 @@
     "@codemirror/language": "^6.12.3",
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.42.0",
-    "@skrive/diff": "workspace:*",
     "character-entities": "^2.0.2",
-    "electron-updater": "^6.8.3",
     "marked": "^18.0.0",
     "yaml": "^2.6.1"
   },
@@ -40,9 +33,6 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8",
-    "electron-vite": "^2.3.0",
     "typescript": "~5.6.2",
     "vite": "^6.0.3"
   }
