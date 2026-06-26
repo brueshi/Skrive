@@ -21,6 +21,10 @@ const ITEMS: Item[] = [
   { title: 'Heading 1', hint: 'Large heading', keywords: 'h1 heading title', spec: { kind: 'heading', level: 1 } },
   { title: 'Heading 2', hint: 'Medium heading', keywords: 'h2 heading subtitle', spec: { kind: 'heading', level: 2 } },
   { title: 'Heading 3', hint: 'Small heading', keywords: 'h3 heading', spec: { kind: 'heading', level: 3 } },
+  { title: 'Quote', hint: 'Blockquote', keywords: 'quote blockquote', spec: { kind: 'blockquote' } },
+  { title: 'Bullet list', hint: 'Unordered list', keywords: 'bullet list unordered ul', spec: { kind: 'bullet_list' } },
+  { title: 'Numbered list', hint: 'Ordered list', keywords: 'numbered ordered list ol', spec: { kind: 'ordered_list' } },
+  { title: 'Code', hint: 'Code block', keywords: 'code monospace pre fenced', spec: { kind: 'code' } },
   { title: 'Divider', hint: 'Horizontal rule', keywords: 'divider rule separator hr line', spec: { kind: 'divider' } }
 ];
 

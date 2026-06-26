@@ -32,6 +32,23 @@ export function focusedBlockElement(
   return null;
 }
 
+/** The nearest block element (top-level OR nested) the caret sits in, found by
+ *  walking up to the first ancestor carrying a block id. Unlike
+ *  focusedBlockElement this does not require registry membership, so it resolves
+ *  a leaf inside a container (a paragraph in a blockquote / list item). */
+export function focusedLeafElement(container: HTMLElement): HTMLElement | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  let node: Node | null = sel.getRangeAt(0).startContainer;
+  while (node && node !== container) {
+    if (node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).hasAttribute(BLOCK_ID_ATTR)) {
+      return node as HTMLElement;
+    }
+    node = node.parentNode;
+  }
+  return null;
+}
+
 /** Flat character offset of a DOM point within a block. Counts the text from the
  *  block's start to the point — mark wrappers contribute nothing, so the offset
  *  is stable regardless of how the characters are wrapped. */
@@ -114,6 +131,21 @@ export function caretContext(container: HTMLElement, registry: BlockViewRegistry
   if (!sel || sel.rangeCount === 0) return null;
   const range = sel.getRangeAt(0);
 
+  return offsetsWithin(blockEl, range);
+}
+
+/** Like caretContext, but resolves the nearest leaf block (nested or top-level) —
+ *  the editing target for typing, marks, and within-block delete, which work the
+ *  same inside a container as at top level. */
+export function leafCaretContext(container: HTMLElement): CaretContext | null {
+  const blockEl = focusedLeafElement(container);
+  if (!blockEl) return null;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  return offsetsWithin(blockEl, sel.getRangeAt(0));
+}
+
+function offsetsWithin(blockEl: HTMLElement, range: Range): CaretContext {
   const start = flatOffsetFromDOM(blockEl, range.startContainer, range.startOffset);
   const collapsed = range.collapsed;
   const endInBlock = blockEl.contains(range.endContainer);

@@ -240,6 +240,63 @@ test('Stage 3d: Escape closes the menu and a mid-text slash does not open it', a
   await expect(menu, 'no menu mid-text').toBeHidden();
 });
 
+// Open a fresh empty block and run the insert menu with the given query, picking
+// the first match.
+async function insertViaMenu(page: Page, query: string): Promise<void> {
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type(`/${query}`);
+  await expect(page.getByRole('listbox', { name: 'Insert block' })).toBeVisible();
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(50);
+}
+
+test('Stage 3e: convert to a quote and type inside it', async ({ page }) => {
+  await open(page, 5);
+  await insertViaMenu(page, 'quote');
+  await page.keyboard.type('quoted words');
+  await page.waitForTimeout(80);
+  const md = await serialized(page);
+  expect(md, 'content is inside a blockquote').toContain('> quoted words');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('Stage 3e: convert to a bullet list and type inside it', async ({ page }) => {
+  await open(page, 5);
+  await insertViaMenu(page, 'bullet');
+  await page.keyboard.type('a list item');
+  await page.waitForTimeout(80);
+  const md = await serialized(page);
+  expect(md, 'content is a list item').toContain('- a list item');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('Stage 3e: convert to code and type multiple lines', async ({ page }) => {
+  await open(page, 5);
+  await insertViaMenu(page, 'code');
+  await page.keyboard.type('line1');
+  await page.keyboard.press('Enter'); // newline within the code block, not a split
+  await page.keyboard.type('line2');
+  await page.waitForTimeout(80);
+  const md = await serialized(page);
+  expect(md, 'both lines inside one fenced block').toContain('line1\nline2');
+  expect(md).toMatch(/```/);
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('Stage 3e: marks work inside a container', async ({ page }) => {
+  await open(page, 5);
+  await insertViaMenu(page, 'quote');
+  await page.keyboard.type('BOLDQ');
+  for (let i = 0; i < 5; i++) await page.keyboard.press('Shift+ArrowLeft');
+  await page.keyboard.press('ControlOrMeta+b');
+  await page.waitForTimeout(80);
+  const md = await serialized(page);
+  expect(md, 'bold applied inside the quote').toContain('**BOLDQ**');
+  expect(md).toContain('>');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
 test('Stage 3a: IME composition lands in the model', async ({ page, context }) => {
   await open(page, 200);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');
