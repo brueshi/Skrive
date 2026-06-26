@@ -90,6 +90,13 @@ export class BlockSurface {
 
     this.container.contentEditable = 'true';
     this.container.spellcheck = false;
+    // Disable the OS text services that fire on word boundaries (autocorrect /
+    // capitalization / smart substitution). In a contenteditable they emit
+    // insertReplacementText on space/period, which the hot path would have to
+    // fight — the source of the word-then-space / word-then-period lag.
+    this.container.setAttribute('autocorrect', 'off');
+    this.container.setAttribute('autocapitalize', 'off');
+    this.container.setAttribute('autocomplete', 'off');
     renderDocument(this.container, this.doc.blocks, this.registry);
     for (const block of this.doc.blocks) this.renderedFrom.set(block.id, block);
 
@@ -492,10 +499,13 @@ export class BlockSurface {
     const cell = this.cellTarget();
     if (cell) {
       if (cell.spansCells) return;
-      let inline = cell.inline;
-      if (!cell.collapsed) inline = deleteRangeInInline(inline, cell.start, cell.end);
-      inline = insertTextInInline(inline, cell.start, text);
-      this.commitCell(cell, inline, cell.start + text.length);
+      if (cell.collapsed && this.surgicalInsert(text)) {
+        this.updateCellModel(cell, insertTextInInline(cell.inline, cell.start, text));
+      } else {
+        let inline = cell.inline;
+        if (!cell.collapsed) inline = deleteRangeInInline(inline, cell.start, cell.end);
+        this.commitCell(cell, insertTextInInline(inline, cell.start, text), cell.start + text.length);
+      }
       this.scheduleSerialize();
       return;
     }
@@ -507,10 +517,19 @@ export class BlockSurface {
       return;
     }
     if (!isInlineText(t.leaf)) return;
-    let inline = t.leaf.inline;
-    if (!t.collapsed) inline = deleteRangeInInline(inline, t.start, t.end);
-    inline = insertTextInInline(inline, t.start, text);
-    this.commitInline(t.leaf.id, inline, t.blockEl, t.start + text.length);
+
+    // Surgical fast path: insert into the live text node in place. Falls back to a
+    // full block re-render only when there is a selection to replace or the caret
+    // is not in a text node.
+    if (t.collapsed && this.surgicalInsert(text)) {
+      const inline = insertTextInInline(t.leaf.inline, t.start, text);
+      this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, t.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
+    } else {
+      let inline = t.leaf.inline;
+      if (!t.collapsed) inline = deleteRangeInInline(inline, t.start, t.end);
+      inline = insertTextInInline(inline, t.start, text);
+      this.commitInline(t.leaf.id, inline, t.blockEl, t.start + text.length);
+    }
     this.scheduleSerialize();
     this.handleSlashAfterInsert(text);
   }
@@ -519,9 +538,13 @@ export class BlockSurface {
     const cell = this.cellTarget();
     if (cell) {
       if (cell.spansCells || (cell.collapsed && cell.start === 0)) return; // no merge across cells
-      const from = cell.collapsed ? cell.start - 1 : cell.start;
-      const to = cell.collapsed ? cell.start : cell.end;
-      this.commitCell(cell, deleteRangeInInline(cell.inline, from, to), from);
+      if (cell.collapsed && this.surgicalDeleteBack()) {
+        this.updateCellModel(cell, deleteRangeInInline(cell.inline, cell.start - 1, cell.start));
+      } else {
+        const from = cell.collapsed ? cell.start - 1 : cell.start;
+        const to = cell.collapsed ? cell.start : cell.end;
+        this.commitCell(cell, deleteRangeInInline(cell.inline, from, to), from);
+      }
       this.scheduleSerialize();
       return;
     }
@@ -546,7 +569,15 @@ export class BlockSurface {
       return;
     }
     if (!isInlineText(t.leaf)) return;
-    this.commitInline(t.leaf.id, deleteRangeInInline(t.leaf.inline, from, to), t.blockEl, from);
+
+    // Surgical fast path for a within-text-node backspace; full re-render only for
+    // a selection delete or a caret at a text-node boundary.
+    if (t.collapsed && this.surgicalDeleteBack()) {
+      const inline = deleteRangeInInline(t.leaf.inline, from, to);
+      this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, t.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
+    } else {
+      this.commitInline(t.leaf.id, deleteRangeInInline(t.leaf.inline, from, to), t.blockEl, from);
+    }
     this.scheduleSerialize();
     this.refreshSlash();
   }
@@ -759,7 +790,7 @@ export class BlockSurface {
     return { tableId, row, col, cellEl, inline, start, end, collapsed, spansCells: !endInCell };
   }
 
-  private commitCell(c: { tableId: string; row: number; col: number; cellEl: HTMLElement }, inline: InlineNode[], caret: number): void {
+  private updateCellModel(c: { tableId: string; row: number; col: number }, inline: InlineNode[]): void {
     this.doc = {
       ...this.doc,
       blocks: updateBlockById(this.doc.blocks, c.tableId, (b) => {
@@ -768,8 +799,40 @@ export class BlockSurface {
         return { ...b, rows, dirty: true };
       })
     };
+  }
+
+  private commitCell(c: { tableId: string; row: number; col: number; cellEl: HTMLElement }, inline: InlineNode[], caret: number): void {
+    this.updateCellModel(c, inline);
     renderInlineInto(c.cellEl, inline);
     setCaret(c.cellEl, caret);
+  }
+
+  // Surgical DOM edits for the common case: a collapsed caret inside a text node.
+  // Insert/delete in place rather than rebuilding the block's DOM, so typing is
+  // native-smooth and the selection is never disturbed. Return false to let the
+  // caller fall back to a full re-render (selection replace, caret on an element).
+  private surgicalInsert(text: string): boolean {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return false;
+    const range = sel.getRangeAt(0);
+    if (!range.collapsed || range.startContainer.nodeType !== Node.TEXT_NODE) return false;
+    const tn = range.startContainer as Text;
+    const off = range.startOffset;
+    tn.insertData(off, text);
+    sel.collapse(tn, off + text.length);
+    return true;
+  }
+
+  private surgicalDeleteBack(): boolean {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return false;
+    const range = sel.getRangeAt(0);
+    if (!range.collapsed || range.startContainer.nodeType !== Node.TEXT_NODE || range.startOffset === 0) return false;
+    const tn = range.startContainer as Text;
+    const off = range.startOffset;
+    tn.deleteData(off - 1, 1);
+    sel.collapse(tn, off - 1);
+    return true;
   }
 
   // Move the caret to the next/previous cell in row-major order. Off the ends it

@@ -15,9 +15,18 @@
   padding: 2.5rem 2rem 40vh;
   box-sizing: border-box;
   outline: none;
+  caret-color: var(--skrive-fg);
   font-family: var(--skrive-editor-font);
   font-size: var(--skrive-editor-font-size);
   line-height: var(--skrive-editor-line-height);
+}
+
+/* The host is the focused contenteditable; opt out of the app's global
+   :focus-visible ring (index.css) so there is no box around the writing area.
+   Higher specificity than the global rule, so it wins regardless of load order. */
+.block-editor-surface:focus,
+.block-editor-surface:focus-visible {
+  outline: none;
 }
 
 .block-editor-surface > * {
