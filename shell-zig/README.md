@@ -1,13 +1,10 @@
 # shell-zig
 
-A second Skrive shell — a Zig core behind a per-platform native host —
-driving the system webview with the existing React renderer, byte-for-byte.
-The Electron shell in `shell/` remains the shipping product; this is the
-labs experiment tracked in `docs/Zig shell master plan.md` and
+Skrive's native shell — a Zig core behind a per-platform native host —
+driving the system webview with the React renderer, byte-for-byte. It is
+the shipping product as of v1.7; the Electron shell it replaced was removed
+in SKR-106. The design history is in `docs/Zig shell master plan.md` and
 `docs/zig-shell-log.md`.
-
-Status: **Stage 1 (macOS spike)**. The code here is allowed to be rough;
-its findings are the deliverable.
 
 ## Layout
 

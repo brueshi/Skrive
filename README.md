@@ -6,7 +6,7 @@ Skrive is a **writing and notes app** — not an Obsidian clone, not a knowledge
 
 What makes 1.0 different from every other Markdown app: it is a **document you write in, not a code editor with a preview**. One canonical Markdown file, two surfaces projected over it — a no-syntax rich surface for everyone, and an honest source surface for the Markdown-literate. The bytes on disk are always plain Markdown you could have typed by hand.
 
-Built on Electron and React, with a small native Rust core (via napi-rs) for structural diffing.
+Built on a native Zig shell and React.
 
 ## Status
 
@@ -64,25 +64,25 @@ The 1.0 "Overcast" design — a warm near-white page on a dove-grey desk, a slat
 
 ## Development
 
-Prerequisites: [Bun](https://bun.com) and a Rust toolchain (for the native diff core).
+Prerequisites: [Bun](https://bun.com) and [Zig](https://ziglang.org) 0.16 (the native shell); macOS builds also need Xcode's Swift toolchain.
 
 ```bash
 bun install
-bun run start        # launch the app in dev (electron-vite)
-bun run typecheck    # type-check shared / app / shell
-bun run test         # vitest
+bun run start        # build the native macOS host + Vite dev server, hot reload
+bun run typecheck    # type-check shared / app
+bun run parity:check # replay the command-contract corpus against the Zig core
 ```
 
-Packaging (`bun run package:mac` / `:win`) is a CI-only path — it signs and notarizes on macOS using secrets the release workflow provides.
+`bun run start` drives the host via `SKRIVE_DEV_URL` so renderer edits hot-reload in the real webview (see `shell-zig/README.md`). Build a distributable app with `shell-zig/build-macos.sh` / `build-windows.sh`; `shell-zig/release-macos.sh` signs + notarizes, driven in CI by `.github/workflows/zig-shell.yml`.
 
 ## Project layout
 
 ```
 .
-├── app/          # React renderer — editor surfaces, panels, UI
-├── shell/        # Electron main + preload + IPC, project intelligence
+├── app/          # React renderer — editor surfaces, panels, UI, project intelligence
+├── shell-zig/    # Native shell: Zig core + macOS (Swift) and Windows hosts
 ├── shared/       # Shared types and IPC contracts
-├── native/diff/  # Rust structural-diff core (napi-rs)
+├── native/diff/  # Rust structural-diff core (retained for future native use)
 └── docs/         # Install notes, design notes, .skrive.toml reference
 ```
 

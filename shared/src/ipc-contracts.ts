@@ -12,11 +12,10 @@ import type { SkriveProjectConfig } from './skrive-toml';
 
 // ============================ Envelope (v1) ============================
 // Every message between renderer and shell is one JSON object, defined
-// here and shared by the Electron shell, the Zig shell, and any future
-// web shim. Spec: `docs/Zig shell master plan.md` Part I. Envelopes are
-// string-marshaled on every transport (including Electron) so the size
-// cap is enforceable without parsing and the parity corpus replays the
-// same bytes against every dispatcher.
+// here and shared by the Zig shell and any future web shim. Spec:
+// `docs/Zig shell master plan.md` Part I. Envelopes are string-marshaled
+// on every transport so the size cap is enforceable without parsing and
+// the parity corpus replays the same bytes against every dispatcher.
 
 export const ENVELOPE_VERSION = 1;
 
@@ -31,9 +30,9 @@ export const SKRIVE_CONTRACT_VERSION = 2;
  *  with PAYLOAD_TOO_LARGE before parsing. */
 export const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
 
-/** Electron channel carrying request/response envelopes (JSON strings). */
+/** IPC channel carrying request/response envelopes (JSON strings). */
 export const SKRIVE_INVOKE_CHANNEL = 'skrive:invoke';
-/** Electron channel carrying event envelopes (JSON strings), shell to renderer. */
+/** IPC channel carrying event envelopes (JSON strings), shell to renderer. */
 export const SKRIVE_EVENT_CHANNEL = 'skrive:event';
 
 /**
@@ -205,7 +204,7 @@ export type ProjectChange =
   | { kind: 'ready' };
 
 // ============================ Diff types ============================
-// Shapes mirror what `@skrive/diff` (native/diff) emits via serde —
+// Shapes mirror what the `native/diff` core emits via serde —
 // `BlockKind` and `DiffOp` are internally tagged on `kind`, with
 // camelCase fields. The TS types here are the source of truth on the
 // JS side; native/diff/__test__/fixtures.test.ts gates the boundary
@@ -435,7 +434,7 @@ export type HistoryEntry =
 
 /** State machine the renderer renders against. The shell side is the
  *  source of truth — a single `current` value is broadcast to every
- *  subscribed renderer whenever electron-updater emits an event. */
+ *  subscribed renderer whenever the native updater driver emits an event. */
 export type UpdaterStatus =
   | { kind: 'idle' }
   | { kind: 'checking' }
@@ -572,7 +571,7 @@ export interface SkriveIpc {
     /**
      * Structural diff (Phase 3.3b). Block-hash matching with 2-opt
      * assignment; emits Kept/Added/Deleted/Moved/Reworded ops. Pure
-     * computation in the main process via @skrive/diff.
+     * computation in the `native/diff` core.
      */
     computeDiff(before: string, after: string): Promise<DiffOp[]>;
     /**
@@ -621,7 +620,7 @@ export interface SkriveIpc {
     current(): Promise<UpdaterStatus>;
     /** Trigger a check against the GitHub Releases provider. Status
      *  flows through `onStatus` rather than this method's return —
-     *  electron-updater is event-driven, and the renderer subscribes
+     *  the native updater is event-driven, and the renderer subscribes
      *  before calling `check()`. Returns when the check has been
      *  *initiated* (not when it resolves). */
     check(): Promise<void>;
