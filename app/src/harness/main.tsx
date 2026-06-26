@@ -15,12 +15,12 @@
 //   anchors = <int>              anchor comment every Nth block, 0 = none (default 0)
 //   seed    = <int>              corpus PRNG seed (default 0xc0ffee)
 
-import { StrictMode, useEffect, useRef } from 'react';
+import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RichEditor } from '../components/editor/rich/RichEditor';
 import { Editor } from '../components/editor/Editor';
 import { mountBespoke, type BespokeVariant } from './bespoke/surface';
-import { BlockSurface } from '../lib/blocksurface';
+import { BlockSurface, SelectionBubble } from '../lib/blocksurface';
 import { parseDocument, serializeDocument, type Document as BlockDocument } from '../lib/blockmodel';
 import {
   buildAdversarialDoc,
@@ -151,20 +151,28 @@ declare global {
 }
 function BlockSurfaceMount({ body }: { body: string }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [surface, setSurface] = useState<BlockSurface | null>(null);
   useEffect(() => {
     if (!ref.current) return;
     const doc: BlockDocument = parseDocument(body);
-    const surface = new BlockSurface({ container: ref.current, doc });
+    const s = new BlockSurface({ container: ref.current, doc });
+    setSurface(s);
     window.__skriveBlockSurface = {
-      serialize: () => serializeDocument(surface.getDocument()),
-      blockCount: () => surface.getDocument().blocks.length
+      serialize: () => serializeDocument(s.getDocument()),
+      blockCount: () => s.getDocument().blocks.length
     };
     return () => {
-      surface.destroy();
+      s.destroy();
+      setSurface(null);
       delete window.__skriveBlockSurface;
     };
   }, [body]);
-  return <div ref={ref} className="bespoke-root" />;
+  return (
+    <>
+      <div ref={ref} className="bespoke-root" />
+      {surface && <SelectionBubble surface={surface} />}
+    </>
+  );
 }
 
 function main(): void {

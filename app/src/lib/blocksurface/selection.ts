@@ -79,6 +79,20 @@ export function setCaret(blockEl: HTMLElement, flatOffset: number): void {
   sel.addRange(range);
 }
 
+/** Select the flat range [start, end) within a block. Used after a mark command
+ *  re-renders the block, so the user keeps their selection (and the bubble stays). */
+export function setSelectionRange(blockEl: HTMLElement, start: number, end: number): void {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const a = domPointFromFlatOffset(blockEl, start);
+  const b = domPointFromFlatOffset(blockEl, end);
+  const range = document.createRange();
+  range.setStart(a.node, a.offset);
+  range.setEnd(b.node, b.offset);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
 export type CaretContext = {
   blockEl: HTMLElement;
   /** Flat offset of the selection start within the block. */

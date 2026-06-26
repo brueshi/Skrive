@@ -7,7 +7,11 @@ import {
   deleteRangeInInline,
   inlineLength,
   insertTextInInline,
-  splitInline
+  rangeHasLink,
+  rangeHasMark,
+  setLinkInInline,
+  splitInline,
+  toggleMarkInInline
 } from '../../../src/lib/blocksurface/inline-ops';
 import type { InlineNode } from '../../../src/lib/blockmodel';
 
@@ -90,5 +94,46 @@ describe('splitInline', () => {
   it('splits at the start (empty left) and end (empty right)', () => {
     expect(splitInline([text('hi')], 0)).toEqual([[], [text('hi')]]);
     expect(splitInline([text('hi')], 2)).toEqual([[text('hi')], []]);
+  });
+});
+
+describe('toggleMarkInInline', () => {
+  it('adds a mark over a sub-range, splitting the run', () => {
+    expect(toggleMarkInInline([text('hello world')], 0, 5, 'strong')).toEqual([
+      text('hello', { strong: true }),
+      text(' world')
+    ]);
+  });
+
+  it('removes the mark when the whole range already has it', () => {
+    expect(toggleMarkInInline([text('hi', { strong: true })], 0, 2, 'strong')).toEqual([text('hi')]);
+  });
+
+  it('adds when only part of the range has the mark', () => {
+    const nodes = [text('ab', { em: true }), text('cd')];
+    expect(toggleMarkInInline(nodes, 0, 4, 'em')).toEqual([text('ab', { em: true }), text('cd', { em: true })]);
+  });
+});
+
+describe('rangeHasMark / rangeHasLink', () => {
+  it('reports a fully-marked range', () => {
+    expect(rangeHasMark([text('hi', { strong: true })], 0, 2, 'strong')).toBe(true);
+    expect(rangeHasMark([text('hi', { strong: true }), text('!')], 0, 3, 'strong')).toBe(false);
+    expect(rangeHasMark([], 0, 0, 'strong')).toBe(false);
+  });
+
+  it('reports a fully-linked range', () => {
+    const link = { href: 'https://x', title: null };
+    expect(rangeHasLink([text('hi', { link })], 0, 2)).toBe(true);
+    expect(rangeHasLink([text('hi')], 0, 2)).toBe(false);
+  });
+});
+
+describe('setLinkInInline', () => {
+  it('sets and clears the link over a range', () => {
+    const link = { href: 'https://x', title: null };
+    const linked = setLinkInInline([text('hello')], 0, 5, link);
+    expect(linked).toEqual([text('hello', { link })]);
+    expect(setLinkInInline(linked, 0, 5, null)).toEqual([text('hello')]);
   });
 });
