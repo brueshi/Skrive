@@ -125,6 +125,68 @@ test('Stage 3b: Delete at a block end merges the next block in', async ({ page }
   expect(serializeDocument(parseDocument(md)), 'stable after forward-merge').toBe(md);
 });
 
+// Focus the first block, append a sentinel word, and leave it selected.
+async function selectSentinel(page: Page, word: string): Promise<void> {
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.type(` ${word}`, { delay: 6 });
+  for (let i = 0; i < word.length; i++) await page.keyboard.press('Shift+ArrowLeft');
+}
+
+test('Stage 3c: bold toggles on and off via the keyboard', async ({ page }) => {
+  await open(page, 5);
+  await selectSentinel(page, 'BOLDME');
+
+  await page.keyboard.press('ControlOrMeta+b');
+  await page.waitForTimeout(80);
+  let md = await serialized(page);
+  expect(md, 'bold applied').toContain('**BOLDME**');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+
+  await page.keyboard.press('ControlOrMeta+b');
+  await page.waitForTimeout(80);
+  md = await serialized(page);
+  expect(md, 'bold removed').not.toContain('**BOLDME**');
+  expect(md).toContain('BOLDME');
+});
+
+test('Stage 3c: italic and inline code via the keyboard', async ({ page }) => {
+  await open(page, 5);
+  await selectSentinel(page, 'EMME');
+  await page.keyboard.press('ControlOrMeta+i');
+  await page.waitForTimeout(80);
+  expect(await serialized(page)).toContain('*EMME*');
+
+  await open(page, 5);
+  await selectSentinel(page, 'CODEME');
+  await page.keyboard.press('ControlOrMeta+e');
+  await page.waitForTimeout(80);
+  const md = await serialized(page);
+  expect(md).toContain('`CODEME`');
+  expect(serializeDocument(parseDocument(md))).toBe(md);
+});
+
+test('Stage 3c: the select->bubble applies bold and a link', async ({ page }) => {
+  await open(page, 5);
+  await selectSentinel(page, 'BUBBLEME');
+
+  const bold = page.getByRole('button', { name: 'Bold (Cmd/Ctrl+B)' });
+  await expect(bold, 'bubble appears on selection').toBeVisible();
+  await bold.click();
+  await page.waitForTimeout(80);
+  expect(await serialized(page)).toContain('**BUBBLEME**');
+
+  // Selection is preserved after the mark, so the bubble stays — add a link.
+  await page.getByRole('button', { name: 'Link' }).click();
+  const input = page.getByPlaceholder('https://…');
+  await expect(input).toBeVisible();
+  await input.fill('https://skrive.md');
+  await input.press('Enter');
+  await page.waitForTimeout(80);
+  const md = await serialized(page);
+  expect(md, 'link applied over the bolded text').toContain('](https://skrive.md)');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
 test('Stage 3a: IME composition lands in the model', async ({ page, context }) => {
   await open(page, 200);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');

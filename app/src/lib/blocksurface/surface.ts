@@ -12,8 +12,27 @@
 
 import { generateBlockId, type BlockNode, type Document, type InlineNode } from '../blockmodel';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto } from './render';
-import { caretContext, focusedBlockElement, setCaret } from './selection';
-import { deleteRangeInInline, inlineLength, insertTextInInline, readInlineFromDOM, splitInline } from './inline-ops';
+import { caretContext, focusedBlockElement, setCaret, setSelectionRange } from './selection';
+import {
+  type BooleanMark,
+  deleteRangeInInline,
+  inlineLength,
+  insertTextInInline,
+  rangeHasLink,
+  rangeHasMark,
+  readInlineFromDOM,
+  setLinkInInline,
+  splitInline,
+  toggleMarkInInline
+} from './inline-ops';
+
+/** What the select->bubble affordance needs: where the selection is on screen and
+ *  which marks already cover it (for active state). Null when there is no
+ *  bubble-worthy selection (collapsed, empty, or crossing a block boundary). */
+export type SelectionInfo = {
+  rect: DOMRect;
+  marks: { strong: boolean; em: boolean; code: boolean; link: boolean };
+};
 
 const SERIALIZE_DEBOUNCE_MS = 400;
 
@@ -37,6 +56,9 @@ export class BlockSurface {
   private readonly onDocChange?: (doc: Document) => void;
   private debounceTimer: number | null = null;
   private composing = false;
+  private selectionCb: ((info: SelectionInfo | null) => void) | null = null;
+  private selScheduled = false;
+  private savedLink: { blockId: string; start: number; end: number } | null = null;
 
   constructor(opts: BlockSurfaceOptions) {
     this.container = opts.container;
@@ -51,6 +73,14 @@ export class BlockSurface {
     this.container.addEventListener('paste', this.onPaste, { capture: true });
     this.container.addEventListener('compositionstart', this.onCompositionStart, true);
     this.container.addEventListener('compositionend', this.onCompositionEnd, true);
+    this.container.addEventListener('keydown', this.onKeyDown, true);
+    document.addEventListener('selectionchange', this.onDocSelectionChange);
+  }
+
+  /** Register (or clear, with null) the select->bubble observer. Fired
+   *  rAF-coalesced on selection change, never per keystroke. */
+  onSelectionChange(cb: ((info: SelectionInfo | null) => void) | null): void {
+    this.selectionCb = cb;
   }
 
   /** The current authoritative document. The consumer serializes this. */
@@ -72,7 +102,127 @@ export class BlockSurface {
     this.container.removeEventListener('paste', this.onPaste, true);
     this.container.removeEventListener('compositionstart', this.onCompositionStart, true);
     this.container.removeEventListener('compositionend', this.onCompositionEnd, true);
+    this.container.removeEventListener('keydown', this.onKeyDown, true);
+    document.removeEventListener('selectionchange', this.onDocSelectionChange);
     if (this.debounceTimer != null) clearTimeout(this.debounceTimer);
+  }
+
+  // --- marks: keyboard shortcuts + commands --------------------------------
+
+  private onKeyDown = (event: Event): void => {
+    const e = event as KeyboardEvent;
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+    const key = e.key.toLowerCase();
+    if (key === 'b') {
+      e.preventDefault();
+      this.toggleMark('strong');
+    } else if (key === 'i') {
+      e.preventDefault();
+      this.toggleMark('em');
+    } else if (key === 'e') {
+      e.preventDefault();
+      this.toggleMark('code');
+    }
+  };
+
+  /** Toggle a boolean mark over the current selection. A no-op without a
+   *  within-block selection (stored marks for a collapsed caret are a later
+   *  refinement). */
+  toggleMark(mark: BooleanMark): void {
+    this.applyToSelection((inline, start, end) => toggleMarkInInline(inline, start, end, mark));
+  }
+
+  /** Set or clear the link over the current selection. `href` empty/null clears. */
+  setLink(href: string | null): void {
+    const link = href && href.length > 0 ? { href, title: null } : null;
+    this.applyToSelection((inline, start, end) => setLinkInInline(inline, start, end, link));
+  }
+
+  /** Remember the current selection so a link can be applied to it after focus
+   *  moves to a URL input (which would otherwise collapse the live selection).
+   *  Returns false when there is no within-block selection to link. */
+  beginLink(): boolean {
+    const ctx = caretContext(this.container, this.registry);
+    if (!ctx || ctx.collapsed || ctx.spansBlocks) return false;
+    const found = this.findBlock(ctx.blockEl);
+    if (!found || !isInlineText(found.block)) return false;
+    this.savedLink = { blockId: found.block.id, start: ctx.start, end: ctx.end };
+    return true;
+  }
+
+  /** Apply (or, with null, abandon) a link to the selection saved by beginLink. */
+  commitLink(href: string | null): void {
+    const saved = this.savedLink;
+    this.savedLink = null;
+    if (!saved || href == null || href.length === 0) return;
+    const index = this.doc.blocks.findIndex((b) => b.id === saved.blockId);
+    if (index < 0) return;
+    const block = this.doc.blocks[index]!;
+    if (!isInlineText(block)) return;
+    const inline = setLinkInInline(block.inline, saved.start, saved.end, { href, title: null });
+    this.commitBlock(index, { ...block, inline, dirty: true });
+    const el = this.registry.get(saved.blockId);
+    if (el) {
+      renderInlineInto(el, inline);
+      setSelectionRange(el, saved.start, saved.end);
+    }
+    this.scheduleSerialize();
+    this.emitSelection();
+  }
+
+  private applyToSelection(transform: (inline: InlineNode[], start: number, end: number) => InlineNode[]): void {
+    const ctx = caretContext(this.container, this.registry);
+    if (!ctx || ctx.collapsed || ctx.spansBlocks) return;
+    const found = this.findBlock(ctx.blockEl);
+    if (!found || !isInlineText(found.block)) return;
+
+    const inline = transform(found.block.inline, ctx.start, ctx.end);
+    this.commitBlock(found.index, { ...found.block, inline, dirty: true });
+    renderInlineInto(ctx.blockEl, inline);
+    setSelectionRange(ctx.blockEl, ctx.start, ctx.end);
+    this.scheduleSerialize();
+    this.emitSelection(); // refresh the bubble's active state
+  }
+
+  // --- the select->bubble observer -----------------------------------------
+
+  private onDocSelectionChange = (): void => {
+    if (this.selScheduled) return;
+    this.selScheduled = true;
+    requestAnimationFrame(() => {
+      this.selScheduled = false;
+      this.emitSelection();
+    });
+  };
+
+  private emitSelection(): void {
+    const cb = this.selectionCb;
+    if (!cb) return;
+    const ctx = caretContext(this.container, this.registry);
+    if (!ctx || ctx.collapsed || ctx.spansBlocks) {
+      cb(null);
+      return;
+    }
+    const found = this.findBlock(ctx.blockEl);
+    if (!found || !isInlineText(found.block)) {
+      cb(null);
+      return;
+    }
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) {
+      cb(null);
+      return;
+    }
+    const inline = found.block.inline;
+    cb({
+      rect: sel.getRangeAt(0).getBoundingClientRect(),
+      marks: {
+        strong: rangeHasMark(inline, ctx.start, ctx.end, 'strong'),
+        em: rangeHasMark(inline, ctx.start, ctx.end, 'em'),
+        code: rangeHasMark(inline, ctx.start, ctx.end, 'code'),
+        link: rangeHasLink(inline, ctx.start, ctx.end)
+      }
+    });
   }
 
   // --- the hot path --------------------------------------------------------

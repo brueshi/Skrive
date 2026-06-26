@@ -94,6 +94,111 @@ export function splitInline(nodes: InlineNode[], offset: number): [InlineNode[],
   return [left, right];
 }
 
+/** The toggleable boolean marks (link is set/cleared with a value, separately). */
+export type BooleanMark = 'strong' | 'em' | 'code';
+
+// Apply a mark transform to the text within the flat range [start, end), splitting
+// runs at the range boundaries so only the covered characters change.
+function mapRange(
+  nodes: InlineNode[],
+  start: number,
+  end: number,
+  fn: (marks: InlineMarks) => InlineMarks
+): InlineNode[] {
+  const out: InlineNode[] = [];
+  let acc = 0;
+  for (const node of nodes) {
+    if (!isText(node)) {
+      out.push(node);
+      continue;
+    }
+    const s = acc;
+    const e = acc + node.text.length;
+    acc = e;
+    if (e <= start || s >= end) {
+      out.push(node);
+      continue;
+    }
+    const a = Math.max(start, s);
+    const b = Math.min(end, e);
+    const before = node.text.slice(0, a - s);
+    const mid = node.text.slice(a - s, b - s);
+    const after = node.text.slice(b - s);
+    if (before) out.push({ kind: 'text', text: before, marks: node.marks });
+    if (mid) out.push({ kind: 'text', text: mid, marks: fn(node.marks) });
+    if (after) out.push({ kind: 'text', text: after, marks: node.marks });
+  }
+  return out;
+}
+
+/** True when every text character in the range carries the boolean mark (and the
+ *  range contains at least one character). Drives toggle direction and the
+ *  bubble's active state. */
+export function rangeHasMark(nodes: InlineNode[], start: number, end: number, mark: BooleanMark): boolean {
+  let acc = 0;
+  let any = false;
+  for (const node of nodes) {
+    if (!isText(node)) continue;
+    const s = acc;
+    const e = acc + node.text.length;
+    acc = e;
+    if (e <= start || s >= end) continue;
+    any = true;
+    if (node.marks[mark] !== true) return false;
+  }
+  return any;
+}
+
+/** True when every text character in the range is part of the same link. */
+export function rangeHasLink(nodes: InlineNode[], start: number, end: number): boolean {
+  let acc = 0;
+  let any = false;
+  for (const node of nodes) {
+    if (!isText(node)) continue;
+    const s = acc;
+    const e = acc + node.text.length;
+    acc = e;
+    if (e <= start || s >= end) continue;
+    any = true;
+    if (!node.marks.link) return false;
+  }
+  return any;
+}
+
+/** Toggle a boolean mark over a range: remove it if the whole range already has
+ *  it, otherwise add it (standard editor semantics). */
+export function toggleMarkInInline(
+  nodes: InlineNode[],
+  start: number,
+  end: number,
+  mark: BooleanMark
+): InlineNode[] {
+  if (start >= end) return nodes;
+  const has = rangeHasMark(nodes, start, end, mark);
+  return mapRange(nodes, start, end, (m) => {
+    const next = { ...m };
+    if (has) delete next[mark];
+    else next[mark] = true;
+    return next;
+  });
+}
+
+/** Set or clear the link mark over a range. */
+export function setLinkInInline(
+  nodes: InlineNode[],
+  start: number,
+  end: number,
+  link: { href: string; title: string | null } | null
+): InlineNode[] {
+  if (start >= end) return nodes;
+  return mapRange(nodes, start, end, (m) => {
+    const next = { ...m };
+    if (link) next.link = link;
+    else delete next.link;
+    return next;
+  });
+}
+
 function markEl(tag: string, marks: InlineMarks): InlineMarks {
   switch (tag) {
     case 'strong':
