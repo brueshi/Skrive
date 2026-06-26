@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import {
   deleteRangeInInline,
   inlineLength,
+  inlinePlainText,
   insertTextInInline,
   rangeHasLink,
   rangeHasMark,
@@ -78,6 +79,13 @@ describe('inlineLength', () => {
   it('sums text run lengths', () => {
     expect(inlineLength([text('ab'), text('cde', { strong: true })])).toBe(5);
     expect(inlineLength([])).toBe(0);
+  });
+});
+
+describe('inlinePlainText', () => {
+  it('concatenates text across runs and marks', () => {
+    expect(inlinePlainText([text('/'), text('head', { strong: true })])).toBe('/head');
+    expect(inlinePlainText([])).toBe('');
   });
 });
 

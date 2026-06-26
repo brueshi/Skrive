@@ -17,6 +17,7 @@ import {
   type BooleanMark,
   deleteRangeInInline,
   inlineLength,
+  inlinePlainText,
   insertTextInInline,
   rangeHasLink,
   rangeHasMark,
@@ -25,6 +26,13 @@ import {
   splitInline,
   toggleMarkInInline
 } from './inline-ops';
+
+/** A block type the insert menu / commands can apply to the current block. */
+export type BlockTypeSpec = { kind: 'paragraph' } | { kind: 'heading'; level: number } | { kind: 'divider' };
+
+/** What the insert (slash) menu needs: where to anchor, and the query typed after
+ *  the `/`. Null when the menu is closed. */
+export type SlashMenuState = { rect: DOMRect; query: string };
 
 /** What the select->bubble affordance needs: where the selection is on screen and
  *  which marks already cover it (for active state). Null when there is no
@@ -59,6 +67,8 @@ export class BlockSurface {
   private selectionCb: ((info: SelectionInfo | null) => void) | null = null;
   private selScheduled = false;
   private savedLink: { blockId: string; start: number; end: number } | null = null;
+  private slash: { blockId: string; slashOffset: number } | null = null;
+  private slashCb: ((state: SlashMenuState | null) => void) | null = null;
 
   constructor(opts: BlockSurfaceOptions) {
     this.container = opts.container;
@@ -81,6 +91,12 @@ export class BlockSurface {
    *  rAF-coalesced on selection change, never per keystroke. */
   onSelectionChange(cb: ((info: SelectionInfo | null) => void) | null): void {
     this.selectionCb = cb;
+  }
+
+  /** Register (or clear) the insert (slash) menu observer. Fired when a `/` opens
+   *  the menu on an empty block, as its query changes, and when it closes (null). */
+  onSlashMenu(cb: ((state: SlashMenuState | null) => void) | null): void {
+    this.slashCb = cb;
   }
 
   /** The current authoritative document. The consumer serializes this. */
@@ -182,6 +198,115 @@ export class BlockSurface {
     setSelectionRange(ctx.blockEl, ctx.start, ctx.end);
     this.scheduleSerialize();
     this.emitSelection(); // refresh the bubble's active state
+  }
+
+  // --- block types + the insert (slash) menu -------------------------------
+
+  /** Convert the current block's type, or insert a divider. Keeps the inline
+   *  content (and the block id) across a paragraph<->heading change. */
+  setBlockType(spec: BlockTypeSpec): void {
+    const cur = this.currentInlineBlock();
+    if (!cur) return;
+    if (spec.kind === 'divider') {
+      this.replaceWithDivider(cur);
+      return;
+    }
+    // A type change invalidates the captured src (it would re-serialize as the old
+    // construct), so drop it; the seam gap is unchanged.
+    const base = { id: cur.block.id, durable: cur.block.durable, src: null, gapBefore: cur.block.gapBefore, dirty: true };
+    const next: BlockNode =
+      spec.kind === 'heading'
+        ? { type: 'heading', ...base, level: spec.level, inline: cur.block.inline }
+        : { type: 'paragraph', ...base, inline: cur.block.inline };
+
+    this.commitBlock(cur.index, next);
+    const newEl = renderBlock(next);
+    cur.blockEl.replaceWith(newEl);
+    this.registry.set(cur.block.id, newEl);
+    setCaret(newEl, Math.min(cur.caret, inlineLength(cur.block.inline)));
+    this.scheduleSerialize();
+  }
+
+  private replaceWithDivider(cur: { block: BlockNode; index: number; blockEl: HTMLElement }): void {
+    const hr: BlockNode = {
+      type: 'horizontal_rule',
+      id: cur.block.id,
+      durable: cur.block.durable,
+      src: null,
+      gapBefore: cur.block.gapBefore,
+      dirty: true
+    };
+    const para = this.newInlineBlock('paragraph', [], 1);
+    const blocks = this.doc.blocks.slice();
+    blocks.splice(cur.index, 1, hr, para);
+    this.doc = { ...this.doc, blocks };
+
+    const hrEl = renderBlock(hr);
+    cur.blockEl.replaceWith(hrEl);
+    this.registry.set(hr.id, hrEl);
+    const paraEl = renderBlock(para);
+    hrEl.after(paraEl);
+    this.registry.set(para.id, paraEl);
+    setCaret(paraEl, 0);
+    this.scheduleSerialize();
+  }
+
+  /** Apply an insert-menu choice: strip the `/query` text, then set the block
+   *  type. Called by the menu (which preserves the caret on mousedown). */
+  applySlashCommand(spec: BlockTypeSpec): void {
+    const slash = this.slash;
+    if (!slash) return;
+    const cur = this.currentInlineBlock();
+    if (cur && cur.block.id === slash.blockId) {
+      const text = inlinePlainText(cur.block.inline);
+      const inline = deleteRangeInInline(cur.block.inline, slash.slashOffset, text.length);
+      this.commitBlock(cur.index, { ...cur.block, inline, dirty: true });
+      renderInlineInto(cur.blockEl, inline);
+      setCaret(cur.blockEl, slash.slashOffset);
+    }
+    this.closeSlash();
+    this.setBlockType(spec);
+  }
+
+  closeSlash(): void {
+    if (!this.slash) return;
+    this.slash = null;
+    this.slashCb?.(null);
+  }
+
+  private currentInlineBlock(): { block: InlineTextBlock; index: number; blockEl: HTMLElement; caret: number } | null {
+    const ctx = caretContext(this.container, this.registry);
+    if (!ctx) return null;
+    const found = this.findBlock(ctx.blockEl);
+    if (!found || !isInlineText(found.block)) return null;
+    return { block: found.block, index: found.index, blockEl: ctx.blockEl, caret: ctx.start };
+  }
+
+  private handleSlashAfterInsert(text: string): void {
+    if (!this.slash && text === '/') {
+      const cur = this.currentInlineBlock();
+      // Open only when the `/` is the entire block (a deliberate, empty-line gesture).
+      if (cur && inlinePlainText(cur.block.inline) === '/') {
+        this.slash = { blockId: cur.block.id, slashOffset: cur.caret - 1 };
+      }
+    }
+    this.refreshSlash();
+  }
+
+  private refreshSlash(): void {
+    if (!this.slash) return;
+    const cur = this.currentInlineBlock();
+    if (!cur || cur.block.id !== this.slash.blockId) return this.closeSlash();
+    const text = inlinePlainText(cur.block.inline);
+    if (text[this.slash.slashOffset] !== '/') return this.closeSlash();
+    const query = text.slice(this.slash.slashOffset + 1, cur.caret);
+    if (query.includes(' ')) return this.closeSlash();
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return this.closeSlash();
+    let rect = sel.getRangeAt(0).getBoundingClientRect();
+    // A caret in an empty block can report a degenerate rect; anchor to the block.
+    if (rect.height === 0 && rect.width === 0) rect = cur.blockEl.getBoundingClientRect();
+    this.slashCb?.({ rect, query });
   }
 
   // --- the select->bubble observer -----------------------------------------
@@ -290,6 +415,7 @@ export class BlockSurface {
     renderInlineInto(ctx.blockEl, inline);
     setCaret(ctx.blockEl, ctx.start + text.length);
     this.scheduleSerialize();
+    this.handleSlashAfterInsert(text);
   }
 
   private applyDeleteBackward(): void {
@@ -300,6 +426,7 @@ export class BlockSurface {
 
     if (ctx.collapsed && ctx.start === 0) {
       this.mergeWithPrevious(found.index, ctx.blockEl);
+      this.closeSlash();
       return;
     }
 
@@ -317,6 +444,7 @@ export class BlockSurface {
     renderInlineInto(ctx.blockEl, inline);
     setCaret(ctx.blockEl, caret);
     this.scheduleSerialize();
+    this.refreshSlash();
   }
 
   private applyDeleteForward(): void {

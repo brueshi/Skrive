@@ -59,26 +59,32 @@ export function SelectionBubble({ surface }: { surface: BlockSurface }) {
   const [linking, setLinking] = useState(false);
   const [href, setHref] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  // Last selection rect, so the bubble can stay anchored while a link is being
+  // entered even though focusing the URL input collapses the selection.
+  const lastRect = useRef<DOMRect | null>(null);
 
   useEffect(() => {
     surface.onSelectionChange(setInfo);
     return () => surface.onSelectionChange(null);
   }, [surface]);
 
-  // Leaving link mode whenever the selection goes away keeps the bubble honest.
   useEffect(() => {
-    if (!info) {
-      setLinking(false);
-      setHref('');
-    }
+    if (info) lastRect.current = info.rect;
   }, [info]);
+
+  // Close the bubble when the selection goes away — but NOT mid-link-entry, when
+  // the collapse is caused by the URL input taking focus.
+  useEffect(() => {
+    if (!info && !linking) setHref('');
+  }, [info, linking]);
 
   useEffect(() => {
     if (linking) inputRef.current?.focus();
   }, [linking]);
 
-  if (!info) return null;
-  const { rect, marks } = info;
+  const rect = info?.rect ?? (linking ? lastRect.current : null);
+  if (!rect) return null;
+  const marks = info?.marks ?? { strong: false, em: false, code: false, link: false };
   const top = Math.max(8, Math.round(rect.top) - BAR_OFFSET);
   const left = Math.round(rect.left);
 

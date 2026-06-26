@@ -3,8 +3,15 @@
 // Stage 3a is the engine core (render + selection + prose typing); structural
 // edits, marks, block types, and affordances arrive in 3b-3d.
 
-export { BlockSurface, type BlockSurfaceOptions, type SelectionInfo } from './surface';
+export {
+  BlockSurface,
+  type BlockSurfaceOptions,
+  type SelectionInfo,
+  type BlockTypeSpec,
+  type SlashMenuState
+} from './surface';
 export { SelectionBubble } from './SelectionBubble';
+export { SlashMenu } from './SlashMenu';
 export { renderDocument, renderBlock, renderInlineInto, BlockViewRegistry, BLOCK_ID_ATTR } from './render';
 export {
   caretContext,

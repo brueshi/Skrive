@@ -20,7 +20,7 @@ import { createRoot } from 'react-dom/client';
 import { RichEditor } from '../components/editor/rich/RichEditor';
 import { Editor } from '../components/editor/Editor';
 import { mountBespoke, type BespokeVariant } from './bespoke/surface';
-import { BlockSurface, SelectionBubble } from '../lib/blocksurface';
+import { BlockSurface, SelectionBubble, SlashMenu } from '../lib/blocksurface';
 import { parseDocument, serializeDocument, type Document as BlockDocument } from '../lib/blockmodel';
 import {
   buildAdversarialDoc,
@@ -171,6 +171,7 @@ function BlockSurfaceMount({ body }: { body: string }) {
     <>
       <div ref={ref} className="bespoke-root" />
       {surface && <SelectionBubble surface={surface} />}
+      {surface && <SlashMenu surface={surface} />}
     </>
   );
 }
