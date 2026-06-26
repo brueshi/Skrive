@@ -23,6 +23,17 @@ enum Resources {
         rendererRootURL()?.appendingPathComponent("index.html")
     }
 
+    /// Dev-server origin for Native HMR. When SKRIVE_DEV_URL is set the host
+    /// loads it instead of the bundled renderer, so `vite dev` drives the real
+    /// WKWebView with HMR. The native bridge is injected via WKUserScript
+    /// regardless of origin, so window.skrive still works against the dev
+    /// server. Loopback (localhost / 127.0.0.1) is ATS-exempt, so http needs no
+    /// Info.plist allowance. Never set in release builds.
+    static func devURL() -> URL? {
+        guard let raw = env["SKRIVE_DEV_URL"], !raw.isEmpty else { return nil }
+        return URL(string: raw)
+    }
+
     /// Project root the asset scheme serves images from. In the spike this
     /// is the bundled sample project (canned data otherwise has no disk).
     static func projectRootURL() -> URL? {

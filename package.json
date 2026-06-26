@@ -11,9 +11,10 @@
     "native/diff"
   ],
   "scripts": {
-    "start": "electron-vite dev",
-    "start:build": "electron-vite build",
-    "start:preview": "electron-vite preview",
+    "start": "bash shell-zig/dev-macos.sh",
+    "dev": "vite",
+    "start:build": "vite build",
+    "start:preview": "vite preview",
     "package": "electron-vite build && electron-builder --mac --win",
     "package:mac": "electron-vite build && electron-builder --mac",
     "package:win": "electron-vite build && electron-builder --win",

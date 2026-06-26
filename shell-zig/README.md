@@ -67,6 +67,7 @@ shell-zig/macos/.build/Skrive.app/Contents/MacOS/SkriveShell
 | `SKRIVE_DIAG` | `1` | Relays the webview console to stdout and runs a post-load self-test (round-trips `app:version`/`app:platform`, probes the DOM). Headless evidence for the done-criteria. |
 | `SKRIVE_RENDERER_DIR` | path | Dev override: load the renderer from a directory instead of the app bundle. |
 | `SKRIVE_BRIDGE_JS` | path | Dev override: inject the bridge from a file instead of the app bundle. |
+| `SKRIVE_DEV_URL` | url | Native HMR: load the renderer from a Vite dev server (e.g. `http://localhost:5173`) instead of the bundle, so renderer edits hot-reload in the real webview. Drives `bun run start` via `dev-macos.sh`. The bridge is still injected at document-create, so `window.skrive` works against it. Never set in release builds. |
 
 ## Tests
 
