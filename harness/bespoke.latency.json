@@ -1,0 +1,162 @@
+{
+  "note": "Keystroke spike (SKR-109). Surrogate engine: Chromium. Constant-time tolerance: block-10k p99 <= 2x block-1.",
+  "tolerance": 2,
+  "variants": {
+    "bespoke-single": {
+      "scenarios": {
+        "small-first": {
+          "count": 65,
+          "min": 0.5,
+          "mean": 3.7,
+          "p50": 2.5,
+          "p90": 7.78,
+          "p99": 15.17,
+          "max": 24.9
+        },
+        "big-last": {
+          "count": 65,
+          "min": 10,
+          "mean": 11.15,
+          "p50": 11.1,
+          "p90": 12,
+          "p99": 13.77,
+          "max": 16.2
+        },
+        "anchor": {
+          "count": 65,
+          "min": 1.8,
+          "mean": 4.57,
+          "p50": 3.1,
+          "p90": 8.8,
+          "p99": 9.61,
+          "max": 9.8
+        },
+        "cold-path": {
+          "count": 65,
+          "min": 1.6,
+          "mean": 4.31,
+          "p50": 2.3,
+          "p90": 8.36,
+          "p99": 13.16,
+          "max": 13.8
+        },
+        "held-key": {
+          "count": 160,
+          "min": 0.8,
+          "mean": 43.95,
+          "p50": 43.5,
+          "p90": 76.18,
+          "p99": 82.4,
+          "max": 83.4
+        },
+        "paste": {
+          "count": 1,
+          "min": 3.6,
+          "mean": 3.6,
+          "p50": 3.6,
+          "p90": 3.6,
+          "p99": 3.6,
+          "max": 3.6
+        }
+      },
+      "ratios": {
+        "size-10k-vs-200": {
+          "ratio": 0.91,
+          "withinTolerance": true
+        }
+      },
+      "constantTime": true,
+      "ime": {
+        "landed": true,
+        "summary": {
+          "count": 15,
+          "min": 1.4,
+          "mean": 5.59,
+          "p50": 5.2,
+          "p90": 8.36,
+          "p99": 13.85,
+          "max": 14.7
+        }
+      },
+      "crossBlockSelection": true
+    },
+    "bespoke-perblock": {
+      "scenarios": {
+        "small-first": {
+          "count": 65,
+          "min": 0.3,
+          "mean": 3.43,
+          "p50": 2.4,
+          "p90": 7.78,
+          "p99": 9.42,
+          "max": 9.8
+        },
+        "big-last": {
+          "count": 65,
+          "min": 5.4,
+          "mean": 6.56,
+          "p50": 5.9,
+          "p90": 10.2,
+          "p99": 11.91,
+          "max": 12.1
+        },
+        "anchor": {
+          "count": 65,
+          "min": 1,
+          "mean": 3.96,
+          "p50": 2.8,
+          "p90": 7.64,
+          "p99": 9.84,
+          "max": 10.1
+        },
+        "cold-path": {
+          "count": 65,
+          "min": 1,
+          "mean": 3.54,
+          "p50": 2.2,
+          "p90": 8.2,
+          "p99": 9.07,
+          "max": 9.2
+        },
+        "held-key": {
+          "count": 160,
+          "min": 5.5,
+          "mean": 38.62,
+          "p50": 38.8,
+          "p90": 64.13,
+          "p99": 69.71,
+          "max": 70.5
+        },
+        "paste": {
+          "count": 1,
+          "min": 4.4,
+          "mean": 4.4,
+          "p50": 4.4,
+          "p90": 4.4,
+          "p99": 4.4,
+          "max": 4.4
+        }
+      },
+      "ratios": {
+        "size-10k-vs-200": {
+          "ratio": 1.26,
+          "withinTolerance": true
+        }
+      },
+      "constantTime": true,
+      "ime": {
+        "landed": true,
+        "summary": {
+          "count": 15,
+          "min": 1.2,
+          "mean": 5.12,
+          "p50": 5.8,
+          "p90": 8.06,
+          "p99": 8.39,
+          "max": 8.4
+        }
+      },
+      "crossBlockSelection": false
+    }
+  }
+}
