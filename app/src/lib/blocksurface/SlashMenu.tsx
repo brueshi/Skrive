@@ -25,6 +25,7 @@ const ITEMS: Item[] = [
   { title: 'Bullet list', hint: 'Unordered list', keywords: 'bullet list unordered ul', spec: { kind: 'bullet_list' } },
   { title: 'Numbered list', hint: 'Ordered list', keywords: 'numbered ordered list ol', spec: { kind: 'ordered_list' } },
   { title: 'Code', hint: 'Code block', keywords: 'code monospace pre fenced', spec: { kind: 'code' } },
+  { title: 'Table', hint: '2x2 table', keywords: 'table grid rows columns', spec: { kind: 'table' } },
   { title: 'Divider', hint: 'Horizontal rule', keywords: 'divider rule separator hr line', spec: { kind: 'divider' } }
 ];
 

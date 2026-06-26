@@ -124,11 +124,15 @@ export function renderBlock(block: BlockNode): HTMLElement {
       const tbody = document.createElement('tbody');
       block.rows.forEach((row, r) => {
         const tr = document.createElement('tr');
-        for (const cell of row) {
+        row.forEach((cell, c) => {
           const cellEl = document.createElement(r === 0 ? 'th' : 'td');
+          // Cells are inline, not blocks, so they carry coordinates (not a block
+          // id); the surface edits a cell by (table id, row, col).
+          cellEl.dataset.cellRow = String(r);
+          cellEl.dataset.cellCol = String(c);
           renderInline(cell, cellEl);
           tr.appendChild(cellEl);
-        }
+        });
         tbody.appendChild(tr);
       });
       el.appendChild(tbody);
