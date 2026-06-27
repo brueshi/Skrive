@@ -10,11 +10,11 @@
 // are no-ops until Stage 3b — never letting the browser mutate structure behind
 // the model's back.
 
-import { generateBlockId, type BlockNode, type Document, type InlineNode } from '../blockmodel';
+import { generateBlockId, type BlockNode, type Document, type InlineNode, type TableBlock } from '../blockmodel';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto } from './render';
 import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, sameLeaf } from './doc-position';
-import { deleteAcross, mergeBackward, mergeForward, replaceAcross } from './range-ops';
+import { deleteAcross, deleteBlock, mergeBackward, mergeForward, replaceAcross } from './range-ops';
 import { findBlockById, updateBlockById } from './tree';
 import { enterInContainer, exitContainer, type StructuralResult } from './structural';
 import { changeListType, findImmediateList, indentItem, liftItemToParagraph, outdentItem } from './list-ops';
@@ -185,7 +185,11 @@ export class BlockSurface {
       const cell = this.cellTarget();
       if (cell) {
         e.preventDefault();
-        this.moveCell(cell, e.shiftKey ? -1 : 1);
+        // Tab steps cell-to-cell; off the last/first cell it exits the table
+        // (instead of dead-ending) so the table is never a one-way trap.
+        if (!this.moveCell(cell, e.shiftKey ? -1 : 1)) {
+          this.exitTable(cell.tableId, e.shiftKey ? 'before' : 'after');
+        }
         return;
       }
       const t = this.leafTarget();
@@ -201,6 +205,14 @@ export class BlockSurface {
     if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault();
       this.applyEnter();
+      return;
+    }
+    // Arrow keys inside a table: navigate cell-to-cell and, at the table's edges,
+    // step the caret OUT to the adjacent block (the native contenteditable caret
+    // can't reliably leave a <table>, worst of all when the table is the last
+    // block). Outside a table — or mid-cell — fall through to native movement.
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      if (this.handleTableArrow(e)) e.preventDefault();
       return;
     }
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
@@ -858,7 +870,13 @@ export class BlockSurface {
   private applyDeleteBackward(): void {
     const cell = this.cellTarget();
     if (cell) {
-      if (cell.spansCells || (cell.collapsed && cell.start === 0)) return; // no merge across cells
+      // A selection dragged across cells means "delete the whole table" (the
+      // select-it-and-hit-Delete gesture); a barrier can't be partial-cut.
+      if (cell.spansCells) {
+        this.removeTable(cell.tableId);
+        return;
+      }
+      if (cell.collapsed && cell.start === 0) return; // start of cell: no merge back
       if (cell.collapsed && this.surgicalDeleteBack()) {
         this.updateCellModel(cell, deleteRangeInInline(cell.inline, cell.start - 1, cell.start));
       } else {
@@ -917,8 +935,13 @@ export class BlockSurface {
   private applyDeleteForward(): void {
     const cell = this.cellTarget();
     if (cell) {
+      // Cross-cell selection: delete the whole table (mirror of Backspace).
+      if (cell.spansCells) {
+        this.removeTable(cell.tableId);
+        return;
+      }
       const cellLen = inlineLength(cell.inline);
-      if (cell.spansCells || (cell.collapsed && cell.start >= cellLen)) return;
+      if (cell.collapsed && cell.start >= cellLen) return;
       const from = cell.start;
       const to = cell.collapsed ? cell.start + 1 : cell.end;
       this.commitCell(cell, deleteRangeInInline(cell.inline, from, to), from);
@@ -1160,20 +1183,104 @@ export class BlockSurface {
     return true;
   }
 
-  // Move the caret to the next/previous cell in row-major order. Off the ends it
-  // stops (row/column insertion is a later refinement).
-  private moveCell(cell: { tableId: string; row: number; col: number }, dir: 1 | -1): void {
+  // Move the caret to the next/previous cell in row-major order. Returns false
+  // off the ends (the Tab handler then exits the table) — row/column insertion is
+  // a later refinement.
+  private moveCell(cell: { tableId: string; row: number; col: number }, dir: 1 | -1): boolean {
     const table = findBlockById(this.doc.blocks, cell.tableId);
-    if (!table || table.type !== 'table') return;
+    if (!table || table.type !== 'table') return false;
     const cols = table.rows[0]?.length ?? 0;
-    if (cols === 0) return;
+    if (cols === 0) return false;
     const flat = cell.row * cols + cell.col + dir;
-    if (flat < 0 || flat >= table.rows.length * cols) return;
+    if (flat < 0 || flat >= table.rows.length * cols) return false;
     const nr = Math.floor(flat / cols);
     const nc = flat % cols;
-    const tableEl = this.leafElementById(cell.tableId);
-    const target = tableEl?.querySelector(`[data-cell-row="${nr}"][data-cell-col="${nc}"]`) as HTMLElement | null;
-    if (target) setCaret(target, 0);
+    return this.focusCell(table, nr, nc, 0);
+  }
+
+  // Arrow-key navigation inside a table: step cell-to-cell, and at the grid's
+  // edges step OUT to the block before/after the table. Returns true when it
+  // handled the key (caller preventDefaults); false to let native movement run
+  // (outside a table, mid-cell text, or a non-collapsed selection).
+  private handleTableArrow(e: KeyboardEvent): boolean {
+    const cell = this.cellTarget();
+    if (!cell || !cell.collapsed) return false;
+    const table = findBlockById(this.doc.blocks, cell.tableId);
+    if (!table || table.type !== 'table') return false;
+    const rows = table.rows.length;
+    const cols = table.rows[0]?.length ?? 0;
+    const len = inlineLength(cell.inline);
+    switch (e.key) {
+      case 'ArrowUp':
+        return cell.row > 0
+          ? this.focusCell(table, cell.row - 1, cell.col, cell.start)
+          : this.exitTable(cell.tableId, 'before');
+      case 'ArrowDown':
+        return cell.row < rows - 1
+          ? this.focusCell(table, cell.row + 1, cell.col, cell.start)
+          : this.exitTable(cell.tableId, 'after');
+      case 'ArrowLeft':
+        if (cell.start > 0) return false; // move within the cell's text
+        if (cell.col > 0) return this.focusCellEnd(table, cell.row, cell.col - 1);
+        if (cell.row > 0) return this.focusCellEnd(table, cell.row - 1, cols - 1);
+        return this.exitTable(cell.tableId, 'before');
+      case 'ArrowRight':
+        if (cell.start < len) return false; // move within the cell's text
+        if (cell.col < cols - 1) return this.focusCell(table, cell.row, cell.col + 1, 0);
+        if (cell.row < rows - 1) return this.focusCell(table, cell.row + 1, 0, 0);
+        return this.exitTable(cell.tableId, 'after');
+      default:
+        return false;
+    }
+  }
+
+  // Place the caret in a table cell, clamping the offset to the cell's length.
+  private focusCell(table: TableBlock, row: number, col: number, offset: number): boolean {
+    const inline = table.rows[row]?.[col];
+    if (!inline) return false;
+    const target = this.leafElementById(table.id)?.querySelector(
+      `[data-cell-row="${row}"][data-cell-col="${col}"]`
+    ) as HTMLElement | null;
+    if (!target) return false;
+    setCaret(target, Math.min(offset, inlineLength(inline)));
+    return true;
+  }
+
+  private focusCellEnd(table: TableBlock, row: number, col: number): boolean {
+    return this.focusCell(table, row, col, inlineLength(table.rows[row]?.[col] ?? []));
+  }
+
+  // Step the caret out of a (top-level) table to the adjacent block. Lands at the
+  // end of the previous inline block / start of the next; when there is no inline
+  // block to land in (e.g. the table is the last block, or the neighbour is
+  // another barrier), seed an empty paragraph there so the table is never a trap.
+  private exitTable(tableId: string, dir: 'before' | 'after'): boolean {
+    const index = this.doc.blocks.findIndex((b) => b.id === tableId);
+    if (index < 0) return false; // nested table: leave it to native movement
+    const neighbor = dir === 'before' ? this.doc.blocks[index - 1] : this.doc.blocks[index + 1];
+    if (neighbor && (neighbor.type === 'paragraph' || neighbor.type === 'heading')) {
+      const el = this.leafElementById(neighbor.id);
+      if (el) {
+        setCaret(el, dir === 'before' ? inlineLength(neighbor.inline) : 0);
+        return true;
+      }
+    }
+    const para = this.newInlineBlock('paragraph', [], 1);
+    const blocks = this.doc.blocks.slice();
+    blocks.splice(dir === 'before' ? index : index + 1, 0, para);
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    writeSelection(this.container, collapsedRange({ leaf: { kind: 'block', id: para.id }, offset: 0 }), 'structural');
+    this.scheduleSerialize();
+    return true;
+  }
+
+  // Delete a whole table (the select-across-cells gesture). Removes the block and
+  // lands the caret on the nearest inline neighbour (see range-ops.deleteBlock).
+  private removeTable(tableId: string): void {
+    const r = deleteBlock(this.doc.blocks, tableId);
+    if (r) this.applyStructural(r);
+    this.closeSlash();
   }
 
   private leafElementById(id: string): HTMLElement | null {

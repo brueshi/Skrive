@@ -123,6 +123,54 @@ export function deleteAcross(
   return { blocks: next, caret: { id: startId, offset: startOffset } };
 }
 
+/**
+ * Delete a whole barrier block (table / code block / divider / image) by id —
+ * the "select it and hit Delete" path, since a barrier can't be partial-cut by a
+ * text range. The caret lands at the end of the previous inline leaf, else the
+ * start of the next, else a fresh empty paragraph when nothing inline remains
+ * (the barrier was the only content). Null when `id` is not a known leaf.
+ */
+export function deleteBlock(blocks: BlockNode[], id: string): RangeResult | null {
+  const leaves = documentLeaves(blocks);
+  const ti = leaves.findIndex((l) => l.id === id);
+  if (ti < 0) return null;
+
+  // Prefer the previous inline leaf (caret at its end), else the next (its start).
+  let caret: { id: string; offset: number } | null = null;
+  for (let i = ti - 1; i >= 0 && !caret; i--) {
+    if (leaves[i]!.kind !== 'inline') continue;
+    const leaf = inlineLeaf(blocks, leaves[i]!.id);
+    if (leaf) caret = { id: leaf.id, offset: inlineLength(leaf.inline) };
+  }
+  for (let i = ti + 1; i < leaves.length && !caret; i++) {
+    if (leaves[i]!.kind === 'inline') caret = { id: leaves[i]!.id, offset: 0 };
+  }
+
+  const wasFirst = blocks[0]?.id === id;
+  let next = removeBlocks(blocks, new Set([id]));
+  // Removing the leading block would leave the new first block's seam (e.g. the
+  // blank line that separated it from the deleted table) as leading blank lines.
+  // Clear it so the document doesn't start with stray blanks.
+  if (wasFirst && next.length > 0 && next[0]!.gapBefore) {
+    next = [{ ...next[0]!, gapBefore: '' } as BlockNode, ...next.slice(1)];
+  }
+  if (!caret) {
+    // No inline leaf left to hold the caret — seed an empty paragraph.
+    const para: BlockNode = {
+      type: 'paragraph',
+      id: generateBlockId(),
+      durable: false,
+      src: null,
+      gapBefore: null,
+      dirty: true,
+      inline: []
+    };
+    next = [...next, para];
+    caret = { id: para.id, offset: 0 };
+  }
+  return { blocks: next, caret };
+}
+
 /** Backspace at the start of an inline leaf: merge it into the previous inline
  *  leaf in document order (across a list / quote boundary). Null when it is the
  *  first leaf, or the previous leaf is a barrier (don't merge into a table/code). */
