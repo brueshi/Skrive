@@ -49,6 +49,19 @@ describe('enterInContainer', () => {
   it('returns null for a top-level block (the caller handles it)', () => {
     expect(enterInContainer([para('top', 'x')], 'top', 1, counter())).toBeNull();
   });
+
+  it('splits a NESTED list item (depth 2), not just the top level', () => {
+    // outer list > item[ para 'a', inner list > item[ para 'b' ] ]
+    const inner = list('inner', [[para('b', 'bbb')]]);
+    const outer = list('outer', [[para('a', 'a'), inner]]);
+    const r = enterInContainer([outer], 'b', 1, counter());
+    expect(r, 'nested item Enter is handled (was a silent no-op)').not.toBeNull();
+    const o = r!.blocks[0]!;
+    // The inner list now has two items; the caret is in the freshly minted one.
+    const innerAfter = o.type === 'bullet_list' ? o.items[0]!.children[1]! : null;
+    expect(innerAfter && innerAfter.type === 'bullet_list' && innerAfter.items.length).toBe(2);
+    expect(r!.caret.id).toBe('new0');
+  });
 });
 
 describe('exitContainer', () => {
@@ -64,5 +77,15 @@ describe('exitContainer', () => {
     expect(r!.blocks).toHaveLength(2);
     expect(r!.blocks[0]!.type).toBe('bullet_list');
     expect(r!.blocks[1]!.type).toBe('paragraph');
+  });
+
+  it('exits an empty NESTED quote line at its own level', () => {
+    // quote > [ para 'a', quote > [ para '' ] ]
+    const innerQ = quote('iq', [para('p', '')]);
+    const r = exitContainer([quote('oq', [para('a', 'a'), innerQ])], 'p', counter());
+    expect(r, 'nested exit is handled').not.toBeNull();
+    // The inner quote emptied, so it is replaced by the paragraph inside the outer.
+    const oq = r!.blocks[0]!;
+    expect(oq.type === 'blockquote' && oq.children[1]!.type).toBe('paragraph');
   });
 });

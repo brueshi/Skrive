@@ -723,10 +723,14 @@ export class BlockSurface {
     if (!t || t.spansBlocks) return;
 
     if (t.collapsed && t.start === 0) {
-      // Boundary: top-level inline-text merge only in 3e; nested merge / exit is 3f.
       if (isInlineText(t.leaf) && this.isTopLevel(t.blockEl, t.leaf.id)) {
+        // Top-level inline-text: merge into the previous block.
         const index = this.doc.blocks.findIndex((b) => b.id === t.leaf.id);
         if (index >= 0) this.mergeWithPrevious(index, t.blockEl);
+      } else if (isInlineText(t.leaf) && findImmediateList(this.doc.blocks, t.leaf.id)) {
+        // Backspace at the start of a list item removes its marker: outdent one
+        // level, or lift the item out to a paragraph at the top level.
+        this.applyOutdent(t.leaf.id, 0);
       }
       this.closeSlash();
       return;
@@ -802,6 +806,13 @@ export class BlockSurface {
     // Enter inside a container: split into a new list item / quote paragraph, or
     // exit the container when the block is empty.
     if (isInlineText(t.leaf) && !this.isTopLevel(t.blockEl, t.leaf.id)) {
+      // Enter on an EMPTY list item outdents one level (or lifts to a paragraph at
+      // the top level) — the Google-Docs / Notion "Enter on a blank bullet leaves
+      // it" gesture, which also reaches nested items the container exit cannot.
+      if (inlineLength(t.leaf.inline) === 0 && findImmediateList(this.doc.blocks, t.leaf.id)) {
+        this.applyOutdent(t.leaf.id, 0);
+        return;
+      }
       const result =
         inlineLength(t.leaf.inline) === 0
           ? exitContainer(this.doc.blocks, t.leaf.id, generateBlockId)
