@@ -15,6 +15,7 @@ import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderIn
 import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, setCaret, setCrossBlockSelection, setSelectionRange } from './selection';
 import { findBlockById, updateBlockById } from './tree';
 import { enterInContainer, exitContainer, type StructuralResult } from './structural';
+import { changeListType, findImmediateList, indentItem, liftItemToParagraph, outdentItem } from './list-ops';
 import {
   type BooleanMark,
   deleteRangeInInline,
@@ -36,7 +37,7 @@ export type BlockTypeSpec =
   | { kind: 'heading'; level: number }
   | { kind: 'blockquote' }
   | { kind: 'bullet_list' }
-  | { kind: 'ordered_list' }
+  | { kind: 'ordered_list'; start?: number; delimiter?: '.' | ')' }
   | { kind: 'code' }
   | { kind: 'table' }
   | { kind: 'divider' };
@@ -149,12 +150,21 @@ export class BlockSurface {
 
   private onKeyDown = (event: Event): void => {
     const e = event as KeyboardEvent;
-    // Tab moves between table cells (no modifier).
+    // Tab moves between table cells (no modifier); in a list item it nests
+    // (Shift+Tab outdents). Outside a table or list, Tab keeps its native focus
+    // behaviour (the early return below without preventDefault).
     if (e.key === 'Tab') {
       const cell = this.cellTarget();
       if (cell) {
         e.preventDefault();
         this.moveCell(cell, e.shiftKey ? -1 : 1);
+        return;
+      }
+      const t = this.leafTarget();
+      if (t && !t.spansBlocks && isInlineText(t.leaf) && findImmediateList(this.doc.blocks, t.leaf.id)) {
+        e.preventDefault();
+        if (e.shiftKey) this.applyOutdent(t.leaf.id, t.start);
+        else this.applyIndent(t.leaf.id, t.start);
       }
       return;
     }
@@ -166,6 +176,13 @@ export class BlockSurface {
       return;
     }
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+    // Cmd/Ctrl+Shift+8 / +7 toggle bullet / ordered list (Google-Docs parity).
+    // Keyed on e.code so it is layout-independent (Shift+8 is '*' on a US layout).
+    if (e.shiftKey && (e.code === 'Digit8' || e.code === 'Digit7')) {
+      e.preventDefault();
+      this.toggleList(e.code === 'Digit8' ? 'bullet_list' : 'ordered_list');
+      return;
+    }
     const key = e.key.toLowerCase();
     if (key === 'b') {
       e.preventDefault();
@@ -350,7 +367,7 @@ export class BlockSurface {
       case 'ordered_list': {
         const inner = this.newInlineBlock('paragraph', inline, 1);
         caretLeafId = inner.id;
-        next = { type: 'ordered_list', ...base, start: 1, delimiter: '.', spread: false, items: [{ spread: false, children: [inner] }] };
+        next = { type: 'ordered_list', ...base, start: spec.start ?? 1, delimiter: spec.delimiter ?? '.', spread: false, items: [{ spread: false, children: [inner] }] };
         break;
       }
       case 'code':
@@ -406,6 +423,75 @@ export class BlockSurface {
     this.registry.set(para.id, paraEl);
     setCaret(paraEl, 0);
     this.scheduleSerialize();
+  }
+
+  // --- list ergonomics (SKR-112) -------------------------------------------
+
+  /** Tab: nest the focused list item under its previous sibling. No-op when the
+   *  item is first in its list. The leaf keeps its id, so the caret is restored. */
+  private applyIndent(leafId: string, offset: number): void {
+    const blocks = indentItem(this.doc.blocks, leafId, generateBlockId);
+    if (blocks) this.applyStructural({ blocks, caret: { id: leafId, offset } });
+  }
+
+  /** Shift+Tab: outdent a nested item one level; a top-level item is lifted out of
+   *  the list to a paragraph (splitting the list). Same dispatch backs toggle-off. */
+  private applyOutdent(leafId: string, offset: number): void {
+    const blocks =
+      outdentItem(this.doc.blocks, leafId, generateBlockId) ??
+      liftItemToParagraph(this.doc.blocks, leafId, generateBlockId);
+    if (blocks) this.applyStructural({ blocks, caret: { id: leafId, offset } });
+  }
+
+  /** Toggle the focused block to/from a list of `target` kind (Cmd/Ctrl+Shift+8/7).
+   *  Not in a list -> wrap into one; in a list of the same kind -> outdent/lift off;
+   *  in a list of the other kind -> switch the kind. */
+  toggleList(target: 'bullet_list' | 'ordered_list'): void {
+    const t = this.leafTarget();
+    if (!t || t.spansBlocks || !isInlineText(t.leaf)) return;
+    const list = findImmediateList(this.doc.blocks, t.leaf.id);
+    if (!list) {
+      this.setBlockType({ kind: target });
+      return;
+    }
+    if (list.type === target) {
+      this.applyOutdent(t.leaf.id, t.start);
+      return;
+    }
+    const blocks = changeListType(this.doc.blocks, t.leaf.id, target);
+    if (blocks) this.applyStructural({ blocks, caret: { id: t.leaf.id, offset: t.start } });
+  }
+
+  /** Affordance input rule: a typed space after a list marker at the start of a
+   *  top-level paragraph (`- `, `* `, `+ `, or `N.`/`N)`) converts the block to a
+   *  list and consumes the marker — it never persists as Markdown syntax. Returns
+   *  true when it fired. */
+  private tryListInputRule(): boolean {
+    const cur = this.currentInlineBlock();
+    if (!cur || cur.block.type !== 'paragraph' || !this.isTopLevel(cur.blockEl, cur.block.id)) return false;
+    const prefix = inlinePlainText(cur.block.inline).slice(0, cur.caret);
+
+    let spec: BlockTypeSpec | null = null;
+    let markerLen = 0;
+    if (prefix === '- ' || prefix === '* ' || prefix === '+ ') {
+      spec = { kind: 'bullet_list' };
+      markerLen = 2;
+    } else {
+      const m = /^(\d{1,9})([.)]) $/.exec(prefix);
+      if (m) {
+        spec = { kind: 'ordered_list', start: Number(m[1]), delimiter: m[2] as '.' | ')' };
+        markerLen = m[0].length;
+      }
+    }
+    if (!spec) return false;
+
+    // Consume the marker text, then convert the (now marker-less) paragraph.
+    const inline = deleteRangeInInline(cur.block.inline, 0, markerLen);
+    this.commitBlock(cur.index, { ...cur.block, inline, dirty: true });
+    renderInlineInto(cur.blockEl, inline);
+    setCaret(cur.blockEl, 0);
+    this.setBlockType(spec);
+    return true;
   }
 
   /** Apply an insert-menu choice: strip the `/query` text, then set the block
@@ -612,6 +698,10 @@ export class BlockSurface {
       this.commitInline(t.leaf.id, inline, t.blockEl, t.start + text.length);
     }
     this.scheduleSerialize();
+    // A typed space at the start of a paragraph may fire a list input rule (the
+    // marker is consumed, never persisted as syntax). It owns the rest of the
+    // gesture, so skip slash handling when it fires.
+    if (text === ' ' && this.tryListInputRule()) return;
     this.handleSlashAfterInsert(text);
   }
 

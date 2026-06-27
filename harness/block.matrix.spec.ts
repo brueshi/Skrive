@@ -401,6 +401,79 @@ test('Stage 3g: marks work inside a table cell', async ({ page }) => {
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
+test('Stage 4: list input rules consume the marker', async ({ page }) => {
+  await open(page, 5);
+  // A typed bullet marker converts the paragraph and is consumed (never persists
+  // as syntax); the marker also normalizes to the canonical `-`.
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('* milk');
+  await page.waitForTimeout(80);
+  let md = await serialized(page);
+  expect(md, 'paragraph became a bullet item, marker normalized').toContain('- milk');
+  expect(md, 'the typed `* ` did not survive as text').not.toContain('* milk');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+
+  // An ordered marker is likewise consumed; a real ordered list serializes `1. `,
+  // whereas an un-converted paragraph would escape the dot as `1\.`.
+  await open(page, 5);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('1. todo');
+  await page.waitForTimeout(80);
+  md = await serialized(page);
+  expect(md, 'paragraph became an ordered item').toMatch(/(^|\n)1\. todo/);
+  expect(md, 'the dot was not escaped (so it is a real list)').not.toContain('1\\.');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('Stage 4: Tab nests a list item and Shift+Tab outdents it', async ({ page }) => {
+  await open(page, 5);
+  await insertViaMenu(page, 'bullet');
+  await page.keyboard.type('one');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('two');
+
+  await page.keyboard.press('Tab'); // nest 'two' under 'one'
+  await page.waitForTimeout(80);
+  let md = await serialized(page);
+  expect(md).toContain('- one');
+  expect(md, 'nested item is indented').toContain('  - two');
+  expect(serializeDocument(parseDocument(md)), 'stable after nest').toBe(md);
+
+  await page.keyboard.press('Shift+Tab'); // back out to the parent level
+  await page.waitForTimeout(80);
+  md = await serialized(page);
+  expect(md, 'item is flat again').toContain('- two');
+  expect(md, 'no longer nested').not.toContain('  - two');
+  expect(serializeDocument(parseDocument(md)), 'stable after outdent').toBe(md);
+});
+
+test('Stage 4: keyboard shortcuts toggle and switch list kind', async ({ page }) => {
+  await open(page, 5);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('shopping');
+
+  await page.keyboard.press('ControlOrMeta+Shift+Digit8'); // -> bullet list
+  await page.waitForTimeout(80);
+  let md = await serialized(page);
+  expect(md, 'became a bullet').toContain('- shopping');
+
+  await page.keyboard.press('ControlOrMeta+Shift+Digit7'); // switch to ordered
+  await page.waitForTimeout(80);
+  md = await serialized(page);
+  expect(md, 'switched to ordered').toMatch(/(^|\n)1\. shopping/);
+  expect(md).not.toContain('- shopping');
+
+  await page.keyboard.press('ControlOrMeta+Shift+Digit7'); // toggle off -> paragraph
+  await page.waitForTimeout(80);
+  md = await serialized(page);
+  expect(md, 'list formatting removed').not.toMatch(/(^|\n)(- |1\. )shopping/);
+  expect(md).toContain('shopping');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
 test('Stage 3a: IME composition lands in the model', async ({ page, context }) => {
   await open(page, 200);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');
