@@ -84,16 +84,32 @@ export function domPointFromFlatOffset(blockEl: HTMLElement, target: number): { 
   return { node: blockEl, offset: 0 };
 }
 
-/** Place a collapsed caret at a flat offset within a block. */
+/** Place a collapsed caret at a flat offset within a block.
+ *
+ *  Uses `selection.collapse` rather than `removeAllRanges()` + `addRange()`. This
+ *  matters after a structural rebuild (reconcile replaces the element the caret
+ *  was in, so the live selection is left on a detached node): in WKWebView,
+ *  `addRange` onto a fresh node in that state can fail to COMMIT — the caret looks
+ *  placed, but `getSelection()` still reports the old detached node, so the next
+ *  Enter/Backspace resolves no block and is inert until an arrow key forces a real
+ *  selection change. `collapse` is the same primitive the typing hot path uses
+ *  (which commits reliably across engines), so the structural caret behaves the
+ *  same as a typed one. */
 export function setCaret(blockEl: HTMLElement, flatOffset: number): void {
   const sel = window.getSelection();
   if (!sel) return;
   const { node, offset } = domPointFromFlatOffset(blockEl, flatOffset);
-  const range = document.createRange();
-  range.setStart(node, offset);
-  range.collapse(true);
-  sel.removeAllRanges();
-  sel.addRange(range);
+  try {
+    sel.collapse(node, offset);
+  } catch {
+    // Fallback for an engine that rejects the point: the range form still places
+    // a caret, just without the WKWebView commit guarantee.
+    const range = document.createRange();
+    range.setStart(node, offset);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
 }
 
 /** Select the flat range [start, end) within a block. Used after a mark command
