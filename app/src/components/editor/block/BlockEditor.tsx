@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BlockSurface } from '../../../lib/blocksurface';
 import { parseDocument, serializeDocument } from '../../../lib/blockmodel';
 import { setActiveEditorFlush } from '../active-editor';
+import { setActiveBlockMenu } from '../active-surface';
 import { BlockMenuController } from '../menus/BlockMenuController';
 import { Toolbar } from '../menus/Toolbar';
 import { SelectionBubble } from '../menus/SelectionBubble';
@@ -44,8 +45,10 @@ export function BlockEditor({ body, onChange }: Props): React.ReactElement {
     const controller = new BlockMenuController(surface);
     setCtx({ surface, controller });
     setActiveEditorFlush(() => surface.flush());
+    setActiveBlockMenu(controller);
     return () => {
       setActiveEditorFlush(null);
+      setActiveBlockMenu(null);
       controller.destroy();
       surface.destroy();
       setCtx(null);
