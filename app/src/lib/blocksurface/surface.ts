@@ -12,7 +12,8 @@
 
 import { generateBlockId, type BlockNode, type Document, type InlineNode } from '../blockmodel';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto } from './render';
-import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, setCaret, setCrossBlockSelection, setSelectionRange } from './selection';
+import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
+import { collapsedRange } from './doc-position';
 import { findBlockById, updateBlockById } from './tree';
 import { enterInContainer, exitContainer, type StructuralResult } from './structural';
 import { changeListType, findImmediateList, indentItem, liftItemToParagraph, outdentItem } from './list-ops';
@@ -1168,8 +1169,10 @@ export class BlockSurface {
   private applyStructural(result: StructuralResult): void {
     this.doc = { ...this.doc, blocks: result.blocks };
     this.reconcile();
-    const el = this.container.querySelector(`[${BLOCK_ID_ATTR}="${result.caret.id}"]`) as HTMLElement | null;
-    if (el) setCaret(el, result.caret.offset);
+    // Place the caret through the document selection map: reconcile() replaced the
+    // element the caret was in, so this goes through the robust (rAF re-asserted,
+    // instrumented) placement that survives WKWebView's post-rebuild commit gap.
+    writeSelection(this.container, collapsedRange({ leaf: { kind: 'block', id: result.caret.id }, offset: result.caret.offset }), 'structural');
     this.scheduleSerialize();
   }
 

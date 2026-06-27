@@ -10,6 +10,7 @@
 
 import { BLOCK_ID_ATTR } from './render';
 import type { BlockViewRegistry } from './render';
+import { isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
 
 /** The top-level block element the caret sits in, or null. Walks up to the first
  *  ancestor whose id is a registered top-level block (nested blocks are not
@@ -187,4 +188,149 @@ function offsetsWithin(blockEl: HTMLElement, range: Range): CaretContext {
   const endInBlock = blockEl.contains(range.endContainer);
   const end = collapsed || !endInBlock ? start : flatOffsetFromDOM(blockEl, range.endContainer, range.endOffset);
   return { blockEl, start, end, collapsed, spansBlocks: !endInBlock };
+}
+
+// --- the document-wide selection map (SKR-118, Stage 1) ------------------------
+//
+// The single source of truth for reading and PLACING the selection in terms of
+// the document position model (DocPos / DocRange). `writeSelection` replaces the
+// ad-hoc "querySelector + setCaret" that followed a structural rebuild and was
+// fragile in WKWebView; it is the one place engine quirks are handled and
+// instrumented.
+
+/** Resolve a DOM node to the leaf it sits in: a table cell (coordinates) when
+ *  inside one, else the nearest block by id. Null when outside any leaf. */
+function addrFromNode(container: HTMLElement, node: Node): LeafAddr | null {
+  let n: Node | null = node;
+  while (n && n !== container) {
+    if (n.nodeType === Node.ELEMENT_NODE) {
+      const el = n as HTMLElement;
+      if (el.dataset.cellRow != null && el.dataset.cellCol != null) {
+        const table = el.closest(`[${BLOCK_ID_ATTR}]`);
+        const tableId = table?.getAttribute(BLOCK_ID_ATTR);
+        if (tableId) return { kind: 'cell', tableId, row: Number(el.dataset.cellRow), col: Number(el.dataset.cellCol) };
+      }
+      const id = el.getAttribute(BLOCK_ID_ATTR);
+      if (id != null) return { kind: 'block', id };
+    }
+    n = n.parentNode;
+  }
+  return null;
+}
+
+/** The element for a leaf address: the block element, or the cell within its
+ *  table. Null when the leaf is not currently rendered. */
+export function leafElement(container: HTMLElement, addr: LeafAddr): HTMLElement | null {
+  if (addr.kind === 'block') {
+    return container.querySelector(`[${BLOCK_ID_ATTR}="${addr.id}"]`) as HTMLElement | null;
+  }
+  const table = container.querySelector(`[${BLOCK_ID_ATTR}="${addr.tableId}"]`);
+  return (table?.querySelector(`[data-cell-row="${addr.row}"][data-cell-col="${addr.col}"]`) as HTMLElement | null) ?? null;
+}
+
+/** Read the current browser selection as a DocRange, or null when it is outside
+ *  the surface. anchor = range start, focus = range end (document order). */
+export function readSelection(container: HTMLElement): DocRange | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  if (!container.contains(range.startContainer)) return null;
+  const startAddr = addrFromNode(container, range.startContainer);
+  if (!startAddr) return null;
+  const startEl = leafElement(container, startAddr);
+  if (!startEl) return null;
+  const anchor: DocPos = { leaf: startAddr, offset: flatOffsetFromDOM(startEl, range.startContainer, range.startOffset) };
+
+  if (range.collapsed) return { anchor, focus: anchor };
+  const endAddr = addrFromNode(container, range.endContainer);
+  const endEl = endAddr ? leafElement(container, endAddr) : null;
+  if (!endAddr || !endEl) return { anchor, focus: anchor };
+  const focus: DocPos = { leaf: endAddr, offset: flatOffsetFromDOM(endEl, range.endContainer, range.endOffset) };
+  return { anchor, focus };
+}
+
+let caretDebug: boolean | null = null;
+function caretLogging(): boolean {
+  // Cached read of an opt-in flag set in the console for in-shell diagnosis:
+  //   window.__skriveCaretDebug = true
+  if (caretDebug == null) {
+    caretDebug = (globalThis as { __skriveCaretDebug?: boolean }).__skriveCaretDebug === true;
+  }
+  return caretDebug || (globalThis as { __skriveCaretDebug?: boolean }).__skriveCaretDebug === true;
+}
+function caretLog(label: string, phase: string, node: Node, offset: number): void {
+  if (!caretLogging()) return;
+  const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element);
+  const block = el?.closest(`[${BLOCK_ID_ATTR}]`);
+  // eslint-disable-next-line no-console
+  console.debug('[skrive caret]', label, phase, {
+    offset,
+    text: (node.textContent ?? '').slice(0, 16),
+    block: block?.getAttribute(BLOCK_ID_ATTR) ?? null,
+    connected: (node as ChildNode).isConnected
+  });
+}
+
+function applyCaretPoint(sel: Selection, node: Node, offset: number): void {
+  try {
+    sel.collapse(node, offset);
+  } catch {
+    const range = document.createRange();
+    range.setStart(node, offset);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+}
+
+/** Place a collapsed caret robustly after a structural rebuild. The sync
+ *  placement is re-asserted once on the next frame: WKWebView can leave a
+ *  selection set right after the surrounding DOM was replaced UNCOMMITTED (the
+ *  caret looks placed but the next keystroke still resolves the old, now-detached
+ *  node — inert until an arrow key). The re-assert lands once layout has settled.
+ *  It never fights a deliberate move: if the selection already sits on the target,
+ *  or the user moved it to another live node, the re-assert is skipped. */
+function placeCaretRobust(node: Node, offset: number, label: string): void {
+  const sel = window.getSelection();
+  if (!sel) return;
+  applyCaretPoint(sel, node, offset);
+  caretLog(label, 'sync', node, offset);
+  if (typeof requestAnimationFrame !== 'function') return;
+  requestAnimationFrame(() => {
+    const s = window.getSelection();
+    if (!s) return;
+    if (s.anchorNode === node) {
+      caretLog(label, 'committed', node, offset);
+      return;
+    }
+    if (s.anchorNode && s.anchorNode.isConnected) {
+      caretLog(label, 'user-moved', s.anchorNode, s.anchorOffset);
+      return; // a live, different node = a deliberate move; don't fight it
+    }
+    applyCaretPoint(s, node, offset); // old anchor was detached / never committed
+    caretLog(label, 're-assert', node, offset);
+  });
+}
+
+/** Place the browser selection from a DocRange (the write half of the map). Used
+ *  after a structural transform + reconcile, so it goes through the robust caret
+ *  placement. `label` tags the instrumentation. */
+export function writeSelection(container: HTMLElement, range: DocRange, label = 'writeSelection'): void {
+  const anchorEl = leafElement(container, range.anchor.leaf);
+  if (!anchorEl) return;
+  const a = domPointFromFlatOffset(anchorEl, range.anchor.offset);
+
+  if (isCollapsed(range)) {
+    placeCaretRobust(a.node, a.offset, label);
+    return;
+  }
+  const focusEl = leafElement(container, range.focus.leaf);
+  if (!focusEl) {
+    placeCaretRobust(a.node, a.offset, label);
+    return;
+  }
+  const b = domPointFromFlatOffset(focusEl, range.focus.offset);
+  const sel = window.getSelection();
+  if (!sel) return;
+  sel.setBaseAndExtent(a.node, a.offset, b.node, b.offset);
 }
