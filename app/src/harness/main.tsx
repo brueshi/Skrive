@@ -20,7 +20,11 @@ import { createRoot } from 'react-dom/client';
 import { RichEditor } from '../components/editor/rich/RichEditor';
 import { Editor } from '../components/editor/Editor';
 import { mountBespoke, type BespokeVariant } from './bespoke/surface';
-import { BlockSurface, SelectionBubble, SlashMenu } from '../lib/blocksurface';
+import { BlockSurface } from '../lib/blocksurface';
+import { BlockMenuController } from '../components/editor/menus/BlockMenuController';
+import { SelectionBubble } from '../components/editor/menus/SelectionBubble';
+import { LinkEditor } from '../components/editor/menus/LinkEditor';
+import { BlockSlashMenu } from '../components/editor/menus/BlockSlashMenu';
 import { parseDocument, serializeDocument, type Document as BlockDocument } from '../lib/blockmodel';
 import {
   buildAdversarialDoc,
@@ -151,27 +155,30 @@ declare global {
 }
 function BlockSurfaceMount({ body }: { body: string }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [surface, setSurface] = useState<BlockSurface | null>(null);
+  const [ctx, setCtx] = useState<{ surface: BlockSurface; controller: BlockMenuController } | null>(null);
   useEffect(() => {
     if (!ref.current) return;
     const doc: BlockDocument = parseDocument(body);
     const s = new BlockSurface({ container: ref.current, doc });
-    setSurface(s);
+    const controller = new BlockMenuController(s);
+    setCtx({ surface: s, controller });
     window.__skriveBlockSurface = {
       serialize: () => serializeDocument(s.getDocument()),
       blockCount: () => s.getDocument().blocks.length
     };
     return () => {
+      controller.destroy();
       s.destroy();
-      setSurface(null);
+      setCtx(null);
       delete window.__skriveBlockSurface;
     };
   }, [body]);
   return (
     <>
       <div ref={ref} className="bespoke-root" />
-      {surface && <SelectionBubble surface={surface} />}
-      {surface && <SlashMenu surface={surface} />}
+      {ctx && <SelectionBubble controller={ctx.controller} />}
+      {ctx && <LinkEditor controller={ctx.controller} />}
+      {ctx && <BlockSlashMenu surface={ctx.surface} />}
     </>
   );
 }

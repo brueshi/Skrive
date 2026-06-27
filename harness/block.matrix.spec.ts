@@ -169,15 +169,16 @@ test('Stage 3c: the select->bubble applies bold and a link', async ({ page }) =>
   await open(page, 5);
   await selectSentinel(page, 'BUBBLEME');
 
-  const bold = page.getByRole('button', { name: 'Bold (Cmd/Ctrl+B)' });
+  const bold = page.getByRole('button', { name: 'Bold' });
   await expect(bold, 'bubble appears on selection').toBeVisible();
   await bold.click();
   await page.waitForTimeout(80);
   expect(await serialized(page)).toContain('**BUBBLEME**');
 
-  // Selection is preserved after the mark, so the bubble stays — add a link.
+  // Selection is preserved after the mark, so the bubble stays — add a link via
+  // the shared link editor.
   await page.getByRole('button', { name: 'Link' }).click();
-  const input = page.getByPlaceholder('https://…');
+  const input = page.getByPlaceholder('Paste or type a link');
   await expect(input).toBeVisible();
   await input.fill('https://skrive.md');
   await input.press('Enter');

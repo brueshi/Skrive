@@ -10,8 +10,6 @@ export {
   type BlockTypeSpec,
   type SlashMenuState
 } from './surface';
-export { SelectionBubble } from './SelectionBubble';
-export { SlashMenu } from './SlashMenu';
 export { renderDocument, renderBlock, renderInlineInto, BlockViewRegistry, BLOCK_ID_ATTR } from './render';
 export {
   caretContext,

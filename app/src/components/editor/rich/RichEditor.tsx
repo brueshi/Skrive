@@ -12,7 +12,7 @@
 // that within a session (the master plan's event-bounded rule); a file switch
 // remounts via the `key` in App.tsx, re-parsing fresh.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { keymap } from 'prosemirror-keymap';
@@ -41,9 +41,10 @@ import {
 } from '../../../lib/projection';
 import { usePreferencesStore } from '../../../stores/preferences';
 import { setActiveEditorFlush, setActiveRichView } from '../active-editor';
-import { RichToolbar } from './RichToolbar';
-import { SelectionBubble } from './SelectionBubble';
-import { LinkEditor } from './LinkEditor';
+import { Toolbar } from '../menus/Toolbar';
+import { SelectionBubble } from '../menus/SelectionBubble';
+import { LinkEditor } from '../menus/LinkEditor';
+import { RichMenuController } from '../menus/RichMenuController';
 import { SlashMenu } from './SlashMenu';
 import { PreviewOutlineRail } from '../PreviewOutlineRail';
 import { slashPlugin } from './slash-plugin';
@@ -192,6 +193,10 @@ export function RichEditor({ body, onChange }: RichEditorProps): React.ReactElem
   // RichEditor a single time to mount those siblings; the `[]`-dep effect never
   // re-runs, so the PM-managed editor div is created exactly once.
   const [view, setView] = useState<EditorView | null>(null);
+  // The editor-agnostic menu controller over this view, driving the shared
+  // toolbar / bubble / link editor. Recreated if the view is replaced.
+  const menuController = useMemo(() => (view ? new RichMenuController(view) : null), [view]);
+  useEffect(() => () => menuController?.destroy(), [menuController]);
   // Keep the latest onChange without re-running the mount effect.
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -281,7 +286,7 @@ export function RichEditor({ body, onChange }: RichEditorProps): React.ReactElem
 
   return (
     <div className="rich-surface">
-      {view && <RichToolbar view={view} />}
+      {menuController && <Toolbar controller={menuController} />}
       {/* Positioned host so the absolutely-placed outline rail anchors to the
           editor area (below the toolbar), mirroring the preview's host. */}
       <div className="rich-body">
@@ -294,8 +299,8 @@ export function RichEditor({ body, onChange }: RichEditorProps): React.ReactElem
           />
         )}
       </div>
-      {view && <SelectionBubble view={view} />}
-      {view && <LinkEditor view={view} />}
+      {menuController && <SelectionBubble controller={menuController} />}
+      {menuController && <LinkEditor controller={menuController} />}
       {view && <SlashMenu view={view} />}
     </div>
   );

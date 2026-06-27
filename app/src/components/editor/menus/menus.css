@@ -1,0 +1,230 @@
+/* Shared editor-menu styling (SKR-114): the fixed toolbar, the "turn into"
+   block-type control, the floating selection bubble, the link editor, and the
+   slash insert menu. Lifted out of rich/RichEditor.css so both editors (the PM
+   Rich surface and the bespoke block surface) render identical chrome from one
+   source. Selectors keep their `rich-` prefix to avoid a wide rename; they are
+   menu-unique, so the file's load order does not matter. The `.ctx-*` rules the
+   block-type dropdown reuses stay in their own (shared) home. */
+
+/* The slim, fixed formatting bar. A quiet full-width band; its contents are
+   centred on the same 42rem measure as the prose so the first control lines up
+   with the text column. */
+.rich-toolbar {
+  flex: 0 0 auto;
+  background: var(--skrive-bg);
+  border-bottom: 1px solid var(--skrive-rule);
+}
+
+/* Neutral toolbar palette. Resting ink is a softened fg that still reads as a
+   live control (plain --skrive-muted sat too close to the disabled grey); hover
+   and active step up through faint neutral fills rather than an accent colour,
+   to keep the chrome calm. The active fill is a clear notch above hover so an
+   engaged mark is unmistakable at a glance. */
+.rich-toolbar {
+  --rich-tool-ink: color-mix(in srgb, var(--skrive-fg) 68%, var(--skrive-bg));
+  --rich-tool-hover: color-mix(in srgb, var(--skrive-fg) 6%, transparent);
+  --rich-tool-active: color-mix(in srgb, var(--skrive-fg) 12%, transparent);
+}
+
+.rich-toolbar-inner {
+  max-width: var(--skrive-measure, 42rem);
+  margin: 0 auto;
+  padding: 0.35rem 2rem;
+  display: flex;
+  align-items: center;
+  /* Tight rhythm inside a group; the separators carry the inter-group space. */
+  gap: 2px;
+}
+
+.rich-toolbar-button {
+  background: transparent;
+  border: none;
+  color: var(--rich-tool-ink);
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: var(--skrive-radius-sm, 4px);
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.rich-toolbar-button:hover:not(:disabled) {
+  color: var(--skrive-fg);
+  background: var(--rich-tool-hover);
+}
+
+.rich-toolbar-button.active {
+  color: var(--skrive-fg);
+  background: var(--rich-tool-active);
+}
+
+.rich-toolbar-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The "turn into" block-type trigger: a labelled pill on the left of the bar. A
+   touch of right margin sets it apart from the first mark group. */
+.rich-toolbar-blocktype {
+  background: transparent;
+  border: none;
+  color: var(--rich-tool-ink);
+  cursor: pointer;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0 0.45rem;
+  border-radius: var(--skrive-radius-sm, 4px);
+  font: inherit;
+  font-size: 0.85em;
+  white-space: nowrap;
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.rich-toolbar-blocktype:hover {
+  color: var(--skrive-fg);
+  background: var(--rich-tool-hover);
+}
+
+/* A short hairline that floats centred in the bar, with generous flanks, so the
+   three control clusters (marks | lists + quote | insert) read as groups. */
+.rich-toolbar-sep {
+  width: 1px;
+  height: 16px;
+  align-self: center;
+  margin: 0 0.5rem;
+  background: var(--skrive-rule);
+}
+
+.rich-blocktype-menu {
+  min-width: 9rem;
+}
+
+/* The floating selection bubble. Portalled to <body> and fixed-positioned from
+   the selection's viewport coordinates, so it floats free of the editor's
+   scroll/clip context. */
+.rich-bubble {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.2rem 0.3rem;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-md, 8px);
+  box-shadow:
+    0 6px 16px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.4)),
+    0 1px 3px light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.3));
+}
+
+/* The transient link input, floated below the selection. */
+.rich-link-editor {
+  position: fixed;
+  z-index: 1001;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-md, 8px);
+  box-shadow:
+    0 6px 16px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.4)),
+    0 1px 3px light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.3));
+}
+
+.rich-link-editor form {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem;
+}
+
+.rich-link-input {
+  width: 18rem;
+  max-width: 60vw;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 0.9em;
+  padding: 0.2rem 0.4rem;
+}
+
+.rich-link-input::placeholder {
+  color: var(--skrive-muted);
+}
+
+.rich-link-action {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--skrive-muted);
+  font: inherit;
+  font-size: 0.85em;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--skrive-radius-sm, 4px);
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.rich-link-action:hover {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.rich-link-remove:hover {
+  color: var(--skrive-danger, #c0392b);
+}
+
+/* The slash insert menu, dropped below the `/` trigger. */
+.rich-slash-menu {
+  position: fixed;
+  z-index: 1001;
+  min-width: 12rem;
+  max-height: 18rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-md, 8px);
+  box-shadow:
+    0 6px 16px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.4)),
+    0 1px 3px light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.3));
+}
+
+.rich-slash-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 0.9em;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--skrive-radius-sm, 4px);
+}
+
+.rich-slash-item:hover,
+.rich-slash-item.active {
+  background: var(--skrive-rule);
+}
+
+.rich-slash-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--skrive-muted);
+  flex: 0 0 auto;
+}

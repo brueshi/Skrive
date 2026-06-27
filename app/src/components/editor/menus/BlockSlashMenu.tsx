@@ -1,0 +1,135 @@
+// The insert (slash) menu for the bespoke surface, at visual parity with the Rich
+// one (shared rich-slash CSS, custom icons, framer-motion). Unlike the toolbar /
+// bubble / link editor, the slash menu is NOT unified behind MenuController: the
+// two editors detect the `/` trigger and drive keyboard navigation in
+// fundamentally different ways (a PM plugin reading doc positions vs. this
+// capture-phase keydown over the bespoke surface's observer), and merging those
+// drivers buys no visual parity. So this keeps the bespoke driver and shares only
+// the presentation; full unification is deferred to the Stage-6 affordance registry.
+//
+// While open, a capture-phase keydown owns Arrow/Enter/Escape — calling BOTH
+// preventDefault AND stopPropagation — so the surface's own keydown (Enter = split)
+// never also fires.
+
+import { useEffect, useMemo, useState, type ComponentType, type MouseEvent } from 'react';
+import { createPortal } from 'react-dom';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import type { BlockSurface, BlockTypeSpec, SlashMenuState } from '../../../lib/blocksurface';
+import { useAnchoredRect } from './useAnchoredRect';
+import {
+  IconParagraph,
+  IconHeading,
+  IconQuote,
+  IconBulletList,
+  IconOrderedList,
+  IconCodeBlock,
+  IconTable,
+  IconDivider
+} from './toolbar-icons';
+import './menus.css';
+
+type IconC = ComponentType<{ size?: number; className?: string }>;
+type Item = { title: string; keywords: string; spec: BlockTypeSpec; Icon: IconC };
+
+const ITEMS: Item[] = [
+  { title: 'Text', keywords: 'text paragraph body plain', spec: { kind: 'paragraph' }, Icon: IconParagraph },
+  { title: 'Heading 1', keywords: 'h1 heading title', spec: { kind: 'heading', level: 1 }, Icon: IconHeading },
+  { title: 'Heading 2', keywords: 'h2 heading subtitle', spec: { kind: 'heading', level: 2 }, Icon: IconHeading },
+  { title: 'Heading 3', keywords: 'h3 heading', spec: { kind: 'heading', level: 3 }, Icon: IconHeading },
+  { title: 'Quote', keywords: 'quote blockquote', spec: { kind: 'blockquote' }, Icon: IconQuote },
+  { title: 'Bullet list', keywords: 'bullet list unordered ul', spec: { kind: 'bullet_list' }, Icon: IconBulletList },
+  { title: 'Numbered list', keywords: 'numbered ordered list ol', spec: { kind: 'ordered_list' }, Icon: IconOrderedList },
+  { title: 'Code', keywords: 'code monospace pre fenced', spec: { kind: 'code' }, Icon: IconCodeBlock },
+  { title: 'Table', keywords: 'table grid rows columns', spec: { kind: 'table' }, Icon: IconTable },
+  { title: 'Divider', keywords: 'divider rule separator hr line', spec: { kind: 'divider' }, Icon: IconDivider }
+];
+
+function filterItems(query: string): Item[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return ITEMS;
+  return ITEMS.filter((it) => it.title.toLowerCase().includes(q) || it.keywords.includes(q));
+}
+
+export function BlockSlashMenu({ surface }: { surface: BlockSurface }) {
+  const [state, setState] = useState<SlashMenuState | null>(null);
+  const [active, setActive] = useState(0);
+  const reduced = useReducedMotion();
+
+  useEffect(() => {
+    surface.onSlashMenu(setState);
+    return () => surface.onSlashMenu(null);
+  }, [surface]);
+
+  const items = useMemo(() => filterItems(state?.query ?? ''), [state?.query]);
+  const visible = state != null && items.length > 0;
+
+  // Keep the active index in range as the filter narrows.
+  useEffect(() => {
+    setActive((i) => Math.min(i, Math.max(0, items.length - 1)));
+  }, [items.length]);
+
+  useEffect(() => {
+    if (!state) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(e.key)) return;
+      // Own these keys fully while open: stopPropagation so the surface's own
+      // capture-phase keydown (Enter = split) never also fires on this event.
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'ArrowDown') setActive((i) => Math.min(i + 1, items.length - 1));
+      else if (e.key === 'ArrowUp') setActive((i) => Math.max(i - 1, 0));
+      else if (e.key === 'Enter') {
+        const item = items[active];
+        if (item) surface.applySlashCommand(item.spec);
+      } else if (e.key === 'Escape') surface.closeSlash();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [state, items, active, surface]);
+
+  // The trigger rect anchors the menu below the `/`; re-measure as the query grows.
+  const { ref, pos } = useAnchoredRect(state?.rect ?? null, visible, items.length, 'below');
+
+  return createPortal(
+    <AnimatePresence>
+      {visible && (
+        <motion.div
+          ref={ref}
+          className="rich-slash-menu"
+          style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999 }}
+          role="listbox"
+          aria-label="Insert block"
+          initial={reduced ? false : { opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={reduced ? { opacity: 0 } : { opacity: 0, y: -4 }}
+          transition={{ duration: 0.12 }}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          {items.map((item, i) => {
+            const isActive = i === active;
+            return (
+              <button
+                key={item.title}
+                type="button"
+                role="option"
+                aria-selected={isActive}
+                className={`rich-slash-item${isActive ? ' active' : ''}`}
+                onMouseEnter={() => setActive(i)}
+                onMouseDown={(e: MouseEvent) => {
+                  e.preventDefault();
+                  surface.applySlashCommand(item.spec);
+                }}
+              >
+                <span className="rich-slash-icon">
+                  <item.Icon size={16} />
+                </span>
+                <span className="rich-slash-title">{item.title}</span>
+              </button>
+            );
+          })}
+        </motion.div>
+      )}
+    </AnimatePresence>,
+    document.body
+  );
+}

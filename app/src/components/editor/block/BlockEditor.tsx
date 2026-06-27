@@ -1,14 +1,23 @@
 // The bespoke block surface, wired into the app (SKR-95, Stage 3h). Mirrors the
-// RichEditor contract: uncontrolled (the body is read once on mount; App keys
-// this by the active tab path so a file switch remounts), edits flow out as a
-// debounced serialized snapshot, and the active-editor flush hook drains a
-// pending snapshot on ⌘S / quit. React mounts the surface and renders the
-// affordance overlays; the keystroke hot path runs in plain DOM.
+// RichEditor contract: uncontrolled (the body is read once on mount; App keys this
+// by the active tab path so a file switch remounts), edits flow out as a debounced
+// serialized snapshot, and the active-editor flush hook drains a pending snapshot
+// on ⌘S / quit. React mounts the surface and renders the affordance overlays; the
+// keystroke hot path runs in plain DOM.
+//
+// The toolbar, selection bubble, and link editor are the shared production menus
+// (SKR-114), driven by a BlockMenuController over the surface; only the slash menu
+// keeps a bespoke driver (BlockSlashMenu).
 
 import { useEffect, useRef, useState } from 'react';
-import { BlockSurface, SelectionBubble, SlashMenu } from '../../../lib/blocksurface';
+import { BlockSurface } from '../../../lib/blocksurface';
 import { parseDocument, serializeDocument } from '../../../lib/blockmodel';
 import { setActiveEditorFlush } from '../active-editor';
+import { BlockMenuController } from '../menus/BlockMenuController';
+import { Toolbar } from '../menus/Toolbar';
+import { SelectionBubble } from '../menus/SelectionBubble';
+import { LinkEditor } from '../menus/LinkEditor';
+import { BlockSlashMenu } from '../menus/BlockSlashMenu';
 import './BlockEditor.css';
 
 type Props = {
@@ -22,22 +31,24 @@ export function BlockEditor({ body, onChange }: Props): React.ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
-  const [surface, setSurface] = useState<BlockSurface | null>(null);
+  const [ctx, setCtx] = useState<{ surface: BlockSurface; controller: BlockMenuController } | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const s = new BlockSurface({
+    const surface = new BlockSurface({
       container: host,
       doc: parseDocument(body),
       onDocChange: (doc) => onChangeRef.current(serializeDocument(doc))
     });
-    setSurface(s);
-    setActiveEditorFlush(() => s.flush());
+    const controller = new BlockMenuController(surface);
+    setCtx({ surface, controller });
+    setActiveEditorFlush(() => surface.flush());
     return () => {
       setActiveEditorFlush(null);
-      s.destroy();
-      setSurface(null);
+      controller.destroy();
+      surface.destroy();
+      setCtx(null);
     };
     // Uncontrolled: body is intentionally read once. App remounts per file via key.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -45,9 +56,13 @@ export function BlockEditor({ body, onChange }: Props): React.ReactElement {
 
   return (
     <div className="block-editor">
-      <div ref={hostRef} className="block-editor-surface" />
-      {surface && <SelectionBubble surface={surface} />}
-      {surface && <SlashMenu surface={surface} />}
+      {ctx && <Toolbar controller={ctx.controller} />}
+      <div className="block-editor-body">
+        <div ref={hostRef} className="block-editor-surface" />
+      </div>
+      {ctx && <SelectionBubble controller={ctx.controller} />}
+      {ctx && <LinkEditor controller={ctx.controller} />}
+      {ctx && <BlockSlashMenu surface={ctx.surface} />}
     </div>
   );
 }
