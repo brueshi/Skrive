@@ -11,8 +11,7 @@ import {
   matchWindowBinding,
   type CommandDeps
 } from '../src/lib/commands/registry';
-import { usePreferencesStore } from '../src/stores/preferences';
-import { useProjectStore } from '../src/stores/project';
+import { useProjectStore, type Tab } from '../src/stores/project';
 
 const noop = () => {};
 const STUB_DEPS: CommandDeps = {
@@ -103,10 +102,10 @@ describe('command registry', () => {
   });
 });
 
-describe('surface toggle (⌘⇧E)', () => {
+describe('source toggle (⌘⇧E)', () => {
   const { commands, bindings } = buildRegistry(STUB_DEPS);
-  const binding = bindings.find((b) => b.commandId === 'view.toggleSurface');
-  const command = commands.find((c) => c.id === 'view.toggleSurface');
+  const binding = bindings.find((b) => b.commandId === 'view.toggleSource');
+  const command = commands.find((c) => c.id === 'view.toggleSource');
 
   it('binds ⌘⇧E in the View group, twinned with a palette command', () => {
     expect(binding).toBeDefined();
@@ -118,27 +117,22 @@ describe('surface toggle (⌘⇧E)', () => {
     expect(command?.shortcut).toBe('⌘⇧E');
   });
 
-  it('is runnable only when switching is enabled and a tab is open', () => {
+  it('is runnable only when a tab is open', () => {
     useProjectStore.setState({ activeTabIndex: 0 });
-    usePreferencesStore.setState({ surfaceSwitchingEnabled: true });
     expect(binding?.when?.()).toBe(true);
 
-    // The disable-switching escape hatch gates the verb off entirely.
-    usePreferencesStore.setState({ surfaceSwitchingEnabled: false });
-    expect(binding?.when?.()).toBe(false);
-
-    // No active tab → nothing to switch.
-    usePreferencesStore.setState({ surfaceSwitchingEnabled: true });
+    // No active tab → nothing to view as source.
     useProjectStore.setState({ activeTabIndex: -1 });
     expect(binding?.when?.()).toBe(false);
   });
 
-  it('flips the default surface text<->rich when run', () => {
-    usePreferencesStore.setState({ defaultSurface: 'text' });
+  it("toggles the active tab's raw source view when run", () => {
+    const tab = { path: 'a.md', rawView: false } as unknown as Tab;
+    useProjectStore.setState({ tabs: [tab], activeTabIndex: 0 });
     binding?.run?.();
-    expect(usePreferencesStore.getState().defaultSurface).toBe('rich');
+    expect(useProjectStore.getState().tabs[0]?.rawView).toBe(true);
     binding?.run?.();
-    expect(usePreferencesStore.getState().defaultSurface).toBe('text');
+    expect(useProjectStore.getState().tabs[0]?.rawView).toBe(false);
   });
 });
 

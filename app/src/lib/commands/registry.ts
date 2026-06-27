@@ -16,10 +16,8 @@
 // own surface's keydown handler because focus context matters. We
 // catalogue them so the cheat-sheet has one place to look.
 
-import type { LayoutMode } from '../../components/editor/SplitView';
 import { flushActiveEditor } from '../../components/editor/active-editor';
 import { getActiveBlockMenu } from '../../components/editor/active-surface';
-import { usePreferencesStore } from '../../stores/preferences';
 import { useProjectStore, logProjectError } from '../../stores/project';
 import { notify } from '../notify';
 
@@ -121,11 +119,6 @@ const whenActiveTabDirty = () => {
   );
 };
 const whenMultipleTabs = () => useProjectStore.getState().tabs.length > 1;
-/** The surface toggle is runnable only when switching is enabled (the
- *  disable-switching escape hatch) and a tab is open to switch. */
-const whenSurfaceSwitchable = () =>
-  usePreferencesStore.getState().surfaceSwitchingEnabled &&
-  useProjectStore.getState().activeTabIndex >= 0;
 
 /** The Insert commands act on the block surface, so they're runnable only when
  *  it's mounted — i.e. a document is open in the rendered (not raw / not diff)
@@ -180,24 +173,6 @@ export function dispatchKey(
 }
 
 // ============================ Build ============================
-
-const LAYOUT_MODES: LayoutMode[] = ['raw', 'split', 'preview'];
-
-const LAYOUT_BINDING_DIGIT: Record<LayoutMode, string> = {
-  raw: 'Digit1',
-  split: 'Digit2',
-  preview: 'Digit3'
-};
-
-const LAYOUT_BINDING_DISPLAY: Record<LayoutMode, string> = {
-  raw: '⌘1',
-  split: '⌘2',
-  preview: '⌘3'
-};
-
-function capitalize(s: string): string {
-  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
-}
 
 /** Build the full registry — both commands (palette-runnable) and
  *  bindings (keyboard-fired). Calls into `deps` for the modals the
@@ -310,19 +285,6 @@ export function buildRegistry(deps: CommandDeps): {
     },
 
     // ============ View ============
-    ...LAYOUT_MODES.map<Binding>((mode) => ({
-      chord: { code: LAYOUT_BINDING_DIGIT[mode], mod: true },
-      display: LAYOUT_BINDING_DISPLAY[mode],
-      scope: 'window',
-      group: 'View',
-      label: `Layout: ${capitalize(mode)}`,
-      commandId: `view.layout.${mode}`,
-      when: whenActiveTab,
-      run: () => {
-        const s = useProjectStore.getState();
-        if (s.activeTabIndex >= 0) s.setTabLayoutMode(s.activeTabIndex, mode);
-      }
-    })),
     {
       chord: { code: 'BracketLeft', mod: true },
       display: '⌘[',
@@ -368,16 +330,18 @@ export function buildRegistry(deps: CommandDeps): {
       display: '⌘⇧E',
       scope: 'window',
       group: 'View',
-      label: 'Toggle editing surface',
-      commandId: 'view.toggleSurface',
-      when: whenSurfaceSwitchable,
+      label: 'Toggle source view',
+      commandId: 'view.toggleSource',
+      when: whenActiveTab,
       // Flush-then-flip: drain the outgoing surface's pending edits into the
-      // canonical body, then flip. Both are synchronous store writes inside one
-      // keydown handler, so React re-renders once and the incoming surface
-      // mounts reading the fully-flushed body — zero pending-edit loss.
+      // canonical body, then toggle the raw source view. Both are synchronous
+      // store writes inside one keydown handler, so React re-renders once and
+      // the incoming view mounts reading the fully-flushed body — no edit loss.
       run: () => {
         flushActiveEditor();
-        usePreferencesStore.getState().toggleDefaultSurface();
+        const s = useProjectStore.getState();
+        const tab = s.tabs[s.activeTabIndex];
+        if (tab) s.setTabRawView(s.activeTabIndex, !tab.rawView);
       }
     },
 
@@ -572,17 +536,6 @@ export function buildRegistry(deps: CommandDeps): {
     },
 
     // ============ View ============
-    ...LAYOUT_MODES.map<Command>((mode) => ({
-      id: `view.layout.${mode}`,
-      label: `Layout: ${capitalize(mode)}`,
-      group: 'View',
-      shortcut: get(`view.layout.${mode}`),
-      when: whenActiveTab,
-      run: () => {
-        const s = useProjectStore.getState();
-        if (s.activeTabIndex >= 0) s.setTabLayoutMode(s.activeTabIndex, mode);
-      }
-    })),
     {
       id: 'view.toggleSidebar',
       label: 'Toggle sidebar',
@@ -616,14 +569,16 @@ export function buildRegistry(deps: CommandDeps): {
       run: () => useProjectStore.getState().toggleHistoryPanel()
     },
     {
-      id: 'view.toggleSurface',
-      label: 'Toggle editing surface',
+      id: 'view.toggleSource',
+      label: 'Toggle source view',
       group: 'View',
-      shortcut: get('view.toggleSurface'),
-      when: whenSurfaceSwitchable,
+      shortcut: get('view.toggleSource'),
+      when: whenActiveTab,
       run: () => {
         flushActiveEditor();
-        usePreferencesStore.getState().toggleDefaultSurface();
+        const s = useProjectStore.getState();
+        const tab = s.tabs[s.activeTabIndex];
+        if (tab) s.setTabRawView(s.activeTabIndex, !tab.rawView);
       }
     },
 

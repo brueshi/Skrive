@@ -67,7 +67,6 @@ export function App() {
   const activeTab = useProjectStore(selectActiveTab);
   const activeTabIndex = useProjectStore((s) => s.activeTabIndex);
   const setTabBody = useProjectStore((s) => s.setTabBody);
-  const setTabSplitRatio = useProjectStore((s) => s.setTabSplitRatio);
   const saveAllDirty = useProjectStore((s) => s.saveAllDirty);
   const openProjectFromDialog = useProjectStore(
     (s) => s.openProjectFromDialog

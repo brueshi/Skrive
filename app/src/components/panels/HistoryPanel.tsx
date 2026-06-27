@@ -81,7 +81,6 @@ export function HistoryPanel() {
   const refreshHistory = useProjectStore((s) => s.refreshHistory);
   const openDiff = useProjectStore((s) => s.openDiffForEntry);
 
-  const splitBlocksDiff = activeTab?.layoutMode === 'split';
   const activePath = activeTab?.path ?? '';
 
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -118,7 +117,6 @@ export function HistoryPanel() {
   }, [open, closePanel]);
 
   function handleRowClick(entry: HistoryEntry, event: React.MouseEvent) {
-    if (splitBlocksDiff) return;
     const id = entryId(entry);
     if (event.shiftKey && baseId && baseId !== id) {
       const baseline = rows.find((r) => entryId(r) === baseId) ?? null;
@@ -161,12 +159,6 @@ export function HistoryPanel() {
         </header>
 
         <div className="hi-panel-body">
-          {splitBlocksDiff && (
-            <p className="hi-notice">
-              Switch to raw or preview to compare versions — split mode
-              uses the two-pane surface diff needs.
-            </p>
-          )}
           {!mode ? (
             <p className="hi-empty">Open a project to view its history.</p>
           ) : rows.length === 0 ? (
@@ -185,7 +177,6 @@ export function HistoryPanel() {
                     <button
                       type="button"
                       className={`hi-row-button${pinned ? ' hi-row-pinned' : ''}`}
-                      disabled={splitBlocksDiff}
                       onClick={(e) => handleRowClick(row, e)}
                       title={isoTooltip(row)}
                     >

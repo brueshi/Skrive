@@ -26,7 +26,6 @@ import {
   LINE_HEIGHT_STEPS_X100,
   lineHeightLabel
 } from '../../lib/typography';
-import { platformShortcut } from '../../lib/commands/shortcut-display';
 import { notify } from '../../lib/notify';
 import { openFeedbackForm } from '../../lib/feedback';
 import {
@@ -185,8 +184,6 @@ function PaneHead({ title, sub }: { title: string; sub: string }) {
 function GeneralPane() {
   const skipDelete = usePreferencesStore((s) => s.skipDeleteConfirmation);
   const setSkip = usePreferencesStore((s) => s.setSkipDeleteConfirmation);
-  const switching = usePreferencesStore((s) => s.surfaceSwitchingEnabled);
-  const setSwitching = usePreferencesStore((s) => s.setSurfaceSwitchingEnabled);
   const gitHistory = usePreferencesStore((s) => s.gitHistoryEnabled);
   // The action lives in the project store: it persists the preference, pushes
   // it to the shell, and refreshes the open project's history live.
@@ -207,19 +204,6 @@ function GeneralPane() {
               checked={skipDelete}
               onChange={setSkip}
               ariaLabel="Skip delete confirmation"
-            />
-          }
-        />
-        <SettingRow
-          label="Allow switching surfaces"
-          desc={platformShortcut(
-            'Let ⌘⇧E and the command palette flip between the Rich and Text surfaces. Off locks the editor to the default surface.'
-          )}
-          control={
-            <Toggle
-              checked={switching}
-              onChange={setSwitching}
-              ariaLabel="Allow switching surfaces"
             />
           }
         />
@@ -343,20 +327,10 @@ function AppearancePane() {
 }
 
 function EditorPane() {
-  const defaultSurface = usePreferencesStore((s) => s.defaultSurface);
-  const setDefaultSurface = usePreferencesStore((s) => s.setDefaultSurface);
-  const markerMode = usePreferencesStore((s) => s.markerMode);
-  const setMarkerMode = usePreferencesStore((s) => s.setMarkerMode);
   const lineMeasure = usePreferencesStore((s) => s.lineMeasure);
   const setLineMeasure = usePreferencesStore((s) => s.setLineMeasure);
   const smartTypography = usePreferencesStore((s) => s.smartTypography);
   const setSmartTypography = usePreferencesStore((s) => s.setSmartTypography);
-
-  // Marker mode only affects the Text surface, so when Rich is the default
-  // it's inactive: dim the row and disable the control so it can't be
-  // changed while it has no effect. Switching back to Text re-enables it
-  // with the stored value intact.
-  const markerInactive = defaultSurface === 'rich';
 
   return (
     <>
@@ -364,42 +338,6 @@ function EditorPane() {
         title="Editor"
         sub="Defaults for new documents and how writing behaves."
       />
-      <SettingsSection cap="Defaults">
-        <SettingRow
-          label="Default surface"
-          desc="Which surface new documents open in."
-          control={
-            <Segmented
-              value={defaultSurface}
-              onChange={setDefaultSurface}
-              options={[
-                { id: 'rich', label: 'Rich' },
-                { id: 'text', label: 'Text' }
-              ]}
-              ariaLabel="Default surface"
-            />
-          }
-        />
-        <SettingRow
-          label="Marker mode"
-          desc="How much Markdown syntax shows in the Text surface."
-          dimmed={markerInactive}
-          control={
-            <Select
-              value={markerMode}
-              onChange={setMarkerMode}
-              disabled={markerInactive}
-              options={[
-                { id: 'raw', label: 'Raw' },
-                { id: 'recessed', label: 'Recessed' },
-                { id: 'concealed', label: 'Concealed' }
-              ]}
-              ariaLabel="Marker mode"
-            />
-          }
-        />
-      </SettingsSection>
-
       <SettingsSection cap="Writing">
         <SettingRow
           label="Line measure"

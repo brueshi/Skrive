@@ -2,8 +2,9 @@
 // project, the open tabs, the active tab, and sidebar visibility/width.
 //
 // Phase 4 swaps the single-active-file model from Phase 3 for the tabs
-// layer. Each tab carries its own layoutMode + splitDividerRatio so that
-// switching files restores the view the user last had on that file.
+// layer. Each tab carries its own cursor/scroll so switching files restores
+// the view the user last had on that file. (layoutMode/splitDividerRatio are
+// vestigial post-cutover — see DEFAULT_LAYOUT_MODE.)
 //
 // Phase 9 wires per-project persistence: the tab set, cursor/scroll
 // state, layout mode, and sidebar visibility/width are reloaded from
@@ -26,7 +27,7 @@ import {
   type ProjectUiState,
   type TabState
 } from '@skrive/shared';
-import type { LayoutMode } from '../components/editor/SplitView';
+import type { LayoutMode } from '@skrive/shared';
 import { computeLineDiff } from '../lib/diff/line-diff';
 import {
   mightHaveLeadingFrontmatter,
@@ -50,7 +51,13 @@ export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 500;
 export const SIDEBAR_DEFAULT_WIDTH = 260;
 
-const DEFAULT_LAYOUT_MODE: LayoutMode = 'split';
+// Vestigial after the editor cutover (SKR-111): the raw/split/preview surfaces
+// were retired, so layoutMode/splitDividerRatio are no longer read by the
+// renderer. They are kept on the tab and in the persisted schema only so the
+// on-disk shape (and its Zig-core mirror) stays stable across versions; the
+// value just round-trips. 'split' is avoided as the default so the dead
+// split-only diff guards never trip.
+const DEFAULT_LAYOUT_MODE: LayoutMode = 'preview';
 const DEFAULT_SPLIT_RATIO = 0.5;
 const DEBOUNCED_SAVE_MS = 1000;
 
@@ -78,19 +85,14 @@ export type DiffSide = {
 };
 
 /** Active diff state on a tab. Diff lives at the tab level so
- *  switching tabs preserves it; closing the diff (Escape / X)
- *  restores `restoreMode` so the user lands back where they started.
- *  Not persisted — diff is an ephemeral overlay. */
+ *  switching tabs preserves it; closing the diff (Escape / X) returns to the
+ *  editor. Not persisted — diff is an ephemeral overlay. */
 export type TabDiffState = {
   before: DiffSide;
   after: DiffSide;
   rows: LineDiffRow[];
   dividerRatio: number;
-  /** Editor mode the tab returns to on close. Diff entry from
-   *  'preview' returns to 'preview'; anything else returns to 'raw'.
-   *  Diff entry from 'split' is blocked at the panel layer. */
-  restoreMode: 'raw' | 'preview';
-  /** Sub-mode controlling DiffView's pane content. */
+  /** Sub-mode controlling DiffView's pane content (rendered vs raw text). */
   diffMode: 'diff-raw' | 'diff-preview';
 };
 
@@ -209,8 +211,6 @@ type Actions = {
 
   setTabBody(index: number, next: string): void;
   setTabRawView(index: number, value: boolean): void;
-  setTabLayoutMode(index: number, mode: LayoutMode): void;
-  setTabSplitRatio(index: number, ratio: number): void;
   setTabCursor(index: number, line: number, column: number): void;
   setTabScrollTop(index: number, top: number): void;
 
@@ -1086,16 +1086,6 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     scheduleLint();
   },
 
-  setTabLayoutMode(index: number, mode: LayoutMode) {
-    const { tabs } = get();
-    const tab = tabs[index];
-    if (!tab || tab.layoutMode === mode) return;
-    const nextTabs = tabs.slice();
-    nextTabs[index] = { ...tab, layoutMode: mode };
-    set({ tabs: nextTabs });
-    scheduleImmediateSave(get);
-  },
-
   setTabRawView(index: number, value: boolean) {
     const { tabs } = get();
     const tab = tabs[index];
@@ -1104,18 +1094,6 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     nextTabs[index] = { ...tab, rawView: value };
     // In-memory only (see Tab.rawView) — no persistence scheduling.
     set({ tabs: nextTabs });
-  },
-
-  setTabSplitRatio(index: number, ratio: number) {
-    const { tabs } = get();
-    const tab = tabs[index];
-    if (!tab) return;
-    const clamped = clampRatio(ratio);
-    if (tab.splitDividerRatio === clamped) return;
-    const nextTabs = tabs.slice();
-    nextTabs[index] = { ...tab, splitDividerRatio: clamped };
-    set({ tabs: nextTabs });
-    scheduleDebouncedSave(get);
   },
 
   setTabCursor(index: number, line: number, column: number) {
@@ -1577,11 +1555,11 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const { tabs, activeTabIndex } = get();
     const tab = tabs[activeTabIndex];
     if (!tab) return;
-    if (tab.layoutMode === 'split') return;
-    const restoreMode: 'raw' | 'preview' =
-      tab.layoutMode === 'preview' ? 'preview' : 'raw';
-    const diffMode: 'diff-raw' | 'diff-preview' =
-      restoreMode === 'preview' ? 'diff-preview' : 'diff-raw';
+    // The diff pane mirrors how the tab is being viewed: a rendered diff for the
+    // block surface, a raw-text diff when the source view is showing.
+    const diffMode: 'diff-raw' | 'diff-preview' = tab.rawView
+      ? 'diff-raw'
+      : 'diff-preview';
     try {
       const beforeEntry: HistoryEntry = baseline ?? entry;
       const afterEntry: HistoryEntry | null = baseline ? entry : null;
@@ -1606,7 +1584,6 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
           after: right,
           rows,
           dividerRatio: 0.5,
-          restoreMode,
           diffMode
         }
       };
