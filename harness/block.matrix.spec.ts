@@ -520,6 +520,83 @@ test('Stage 4: Backspace at a list item start removes the marker', async ({ page
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
+// Select from offset offA of the block whose text is exactly textA, to offset
+// offB of the block whose text is exactly textB (a cross-block selection).
+async function selectAcross(page: Page, textA: string, offA: number, textB: string, offB: number): Promise<void> {
+  await page.evaluate(
+    ({ textA, offA, textB, offB }) => {
+      const root = document.querySelector('.bespoke-root');
+      if (!root) throw new Error('no surface root');
+      const find = (t: string) =>
+        Array.from(root.querySelectorAll('[data-block-id]')).find((el) => el.textContent === t) as HTMLElement | undefined;
+      const a = find(textA);
+      const b = find(textB);
+      if (!a?.firstChild || !b?.firstChild) throw new Error('blocks not found');
+      const range = document.createRange();
+      range.setStart(a.firstChild, offA);
+      range.setEnd(b.firstChild, offB);
+      const sel = window.getSelection();
+      if (!sel) throw new Error('no selection');
+      sel.removeAllRanges();
+      sel.addRange(range);
+      document.dispatchEvent(new Event('selectionchange'));
+    },
+    { textA, offA, textB, offB }
+  );
+}
+
+test('Stage 4: Backspace from a paragraph merges into the previous list item', async ({ page }) => {
+  await open(page, 5);
+  await insertViaMenu(page, 'bullet');
+  await page.keyboard.type('one');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('two');
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Backspace'); // outdent 'two' -> a paragraph after the list
+  await page.waitForTimeout(60);
+  await page.keyboard.press('Backspace'); // merge 'two' back into the previous item 'one'
+  await page.waitForTimeout(60);
+  const md = await serialized(page);
+  expect(md, 'merged into the previous list item').toContain('- onetwo');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('Stage 4: select across blocks and delete merges the range', async ({ page }) => {
+  await open(page, 5);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('ALPHA');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('BETA');
+  await page.waitForTimeout(40);
+
+  await selectAcross(page, 'ALPHA', 2, 'BETA', 2); // "AL[PHA / BE]TA"
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(60);
+  const md = await serialized(page);
+  expect(md, 'range removed, ends joined').toContain('ALTA');
+  expect(md).not.toContain('ALPHA');
+  expect(md).not.toContain('BETA');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('Stage 4: typing over a cross-block selection replaces it', async ({ page }) => {
+  await open(page, 5);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('ALPHA');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('BETA');
+  await page.waitForTimeout(40);
+
+  await selectAcross(page, 'ALPHA', 2, 'BETA', 2);
+  await page.keyboard.type('Z');
+  await page.waitForTimeout(60);
+  const md = await serialized(page);
+  expect(md, 'selection replaced by the typed text').toContain('ALZTA');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
 test('Stage 3a: IME composition lands in the model', async ({ page, context }) => {
   await open(page, 200);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');

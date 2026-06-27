@@ -12,7 +12,9 @@
 
 import { generateBlockId, type BlockNode, type Document, type InlineNode } from '../blockmodel';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto } from './render';
-import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, setCaret, setCrossBlockSelection, setSelectionRange } from './selection';
+import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
+import { collapsedRange, isCollapsed, sameLeaf } from './doc-position';
+import { deleteAcross, mergeBackward, mergeForward, replaceAcross } from './range-ops';
 import { findBlockById, updateBlockById } from './tree';
 import { enterInContainer, exitContainer, type StructuralResult } from './structural';
 import { changeListType, findImmediateList, indentItem, liftItemToParagraph, outdentItem } from './list-ops';
@@ -782,7 +784,12 @@ export class BlockSurface {
       return;
     }
     const t = this.leafTarget();
-    if (!t || t.spansBlocks) return;
+    if (!t) return;
+    // Typing with a cross-block selection: replace the whole range with the text.
+    if (t.spansBlocks) {
+      this.replaceSelectionRange(text);
+      return;
+    }
     if (t.leaf.type === 'code_block') {
       this.editCodeText(t.leaf, t.blockEl, t.leaf.text.slice(0, t.start) + text + t.leaf.text.slice(t.end), t.start + text.length);
       this.scheduleSerialize();
@@ -825,17 +832,24 @@ export class BlockSurface {
       return;
     }
     const t = this.leafTarget();
-    if (!t || t.spansBlocks) return;
+    if (!t) return;
+    // A selection spanning blocks: delete the whole range (one primitive).
+    if (t.spansBlocks) {
+      this.deleteSelectionRange();
+      this.closeSlash();
+      return;
+    }
 
     if (t.collapsed && t.start === 0) {
-      if (isInlineText(t.leaf) && this.isTopLevel(t.blockEl, t.leaf.id)) {
-        // Top-level inline-text: merge into the previous block.
-        const index = this.doc.blocks.findIndex((b) => b.id === t.leaf.id);
-        if (index >= 0) this.mergeWithPrevious(index, t.blockEl);
-      } else if (isInlineText(t.leaf) && findImmediateList(this.doc.blocks, t.leaf.id)) {
+      if (isInlineText(t.leaf) && findImmediateList(this.doc.blocks, t.leaf.id)) {
         // Backspace at the start of a list item removes its marker: outdent one
         // level, or lift the item out to a paragraph at the top level.
         this.applyOutdent(t.leaf.id, 0);
+      } else if (isInlineText(t.leaf)) {
+        // Merge into the previous inline leaf in document order — across a list /
+        // quote boundary too (the old merge only joined top-level paragraphs).
+        const r = mergeBackward(this.doc.blocks, t.leaf.id);
+        if (r) this.applyStructural(r);
       }
       this.closeSlash();
       return;
@@ -874,13 +888,18 @@ export class BlockSurface {
       return;
     }
     const t = this.leafTarget();
-    if (!t || t.spansBlocks) return;
+    if (!t) return;
+    if (t.spansBlocks) {
+      this.deleteSelectionRange();
+      return;
+    }
     const len = t.leaf.type === 'code_block' ? t.leaf.text.length : isInlineText(t.leaf) ? inlineLength(t.leaf.inline) : 0;
 
     if (t.collapsed && t.start >= len) {
-      if (isInlineText(t.leaf) && this.isTopLevel(t.blockEl, t.leaf.id)) {
-        const index = this.doc.blocks.findIndex((b) => b.id === t.leaf.id);
-        if (index >= 0) this.mergeWithNext(index, t.blockEl);
+      if (isInlineText(t.leaf)) {
+        // Pull the next inline leaf up into this one (across a container boundary).
+        const r = mergeForward(this.doc.blocks, t.leaf.id);
+        if (r) this.applyStructural(r);
       }
       return;
     }
@@ -949,50 +968,31 @@ export class BlockSurface {
     this.scheduleSerialize();
   }
 
-  // Backspace at a block start: append this block's content to the previous one.
-  // The previous block is the survivor and keeps its id (merge keeps survivor);
-  // this block is removed.
-  private mergeWithPrevious(index: number, currEl: HTMLElement): void {
-    if (index === 0) return;
-    const prev = this.doc.blocks[index - 1]!;
-    const curr = this.doc.blocks[index]!;
-    if (!isInlineText(prev) || !isInlineText(curr)) return;
+  // Boundary merges (Backspace at a block start, Delete at a block end) and
+  // cross-block selection delete / replace all go through the document range ops
+  // (range-ops.ts) and applyStructural — one spine, container-aware, instead of
+  // the old top-level-only splices.
 
-    const joinOffset = inlineLength(prev.inline);
-    const merged: BlockNode = { ...prev, inline: [...prev.inline, ...curr.inline], dirty: true };
-    const blocks = this.doc.blocks.slice();
-    blocks.splice(index - 1, 2, merged);
-    this.doc = { ...this.doc, blocks };
-
-    const prevEl = this.registry.get(prev.id);
-    this.registry.delete(curr.id);
-    currEl.remove();
-    if (prevEl) {
-      renderInlineInto(prevEl, merged.inline);
-      setCaret(prevEl, joinOffset);
-    }
-    this.scheduleSerialize();
+  // Delete the current cross-block selection as a single range op. Clamps (no-op)
+  // when an endpoint is a table cell, or a barrier (table / code) lies in the
+  // range — a text range never corrupts one.
+  private deleteSelectionRange(): void {
+    const range = readSelection(this.container);
+    if (!range || isCollapsed(range)) return;
+    if (range.anchor.leaf.kind !== 'block' || range.focus.leaf.kind !== 'block') return;
+    if (sameLeaf(range.anchor.leaf, range.focus.leaf)) return; // single leaf: normal path
+    const r = deleteAcross(this.doc.blocks, range.anchor.leaf.id, range.anchor.offset, range.focus.leaf.id, range.focus.offset);
+    if (r) this.applyStructural(r);
   }
 
-  // Forward-delete at a block end: append the next block's content to this one.
-  // This block survives and keeps its id; the next block is removed.
-  private mergeWithNext(index: number, currEl: HTMLElement): void {
-    const curr = this.doc.blocks[index]!;
-    const next = this.doc.blocks[index + 1];
-    if (!next || !isInlineText(curr) || !isInlineText(next)) return;
-
-    const joinOffset = inlineLength(curr.inline);
-    const merged: BlockNode = { ...curr, inline: [...curr.inline, ...next.inline], dirty: true };
-    const blocks = this.doc.blocks.slice();
-    blocks.splice(index, 2, merged);
-    this.doc = { ...this.doc, blocks };
-
-    const nextEl = this.registry.get(next.id);
-    this.registry.delete(next.id);
-    nextEl?.remove();
-    renderInlineInto(currEl, merged.inline);
-    setCaret(currEl, joinOffset);
-    this.scheduleSerialize();
+  // Replace the current cross-block selection with typed / pasted text.
+  private replaceSelectionRange(text: string): void {
+    const range = readSelection(this.container);
+    if (!range || isCollapsed(range)) return;
+    if (range.anchor.leaf.kind !== 'block' || range.focus.leaf.kind !== 'block') return;
+    if (sameLeaf(range.anchor.leaf, range.focus.leaf)) return;
+    const r = replaceAcross(this.doc.blocks, range.anchor.leaf.id, range.anchor.offset, range.focus.leaf.id, range.focus.offset, text);
+    if (r) this.applyStructural(r);
   }
 
   private newInlineBlock(type: 'paragraph' | 'heading', inline: InlineNode[], level: number): BlockNode {
@@ -1168,8 +1168,10 @@ export class BlockSurface {
   private applyStructural(result: StructuralResult): void {
     this.doc = { ...this.doc, blocks: result.blocks };
     this.reconcile();
-    const el = this.container.querySelector(`[${BLOCK_ID_ATTR}="${result.caret.id}"]`) as HTMLElement | null;
-    if (el) setCaret(el, result.caret.offset);
+    // Place the caret through the document selection map: reconcile() replaced the
+    // element the caret was in, so this goes through the robust (rAF re-asserted,
+    // instrumented) placement that survives WKWebView's post-rebuild commit gap.
+    writeSelection(this.container, collapsedRange({ leaf: { kind: 'block', id: result.caret.id }, offset: result.caret.offset }), 'structural');
     this.scheduleSerialize();
   }
 
