@@ -22,6 +22,7 @@ import {
   inlineLength,
   inlinePlainText,
   insertTextInInline,
+  linkHrefInRange,
   rangeHasLink,
   rangeHasMark,
   readInlineFromDOM,
@@ -46,12 +47,26 @@ export type BlockTypeSpec =
  *  the `/`. Null when the menu is closed. */
 export type SlashMenuState = { rect: DOMRect; query: string };
 
-/** What the select->bubble affordance needs: where the selection is on screen and
- *  which marks already cover it (for active state). Null when there is no
- *  bubble-worthy selection (collapsed, empty, or crossing a block boundary). */
+/** The current selection's formatting context, emitted on every selection change
+ *  (rAF-coalesced, never per keystroke). Drives both the fixed toolbar (always
+ *  visible, reads block type + container flags) and the floating bubble (shows
+ *  only when `empty` is false). `rect` is the selection's bounding box for a
+ *  range, or the caret box when collapsed. Null only when focus is outside the
+ *  surface entirely. */
 export type SelectionInfo = {
   rect: DOMRect;
+  /** True when there is no range to format (collapsed caret, or crossing blocks). */
+  empty: boolean;
   marks: { strong: boolean; em: boolean; code: boolean; link: boolean };
+  /** The href shared across the selection, when it is uniformly one link. */
+  linkHref: string | null;
+  /** The focused leaf's block type, for the "Turn into" control. */
+  blockType: 'paragraph' | 'heading' | 'code_block' | 'table' | 'other';
+  headingLevel: number | null;
+  inBulletList: boolean;
+  inOrderedList: boolean;
+  inBlockquote: boolean;
+  inTable: boolean;
 };
 
 const SERIALIZE_DEBOUNCE_MS = 400;
@@ -125,6 +140,17 @@ export class BlockSurface {
   /** The current authoritative document. The consumer serializes this. */
   getDocument(): Document {
     return this.doc;
+  }
+
+  /** The current selection's formatting summary, for an on-demand read (e.g. a
+   *  controller priming its snapshot). Null when focus is outside the surface. */
+  getSelectionInfo(): SelectionInfo | null {
+    return this.selectionSummary();
+  }
+
+  /** Return focus to the editing surface (after a menu action that moved focus). */
+  focus(): void {
+    this.container.focus();
   }
 
   /** Flush any pending debounced cold-path call immediately (save / blur). */
@@ -273,12 +299,6 @@ export class BlockSurface {
     return out;
   }
 
-  /** Set or clear the link over the current selection. `href` empty/null clears. */
-  setLink(href: string | null): void {
-    const link = href && href.length > 0 ? { href, title: null } : null;
-    this.applyToSelection((inline, start, end) => setLinkInInline(inline, start, end, link));
-  }
-
   /** Remember the current selection so a link can be applied to it after focus
    *  moves to a URL input (which would otherwise collapse the live selection).
    *  Returns false when there is no within-block selection to link. */
@@ -289,14 +309,29 @@ export class BlockSurface {
     return true;
   }
 
-  /** Apply (or, with null, abandon) a link to the selection saved by beginLink. */
-  commitLink(href: string | null): void {
-    const saved = this.savedLink;
+  /** Apply a link over the selection saved by beginLink. */
+  commitLink(href: string): void {
+    if (href.length > 0) this.applySavedLink({ href, title: null });
     this.savedLink = null;
-    if (!saved || href == null || href.length === 0) return;
+  }
+
+  /** Remove any link over the selection saved by beginLink. */
+  removeLink(): void {
+    this.applySavedLink(null);
+    this.savedLink = null;
+  }
+
+  /** Discard the saved selection without touching the document (Escape / click-out). */
+  cancelLink(): void {
+    this.savedLink = null;
+  }
+
+  private applySavedLink(link: { href: string; title: string | null } | null): void {
+    const saved = this.savedLink;
+    if (!saved) return;
     const block = findBlockById(this.doc.blocks, saved.blockId);
     if (!block || !isInlineText(block)) return;
-    const inline = setLinkInInline(block.inline, saved.start, saved.end, { href, title: null });
+    const inline = setLinkInInline(block.inline, saved.start, saved.end, link);
     this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, saved.blockId, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
     const el = this.leafElementById(saved.blockId);
     if (el) {
@@ -566,46 +601,116 @@ export class BlockSurface {
   private emitSelection(): void {
     const cb = this.selectionCb;
     if (!cb) return;
+    cb(this.selectionSummary());
+  }
+
+  /** Build the current selection's formatting summary, or null when focus is
+   *  outside the surface. Always returns a summary while the caret is in the
+   *  surface (even collapsed) so the fixed toolbar can reflect the current block;
+   *  the bubble keys its visibility off `empty`. */
+  private selectionSummary(): SelectionInfo | null {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    const range = sel.getRangeAt(0);
+    if (!this.container.contains(range.startContainer)) return null;
+    const rect = range.getBoundingClientRect();
+
     const cell = this.cellTarget();
     if (cell) {
-      const sel = window.getSelection();
-      if (cell.collapsed || cell.spansCells || !sel || sel.rangeCount === 0) {
-        cb(null);
-        return;
-      }
-      cb({
-        rect: sel.getRangeAt(0).getBoundingClientRect(),
+      const empty = cell.collapsed || cell.spansCells;
+      return {
+        rect,
+        empty,
         marks: {
-          strong: rangeHasMark(cell.inline, cell.start, cell.end, 'strong'),
-          em: rangeHasMark(cell.inline, cell.start, cell.end, 'em'),
-          code: rangeHasMark(cell.inline, cell.start, cell.end, 'code'),
-          link: rangeHasLink(cell.inline, cell.start, cell.end)
-        }
-      });
-      return;
+          strong: !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'strong'),
+          em: !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'em'),
+          code: !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'code'),
+          link: !empty && rangeHasLink(cell.inline, cell.start, cell.end)
+        },
+        linkHref: empty ? null : linkHrefInRange(cell.inline, cell.start, cell.end),
+        blockType: 'table',
+        headingLevel: null,
+        inBulletList: false,
+        inOrderedList: false,
+        inBlockquote: false,
+        inTable: true
+      };
     }
-    // Use the same multi-leaf resolution as the mark commands so the bubble shows
-    // for a whole-block or multi-block selection (not only a single partial run),
-    // with the mark active-state aggregated across every covered leaf.
+
+    // The block-type / container context comes from the focused leaf; the marks
+    // come from the multi-leaf resolution the commands use, so the summary agrees
+    // with what a toggle would do over the same selection.
+    const leaf = this.leafTarget();
+    const flags = leaf ? this.containerFlags(leaf.leaf.id) : null;
+    const blockType =
+      leaf?.leaf.type === 'heading'
+        ? 'heading'
+        : leaf?.leaf.type === 'code_block'
+          ? 'code_block'
+          : leaf?.leaf.type === 'paragraph'
+            ? 'paragraph'
+            : 'other';
+    const headingLevel = leaf?.leaf.type === 'heading' ? leaf.leaf.level : null;
+
     const leaves = this.selectedLeaves();
-    const sel = window.getSelection();
-    if (leaves.length === 0 || !sel || sel.rangeCount === 0) {
-      cb(null);
-      return;
-    }
+    const empty = leaves.length === 0;
     const every = (mark: BooleanMark): boolean =>
-      leaves.every((l) => rangeHasMark(l.leaf.inline, l.start, l.end, mark));
+      !empty && leaves.every((l) => rangeHasMark(l.leaf.inline, l.start, l.end, mark));
+    // A link can only target one block; only offer it for a single-leaf selection.
     const single = leaves.length === 1 ? leaves[0] : null;
-    cb({
-      rect: sel.getRangeAt(0).getBoundingClientRect(),
+    return {
+      rect,
+      empty,
       marks: {
         strong: every('strong'),
         em: every('em'),
         code: every('code'),
-        // A link can only target one block; only offer it for a single-leaf selection.
         link: single ? rangeHasLink(single.leaf.inline, single.start, single.end) : false
+      },
+      linkHref: single ? linkHrefInRange(single.leaf.inline, single.start, single.end) : null,
+      blockType,
+      headingLevel,
+      inBulletList: flags?.inBulletList ?? false,
+      inOrderedList: flags?.inOrderedList ?? false,
+      inBlockquote: flags?.inBlockquote ?? false,
+      inTable: false
+    };
+  }
+
+  /** Which container types the leaf is nested inside, walking its ancestry. */
+  private containerFlags(leafId: string): {
+    inBulletList: boolean;
+    inOrderedList: boolean;
+    inBlockquote: boolean;
+  } {
+    const walk = (
+      nodes: BlockNode[],
+      acc: { inBulletList: boolean; inOrderedList: boolean; inBlockquote: boolean }
+    ): typeof acc | null => {
+      for (const b of nodes) {
+        if (b.id === leafId) return acc;
+        if (b.type === 'blockquote') {
+          const r = walk(b.children, { ...acc, inBlockquote: true });
+          if (r) return r;
+        } else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
+          const bullet = b.type === 'bullet_list';
+          for (const item of b.items) {
+            const r = walk(item.children, {
+              inBulletList: acc.inBulletList || bullet,
+              inOrderedList: acc.inOrderedList || !bullet,
+              inBlockquote: acc.inBlockquote
+            });
+            if (r) return r;
+          }
+        }
       }
-    });
+      return null;
+    };
+    return walk(this.doc.blocks, { inBulletList: false, inOrderedList: false, inBlockquote: false }) ?? {
+      inBulletList: false,
+      inOrderedList: false,
+      inBlockquote: false
+    };
   }
 
   // --- the hot path --------------------------------------------------------

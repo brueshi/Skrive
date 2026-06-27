@@ -26,7 +26,7 @@ import {
   IconDivider,
   IconTable,
   IconCodeBlock
-} from './toolbar-icons';
+} from '../menus/toolbar-icons';
 
 export type SlashItem = {
   id: string;

@@ -173,6 +173,31 @@ export function rangeHasLink(nodes: InlineNode[], start: number, end: number): b
   return any;
 }
 
+/** The href shared by every text run in the range, or null when the range is not
+ *  uniformly covered by one link. Lets a menu prefill the link editor with the
+ *  existing target. */
+export function linkHrefInRange(nodes: InlineNode[], start: number, end: number): string | null {
+  let acc = 0;
+  let href: string | null = null;
+  let any = false;
+  for (const node of nodes) {
+    if (!isText(node)) continue;
+    const s = acc;
+    const e = acc + node.text.length;
+    acc = e;
+    if (e <= start || s >= end) continue;
+    const link = node.marks.link;
+    if (!link) return null;
+    if (!any) {
+      href = link.href;
+      any = true;
+    } else if (href !== link.href) {
+      return null;
+    }
+  }
+  return any ? href : null;
+}
+
 /** Force a boolean mark on or off over a range, regardless of its current state.
  *  Used for multi-block selections, where every covered block must end up in the
  *  same state (so a toggle decided once over the whole selection applies

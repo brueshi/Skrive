@@ -1,36 +1,27 @@
-// The transient link affordance: a small input that floats below the selection
-// to add, edit, or remove a link. Opened by the toolbar / bubble link button or
-// ⌘K. The key property (Stage 3 gate) is commit-on-intent, discard-on-escape:
-// opening it does NOT touch the document — only Enter / Update / Remove dispatch
-// a transaction. Escape, or a click outside, dismisses it leaving the buffer
-// byte-identical.
+// The transient link affordance: a small input that floats below the selection to
+// add, edit, or remove a link. Opened by the toolbar / bubble link button. The key
+// property: commit-on-intent, discard-on-escape — opening it does NOT touch the
+// document; only Add / Update / Remove dispatch through the controller. Escape, or
+// a click outside, dismisses it leaving the buffer unchanged. Shared by both
+// editors via MenuController.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import type { Command } from 'prosemirror-state';
-import type { EditorView } from 'prosemirror-view';
-import { setLink, removeLink } from '../../../lib/projection/commands';
-import { useRichUiStore } from './selection-state';
-import { useAnchoredBox } from './use-anchored-box';
+import type { MenuController } from './controller';
+import { useAnchoredRect } from './useAnchoredRect';
+import './menus.css';
 
-type Props = { view: EditorView };
-
-export function LinkEditor({ view }: Props) {
-  const open = useRichUiStore((s) => s.linkEditor.open);
-  const initialHref = useRichUiStore((s) => s.linkEditor.href);
-  const editing = useRichUiStore((s) => s.linkEditor.editing);
-  const selFrom = useRichUiStore((s) => s.selFrom);
-  const selTo = useRichUiStore((s) => s.selTo);
-  const geometry = useRichUiStore((s) => s.geometry);
-  const close = useRichUiStore((s) => s.closeLinkEditor);
+export function LinkEditor({ controller }: { controller: MenuController }) {
+  const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  const { open, href: initialHref, editing } = snap.link;
+  const reduced = useReducedMotion();
 
   const [href, setHref] = useState(initialHref);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const reduced = useReducedMotion();
-  const { ref, pos } = useAnchoredBox(view, selFrom, selTo, open, geometry, 'below');
+  const { ref, pos } = useAnchoredRect(controller.anchorRect(), open, snap.rev, 'below');
 
-  // Seed the field from the store each time the editor (re)opens.
+  // Seed the field from the controller each time it (re)opens.
   useEffect(() => {
     if (open) setHref(initialHref);
   }, [open, initialHref]);
@@ -45,31 +36,23 @@ export function LinkEditor({ view }: Props) {
     return () => cancelAnimationFrame(id);
   }, [open]);
 
-  const run = useCallback(
-    (cmd: Command) => {
-      cmd(view.state, view.dispatch, view);
-    },
-    [view]
-  );
-
   const cancel = useCallback(() => {
-    close();
-    view.focus();
-  }, [close, view]);
+    controller.closeLinkEditor();
+    controller.focusEditor();
+  }, [controller]);
 
   const commit = useCallback(() => {
     const trimmed = href.trim();
-    if (trimmed) run(setLink(trimmed));
-    else if (editing) run(removeLink); // cleared an existing link -> unlink
-    close();
-    view.focus();
-  }, [href, editing, run, close, view]);
+    if (trimmed) controller.commitLink(trimmed);
+    else if (editing) controller.removeLink(); // cleared an existing link -> unlink
+    else controller.closeLinkEditor();
+    controller.focusEditor();
+  }, [href, editing, controller]);
 
   const remove = useCallback(() => {
-    run(removeLink);
-    close();
-    view.focus();
-  }, [run, close, view]);
+    controller.removeLink();
+    controller.focusEditor();
+  }, [controller]);
 
   // A click anywhere outside discards (commit-on-intent: only explicit actions
   // mutate). Capture phase so it fires before the editor handles the click.
@@ -120,11 +103,7 @@ export function LinkEditor({ view }: Props) {
               {editing ? 'Update' : 'Add'}
             </button>
             {editing && (
-              <button
-                type="button"
-                className="rich-link-action rich-link-remove"
-                onClick={remove}
-              >
+              <button type="button" className="rich-link-action rich-link-remove" onClick={remove}>
                 Remove
               </button>
             )}
