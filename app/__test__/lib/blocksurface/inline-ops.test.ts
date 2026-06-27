@@ -11,6 +11,7 @@ import {
   rangeHasLink,
   rangeHasMark,
   setLinkInInline,
+  setMarkInInline,
   splitInline,
   toggleMarkInInline
 } from '../../../src/lib/blocksurface/inline-ops';
@@ -120,6 +121,30 @@ describe('toggleMarkInInline', () => {
   it('adds when only part of the range has the mark', () => {
     const nodes = [text('ab', { em: true }), text('cd')];
     expect(toggleMarkInInline(nodes, 0, 4, 'em')).toEqual([text('ab', { em: true }), text('cd', { em: true })]);
+  });
+});
+
+describe('setMarkInInline', () => {
+  it('forces the mark on regardless of current state', () => {
+    expect(setMarkInInline([text('ab', { strong: true }), text('cd')], 0, 4, 'strong', true)).toEqual([
+      text('ab', { strong: true }),
+      text('cd', { strong: true })
+    ]);
+  });
+
+  it('forces the mark off regardless of current state', () => {
+    expect(setMarkInInline([text('ab', { strong: true }), text('cd')], 0, 4, 'strong', false)).toEqual([
+      text('ab'),
+      text('cd')
+    ]);
+  });
+
+  it('does not invert a half-marked range the way a per-block toggle would', () => {
+    // The whole point: a multi-block selection decides on/off once, then forces
+    // every block to match — so a partly-bold selection ends up fully bold.
+    expect(setMarkInInline([text('abcd', { strong: true })], 0, 4, 'strong', true)).toEqual([
+      text('abcd', { strong: true })
+    ]);
   });
 });
 

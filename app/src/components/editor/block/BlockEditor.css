@@ -1,0 +1,103 @@
+/* Bespoke block surface, in-app styling (SKR-95, Stage 3h). Reads the same
+   typography tokens as the other surfaces so it reads as the same document. Kept
+   intentionally close to the Rich surface; visual polish is a later pass. */
+
+.block-editor {
+  height: 100%;
+  overflow: auto;
+  background: var(--skrive-bg);
+  color: var(--skrive-fg);
+}
+
+.block-editor-surface {
+  max-width: var(--skrive-measure, 42rem);
+  margin: 0 auto;
+  padding: 2.5rem 2rem 40vh;
+  box-sizing: border-box;
+  outline: none;
+  caret-color: var(--skrive-fg);
+  /* Render spaces verbatim — without this a trailing space collapses and does
+     not paint until the next character (the "space doesn't show" bug). */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  font-family: var(--skrive-editor-font);
+  font-size: var(--skrive-editor-font-size);
+  line-height: var(--skrive-editor-line-height);
+}
+
+/* The host is the focused contenteditable; opt out of the app's global
+   :focus-visible ring (index.css) so there is no box around the writing area.
+   Higher specificity than the global rule, so it wins regardless of load order. */
+.block-editor-surface:focus,
+.block-editor-surface:focus-visible {
+  outline: none;
+}
+
+.block-editor-surface > * {
+  margin: 0 0 0.85em;
+}
+
+.block-editor-surface h1,
+.block-editor-surface h2,
+.block-editor-surface h3,
+.block-editor-surface h4,
+.block-editor-surface h5,
+.block-editor-surface h6 {
+  margin: 1.4em 0 0.5em;
+  line-height: 1.25;
+  font-weight: 650;
+}
+
+.block-editor-surface blockquote {
+  margin-left: 0;
+  padding-left: 1rem;
+  border-left: 3px solid var(--skrive-rule);
+  color: color-mix(in srgb, var(--skrive-fg) 80%, var(--skrive-bg));
+}
+
+.block-editor-surface ul,
+.block-editor-surface ol {
+  padding-left: 1.5rem;
+}
+
+.block-editor-surface pre {
+  padding: 0.8rem 1rem;
+  border-radius: var(--skrive-radius-sm, 6px);
+  background: color-mix(in srgb, var(--skrive-fg) 5%, var(--skrive-bg));
+  overflow-x: auto;
+  font-size: 0.9em;
+}
+
+.block-editor-surface code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.block-editor-surface :not(pre) > code {
+  padding: 0.1em 0.35em;
+  border-radius: var(--skrive-radius-sm, 4px);
+  background: color-mix(in srgb, var(--skrive-fg) 7%, var(--skrive-bg));
+  font-size: 0.88em;
+}
+
+.block-editor-surface hr {
+  border: none;
+  border-top: 1px solid var(--skrive-rule);
+  margin: 1.5em 0;
+}
+
+.block-editor-surface table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.block-editor-surface th,
+.block-editor-surface td {
+  border: 1px solid var(--skrive-rule);
+  padding: 0.4em 0.6em;
+  text-align: left;
+}
+
+.block-editor-surface a {
+  color: var(--skrive-accent, #2563eb);
+  text-decoration: underline;
+}

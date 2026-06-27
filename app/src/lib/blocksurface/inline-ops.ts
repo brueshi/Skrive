@@ -173,6 +173,26 @@ export function rangeHasLink(nodes: InlineNode[], start: number, end: number): b
   return any;
 }
 
+/** Force a boolean mark on or off over a range, regardless of its current state.
+ *  Used for multi-block selections, where every covered block must end up in the
+ *  same state (so a toggle decided once over the whole selection applies
+ *  uniformly, rather than each block flipping on its own). */
+export function setMarkInInline(
+  nodes: InlineNode[],
+  start: number,
+  end: number,
+  mark: BooleanMark,
+  on: boolean
+): InlineNode[] {
+  if (start >= end) return nodes;
+  return mapRange(nodes, start, end, (m) => {
+    const next = { ...m };
+    if (on) next[mark] = true;
+    else delete next[mark];
+    return next;
+  });
+}
+
 /** Toggle a boolean mark over a range: remove it if the whole range already has
  *  it, otherwise add it (standard editor semantics). */
 export function toggleMarkInInline(
@@ -182,13 +202,7 @@ export function toggleMarkInInline(
   mark: BooleanMark
 ): InlineNode[] {
   if (start >= end) return nodes;
-  const has = rangeHasMark(nodes, start, end, mark);
-  return mapRange(nodes, start, end, (m) => {
-    const next = { ...m };
-    if (has) delete next[mark];
-    else next[mark] = true;
-    return next;
-  });
+  return setMarkInInline(nodes, start, end, mark, !rangeHasMark(nodes, start, end, mark));
 }
 
 /** Set or clear the link mark over a range. */

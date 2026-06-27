@@ -8,6 +8,8 @@ import { Toaster } from 'sonner';
 import { SplitView } from './components/editor/SplitView';
 import { TextToolbar } from './components/editor/TextToolbar';
 import { RichEditor } from './components/editor/rich/RichEditor';
+import { BlockEditor } from './components/editor/block/BlockEditor';
+import { blockSurfaceEnabled } from './lib/block-surface-flag';
 import { flushActiveEditor } from './components/editor/active-editor';
 import { platformShortcut } from './lib/commands/shortcut-display';
 import { DiffView } from './components/editor/DiffView';
@@ -464,6 +466,14 @@ export function App() {
                     setTabDiffDividerRatio(activeTabIndex, ratio)
                   }
                   onClose={closeDiff}
+                />
+              ) : activeTab && blockSurfaceEnabled ? (
+                // Experimental bespoke surface (SKR-95), opt-in behind a flag.
+                // Keyed per file so a switch remounts (uncontrolled, like Rich).
+                <BlockEditor
+                  key={activeTab.path}
+                  body={activeTab.body}
+                  onChange={(next) => setTabBody(activeTabIndex, next)}
                 />
               ) : activeTab && defaultSurface === 'rich' ? (
                 <RichEditor

@@ -12,7 +12,7 @@
 
 import { generateBlockId, type BlockNode, type Document, type InlineNode } from '../blockmodel';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto } from './render';
-import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, setCaret, setSelectionRange } from './selection';
+import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, setCaret, setCrossBlockSelection, setSelectionRange } from './selection';
 import { findBlockById, updateBlockById } from './tree';
 import { enterInContainer, exitContainer, type StructuralResult } from './structural';
 import {
@@ -25,6 +25,7 @@ import {
   rangeHasMark,
   readInlineFromDOM,
   setLinkInInline,
+  setMarkInInline,
   splitInline,
   toggleMarkInInline
 } from './inline-ops';
@@ -90,6 +91,13 @@ export class BlockSurface {
 
     this.container.contentEditable = 'true';
     this.container.spellcheck = false;
+    // Disable the OS text services that fire on word boundaries (autocorrect /
+    // capitalization / smart substitution). In a contenteditable they emit
+    // insertReplacementText on space/period, which the hot path would have to
+    // fight — the source of the word-then-space / word-then-period lag.
+    this.container.setAttribute('autocorrect', 'off');
+    this.container.setAttribute('autocapitalize', 'off');
+    this.container.setAttribute('autocomplete', 'off');
     renderDocument(this.container, this.doc.blocks, this.registry);
     for (const block of this.doc.blocks) this.renderedFrom.set(block.id, block);
 
@@ -150,6 +158,13 @@ export class BlockSurface {
       }
       return;
     }
+    // Enter is handled here (not beforeinput): preventDefault on keydown reliably
+    // stops the browser's own newline, so the block splits exactly once.
+    if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      this.applyEnter();
+      return;
+    }
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
     const key = e.key.toLowerCase();
     if (key === 'b') {
@@ -168,7 +183,77 @@ export class BlockSurface {
    *  within-block selection (stored marks for a collapsed caret are a later
    *  refinement). */
   toggleMark(mark: BooleanMark): void {
+    // A selection can cover several blocks (select-all, triple-click that bleeds
+    // into the next block, or a deliberate multi-paragraph drag). Resolve every
+    // covered leaf and mark them as one unit so "bold the whole thing" works.
+    const leaves = this.selectedLeaves();
+    if (leaves.length > 0) {
+      this.applyMarkToLeaves(leaves, mark);
+      return;
+    }
+    // No block-id leaf in the selection means a table cell (cells are addressed by
+    // coordinates, not a block id) — fall back to the single-region path.
     this.applyToSelection((inline, start, end) => toggleMarkInInline(inline, start, end, mark));
+  }
+
+  /** Apply a mark uniformly across the covered leaves. The on/off decision is made
+   *  once over the whole selection (Google-Docs semantics: if every covered run
+   *  already has the mark, clear it; otherwise set it everywhere), then forced on
+   *  each leaf so a half-marked selection ends up fully marked, not inverted. */
+  private applyMarkToLeaves(
+    leaves: ReadonlyArray<{ leaf: InlineTextBlock; start: number; end: number }>,
+    mark: BooleanMark
+  ): void {
+    const on = !leaves.every((l) => rangeHasMark(l.leaf.inline, l.start, l.end, mark));
+    let blocks = this.doc.blocks;
+    for (const l of leaves) {
+      const inline = setMarkInInline(l.leaf.inline, l.start, l.end, mark, on);
+      blocks = updateBlockById(blocks, l.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode);
+    }
+    this.doc = { ...this.doc, blocks };
+    for (const l of leaves) {
+      const el = this.leafElementById(l.leaf.id);
+      const updated = findBlockById(this.doc.blocks, l.leaf.id);
+      if (el && updated && isInlineText(updated)) renderInlineInto(el, updated.inline);
+    }
+    const first = leaves[0];
+    const last = leaves[leaves.length - 1];
+    if (!first || !last) return;
+    const firstEl = this.leafElementById(first.leaf.id);
+    const lastEl = this.leafElementById(last.leaf.id);
+    if (firstEl && lastEl) {
+      if (firstEl === lastEl) setSelectionRange(firstEl, first.start, last.end);
+      else setCrossBlockSelection(firstEl, first.start, lastEl, last.end);
+    }
+    this.scheduleSerialize();
+    this.emitSelection();
+  }
+
+  /** The inline-text leaves the current selection actually covers, in document
+   *  order, each clamped to its in-block range. A leaf the selection only grazes
+   *  at offset 0 (the classic triple-click bleed into the next block) contributes
+   *  nothing and is dropped, so marks land only where text is really selected. */
+  private selectedLeaves(): Array<{ leaf: InlineTextBlock; start: number; end: number }> {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return [];
+    const range = sel.getRangeAt(0);
+    const out: Array<{ leaf: InlineTextBlock; start: number; end: number }> = [];
+    this.container.querySelectorAll(`[${BLOCK_ID_ATTR}]`).forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      const id = node.getAttribute(BLOCK_ID_ATTR);
+      if (!id) return;
+      const block = findBlockById(this.doc.blocks, id);
+      if (!block || !isInlineText(block) || !range.intersectsNode(node)) return;
+      const start = node.contains(range.startContainer)
+        ? flatOffsetFromDOM(node, range.startContainer, range.startOffset)
+        : 0;
+      const end = node.contains(range.endContainer)
+        ? flatOffsetFromDOM(node, range.endContainer, range.endOffset)
+        : inlineLength(block.inline);
+      if (start >= end) return;
+      out.push({ leaf: block, start, end });
+    });
+    return out;
   }
 
   /** Set or clear the link over the current selection. `href` empty/null clears. */
@@ -413,24 +498,26 @@ export class BlockSurface {
       });
       return;
     }
-    const t = this.leafTarget();
-    if (!t || t.collapsed || t.spansBlocks || !isInlineText(t.leaf)) {
-      cb(null);
-      return;
-    }
+    // Use the same multi-leaf resolution as the mark commands so the bubble shows
+    // for a whole-block or multi-block selection (not only a single partial run),
+    // with the mark active-state aggregated across every covered leaf.
+    const leaves = this.selectedLeaves();
     const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) {
+    if (leaves.length === 0 || !sel || sel.rangeCount === 0) {
       cb(null);
       return;
     }
-    const inline = t.leaf.inline;
+    const every = (mark: BooleanMark): boolean =>
+      leaves.every((l) => rangeHasMark(l.leaf.inline, l.start, l.end, mark));
+    const single = leaves.length === 1 ? leaves[0] : null;
     cb({
       rect: sel.getRangeAt(0).getBoundingClientRect(),
       marks: {
-        strong: rangeHasMark(inline, t.start, t.end, 'strong'),
-        em: rangeHasMark(inline, t.start, t.end, 'em'),
-        code: rangeHasMark(inline, t.start, t.end, 'code'),
-        link: rangeHasLink(inline, t.start, t.end)
+        strong: every('strong'),
+        em: every('em'),
+        code: every('code'),
+        // A link can only target one block; only offer it for a single-leaf selection.
+        link: single ? rangeHasLink(single.leaf.inline, single.start, single.end) : false
       }
     });
   }
@@ -445,8 +532,9 @@ export class BlockSurface {
       e.preventDefault();
       this.applyInsertText(e.data);
     } else if (type === 'insertParagraph' || type === 'insertLineBreak') {
+      // Enter is handled in keydown; swallow any native paragraph so it can't
+      // produce a second line break.
       e.preventDefault();
-      this.applyEnter();
     } else if (type === 'deleteContentBackward') {
       e.preventDefault();
       this.applyDeleteBackward();
@@ -492,10 +580,13 @@ export class BlockSurface {
     const cell = this.cellTarget();
     if (cell) {
       if (cell.spansCells) return;
-      let inline = cell.inline;
-      if (!cell.collapsed) inline = deleteRangeInInline(inline, cell.start, cell.end);
-      inline = insertTextInInline(inline, cell.start, text);
-      this.commitCell(cell, inline, cell.start + text.length);
+      if (cell.collapsed && this.surgicalInsert(text)) {
+        this.updateCellModel(cell, insertTextInInline(cell.inline, cell.start, text));
+      } else {
+        let inline = cell.inline;
+        if (!cell.collapsed) inline = deleteRangeInInline(inline, cell.start, cell.end);
+        this.commitCell(cell, insertTextInInline(inline, cell.start, text), cell.start + text.length);
+      }
       this.scheduleSerialize();
       return;
     }
@@ -507,10 +598,19 @@ export class BlockSurface {
       return;
     }
     if (!isInlineText(t.leaf)) return;
-    let inline = t.leaf.inline;
-    if (!t.collapsed) inline = deleteRangeInInline(inline, t.start, t.end);
-    inline = insertTextInInline(inline, t.start, text);
-    this.commitInline(t.leaf.id, inline, t.blockEl, t.start + text.length);
+
+    // Surgical fast path: insert into the live text node in place. Falls back to a
+    // full block re-render only when there is a selection to replace or the caret
+    // is not in a text node.
+    if (t.collapsed && this.surgicalInsert(text)) {
+      const inline = insertTextInInline(t.leaf.inline, t.start, text);
+      this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, t.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
+    } else {
+      let inline = t.leaf.inline;
+      if (!t.collapsed) inline = deleteRangeInInline(inline, t.start, t.end);
+      inline = insertTextInInline(inline, t.start, text);
+      this.commitInline(t.leaf.id, inline, t.blockEl, t.start + text.length);
+    }
     this.scheduleSerialize();
     this.handleSlashAfterInsert(text);
   }
@@ -519,9 +619,13 @@ export class BlockSurface {
     const cell = this.cellTarget();
     if (cell) {
       if (cell.spansCells || (cell.collapsed && cell.start === 0)) return; // no merge across cells
-      const from = cell.collapsed ? cell.start - 1 : cell.start;
-      const to = cell.collapsed ? cell.start : cell.end;
-      this.commitCell(cell, deleteRangeInInline(cell.inline, from, to), from);
+      if (cell.collapsed && this.surgicalDeleteBack()) {
+        this.updateCellModel(cell, deleteRangeInInline(cell.inline, cell.start - 1, cell.start));
+      } else {
+        const from = cell.collapsed ? cell.start - 1 : cell.start;
+        const to = cell.collapsed ? cell.start : cell.end;
+        this.commitCell(cell, deleteRangeInInline(cell.inline, from, to), from);
+      }
       this.scheduleSerialize();
       return;
     }
@@ -546,7 +650,15 @@ export class BlockSurface {
       return;
     }
     if (!isInlineText(t.leaf)) return;
-    this.commitInline(t.leaf.id, deleteRangeInInline(t.leaf.inline, from, to), t.blockEl, from);
+
+    // Surgical fast path for a within-text-node backspace; full re-render only for
+    // a selection delete or a caret at a text-node boundary.
+    if (t.collapsed && this.surgicalDeleteBack()) {
+      const inline = deleteRangeInInline(t.leaf.inline, from, to);
+      this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, t.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
+    } else {
+      this.commitInline(t.leaf.id, deleteRangeInInline(t.leaf.inline, from, to), t.blockEl, from);
+    }
     this.scheduleSerialize();
     this.refreshSlash();
   }
@@ -759,7 +871,7 @@ export class BlockSurface {
     return { tableId, row, col, cellEl, inline, start, end, collapsed, spansCells: !endInCell };
   }
 
-  private commitCell(c: { tableId: string; row: number; col: number; cellEl: HTMLElement }, inline: InlineNode[], caret: number): void {
+  private updateCellModel(c: { tableId: string; row: number; col: number }, inline: InlineNode[]): void {
     this.doc = {
       ...this.doc,
       blocks: updateBlockById(this.doc.blocks, c.tableId, (b) => {
@@ -768,8 +880,40 @@ export class BlockSurface {
         return { ...b, rows, dirty: true };
       })
     };
+  }
+
+  private commitCell(c: { tableId: string; row: number; col: number; cellEl: HTMLElement }, inline: InlineNode[], caret: number): void {
+    this.updateCellModel(c, inline);
     renderInlineInto(c.cellEl, inline);
     setCaret(c.cellEl, caret);
+  }
+
+  // Surgical DOM edits for the common case: a collapsed caret inside a text node.
+  // Insert/delete in place rather than rebuilding the block's DOM, so typing is
+  // native-smooth and the selection is never disturbed. Return false to let the
+  // caller fall back to a full re-render (selection replace, caret on an element).
+  private surgicalInsert(text: string): boolean {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return false;
+    const range = sel.getRangeAt(0);
+    if (!range.collapsed || range.startContainer.nodeType !== Node.TEXT_NODE) return false;
+    const tn = range.startContainer as Text;
+    const off = range.startOffset;
+    tn.insertData(off, text);
+    sel.collapse(tn, off + text.length);
+    return true;
+  }
+
+  private surgicalDeleteBack(): boolean {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return false;
+    const range = sel.getRangeAt(0);
+    if (!range.collapsed || range.startContainer.nodeType !== Node.TEXT_NODE || range.startOffset === 0) return false;
+    const tn = range.startContainer as Text;
+    const off = range.startOffset;
+    tn.deleteData(off - 1, 1);
+    sel.collapse(tn, off - 1);
+    return true;
   }
 
   // Move the caret to the next/previous cell in row-major order. Off the ends it
@@ -862,7 +1006,13 @@ export class BlockSurface {
     if (this.debounceTimer != null) clearTimeout(this.debounceTimer);
     this.debounceTimer = window.setTimeout(() => {
       this.debounceTimer = null;
-      this.onDocChange?.(this.doc);
+      // Run the cold path (serialize + store write + lint + app re-render) during
+      // an idle gap so it never lands between keystrokes — the "type 3, pause,
+      // 4th" hitch. flush() (Cmd-S / quit) still runs it synchronously.
+      const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void })
+        .requestIdleCallback;
+      if (typeof ric === 'function') ric(() => this.onDocChange?.(this.doc), { timeout: 1000 });
+      else this.onDocChange?.(this.doc);
     }, SERIALIZE_DEBOUNCE_MS);
   }
 }

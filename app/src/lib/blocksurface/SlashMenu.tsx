@@ -54,20 +54,17 @@ export function SlashMenu({ surface }: { surface: BlockSurface }) {
   useEffect(() => {
     if (!state) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setActive((i) => Math.min(i + 1, items.length - 1));
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setActive((i) => Math.max(i - 1, 0));
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
+      if (!['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(e.key)) return;
+      // Own these keys fully while open: stopPropagation so the surface's own
+      // capture-phase keydown (Enter = split) never also fires on this event.
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'ArrowDown') setActive((i) => Math.min(i + 1, items.length - 1));
+      else if (e.key === 'ArrowUp') setActive((i) => Math.max(i - 1, 0));
+      else if (e.key === 'Enter') {
         const item = items[active];
         if (item) surface.applySlashCommand(item.spec);
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        surface.closeSlash();
-      }
+      } else if (e.key === 'Escape') surface.closeSlash();
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
