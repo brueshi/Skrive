@@ -79,11 +79,12 @@ const tailOf = (inline: InlineNode[], offset: number): InlineNode[] => deleteRan
 
 /**
  * Delete the content between two positions in document order. The start leaf
- * keeps its id + type and receives `head(start) + tail(end)`; every inline leaf
- * strictly after start through end is removed and emptied containers pruned.
- * Returns null (clamp) when either endpoint is not an inline leaf, or a barrier
- * (code/table/atom) lies inside the range — so a text range never corrupts one.
- * Caret lands at the join (`start`).
+ * keeps its id + type and receives `head(start) + tail(end)`; every block strictly
+ * between is removed — including a fully-covered barrier (a divider / code block /
+ * table caught entirely inside the selection) — and emptied containers pruned.
+ * Both ENDPOINTS must be inline leaves: a range that starts or ends inside a code
+ * block / table returns null (clamp), so a text edit never partial-cuts one. Caret
+ * lands at the join (`start`).
  */
 export function deleteAcross(
   blocks: BlockNode[],
@@ -107,15 +108,11 @@ export function deleteAcross(
   const ei = leaves.findIndex((l) => l.id === endId);
   if (si < 0 || ei < 0 || si >= ei) return null;
 
+  // Endpoints must be text leaves; a range bounded by a code block / table cell
+  // clamps (don't partial-cut one). Barriers fully BETWEEN the ends are removed.
   const startLeaf = inlineLeaf(blocks, startId);
   const endLeaf = inlineLeaf(blocks, endId);
   if (!startLeaf || !endLeaf) return null;
-
-  // A barrier anywhere in (start, end] means the range crosses a table/code/atom;
-  // clamp rather than risk corrupting it.
-  for (let i = si + 1; i <= ei; i++) {
-    if (leaves[i]!.kind === 'barrier') return null;
-  }
 
   const merged = [...headOf(startLeaf.inline, startOffset), ...tailOf(endLeaf.inline, endOffset)];
   const removeIds = new Set<string>();

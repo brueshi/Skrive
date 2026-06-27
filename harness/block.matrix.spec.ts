@@ -622,6 +622,30 @@ test('Stage 4: pasting multiple lines creates multiple blocks', async ({ page })
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
+test('Stage 4: selecting across a divider and deleting removes it', async ({ page }) => {
+  await open(page, 5);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('BEFORE');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('/div');
+  await expect(page.getByRole('listbox', { name: 'Insert block' })).toBeVisible();
+  await page.keyboard.press('Enter'); // insert a divider; caret lands in the paragraph after it
+  await page.waitForTimeout(50);
+  await page.keyboard.type('AFTER');
+  await page.waitForTimeout(40);
+  const before = await page.evaluate(() => window.__skriveBlockSurface!.blockCount());
+
+  await selectAcross(page, 'BEFORE', 2, 'AFTER', 2); // spans the divider
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(60);
+
+  const md = await serialized(page);
+  expect(md, 'ends joined across the removed divider').toContain('BETER');
+  expect(await page.evaluate(() => window.__skriveBlockSurface!.blockCount()), 'divider + one block removed').toBe(before - 2);
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
 test('Stage 3a: IME composition lands in the model', async ({ page, context }) => {
   await open(page, 200);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');

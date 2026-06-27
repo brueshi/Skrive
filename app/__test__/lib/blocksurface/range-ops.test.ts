@@ -88,9 +88,24 @@ describe('deleteAcross', () => {
     expect(ser(r!.blocks, d)).toBe('- onethree\n');
   });
 
-  it('clamps a range that includes a code-block barrier', () => {
+  it('removes a code block caught fully inside the range', () => {
     const d = doc('abc\n\n```\ncode\n```\n\ndef\n');
-    expect(deleteAcross(d.blocks, leafId(d.blocks, 'abc'), 1, leafId(d.blocks, 'def'), 2)).toBeNull();
+    const r = deleteAcross(d.blocks, leafId(d.blocks, 'abc'), 1, leafId(d.blocks, 'def'), 2);
+    expect(ser(r!.blocks, d)).toBe('af\n');
+  });
+
+  it('removes a divider caught fully inside the range', () => {
+    const d = doc('a\n\n---\n\nb\n');
+    const r = deleteAcross(d.blocks, leafId(d.blocks, 'a'), 1, leafId(d.blocks, 'b'), 0);
+    expect(ser(r!.blocks, d)).toBe('ab\n');
+  });
+
+  it('clamps when an endpoint is inside a code block (no partial cut)', () => {
+    const d = doc('abc\n\n```\ncode\n```\n');
+    // The code block has no inline leaf; a range ending in it cannot be addressed
+    // as an inline endpoint, so deleteAcross declines.
+    const codeId = d.blocks.find((b) => b.type === 'code_block')!.id;
+    expect(deleteAcross(d.blocks, leafId(d.blocks, 'abc'), 1, codeId, 0)).toBeNull();
   });
 
   it('within one leaf delegates to inline delete', () => {
