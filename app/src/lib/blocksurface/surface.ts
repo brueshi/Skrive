@@ -12,7 +12,7 @@
 
 import { generateBlockId, type BlockNode, type Document, type InlineNode } from '../blockmodel';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto } from './render';
-import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, setCaret, setSelectionRange } from './selection';
+import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, setCaret, setCrossBlockSelection, setSelectionRange } from './selection';
 import { findBlockById, updateBlockById } from './tree';
 import { enterInContainer, exitContainer, type StructuralResult } from './structural';
 import {
@@ -25,6 +25,7 @@ import {
   rangeHasMark,
   readInlineFromDOM,
   setLinkInInline,
+  setMarkInInline,
   splitInline,
   toggleMarkInInline
 } from './inline-ops';
@@ -182,7 +183,77 @@ export class BlockSurface {
    *  within-block selection (stored marks for a collapsed caret are a later
    *  refinement). */
   toggleMark(mark: BooleanMark): void {
+    // A selection can cover several blocks (select-all, triple-click that bleeds
+    // into the next block, or a deliberate multi-paragraph drag). Resolve every
+    // covered leaf and mark them as one unit so "bold the whole thing" works.
+    const leaves = this.selectedLeaves();
+    if (leaves.length > 0) {
+      this.applyMarkToLeaves(leaves, mark);
+      return;
+    }
+    // No block-id leaf in the selection means a table cell (cells are addressed by
+    // coordinates, not a block id) — fall back to the single-region path.
     this.applyToSelection((inline, start, end) => toggleMarkInInline(inline, start, end, mark));
+  }
+
+  /** Apply a mark uniformly across the covered leaves. The on/off decision is made
+   *  once over the whole selection (Google-Docs semantics: if every covered run
+   *  already has the mark, clear it; otherwise set it everywhere), then forced on
+   *  each leaf so a half-marked selection ends up fully marked, not inverted. */
+  private applyMarkToLeaves(
+    leaves: ReadonlyArray<{ leaf: InlineTextBlock; start: number; end: number }>,
+    mark: BooleanMark
+  ): void {
+    const on = !leaves.every((l) => rangeHasMark(l.leaf.inline, l.start, l.end, mark));
+    let blocks = this.doc.blocks;
+    for (const l of leaves) {
+      const inline = setMarkInInline(l.leaf.inline, l.start, l.end, mark, on);
+      blocks = updateBlockById(blocks, l.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode);
+    }
+    this.doc = { ...this.doc, blocks };
+    for (const l of leaves) {
+      const el = this.leafElementById(l.leaf.id);
+      const updated = findBlockById(this.doc.blocks, l.leaf.id);
+      if (el && updated && isInlineText(updated)) renderInlineInto(el, updated.inline);
+    }
+    const first = leaves[0];
+    const last = leaves[leaves.length - 1];
+    if (!first || !last) return;
+    const firstEl = this.leafElementById(first.leaf.id);
+    const lastEl = this.leafElementById(last.leaf.id);
+    if (firstEl && lastEl) {
+      if (firstEl === lastEl) setSelectionRange(firstEl, first.start, last.end);
+      else setCrossBlockSelection(firstEl, first.start, lastEl, last.end);
+    }
+    this.scheduleSerialize();
+    this.emitSelection();
+  }
+
+  /** The inline-text leaves the current selection actually covers, in document
+   *  order, each clamped to its in-block range. A leaf the selection only grazes
+   *  at offset 0 (the classic triple-click bleed into the next block) contributes
+   *  nothing and is dropped, so marks land only where text is really selected. */
+  private selectedLeaves(): Array<{ leaf: InlineTextBlock; start: number; end: number }> {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return [];
+    const range = sel.getRangeAt(0);
+    const out: Array<{ leaf: InlineTextBlock; start: number; end: number }> = [];
+    this.container.querySelectorAll(`[${BLOCK_ID_ATTR}]`).forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      const id = node.getAttribute(BLOCK_ID_ATTR);
+      if (!id) return;
+      const block = findBlockById(this.doc.blocks, id);
+      if (!block || !isInlineText(block) || !range.intersectsNode(node)) return;
+      const start = node.contains(range.startContainer)
+        ? flatOffsetFromDOM(node, range.startContainer, range.startOffset)
+        : 0;
+      const end = node.contains(range.endContainer)
+        ? flatOffsetFromDOM(node, range.endContainer, range.endOffset)
+        : inlineLength(block.inline);
+      if (start >= end) return;
+      out.push({ leaf: block, start, end });
+    });
+    return out;
   }
 
   /** Set or clear the link over the current selection. `href` empty/null clears. */
@@ -427,24 +498,26 @@ export class BlockSurface {
       });
       return;
     }
-    const t = this.leafTarget();
-    if (!t || t.collapsed || t.spansBlocks || !isInlineText(t.leaf)) {
-      cb(null);
-      return;
-    }
+    // Use the same multi-leaf resolution as the mark commands so the bubble shows
+    // for a whole-block or multi-block selection (not only a single partial run),
+    // with the mark active-state aggregated across every covered leaf.
+    const leaves = this.selectedLeaves();
     const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) {
+    if (leaves.length === 0 || !sel || sel.rangeCount === 0) {
       cb(null);
       return;
     }
-    const inline = t.leaf.inline;
+    const every = (mark: BooleanMark): boolean =>
+      leaves.every((l) => rangeHasMark(l.leaf.inline, l.start, l.end, mark));
+    const single = leaves.length === 1 ? leaves[0] : null;
     cb({
       rect: sel.getRangeAt(0).getBoundingClientRect(),
       marks: {
-        strong: rangeHasMark(inline, t.start, t.end, 'strong'),
-        em: rangeHasMark(inline, t.start, t.end, 'em'),
-        code: rangeHasMark(inline, t.start, t.end, 'code'),
-        link: rangeHasLink(inline, t.start, t.end)
+        strong: every('strong'),
+        em: every('em'),
+        code: every('code'),
+        // A link can only target one block; only offer it for a single-leaf selection.
+        link: single ? rangeHasLink(single.leaf.inline, single.start, single.end) : false
       }
     });
   }

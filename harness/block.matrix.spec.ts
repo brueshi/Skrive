@@ -187,6 +187,40 @@ test('Stage 3c: the select->bubble applies bold and a link', async ({ page }) =>
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
+test('Stage 3c: bold applies across a multi-block selection', async ({ page }) => {
+  await open(page, 5);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK'); // focus the editable
+
+  // Select the full text of the first two top-level blocks, end to end — the
+  // "select several paragraphs and bold them all at once" case.
+  await page.evaluate(() => {
+    const root = document.querySelector('.bespoke-root');
+    if (!root) throw new Error('no surface root');
+    const blocks = root.querySelectorAll('[data-block-id]');
+    const a = blocks[0] as HTMLElement;
+    const b = blocks[1] as HTMLElement;
+    const range = document.createRange();
+    range.selectNodeContents(a);
+    range.setEnd(b, b.childNodes.length);
+    const sel = window.getSelection();
+    if (!sel) throw new Error('no selection');
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+  });
+
+  await page.keyboard.press('ControlOrMeta+b');
+  await page.waitForTimeout(80);
+
+  const md = await serialized(page);
+  const boldBlocks = md.split('\n\n').filter((blk) => {
+    const t = blk.trim();
+    return t.startsWith('**') && t.endsWith('**');
+  });
+  expect(boldBlocks.length, 'both blocks bolded as one action').toBeGreaterThanOrEqual(2);
+  expect(serializeDocument(parseDocument(md)), 'stable after multi-block bold').toBe(md);
+});
+
 test('Stage 3d: slash menu converts a block to a heading', async ({ page }) => {
   await open(page, 5);
   // Make a fresh empty block, then open the insert menu with `/`.

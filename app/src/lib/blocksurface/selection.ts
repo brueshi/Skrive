@@ -110,6 +110,26 @@ export function setSelectionRange(blockEl: HTMLElement, start: number, end: numb
   sel.addRange(range);
 }
 
+/** Select a range that starts in one block and ends in another — the restore
+ *  after a mark command applied across a multi-block selection, so the user keeps
+ *  the same highlight they acted on. */
+export function setCrossBlockSelection(
+  startEl: HTMLElement,
+  startOffset: number,
+  endEl: HTMLElement,
+  endOffset: number
+): void {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const a = domPointFromFlatOffset(startEl, startOffset);
+  const b = domPointFromFlatOffset(endEl, endOffset);
+  const range = document.createRange();
+  range.setStart(a.node, a.offset);
+  range.setEnd(b.node, b.offset);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
 export type CaretContext = {
   blockEl: HTMLElement;
   /** Flat offset of the selection start within the block. */
