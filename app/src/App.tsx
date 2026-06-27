@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
 import { BlockEditor } from './components/editor/block/BlockEditor';
+import { RawSourceView } from './components/editor/raw/RawSourceView';
 import { flushActiveEditor } from './components/editor/active-editor';
 import { platformShortcut } from './lib/commands/shortcut-display';
 import { DiffView } from './components/editor/DiffView';
@@ -450,8 +451,17 @@ export function App() {
                   }
                   onClose={closeDiff}
                 />
+              ) : activeTab && activeTab.rawView ? (
+                // Raw Markdown source view over the same buffer (SKR-97). Keyed
+                // by path + view so a file switch or a toggle remounts and
+                // re-reads the (possibly edited) body.
+                <RawSourceView
+                  key={`${activeTab.path}:raw`}
+                  body={activeTab.body}
+                  onChange={(next) => setTabBody(activeTabIndex, next)}
+                />
               ) : activeTab ? (
-                // The bespoke block surface is the only editor (SKR-111).
+                // The bespoke block surface is the default editor (SKR-111).
                 // Keyed per file so a file switch remounts (uncontrolled).
                 <BlockEditor
                   key={activeTab.path}

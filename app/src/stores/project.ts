@@ -111,6 +111,10 @@ export type Tab = {
    *  this tab (keeping it dirty) until the writer resolves it via Overwrite or
    *  an explicit ⌘S. Not persisted. */
   conflict: boolean;
+  /** True when this tab shows the raw Markdown source view instead of the
+   *  rendered block surface (SKR-97). In-memory only — a transient peek that
+   *  resets to rendered on restart, so it is deliberately not persisted. */
+  rawView: boolean;
   layoutMode: LayoutMode;
   splitDividerRatio: number;
   /** Cursor + scroll persisted in the per-project state (Phase 9).
@@ -204,6 +208,7 @@ type Actions = {
   clearPendingSelection(index: number): void;
 
   setTabBody(index: number, next: string): void;
+  setTabRawView(index: number, value: boolean): void;
   setTabLayoutMode(index: number, mode: LayoutMode): void;
   setTabSplitRatio(index: number, ratio: number): void;
   setTabCursor(index: number, line: number, column: number): void;
@@ -976,6 +981,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       dirty: false,
       diskHash: content.hash,
       conflict: false,
+      rawView: false,
       layoutMode: hydrate?.applyOverrides
         ? hydrate.layoutMode
         : DEFAULT_LAYOUT_MODE,
@@ -1088,6 +1094,16 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     nextTabs[index] = { ...tab, layoutMode: mode };
     set({ tabs: nextTabs });
     scheduleImmediateSave(get);
+  },
+
+  setTabRawView(index: number, value: boolean) {
+    const { tabs } = get();
+    const tab = tabs[index];
+    if (!tab || tab.rawView === value) return;
+    const nextTabs = tabs.slice();
+    nextTabs[index] = { ...tab, rawView: value };
+    // In-memory only (see Tab.rawView) — no persistence scheduling.
+    set({ tabs: nextTabs });
   },
 
   setTabSplitRatio(index: number, ratio: number) {
