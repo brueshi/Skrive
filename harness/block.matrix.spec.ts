@@ -597,6 +597,31 @@ test('Stage 4: typing over a cross-block selection replaces it', async ({ page }
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
+test('Stage 4: pasting multiple lines creates multiple blocks', async ({ page }) => {
+  await open(page, 5);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('HEAD'); // a fresh block, caret at its end
+  const before = await page.evaluate(() => window.__skriveBlockSurface!.blockCount());
+
+  // Paste three lines at the caret (synthetic paste event with plain text).
+  await page.evaluate(() => {
+    const root = document.querySelector('.bespoke-root');
+    if (!root) throw new Error('no surface root');
+    const dt = new DataTransfer();
+    dt.setData('text/plain', 'one\ntwo\nthree');
+    root.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await page.waitForTimeout(80);
+
+  expect(await page.evaluate(() => window.__skriveBlockSurface!.blockCount()), 'two new blocks').toBe(before + 2);
+  const md = await serialized(page);
+  expect(md, 'first pasted line joined the caret block').toContain('HEADone');
+  expect(md).toContain('two');
+  expect(md).toContain('three');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
 test('Stage 3a: IME composition lands in the model', async ({ page, context }) => {
   await open(page, 200);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');
