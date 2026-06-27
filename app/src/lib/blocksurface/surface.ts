@@ -746,10 +746,48 @@ export class BlockSurface {
     const text = e.clipboardData?.getData('text/plain');
     if (typeof text !== 'string' || text.length === 0) return;
     e.preventDefault();
-    // Stage 3a: paste as plain text, newlines collapsed (block-splitting paste is
-    // 3b). The same block-local insert as a keystroke, larger payload.
-    this.applyInsertText(text.replace(/\r?\n/g, ' '));
+    this.pasteText(text);
   };
+
+  // Paste plain text, splitting runs of newlines into separate paragraphs (SKR-118
+  // Stage 3). A single paragraph's worth goes through the normal insert (which also
+  // handles replacing a selection). Multi-paragraph paste is supported at a
+  // collapsed caret in a top-level inline leaf: the caret splits the block, the
+  // first pasted paragraph joins the head, the last joins the tail, the rest land
+  // between. A caret in a container / code / cell falls back to a single-block
+  // insert (newlines -> spaces) rather than risk corrupting it — refined later.
+  private pasteText(raw: string): void {
+    const segments = raw.replace(/\r/g, '').split(/\n+/).filter((s) => s.length > 0);
+    if (segments.length <= 1) {
+      this.applyInsertText(segments.join(' '));
+      return;
+    }
+    const t = this.leafTarget();
+    if (!t || !t.collapsed || !isInlineText(t.leaf) || !this.isTopLevel(t.blockEl, t.leaf.id)) {
+      this.applyInsertText(segments.join(' '));
+      return;
+    }
+    const index = this.doc.blocks.findIndex((b) => b.id === t.leaf.id);
+    if (index < 0) {
+      this.applyInsertText(segments.join(' '));
+      return;
+    }
+
+    const toInline = (s: string): InlineNode[] => (s ? [{ kind: 'text', text: s, marks: {} }] : []);
+    const [head, tail] = splitInline(t.leaf.inline, t.start);
+    const firstSeg = segments[0]!;
+    const lastSeg = segments[segments.length - 1]!;
+    const first: BlockNode = { ...t.leaf, inline: [...head, ...toInline(firstSeg)], dirty: true };
+    const middle = segments.slice(1, -1).map((s) => this.newInlineBlock('paragraph', toInline(s), 1));
+    const last = this.newInlineBlock('paragraph', [...toInline(lastSeg), ...tail], 1);
+
+    const blocks = this.doc.blocks.slice();
+    blocks.splice(index, 1, first, ...middle, last);
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    writeSelection(this.container, collapsedRange({ leaf: { kind: 'block', id: last.id }, offset: lastSeg.length }), 'paste');
+    this.scheduleSerialize();
+  }
 
   private onCompositionStart = (): void => {
     this.composing = true;
