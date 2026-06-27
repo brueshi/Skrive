@@ -474,6 +474,51 @@ test('Stage 4: keyboard shortcuts toggle and switch list kind', async ({ page })
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
+test('Stage 4: Enter works inside a nested list item', async ({ page }) => {
+  await open(page, 5);
+  await insertViaMenu(page, 'bullet');
+  await page.keyboard.type('one');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('two');
+  await page.keyboard.press('Tab'); // nest 'two' under 'one'
+
+  // Enter inside the nested item must create a sibling nested item (was a no-op
+  // before the structural ops learned to recurse).
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('three');
+  await page.waitForTimeout(80);
+  const md = await serialized(page);
+  expect(md, 'nested sibling created').toContain('  - two');
+  expect(md, 'second nested item present').toContain('  - three');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('Stage 4: Backspace at a list item start removes the marker', async ({ page }) => {
+  await open(page, 5);
+  await insertViaMenu(page, 'bullet');
+  await page.keyboard.type('one');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('two');
+  await page.keyboard.press('Tab'); // nest 'two'
+
+  // Backspace at the start of the nested item outdents it one level.
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(80);
+  let md = await serialized(page);
+  expect(md, 'item is flat again').toContain('- two');
+  expect(md, 'no longer nested').not.toContain('  - two');
+
+  // Backspace at the start of a top-level item lifts it out to a paragraph.
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(80);
+  md = await serialized(page);
+  expect(md, 'bullet removed -> paragraph').not.toMatch(/(^|\n)- two/);
+  expect(md).toContain('two');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
 test('Stage 3a: IME composition lands in the model', async ({ page, context }) => {
   await open(page, 200);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');
