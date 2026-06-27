@@ -195,7 +195,7 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   editorFont: 'editorial',
   editorCustomFontFamily: '',
   editorFontSize: 17,
-  editorLineHeightX100: 170,
+  editorLineHeightX100: 150,
   autoUpdateOnLaunch: true,
   theme: 'light',
   showOutlineRail: true,
