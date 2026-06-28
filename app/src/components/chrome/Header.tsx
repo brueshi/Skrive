@@ -20,7 +20,7 @@ import { IconSidebarToggle } from '../icons/IconSidebarToggle';
 import { platformShortcut } from '../../lib/commands/shortcut-display';
 import { PanelMenu } from './PanelMenu';
 import { SaveStatus } from './SaveStatus';
-import { SurfaceToggle } from './SurfaceToggle';
+import { SourceToggle } from './SourceToggle';
 import { TabBar } from './TabBar';
 import { WindowControls } from './WindowControls';
 
@@ -105,7 +105,7 @@ export function Header() {
 
       {activeTab && (
         <div className="header-right" style={noDragStyle}>
-          <SurfaceToggle />
+          <SourceToggle />
           <SaveStatus />
           <PanelMenu />
         </div>

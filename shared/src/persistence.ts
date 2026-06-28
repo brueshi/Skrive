@@ -13,6 +13,10 @@
 //   - Debounced 1s: scroll, sidebar width drag, split-divider drag.
 //   - Blur/quit: cursor position (per-keystroke saves are wasteful).
 
+/** LEGACY (pre-SKR-111 cutover). The raw/split/preview surfaces were retired
+ *  when the bespoke block surface became the only editor; the renderer no longer
+ *  reads `TabState.layoutMode`. Kept so older state files (and the Zig-core
+ *  persistence mirror) still load without a schema bump — the value round-trips. */
 export type LayoutMode = 'raw' | 'split' | 'preview';
 
 export type CursorPosition = {
@@ -77,18 +81,15 @@ export type EditorFontId =
  *  aesthetic, not a color option — it persists across all schemes.) */
 export type ThemeId = 'system' | 'light' | 'dark';
 
-/** Default editing surface. 'rich' is the ProseMirror projection surface —
- *  the no-syntax surface and the default a new user lands in. 'text' is the
- *  CodeMirror surface (raw / recessed Markdown source) for the Markdown-literate.
- *  Both edit the same canonical `.md`; see planning/projection-editor-master-plan.md. */
+/** LEGACY (pre-SKR-111 cutover). Selected the Rich (ProseMirror) vs Text
+ *  (CodeMirror) surface; both engines were retired when the bespoke block
+ *  surface became the only editor. Retained for schema stability — see
+ *  LayoutMode. The renderer no longer reads `AppUiState.defaultSurface`. */
 export type SurfaceId = 'text' | 'rich';
 
-/** How the Text (CodeMirror) surface treats Markdown syntax markers. A
- *  Text-surface nicety, independent of which surface is default:
- *   - 'raw'       — every marker shown at full strength (honest source).
- *   - 'recessed'  — markers visible but dimmed; prose leads, syntax recedes.
- *   - 'concealed' — markers hidden except on the line being edited (live-preview).
- *  The Rich surface hides syntax entirely, so this only affects Text. */
+/** LEGACY (pre-SKR-111 cutover). Controlled how the retired Text (CodeMirror)
+ *  surface dimmed Markdown syntax markers. Retained for schema stability — the
+ *  renderer no longer reads `AppUiState.markerMode`. */
 export type MarkerMode = 'raw' | 'recessed' | 'concealed';
 
 /** Width of the centered writing column. A reading-comfort knob; the

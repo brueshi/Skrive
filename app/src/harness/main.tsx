@@ -1,24 +1,22 @@
 // Latency-harness entry (SKR-108, Stage 0). Dev-only.
 //
-// Mounts a single editor surface — today's Rich (ProseMirror) or Text
-// (CodeMirror) — over a deterministic adversarial document, then publishes the
-// gate's instrumentation on `window` for the Playwright matrix to drive and
-// read. This deliberately isolates the editor *surface*: no native bridge, no
-// project store, no cold-path noise — exactly the hot path the gate measures
-// (planning/editor-surface-build-plan.md, "The latency architecture"). When the
-// bespoke surface arrives, it mounts here behind the same contract and every
-// matrix row applies unchanged.
+// Mounts the bespoke block surface over a deterministic adversarial document,
+// then publishes the gate's instrumentation on `window` for the Playwright
+// matrix to drive and read. This deliberately isolates the editor *surface*: no
+// native bridge, no project store, no cold-path noise — exactly the hot path the
+// gate measures (planning/editor-surface-build-plan.md, "The latency
+// architecture"). The retired Rich (ProseMirror) / Text (CodeMirror) rows were
+// dropped at the cutover (SKR-111) along with those engines; the bespoke
+// `surface=block` row is the post-cutover gate (harness/block.matrix.spec.ts).
 //
 // Query params:
-//   surface = rich | text        (default rich)
+//   surface = block | bespoke-single | bespoke-perblock   (default block)
 //   blocks  = <int>              content blocks in the corpus (default 200)
 //   anchors = <int>              anchor comment every Nth block, 0 = none (default 0)
 //   seed    = <int>              corpus PRNG seed (default 0xc0ffee)
 
 import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { RichEditor } from '../components/editor/rich/RichEditor';
-import { Editor } from '../components/editor/Editor';
 import { mountBespoke, type BespokeVariant } from './bespoke/surface';
 import { BlockSurface } from '../lib/blocksurface';
 import { BlockMenuController } from '../components/editor/menus/BlockMenuController';
@@ -37,7 +35,7 @@ import {
 import '../index.css';
 import './harness.css';
 
-type SurfaceId = 'rich' | 'text' | 'bespoke-single' | 'bespoke-perblock' | 'block';
+type SurfaceId = 'bespoke-single' | 'bespoke-perblock' | 'block';
 
 type HarnessApi = {
   surface: SurfaceId;
@@ -63,7 +61,7 @@ function readParams() {
   const q = new URLSearchParams(window.location.search);
   const raw = q.get('surface');
   const surface: SurfaceId =
-    raw === 'text' || raw === 'bespoke-single' || raw === 'bespoke-perblock' || raw === 'block' ? raw : 'rich';
+    raw === 'bespoke-single' || raw === 'bespoke-perblock' ? raw : 'block';
   const blocks = Math.max(1, Number(q.get('blocks') ?? '200') | 0);
   const anchorEvery = Math.max(0, Number(q.get('anchors') ?? '0') | 0);
   const seed = q.get('seed') ? Number(q.get('seed')) | 0 : undefined;
@@ -121,12 +119,8 @@ function Harness({ surface, body }: { surface: SurfaceId; body: string }) {
     <div className="harness-surface">
       {bespokeVariant ? (
         <BespokeMount body={body} variant={bespokeVariant} />
-      ) : surface === 'block' ? (
-        <BlockSurfaceMount body={body} />
-      ) : surface === 'rich' ? (
-        <RichEditor body={body} onChange={() => {}} />
       ) : (
-        <Editor value={body} onChange={() => {}} filePath={null} projectRoot="" lintFindings={[]} />
+        <BlockSurfaceMount body={body} />
       )}
       <LatencyOverlay />
     </div>

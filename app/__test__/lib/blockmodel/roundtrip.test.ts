@@ -19,7 +19,7 @@ import type { BlockNode, Document } from '../../../src/lib/blockmodel/types';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../../../../');
-const fixture = readFileSync(resolve(here, '../projection/fixture.md'), 'utf8');
+const fixture = readFileSync(resolve(here, 'fixture.md'), 'utf8');
 
 const roundTrip = (md: string): string => serializeDocument(parseDocument(md));
 

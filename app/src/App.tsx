@@ -5,11 +5,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
-import { SplitView } from './components/editor/SplitView';
-import { TextToolbar } from './components/editor/TextToolbar';
-import { RichEditor } from './components/editor/rich/RichEditor';
 import { BlockEditor } from './components/editor/block/BlockEditor';
-import { blockSurfaceEnabled } from './lib/block-surface-flag';
+import { RawSourceView } from './components/editor/raw/RawSourceView';
 import { flushActiveEditor } from './components/editor/active-editor';
 import { platformShortcut } from './lib/commands/shortcut-display';
 import { DiffView } from './components/editor/DiffView';
@@ -70,7 +67,6 @@ export function App() {
   const activeTab = useProjectStore(selectActiveTab);
   const activeTabIndex = useProjectStore((s) => s.activeTabIndex);
   const setTabBody = useProjectStore((s) => s.setTabBody);
-  const setTabSplitRatio = useProjectStore((s) => s.setTabSplitRatio);
   const saveAllDirty = useProjectStore((s) => s.saveAllDirty);
   const openProjectFromDialog = useProjectStore(
     (s) => s.openProjectFromDialog
@@ -81,20 +77,12 @@ export function App() {
   );
   const closeDiff = useProjectStore((s) => s.closeDiff);
   const openRenameModal = useProjectStore((s) => s.openRenameModal);
-  const lintReport = useProjectStore((s) => s.lintReport);
-  const setTabCursor = useProjectStore((s) => s.setTabCursor);
-  const setTabScrollTop = useProjectStore((s) => s.setTabScrollTop);
-  const clearPendingSelection = useProjectStore(
-    (s) => s.clearPendingSelection
-  );
   const persistProjectStateNow = useProjectStore(
     (s) => s.persistProjectStateNow
   );
   const openProject = useProjectStore((s) => s.openProject);
   const activeView = useProjectStore((s) => s.activeView);
   const theme = usePreferencesStore((s) => s.theme);
-  const showOutlineRail = usePreferencesStore((s) => s.showOutlineRail);
-  const defaultSurface = usePreferencesStore((s) => s.defaultSurface);
   const autosaveIdleDelayMs = usePreferencesStore((s) => s.autosaveIdleDelayMs);
   const hydratePreferences = usePreferencesStore((s) => s.hydrate);
   const persistPreferencesNow = usePreferencesStore((s) => s.persistNow);
@@ -104,11 +92,6 @@ export function App() {
   const removeRecentProject = usePreferencesStore(
     (s) => s.removeRecentProject
   );
-
-  const activeLintFindings = useMemo(() => {
-    if (!activeTab || !lintReport) return [];
-    return lintReport.findings.filter((f) => f.path === activeTab.path);
-  }, [activeTab, lintReport]);
 
   useTypographyVars();
 
@@ -467,51 +450,23 @@ export function App() {
                   }
                   onClose={closeDiff}
                 />
-              ) : activeTab && blockSurfaceEnabled ? (
-                // Experimental bespoke surface (SKR-95), opt-in behind a flag.
-                // Keyed per file so a switch remounts (uncontrolled, like Rich).
+              ) : activeTab && activeTab.rawView ? (
+                // Raw Markdown source view over the same buffer (SKR-97). Keyed
+                // by path + view so a file switch or a toggle remounts and
+                // re-reads the (possibly edited) body.
+                <RawSourceView
+                  key={`${activeTab.path}:raw`}
+                  body={activeTab.body}
+                  onChange={(next) => setTabBody(activeTabIndex, next)}
+                />
+              ) : activeTab ? (
+                // The bespoke block surface is the default editor (SKR-111).
+                // Keyed per file so a file switch remounts (uncontrolled).
                 <BlockEditor
                   key={activeTab.path}
                   body={activeTab.body}
                   onChange={(next) => setTabBody(activeTabIndex, next)}
                 />
-              ) : activeTab && defaultSurface === 'rich' ? (
-                <RichEditor
-                  key={activeTab.path}
-                  body={activeTab.body}
-                  onChange={(next) => setTabBody(activeTabIndex, next)}
-                />
-              ) : activeTab ? (
-                <>
-                  <TextToolbar />
-                  <SplitView
-                    key={activeTab.path}
-                    mode={activeTab.layoutMode}
-                    ratio={activeTab.splitDividerRatio}
-                    body={activeTab.body}
-                    filePath={activeTab.path}
-                    projectRoot={manifest.root}
-                    onChange={(next) => setTabBody(activeTabIndex, next)}
-                    onRatioChange={(next) =>
-                      setTabSplitRatio(activeTabIndex, next)
-                    }
-                    lintFindings={activeLintFindings}
-                    initialCursorLine={activeTab.cursorLine}
-                    initialCursorColumn={activeTab.cursorColumn}
-                    initialScrollTop={activeTab.scrollTop}
-                    pendingSelection={activeTab.pendingSelection}
-                    onPendingSelectionApplied={() =>
-                      clearPendingSelection(activeTabIndex)
-                    }
-                    onCursorChange={(line, column) =>
-                      setTabCursor(activeTabIndex, line, column)
-                    }
-                    onScrollTopChange={(top) =>
-                      setTabScrollTop(activeTabIndex, top)
-                    }
-                    showOutlineRail={showOutlineRail}
-                  />
-                </>
               ) : (
                 <div className="empty-pane">
                   <p>Select a file from the sidebar to open it as a tab.</p>

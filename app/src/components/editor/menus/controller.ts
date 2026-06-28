@@ -1,14 +1,14 @@
 // The editor-agnostic menu controller (SKR-114). The shared toolbar, selection
 // bubble, block-type dropdown, and link editor are presentation only: they read a
-// MenuSnapshot and call command methods, never touching ProseMirror or the block
-// surface directly. Each editor provides an adapter implementing MenuController —
-// RichMenuController over the PM view + selection store, BlockMenuController over
-// the bespoke surface — so the same menus drive both. This is the parity lift the
-// cutover (Stage 5) relies on: the menus already live outside rich/, so deleting
-// PM removes only its core, not the affordances.
+// MenuSnapshot and call command methods, never touching the block surface
+// directly. The surface provides an adapter implementing MenuController
+// (BlockMenuController). The interface was the parity lift the cutover (SKR-111)
+// relied on: because the menus lived outside the engines, deleting ProseMirror
+// removed only its adapter, not the affordances. The PM adapter is now gone; the
+// abstraction remains so a second surface (or host) can reuse the menus.
 //
 // The generalization into an open, third-party affordance registry (SKR-110) is
-// deliberately NOT here; this is a closed two-adapter interface.
+// deliberately NOT here; this is a closed interface.
 
 /** The focused block's type, for the "Turn into" control's label and active
  *  state. `other` covers container/table contexts the dropdown leaves alone. */

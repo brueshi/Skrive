@@ -19,10 +19,8 @@ import {
   type NewFileLocation,
   type NewFileNaming,
   type RecentFile,
-  type MarkerMode,
   type RecentProject,
   type SlugFormat,
-  type SurfaceId,
   type ThemeId
 } from '@skrive/shared';
 
@@ -55,13 +53,6 @@ type PreferencesActions = {
   setAutoUpdateOnLaunch(value: boolean): void;
   setTheme(value: ThemeId): void;
   setShowOutlineRail(value: boolean): void;
-  setDefaultSurface(value: SurfaceId): void;
-  /** Flip the active surface text<->rich. The ⌘⇧E binding calls this after
-   *  draining the outgoing surface's pending edits (see active-editor.ts), so
-   *  the incoming surface re-parses from the fully-flushed canonical body. */
-  toggleDefaultSurface(): void;
-  setSurfaceSwitchingEnabled(value: boolean): void;
-  setMarkerMode(value: MarkerMode): void;
 
   setLineMeasure(value: LineMeasure): void;
   setSmartTypography(value: boolean): void;
@@ -245,25 +236,6 @@ export const usePreferencesStore = create<
   setShowOutlineRail(value) {
     if (get().showOutlineRail === value) return;
     set({ showOutlineRail: value });
-    scheduleSave(get);
-  },
-  setDefaultSurface(value) {
-    if (get().defaultSurface === value) return;
-    set({ defaultSurface: value });
-    scheduleSave(get);
-  },
-  toggleDefaultSurface() {
-    set({ defaultSurface: get().defaultSurface === 'rich' ? 'text' : 'rich' });
-    scheduleSave(get);
-  },
-  setSurfaceSwitchingEnabled(value) {
-    if (get().surfaceSwitchingEnabled === value) return;
-    set({ surfaceSwitchingEnabled: value });
-    scheduleSave(get);
-  },
-  setMarkerMode(value) {
-    if (get().markerMode === value) return;
-    set({ markerMode: value });
     scheduleSave(get);
   },
 

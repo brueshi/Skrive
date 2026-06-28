@@ -1,9 +1,9 @@
-// The bespoke block surface, wired into the app (SKR-95, Stage 3h). Mirrors the
-// RichEditor contract: uncontrolled (the body is read once on mount; App keys this
-// by the active tab path so a file switch remounts), edits flow out as a debounced
-// serialized snapshot, and the active-editor flush hook drains a pending snapshot
-// on ⌘S / quit. React mounts the surface and renders the affordance overlays; the
-// keystroke hot path runs in plain DOM.
+// The bespoke block surface, wired into the app (SKR-95). The only editor since
+// the cutover (SKR-111). Uncontrolled: the body is read once on mount; App keys
+// this by the active tab path so a file switch remounts. Edits flow out as a
+// debounced serialized snapshot, and the active-editor flush hook drains a
+// pending snapshot on ⌘S / quit / source-view toggle. React mounts the surface
+// and renders the affordance overlays; the keystroke hot path runs in plain DOM.
 //
 // The toolbar, selection bubble, and link editor are the shared production menus
 // (SKR-114), driven by a BlockMenuController over the surface; only the slash menu
@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BlockSurface } from '../../../lib/blocksurface';
 import { parseDocument, serializeDocument } from '../../../lib/blockmodel';
 import { setActiveEditorFlush } from '../active-editor';
+import { setActiveBlockMenu } from '../active-surface';
 import { BlockMenuController } from '../menus/BlockMenuController';
 import { Toolbar } from '../menus/Toolbar';
 import { SelectionBubble } from '../menus/SelectionBubble';
@@ -44,8 +45,10 @@ export function BlockEditor({ body, onChange }: Props): React.ReactElement {
     const controller = new BlockMenuController(surface);
     setCtx({ surface, controller });
     setActiveEditorFlush(() => surface.flush());
+    setActiveBlockMenu(controller);
     return () => {
       setActiveEditorFlush(null);
+      setActiveBlockMenu(null);
       controller.destroy();
       surface.destroy();
       setCtx(null);
