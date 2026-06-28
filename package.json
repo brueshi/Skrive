@@ -1,6 +1,6 @@
 {
   "name": "skrive",
-  "version": "1.7.2",
+  "version": "1.8.0",
   "description": "A writing app for notes, drafts, and documents — rich, rendered writing in plain files you own.",
   "type": "module",
   "workspaces": [
