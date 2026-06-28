@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   deleteAcross,
+  deleteBlock,
   mergeBackward,
   mergeForward,
   replaceAcross,
@@ -37,8 +38,15 @@ function leafId(blocks: BlockNode[], text: string): string {
   if (!id) throw new Error(`leaf not found: ${text}`);
   return id;
 }
+function tableId(blocks: BlockNode[]): string {
+  const b = blocks.find((x) => x.type === 'table');
+  if (!b) throw new Error('no table block');
+  return b.id;
+}
 const doc = (md: string): Document => parseDocument(md);
 const ser = (blocks: BlockNode[], base: Document): string => serializeDocument({ ...base, blocks });
+
+const TABLE = '| a | b |\n| - | - |\n| 1 | 2 |';
 
 describe('mergeBackward', () => {
   it('merges a paragraph into the previous list item (the reported bug)', () => {
@@ -129,5 +137,36 @@ describe('documentLeaves', () => {
     const d = doc('p\n\n- a\n- b\n\n```\nc\n```\n');
     const kinds = documentLeaves(d.blocks).map((l) => l.kind);
     expect(kinds).toEqual(['inline', 'inline', 'inline', 'barrier']);
+  });
+});
+
+describe('deleteBlock (whole-table delete)', () => {
+  it('removes a table between paragraphs; caret at the end of the previous block', () => {
+    const d = doc(`alpha\n\n${TABLE}\n\nbeta\n`);
+    const r = deleteBlock(d.blocks, tableId(d.blocks));
+    expect(r, 'delete happened').not.toBeNull();
+    expect(ser(r!.blocks, d)).toBe('alpha\n\nbeta\n');
+    expect(r!.caret).toEqual({ id: leafId(d.blocks, 'alpha'), offset: 5 });
+  });
+
+  it('removes a leading table; caret at the start of the next block', () => {
+    const d = doc(`${TABLE}\n\nbeta\n`);
+    const r = deleteBlock(d.blocks, tableId(d.blocks));
+    expect(ser(r!.blocks, d)).toBe('beta\n');
+    expect(r!.caret).toEqual({ id: leafId(d.blocks, 'beta'), offset: 0 });
+  });
+
+  it('removes a lone table; seeds an empty paragraph for the caret', () => {
+    const d = doc(`${TABLE}\n`);
+    const r = deleteBlock(d.blocks, tableId(d.blocks));
+    expect(r, 'delete happened').not.toBeNull();
+    expect(r!.blocks).toHaveLength(1);
+    expect(r!.blocks[0]!.type).toBe('paragraph');
+    expect(r!.caret).toEqual({ id: r!.blocks[0]!.id, offset: 0 });
+  });
+
+  it('returns null for an unknown id', () => {
+    const d = doc('a\n');
+    expect(deleteBlock(d.blocks, 'nope')).toBeNull();
   });
 });
