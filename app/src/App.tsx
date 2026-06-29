@@ -53,7 +53,7 @@ const FEEDBACK_PROMPT_DELAY_MS = 2500;
 // auto-updater can't cross to the new native (Zig-shell) app — a different
 // artifact — so we notify-and-redownload: a toast that links to the download
 // page, shown until the writer follows it. Electron-only (the native shells
-// gate out via __SKRIVE_NATIVE_UPDATER__). The "followed it" bit lives in
+// gate out via __SKRIVE_NATIVE_SHELL__). The "followed it" bit lives in
 // localStorage, NOT AppUiState, so the cross-shell persistence schema (and its
 // parity corpus + the Zig core default) stays untouched. NOTE: this URL must
 // resolve to the native build before the toast-bearing release ships — it is
@@ -224,12 +224,17 @@ export function App() {
   // Shown once per launch until followed; dismissing it (the X) lets it return
   // next launch so the migration isn't silently lost. No-op on the native
   // shells (they ARE the destination) and once the writer has followed it.
+  //
+  // Gate on __SKRIVE_NATIVE_SHELL__, NOT __SKRIVE_NATIVE_UPDATER__: the latter
+  // tracks who owns the updater UI and is deliberately `false` on the macOS
+  // native shell (it drives the contract UI itself), so reusing it here leaked
+  // this Electron-only notice onto the native macOS app (SKR-121).
   const migrationPromptRef = useRef(false);
   useEffect(() => {
     if (migrationPromptRef.current) return;
     if (!preferencesHydrated) return;
     migrationPromptRef.current = true;
-    if (window.__SKRIVE_NATIVE_UPDATER__ === true) return;
+    if (window.__SKRIVE_NATIVE_SHELL__ === true) return;
     try {
       if (localStorage.getItem(MIGRATION_ACTIONED_KEY) === '1') return;
     } catch {

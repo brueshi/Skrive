@@ -37,6 +37,9 @@ declare global {
     // Tells the renderer the host owns updates (Sparkle), so it hides its
     // in-app updater controls. See SettingsView's NativeUpdatesPane.
     __SKRIVE_NATIVE_UPDATER__?: boolean;
+    // Marks "this renderer is hosted by the native shell" (vs Electron). Set on
+    // both native shells; Electron loads no bridge so it's absent there.
+    __SKRIVE_NATIVE_SHELL__?: boolean;
   }
 }
 
@@ -120,6 +123,11 @@ window.skrive = createSkriveBridge(transport);
 // Sparkle's stock dialogs. Leave this flag unset so that UI renders. (The
 // Windows host still uses WinSparkle's native dialogs and keeps the flag true.)
 window.__SKRIVE_NATIVE_UPDATER__ = false;
+
+// This renderer runs inside the native shell (not Electron). The renderer reads
+// this to suppress Electron-only flows like the M4a migration notice. Kept
+// separate from the updater flag above, which means something different.
+window.__SKRIVE_NATIVE_SHELL__ = true;
 
 // Test-only hook: lets the SKRIVE_DIAG self-test drive the native channel
 // directly (e.g. diag:poison for the 1.4 delivery-rule round-trip) without
