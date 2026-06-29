@@ -19,8 +19,6 @@ import {
 import { IconSidebarToggle } from '../icons/IconSidebarToggle';
 import { platformShortcut } from '../../lib/commands/shortcut-display';
 import { PanelMenu } from './PanelMenu';
-import { SaveStatus } from './SaveStatus';
-import { SourceToggle } from './SourceToggle';
 import { TabBar } from './TabBar';
 import { WindowControls } from './WindowControls';
 
@@ -105,8 +103,8 @@ export function Header() {
 
       {activeTab && (
         <div className="header-right" style={noDragStyle}>
-          <SourceToggle />
-          <SaveStatus />
+          {/* SourceToggle + SaveStatus moved to the persistent editor toolbar
+              band (EditorBar, SKR-123); the panel popover stays in the topbar. */}
           <PanelMenu />
         </div>
       )}

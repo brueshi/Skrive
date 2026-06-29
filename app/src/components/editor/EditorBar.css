@@ -1,0 +1,26 @@
+/* The persistent editor toolbar band (SKR-123). Owns the bar chrome — the
+   bottom rule and a stable height — so toggling rendered/source never shifts
+   it: in rendered mode the formatting Toolbar fills it; in source mode it's the
+   floated controls alone over an empty bar of the same height. The min-height
+   matches the formatting toolbar (28px button + 0.35rem inner padding each
+   side), so the two modes line up to the pixel. */
+.editor-bar {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: calc(28px + 0.7rem);
+  background: var(--skrive-bg);
+  border-bottom: 1px solid var(--skrive-rule);
+}
+
+/* The rendered/source toggle and save dot float over the bar's right edge so
+   the formatting toolbar underneath stays centered to the writing measure. */
+.editor-bar-controls {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  z-index: 1;
+}

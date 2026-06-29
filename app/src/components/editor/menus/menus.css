@@ -9,10 +9,12 @@
 /* The slim, fixed formatting bar. A quiet full-width band; its contents are
    centred on the same 42rem measure as the prose so the first control lines up
    with the text column. */
+/* The bottom rule and bar height now live on the .editor-bar band that hosts
+   this toolbar (see EditorBar.css), so rendered and source views share one bar.
+   This element just lays out the centered formatting controls. */
 .rich-toolbar {
   flex: 0 0 auto;
   background: var(--skrive-bg);
-  border-bottom: 1px solid var(--skrive-rule);
 }
 
 /* Neutral toolbar palette. Resting ink is a softened fg that still reads as a
