@@ -5199,58 +5199,11 @@ body {
   }
 }
 
-/* Persistent prompt toasts (notify.prompt — the updater and feedback
-   nudges) carry a corner dismiss control via sonner's `closeButton`.
-   Sonner anchors it top-left and draws an X; we want it top-right and a
-   dash. Sonner defines the position vars with zero-specificity :where()
-   selectors, so a plain attribute selector overrides them without
-   !important. The dir='rtl' variant would also move it right, but only
-   by flipping the entire layout — not what we want here. */
-[data-sonner-toaster] {
-  --toast-close-button-start: unset;
-  --toast-close-button-end: 0;
-  --toast-close-button-transform: translate(35%, -35%);
-}
-
-/* Swap sonner's baked-in X glyph for a centered dash. The close button is
-   already display:flex/center, so a sized pseudo-element lands dead-center;
-   currentColor tracks the themed button color. A drawn bar (not the "–"
-   character) keeps the weight crisp and font-independent. */
-[data-sonner-toast] [data-close-button] svg {
-  display: none;
-}
-
-[data-sonner-toast] [data-close-button]::after {
-  content: '';
-  width: 8px;
-  height: 1.5px;
-  border-radius: 1px;
-  background: currentColor;
-}
-
-/* Theme the dismiss control to the toast's own surface. The toast body
-   is styled with --skrive-* tokens (see <Toaster> in App.tsx), which
-   track the app's light/dark theme; sonner's close-button colors track
-   *its own* data-theme instead, so the button would drift off-palette.
-   sonner's rule is [data-sonner-toaster][data-theme='dark'] … (0,4,0) —
-   !important is the clean override rather than an attribute-selector
-   arms race. The ::after dash inherits `color`, so it stays muted at
-   rest and brightens with the button on hover. */
-[data-sonner-toast] [data-close-button] {
-  background: var(--skrive-bg) !important;
-  border-color: var(--skrive-rule) !important;
-  color: var(--skrive-muted) !important;
-}
-
-[data-sonner-toast] [data-close-button]:hover {
-  border-color: var(--skrive-muted) !important;
-  color: var(--skrive-fg) !important;
-}
-
-/* Two-tier notification card (notify.card) — a small grey eyebrow over a bold
-   headline in a soft rounded surface, no button or visible close. Rendered as a
-   fully custom `unstyled` sonner toast, so this .toast-card div is the entire
-   visual; sonner only positions and animates the wrapper. */
+/* Unified toast card. Every toast (errors, info, the updater cards, persistent
+   prompts) renders through notify.ts's showCard as this .toast-card div — a
+   small grey eyebrow over a bold headline in a soft rounded surface with an
+   in-card dismiss. It's a fully custom `unstyled` sonner toast, so this div is
+   the entire visual; sonner only positions and animates the wrapper. */
 .toast-card {
   position: relative;
   width: 100%;
@@ -5284,6 +5237,9 @@ body {
 }
 
 .toast-card-title {
+  /* Room so a title with no eyebrow above it never slides under the dismiss
+     control in the top-right corner. */
+  padding-right: 1.25rem;
   font-size: 15px;
   font-weight: 600;
   line-height: 1.3;
@@ -5319,4 +5275,49 @@ body {
 .toast-card-dismiss:hover {
   opacity: 1;
   background: color-mix(in srgb, var(--skrive-muted) 16%, transparent);
+}
+
+/* Attention tone (errors, warnings): a single quiet accent bar down the left
+   edge — enough to read as "something needs you" without a loud colored panel,
+   in keeping with the calm, neutral toast surface. Calm toasts get no accent;
+   the copy carries the meaning. The bar is inset and rounded so it sits cleanly
+   inside the card's own radius. */
+.toast-card.tone-danger::before {
+  content: '';
+  position: absolute;
+  top: 0.75rem;
+  bottom: 0.75rem;
+  left: 0;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--skrive-danger);
+}
+
+/* Labeled action button (notify.prompt). A quiet bordered control under the
+   headline; the verb ("Overwrite", "Download the new Skrive") lives here rather
+   than on a whole-card click, so the affordance is explicit. */
+.toast-card-action {
+  margin-top: 0.6875rem;
+  padding: 0.3125rem 0.6875rem;
+  border: 1px solid var(--skrive-rule);
+  border-radius: 8px;
+  background: var(--skrive-bg);
+  color: var(--skrive-fg);
+  font-family: var(--skrive-ui-font);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    border-color var(--skrive-duration-quick) var(--skrive-easing),
+    background var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.toast-card-action:hover {
+  border-color: var(--skrive-muted);
+  background: color-mix(in srgb, var(--skrive-muted) 10%, var(--skrive-bg));
+}
+
+.toast-card-action:focus-visible {
+  outline: 2px solid var(--skrive-accent);
+  outline-offset: 2px;
 }

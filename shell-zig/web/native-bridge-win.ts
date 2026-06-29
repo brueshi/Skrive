@@ -44,6 +44,9 @@ declare global {
     skrive?: ReturnType<typeof createSkriveBridge>;
     __SKRIVE_FRAMELESS__?: boolean;
     __SKRIVE_NATIVE_UPDATER__?: boolean;
+    // Marks "this renderer is hosted by the native shell" (vs Electron). Set on
+    // both native shells; Electron loads no bridge so it's absent there.
+    __SKRIVE_NATIVE_SHELL__?: boolean;
     __skriveWindow?: SkriveWindowApi;
   }
 }
@@ -134,6 +137,9 @@ window.__SKRIVE_FRAMELESS__ = true;
 // macOS host. updater:check is still routed natively (the Settings "Check for
 // updates" button -> WinSparkle's own dialog).
 window.__SKRIVE_NATIVE_UPDATER__ = true;
+// This renderer runs inside the native shell (not Electron). The renderer reads
+// this to suppress Electron-only flows like the M4a migration notice.
+window.__SKRIVE_NATIVE_SHELL__ = true;
 window.__skriveWindow = {
   minimize: () => nativeInvoke('window:minimize', {}),
   toggleMaximize: () => nativeInvoke('window:toggleMaximize', {}),
