@@ -73,6 +73,23 @@ STAGE="$(mktemp -d)"
 cp -R "$APP" "$STAGE/Skrive.app"
 ln -s /Applications "$STAGE/Applications"   # drag-to-install affordance
 
+# Branded chrome (SKR-122): a HiDPI background image and a custom volume icon.
+# The background is bundled from the committed @1x/@2x PNGs into one multi-rep
+# TIFF (tiffutil) so Finder renders it crisply on Retina without needing a
+# rasterizer at release time. Both touches are absent-safe: with no PNGs we ship
+# the plain — still correctly laid-out — window, and with no icns the disk keeps
+# the generic icon. The icns is the existing app mark, reused as the disk icon.
+DMG_DIR="$MACOS_DIR/dmg"
+VOL_ICNS="$MACOS_DIR/skrive.icns"
+BACKGROUND_HFS=""   # HFS path handed to the layout script; empty => no background
+if [[ -f "$DMG_DIR/background.png" && -f "$DMG_DIR/background@2x.png" ]]; then
+    mkdir -p "$STAGE/.background"
+    tiffutil -cathidpicheck "$DMG_DIR/background.png" \
+        "$DMG_DIR/background@2x.png" -out "$STAGE/.background/background.tiff" >/dev/null
+    BACKGROUND_HFS=".background:background.tiff"
+fi
+[[ -f "$VOL_ICNS" ]] && cp "$VOL_ICNS" "$STAGE/.VolumeIcon.icns"
+
 # Lay the install window out so the drag reads left -> right: Skrive.app on the
 # left, the Applications symlink on the right. A bare `hdiutil create` ships no
 # icon positions, so Finder sorts the two items alphabetically — "Applications"
@@ -96,21 +113,25 @@ MOUNT_VOL="$(basename "$MOUNT_DIR")"
 # Non-fatal: if Finder scripting is unavailable (some headless CI sessions) we
 # ship the un-positioned DMG rather than failing the release — at worst the
 # layout reverts to today's behavior, never a broken artifact.
-if ! osascript - "$MOUNT_VOL" <<'APPLESCRIPT' >/dev/null 2>&1
+if ! osascript - "$MOUNT_VOL" "$BACKGROUND_HFS" <<'APPLESCRIPT' >/dev/null 2>&1
 on run argv
   set volName to item 1 of argv
+  set bgPath to item 2 of argv
   tell application "Finder"
     tell disk volName
       open
       set current view of container window to icon view
       set toolbar visible of container window to false
       set statusbar visible of container window to false
-      set the bounds of container window to {200, 150, 740, 480}
+      set the bounds of container window to {200, 150, 960, 620}
       set opts to the icon view options of container window
       set arrangement of opts to not arranged
       set icon size of opts to 128
-      set position of item "Skrive.app" of container window to {150, 175}
-      set position of item "Applications" of container window to {390, 175}
+      if bgPath is not "" then
+        set background picture of opts to file bgPath
+      end if
+      set position of item "Skrive.app" of container window to {170, 252}
+      set position of item "Applications" of container window to {640, 252}
       update without registering applications
       delay 1
       close
@@ -120,6 +141,13 @@ end run
 APPLESCRIPT
 then
     echo "    WARN: Finder layout step failed; shipping un-positioned DMG"
+fi
+
+# Activate the custom volume icon: the .VolumeIcon.icns staged at the volume
+# root only takes effect once the volume's custom-icon attribute bit is set,
+# which must happen while it's still mounted.
+if [[ -f "$MOUNT_DIR/.VolumeIcon.icns" ]]; then
+    SetFile -a C "$MOUNT_DIR" || echo "    WARN: couldn't set volume icon bit"
 fi
 
 sync
