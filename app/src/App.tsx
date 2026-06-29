@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
 import { BlockEditor } from './components/editor/block/BlockEditor';
 import { RawSourceView } from './components/editor/raw/RawSourceView';
+import { EditorBar } from './components/editor/EditorBar';
 import { flushActiveEditor } from './components/editor/active-editor';
 import { platformShortcut } from './lib/commands/shortcut-display';
 import { DiffView } from './components/editor/DiffView';
@@ -450,23 +451,35 @@ export function App() {
                   }
                   onClose={closeDiff}
                 />
-              ) : activeTab && activeTab.rawView ? (
-                // Raw Markdown source view over the same buffer (SKR-97). Keyed
-                // by path + view so a file switch or a toggle remounts and
-                // re-reads the (possibly edited) body.
-                <RawSourceView
-                  key={`${activeTab.path}:raw`}
-                  body={activeTab.body}
-                  onChange={(next) => setTabBody(activeTabIndex, next)}
-                />
               ) : activeTab ? (
-                // The bespoke block surface is the default editor (SKR-111).
-                // Keyed per file so a file switch remounts (uncontrolled).
-                <BlockEditor
-                  key={activeTab.path}
-                  body={activeTab.body}
-                  onChange={(next) => setTabBody(activeTabIndex, next)}
-                />
+                // Editor modes (rendered + source) share the persistent toolbar
+                // band (EditorBar, SKR-123); the surface below it switches on
+                // rawView. Diff is a separate takeover with its own chrome, so
+                // it sits outside the band (handled above).
+                <>
+                  <EditorBar />
+                  <div className="workspace-surface">
+                    {activeTab.rawView ? (
+                      // Raw Markdown source view over the same buffer (SKR-97).
+                      // Keyed by path + view so a file switch or a toggle
+                      // remounts and re-reads the (possibly edited) body.
+                      <RawSourceView
+                        key={`${activeTab.path}:raw`}
+                        body={activeTab.body}
+                        onChange={(next) => setTabBody(activeTabIndex, next)}
+                      />
+                    ) : (
+                      // The bespoke block surface is the default editor
+                      // (SKR-111). Keyed per file so a file switch remounts
+                      // (uncontrolled).
+                      <BlockEditor
+                        key={activeTab.path}
+                        body={activeTab.body}
+                        onChange={(next) => setTabBody(activeTabIndex, next)}
+                      />
+                    )}
+                  </div>
+                </>
               ) : (
                 <div className="empty-pane">
                   <p>Select a file from the sidebar to open it as a tab.</p>

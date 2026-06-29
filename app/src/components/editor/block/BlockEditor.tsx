@@ -5,9 +5,11 @@
 // pending snapshot on ⌘S / quit / source-view toggle. React mounts the surface
 // and renders the affordance overlays; the keystroke hot path runs in plain DOM.
 //
-// The toolbar, selection bubble, and link editor are the shared production menus
-// (SKR-114), driven by a BlockMenuController over the surface; only the slash menu
-// keeps a bespoke driver (BlockSlashMenu).
+// The selection bubble and link editor are the shared production menus (SKR-114),
+// driven by a BlockMenuController over the surface; only the slash menu keeps a
+// bespoke driver (BlockSlashMenu). The fixed formatting toolbar moved up to the
+// persistent EditorBar band (SKR-123), which reads this controller from the
+// active-surface registry rather than rendering it inside the editor.
 
 import { useEffect, useRef, useState } from 'react';
 import { BlockSurface } from '../../../lib/blocksurface';
@@ -15,7 +17,6 @@ import { parseDocument, serializeDocument } from '../../../lib/blockmodel';
 import { setActiveEditorFlush } from '../active-editor';
 import { setActiveBlockMenu } from '../active-surface';
 import { BlockMenuController } from '../menus/BlockMenuController';
-import { Toolbar } from '../menus/Toolbar';
 import { SelectionBubble } from '../menus/SelectionBubble';
 import { LinkEditor } from '../menus/LinkEditor';
 import { BlockSlashMenu } from '../menus/BlockSlashMenu';
@@ -59,7 +60,6 @@ export function BlockEditor({ body, onChange }: Props): React.ReactElement {
 
   return (
     <div className="block-editor">
-      {ctx && <Toolbar controller={ctx.controller} />}
       <div className="block-editor-body">
         <div ref={hostRef} className="block-editor-surface" />
       </div>

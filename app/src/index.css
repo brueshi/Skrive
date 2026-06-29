@@ -1012,6 +1012,18 @@ body {
   overflow: hidden;
 }
 
+/* Holds the active surface (block editor or raw source view) below the
+   persistent EditorBar band, filling the remaining workspace height. The
+   surfaces are height:100% flex columns, so this wrapper gives them a definite
+   box to resolve against. */
+.workspace-surface {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
 /* ===================== Empty states ===================== */
 
 .empty-state {
