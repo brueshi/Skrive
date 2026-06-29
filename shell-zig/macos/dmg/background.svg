@@ -1,0 +1,53 @@
+<!-- DMG install-window background (SKR-122). 760x470 pt. The two real 128px
+     icons (Skrive.app, Applications) are overlaid by Finder at centers
+     (170,252) and (640,252), so the art keeps those zones clear. Between them,
+     an easter-egg arrow in the spirit of VS Code's installer: a short Markdown
+     source snippet as the shaft, flowing into an arrowhead built from '#' (the
+     Markdown heading marker) with HAPPY_WRITING! at its tip, pointing at the
+     Applications folder. Editable source; rasterized to background.png /
+     background@2x.png by scripts/render-dmg-background.mjs and bundled into a
+     HiDPI .tiff. Colours/fonts track the Overcast/light theme tokens. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="470" viewBox="0 0 760 470">
+  <defs>
+    <!-- Barely-there slate glow behind the destination folder, for depth. -->
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#4c5ba6" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#4c5ba6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Cool off-white field — a hair off pure white so the white app icon reads. -->
+  <rect width="760" height="470" fill="#f6f7f9"/>
+  <circle cx="640" cy="252" r="190" fill="url(#glow)"/>
+
+  <!-- Wordmark. The app icon carries the Morse mark; this is the name, set in
+       the Overcast serif (Fraunces, falling back to Palatino). -->
+  <text x="380" y="74" text-anchor="middle"
+        font-family="Fraunces, Palatino, 'Palatino Linotype', Georgia, serif"
+        font-size="34" font-weight="500" letter-spacing="0.5" fill="#1a1a1d">Skrive</text>
+
+  <!-- The arrow shaft: a little Markdown source, right-aligned so it butts into
+       the arrowhead. Punctuation (the syntax) in the slate accent, words muted —
+       a calm one-theme nod to a code editor. -->
+  <g font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="14" text-anchor="end">
+    <text x="356" y="236"><tspan fill="#4c5ba6"># </tspan><tspan fill="#5b5f6b">Skrive</tspan></text>
+    <text x="356" y="254"><tspan fill="#4c5ba6">&gt; </tspan><tspan fill="#5b5f6b">rendered</tspan></text>
+    <text x="356" y="272"><tspan fill="#4c5ba6">**</tspan><tspan fill="#1a1a1d" font-weight="600">markdown</tspan><tspan fill="#4c5ba6">**</tspan></text>
+  </g>
+
+  <!-- The arrowhead, a solid triangle built from '#' (the Markdown heading
+       marker) tapering symmetrically to a point on the right; HAPPY_WRITING!
+       shoots out the tip, aimed at the Applications folder. -->
+  <g font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="14"
+     fill="#4c5ba6" xml:space="preserve">
+    <text x="368" y="194">#</text>
+    <text x="368" y="209">###</text>
+    <text x="368" y="224">#####</text>
+    <text x="368" y="239">#######</text>
+    <text x="368" y="254" font-weight="600">######### HAPPY_WRITING!</text>
+    <text x="368" y="269">#######</text>
+    <text x="368" y="284">#####</text>
+    <text x="368" y="299">###</text>
+    <text x="368" y="314">#</text>
+  </g>
+</svg>
