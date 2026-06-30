@@ -87,6 +87,7 @@ export type CommandDeps = {
   openRename: (path: string) => void;
   openNewProject: () => void;
   openBugReport: () => void;
+  openFeedback: () => void;
 };
 
 export const COMMAND_GROUP_ORDER: CommandGroup[] = [
@@ -729,6 +730,12 @@ export function buildRegistry(deps: CommandDeps): {
       label: 'Report a bug…',
       group: 'Help',
       run: () => deps.openBugReport()
+    },
+    {
+      id: 'help.sendFeedback',
+      label: 'Send feedback…',
+      group: 'Help',
+      run: () => deps.openFeedback()
     }
   ];
 

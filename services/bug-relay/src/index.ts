@@ -16,6 +16,8 @@ export interface Env {
   // Public config (wrangler.toml [vars]) — safe to commit.
   LINEAR_TEAM_ID: string;
   LINEAR_BUG_LABEL_ID: string;
+  LINEAR_FEEDBACK_LABEL_ID: string;
+  LINEAR_ASSIGNEE_ID: string; // who reports are auto-assigned to
   INTAKE_ENABLED: string; // kill switch: "false" rejects all intake
   // Secrets (wrangler secret put ...) — NEVER committed.
   LINEAR_API_KEY: string;
@@ -37,6 +39,16 @@ const TURNSTILE_VERIFY = "https://challenges.cloudflare.com/turnstile/v0/sitever
 // client sends is silently dropped — never document content, never paths.
 const DIAG_FIELDS = ["appVersion", "platform", "host", "locale"] as const;
 
+// Report type → Linear routing. Priority on Linear's scale: 2 = High, 3 = Medium.
+// Both types auto-assign to LINEAR_ASSIGNEE_ID (solo team).
+type ReportType = "bug" | "feedback";
+
+function routingFor(type: ReportType, env: Env): { labelId: string; priority: number } {
+  return type === "feedback"
+    ? { labelId: env.LINEAR_FEEDBACK_LABEL_ID, priority: 3 }
+    : { labelId: env.LINEAR_BUG_LABEL_ID, priority: 2 };
+}
+
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -46,6 +58,7 @@ const CORS_HEADERS: Record<string, string> = {
 interface ReportPayload {
   subject?: unknown;
   body?: unknown;
+  type?: unknown;
   diagnostics?: unknown;
   turnstileToken?: unknown;
 }
@@ -110,10 +123,11 @@ export default {
       }
     }
 
+    const type: ReportType = payload.type === "feedback" ? "feedback" : "bug";
     const description = composeDescription(body, payload.diagnostics);
 
     try {
-      const issue = await createLinearIssue(env, subject, description);
+      const issue = await createLinearIssue(env, subject, description, type);
       return json(201, { ok: true, identifier: issue.identifier, url: issue.url });
     } catch (err) {
       console.error("issueCreate failed", err);
@@ -170,9 +184,11 @@ async function createLinearIssue(
   env: Env,
   title: string,
   description: string,
+  type: ReportType,
 ): Promise<CreatedIssue> {
+  const { labelId, priority } = routingFor(type, env);
   const query = `
-    mutation CreateBugReport($input: IssueCreateInput!) {
+    mutation CreateReport($input: IssueCreateInput!) {
       issueCreate(input: $input) {
         success
         issue { identifier url }
@@ -183,7 +199,9 @@ async function createLinearIssue(
       teamId: env.LINEAR_TEAM_ID,
       title,
       description,
-      labelIds: [env.LINEAR_BUG_LABEL_ID],
+      labelIds: [labelId],
+      priority,
+      assigneeId: env.LINEAR_ASSIGNEE_ID,
     },
   };
 
