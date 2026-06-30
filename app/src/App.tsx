@@ -21,6 +21,7 @@ import { Sidebar } from './components/sidebar/Sidebar';
 import { SearchModal } from './components/modals/SearchModal';
 import { RenameModal } from './components/modals/RenameModal';
 import { NewProjectDialog } from './components/modals/NewProjectDialog';
+import { BugReportDialog } from './components/modals/BugReportDialog';
 import { CheatSheetModal } from './components/modals/CheatSheetModal';
 import { CommandPalette } from './components/cmdk/CommandPalette';
 import { FileSwitcher } from './components/cmdk/FileSwitcher';
@@ -297,6 +298,7 @@ export function App() {
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [cheatSheetOpen, setCheatSheetOpen] = useState(false);
+  const [bugReportOpen, setBugReportOpen] = useState(false);
 
   // Toggle helpers honour mutual exclusion: opening one cmdk-class
   // modal closes its sibling so the modal stack stays one-deep.
@@ -316,7 +318,8 @@ export function App() {
       toggleSearch: () => setSearchOpen((o) => !o),
       toggleCheatSheet: () => setCheatSheetOpen((o) => !o),
       openRename: (path: string) => openRenameModal(path),
-      openNewProject: () => setNewProjectOpen(true)
+      openNewProject: () => setNewProjectOpen(true),
+      openBugReport: () => setBugReportOpen(true)
     }),
     [openRenameModal]
   );
@@ -441,7 +444,10 @@ export function App() {
 
       <main className="app-body">
         {activeView === 'settings' ? (
-          <SettingsView appVersion={appVersion} />
+          <SettingsView
+            appVersion={appVersion}
+            onReportBug={() => setBugReportOpen(true)}
+          />
         ) : manifest ? (
           <>
             <Sidebar />
@@ -578,6 +584,10 @@ export function App() {
       <NewProjectDialog
         open={newProjectOpen}
         onClose={() => setNewProjectOpen(false)}
+      />
+      <BugReportDialog
+        open={bugReportOpen}
+        onClose={() => setBugReportOpen(false)}
       />
       <CommandPalette
         open={paletteOpen}

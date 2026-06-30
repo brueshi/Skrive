@@ -88,7 +88,13 @@ const NAV_GROUPS: NavGroup[] = [
 
 const APP_LICENSE_LABEL = 'PolyForm Noncommercial 1.0.0';
 
-export function SettingsView({ appVersion }: { appVersion: string }) {
+export function SettingsView({
+  appVersion,
+  onReportBug
+}: {
+  appVersion: string;
+  onReportBug: () => void;
+}) {
   const [section, setSection] = useState<SectionId>('general');
   const reduced = useReducedMotion();
 
@@ -107,7 +113,7 @@ export function SettingsView({ appVersion }: { appVersion: string }) {
       case 'updates':
         return <UpdatesPane appVersion={appVersion} />;
       case 'about':
-        return <AboutPane appVersion={appVersion} />;
+        return <AboutPane appVersion={appVersion} onReportBug={onReportBug} />;
     }
   }
 
@@ -876,7 +882,13 @@ function renderUpdaterBody(
   }
 }
 
-function AboutPane({ appVersion }: { appVersion: string }) {
+function AboutPane({
+  appVersion,
+  onReportBug
+}: {
+  appVersion: string;
+  onReportBug: () => void;
+}) {
   async function reveal() {
     try {
       await window.skrive.persistence.revealUserData();
@@ -931,6 +943,19 @@ function AboutPane({ appVersion }: { appVersion: string }) {
         />
       </SettingsSection>
       <SettingsSection cap="Feedback">
+        <SettingRow
+          label="Report a bug"
+          desc="Something broken? Send a report straight to our tracker — only what you write is sent, never your documents."
+          control={
+            <button
+              type="button"
+              className="settings-secondary-button"
+              onClick={onReportBug}
+            >
+              Report a bug
+            </button>
+          }
+        />
         <SettingRow
           label="Share feedback"
           desc="Tell us what's working and what isn't. Opens a short form in your browser."
