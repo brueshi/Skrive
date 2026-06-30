@@ -9,6 +9,7 @@ import { BlockEditor } from './components/editor/block/BlockEditor';
 import { RawSourceView } from './components/editor/raw/RawSourceView';
 import { EditorBar } from './components/editor/EditorBar';
 import { flushActiveEditor } from './components/editor/active-editor';
+import { installPasteCapture } from './lib/clipboard/capturePaste';
 import { platformShortcut } from './lib/commands/shortcut-display';
 import { DiffView } from './components/editor/DiffView';
 import { Header } from './components/chrome/Header';
@@ -121,6 +122,14 @@ export function App() {
     if (!perfEnabled) return;
     const probe = enableLatencyProbe();
     return () => probe.stop();
+  }, []);
+
+  // DEV-only paste-capture harness (SKR-119 scaffolding). Inert until enabled
+  // via __skriveCapturePaste.on() in the console; snapshots the raw clipboard
+  // so paste fixtures come from real sources. See lib/clipboard/capturePaste.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    return installPasteCapture();
   }, []);
 
   const coldOpenLoggedRef = useRef(false);
