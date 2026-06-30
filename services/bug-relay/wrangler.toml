@@ -14,9 +14,7 @@ INTAKE_ENABLED = "true" # kill switch: set "false" (then `wrangler deploy`) to r
 # For local `wrangler dev`, put the same values in a gitignored .dev.vars file
 # (see .dev.vars.example).
 
-# Optional per-IP rate limiting via KV. Create a namespace, then uncomment and
-# paste the printed id:
-#   bunx wrangler kv namespace create RATE_LIMIT
-# [[kv_namespaces]]
-# binding = "RATE_LIMIT"
-# id = "<paste id from the command above>"
+# Per-IP rate limiting via KV (default 5 reports/IP/hour, see src/index.ts).
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "cb13301bd7e846c79c1d84e1cad93a47"

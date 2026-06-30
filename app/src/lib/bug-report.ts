@@ -1,8 +1,9 @@
 // Client side of the in-app bug reporter (SKR-130). Owns the optional
-// diagnostics payload and the submit call. The transport is mocked at this
-// stage: stage 3 replaces only `submitBugReport`'s body with the host-side
-// `window.skrive.bugReport.submit` IPC egress — the signature and every call
-// site stay the same.
+// diagnostics payload and the submit call. The report is POSTed straight to the
+// Cloudflare relay (services/bug-relay) — a public endpoint that holds the
+// Linear key server-side, so the call carries no secret and renderer-side fetch
+// is safe. (We chose renderer fetch over host-side IPC because the payload is
+// non-sensitive and it's identical on macOS + Windows; see SKR-130.)
 //
 // Privacy: diagnostics carry version/OS/build only. Never note text, file
 // paths, or project contents. The relay also re-filters server-side, so this
@@ -40,14 +41,44 @@ export async function gatherDiagnostics(): Promise<BugReportDiagnostics> {
   };
 }
 
-/** Submit a bug report.
- *
- *  Stage-2 mock: resolves without touching the network so the form is fully
- *  exercisable (success path, busy state, toasts). Stage 3 (SKR-130) swaps this
- *  body for `window.skrive.bugReport.submit(input)`, which performs the real
- *  host-side POST to the Cloudflare relay. */
+// Public relay endpoint (services/bug-relay). Not a secret — the Linear key
+// lives in the Worker, not here. Discoverable from network traffic regardless.
+const BUG_RELAY_URL = 'https://skrive-bug-relay.bruechnerjoseph.workers.dev/report';
+
+interface RelayResponse {
+  ok?: boolean;
+  identifier?: string;
+  url?: string;
+  error?: string;
+}
+
+/** POST the report to the relay, which creates the `Bug`-labeled Linear issue.
+ *  Throws with a human-readable message on any failure so the caller can toast
+ *  it — a report is never lost silently. */
 export async function submitBugReport(input: BugReportInput): Promise<BugReportResult> {
-  console.info('[bug-report] stage-2 mock submit — not actually sent', input);
-  await new Promise((resolve) => setTimeout(resolve, 400));
-  return { identifier: 'SKR-DEV', url: '' };
+  let res: Response;
+  try {
+    res = await fetch(BUG_RELAY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input)
+    });
+  } catch {
+    // Offline / DNS / connection refused — no response at all.
+    throw new Error('Network error — check your connection and try again.');
+  }
+
+  let payload: RelayResponse | null = null;
+  try {
+    payload = (await res.json()) as RelayResponse;
+  } catch {
+    // Non-JSON body (e.g. an edge error page); fall through to the check below.
+  }
+
+  if (!res.ok || !payload?.ok || !payload.identifier) {
+    const reason = payload?.error ?? `HTTP ${res.status}`;
+    throw new Error(`The report couldn't be filed (${reason}).`);
+  }
+
+  return { identifier: payload.identifier, url: payload.url ?? '' };
 }
