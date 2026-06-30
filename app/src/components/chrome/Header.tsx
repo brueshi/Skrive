@@ -103,8 +103,9 @@ export function Header() {
 
       {activeTab && (
         <div className="header-right" style={noDragStyle}>
-          {/* SourceToggle + SaveStatus moved to the persistent editor toolbar
-              band (EditorBar, SKR-123); the panel popover stays in the topbar. */}
+          {/* Save status lives in the editor toolbar band (EditorBar, SKR-123);
+              the rendered/source switch was retired to the command palette
+              (SKR-126). The panel popover stays in the topbar. */}
           <PanelMenu />
         </div>
       )}
