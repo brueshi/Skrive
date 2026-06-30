@@ -12,15 +12,23 @@
   border-bottom: 1px solid var(--skrive-rule);
 }
 
-/* The rendered/source toggle and save dot float over the bar's right edge so
-   the formatting toolbar underneath stays centered to the writing measure. */
-.editor-bar-controls {
+/* Save (left) and Copy (right) float in the bar's gutters so the formatting
+   toolbar underneath stays centered to the writing measure. Symmetric absolute
+   overlays — neither affects the centered toolbar's flow. */
+.editor-bar-left,
+.editor-bar-right {
   position: absolute;
   top: 0;
   bottom: 0;
-  right: 1rem;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
   z-index: 1;
+}
+
+.editor-bar-left {
+  left: 1rem;
+}
+
+.editor-bar-right {
+  right: 1rem;
 }

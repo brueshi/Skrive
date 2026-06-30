@@ -1,45 +1,56 @@
-// Save-status dot for the topbar trio (Stage 2). Saving is automatic
-// (debounced autosave), so the state is simply the active tab's dirty flag:
-// a filled accent dot when the document is saved (clean), a hollow ring
-// while edits are still pending the next autosave. A single soft pulse
-// plays on the dirty -> saved transition for quiet confirmation; the dot
-// never moves, per the calm, stationary-chrome bias. Per-tab detail still
-// lives on the tab dirty dot.
+// Ephemeral save confirmation for the editor bar's left gutter. Autosave is
+// automatic (debounced), so rather than a persistent status indicator this just
+// flashes a quiet "Saved" when an autosave lands (the active tab's dirty flag
+// flipping true -> false within the same document), then fades away. Nothing
+// shows in the steady state or while edits are still pending — calm by default,
+// reassurance exactly at the moment a save completes.
 
 import { useEffect, useRef, useState } from 'react';
 import { selectActiveTab, useProjectStore } from '../../stores/project';
+import { IconCheck } from '../icons/IconCheck';
+
+const SAVED_VISIBLE_MS = 1600;
 
 export function SaveStatus() {
   const activeTab = useProjectStore(selectActiveTab);
   const dirty = activeTab?.dirty ?? false;
   const path = activeTab?.path ?? null;
-  const [pulse, setPulse] = useState(false);
+  const [visible, setVisible] = useState(false);
   const prev = useRef({ dirty, path });
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    // Pulse only on a real dirty -> clean edge within the same document
-    // (a save landing). Switching to an already-clean tab also flips
-    // dirty true -> false, but the path changes, so it's filtered out.
     const samePath = prev.current.path === path;
+    // A save landed: dirty -> clean within the same document. Switching to an
+    // already-clean tab also flips dirty, but the path changes, so it's filtered.
     if (samePath && prev.current.dirty && !dirty) {
-      setPulse(true);
-      const t = setTimeout(() => setPulse(false), 360);
-      prev.current = { dirty, path };
-      return () => clearTimeout(t);
+      setVisible(true);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setVisible(false), SAVED_VISIBLE_MS);
+    } else if (!samePath) {
+      setVisible(false);
     }
     prev.current = { dirty, path };
   }, [dirty, path]);
 
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
   if (!activeTab) return null;
 
+  // Always rendered (text persists so the fade-out reads cleanly); only the
+  // opacity class toggles. aria-live announces the confirmation when it appears.
   return (
     <span
-      className={`save-dot${dirty ? ' dirty' : ' saved'}${
-        pulse ? ' pulse' : ''
-      }`}
+      className={`save-status${visible ? ' is-visible' : ''}`}
       role="status"
-      aria-label={dirty ? 'Saving' : 'Saved'}
-      title={dirty ? 'Saving…' : 'Saved'}
-    />
+      aria-live="polite"
+    >
+      <IconCheck size={16} className="save-status-icon" />
+      Saved
+    </span>
   );
 }

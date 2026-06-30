@@ -644,42 +644,37 @@ body {
   background: var(--skrive-rule);
 }
 
-/* Save-status dot. Filled accent = saved, hollow ring = unsaved edits.
-   Fixed 8px box in both states so the surrounding chrome never reflows
-   when it flips. */
-.save-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  box-sizing: border-box;
-  flex-shrink: 0;
+/* Save-status microcopy. Autosave is silent, so this is ephemeral confirmation,
+   not persistent chrome: a quiet "Saved" fades in when an autosave lands, then
+   fades away. Nothing in the steady state. Lives in the bar's left gutter; its
+   width is never depended on (absolute overlay), so the fade reflows nothing. */
+.save-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 12px;
+  color: var(--skrive-muted);
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 240ms var(--skrive-easing-out);
 }
 
-.save-dot.saved {
-  background: var(--skrive-accent);
+/* Scaled down from the 16px glyph to sit with the 12px label; inherits the
+   muted text colour via currentColor. */
+.save-status-icon {
+  width: 13px;
+  height: 13px;
 }
 
-.save-dot.dirty {
-  background: transparent;
-  border: 1.5px solid var(--skrive-muted);
-}
-
-.save-dot.pulse {
-  animation: save-dot-pulse 360ms var(--skrive-easing-out);
-}
-
-@keyframes save-dot-pulse {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--skrive-accent) 45%, transparent);
-  }
-  100% {
-    box-shadow: 0 0 0 6px color-mix(in srgb, var(--skrive-accent) 0%, transparent);
-  }
+.save-status.is-visible {
+  opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .save-dot.pulse {
-    animation: none;
+  .save-status {
+    transition: none;
   }
 }
 
