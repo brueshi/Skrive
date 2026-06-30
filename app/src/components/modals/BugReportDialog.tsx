@@ -79,13 +79,13 @@ export function BugReportDialog({ open, onClose }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const result = await submitBugReport({
+      await submitBugReport({
         subject: trimmedSubject,
         body: trimmedBody,
         diagnostics: includeDiagnostics ? (diagnostics ?? undefined) : undefined
       });
       onClose();
-      notify.success(`Bug report sent — ${result.identifier}`);
+      notify.success('Bug report sent');
     } catch (err) {
       // Keep the writer's text so they can retry; never lose a report silently.
       notify.error("Couldn't send bug report", err);
