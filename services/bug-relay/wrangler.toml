@@ -1,0 +1,22 @@
+name = "skrive-bug-relay"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+# Public, non-secret configuration. Safe to commit — none of this is a credential.
+[vars]
+LINEAR_TEAM_ID = "a5098bd4-e1c2-4103-bb74-80ab40cf1d18"
+LINEAR_BUG_LABEL_ID = "eef06141-2ac6-46e6-89c1-7768ced3b122"
+INTAKE_ENABLED = "true" # kill switch: set "false" (then `wrangler deploy`) to reject all intake
+
+# Secrets — NEVER in this file. Set them with:
+#   bunx wrangler secret put LINEAR_API_KEY
+#   bunx wrangler secret put TURNSTILE_SECRET   # optional; presence enables Turnstile
+# For local `wrangler dev`, put the same values in a gitignored .dev.vars file
+# (see .dev.vars.example).
+
+# Optional per-IP rate limiting via KV. Create a namespace, then uncomment and
+# paste the printed id:
+#   bunx wrangler kv namespace create RATE_LIMIT
+# [[kv_namespaces]]
+# binding = "RATE_LIMIT"
+# id = "<paste id from the command above>"
