@@ -1,33 +1,72 @@
-// In-app bug reporter (SKR-130). A subject + body go to the backend relay,
-// which creates a `Bug`-labeled issue in our tracker. Same Radix-dialog shell
-// as the new-project / rename modals (focus trap, ESC, scroll lock).
+// In-app reporter (SKR-130). One dialog, two kinds: a bug report or customer
+// feedback. `kind` drives the copy; the relay routes by the `type` we send
+// (label + priority + assignee). Same Radix-dialog shell as the new-project /
+// rename modals, styled with the shared `.modal-sheet` toast language.
 //
-// Privacy: nothing is sent until the writer hits Send, and the optional
+// Privacy: nothing is sent until the writer hits the button, and the optional
 // diagnostics are off by default and shown in full before they're attached —
-// never document content. See lib/bug-report.ts and Linear SKR-130.
+// never document content. See lib/report.ts and Linear SKR-130.
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useRef, useState } from 'react';
 import { notify } from '../../lib/notify';
 import {
   gatherDiagnostics,
-  submitBugReport,
-  type BugReportDiagnostics
-} from '../../lib/bug-report';
+  submitReport,
+  type ReportDiagnostics,
+  type ReportType
+} from '../../lib/report';
 
 const SUBJECT_MAX = 200;
 const BODY_MAX = 8000;
 
+type Copy = {
+  eyebrow: string;
+  title: string;
+  desc: string;
+  bodyLabel: string;
+  bodyPlaceholder: string;
+  submit: string;
+  submitting: string;
+  success: string;
+};
+
+const COPY: Record<ReportType, Copy> = {
+  bug: {
+    eyebrow: 'Bug report',
+    title: 'Report a bug',
+    desc: 'Goes straight to our tracker. Only what you write here is sent — never your documents.',
+    bodyLabel: 'What happened?',
+    bodyPlaceholder: 'What you did, what you expected, and what happened instead.',
+    submit: 'Send report',
+    submitting: 'Sending…',
+    success: 'Bug report sent'
+  },
+  feedback: {
+    eyebrow: 'Feedback',
+    title: 'Send feedback',
+    desc: 'Ideas, requests, or what could be better. Goes straight to our tracker — only what you write here is sent.',
+    bodyLabel: 'Your feedback',
+    bodyPlaceholder: "What you'd love to see, or what's getting in your way.",
+    submit: 'Send feedback',
+    submitting: 'Sending…',
+    success: 'Feedback sent — thank you'
+  }
+};
+
 type Props = {
   open: boolean;
+  kind: ReportType;
   onClose: () => void;
 };
 
-export function BugReportDialog({ open, onClose }: Props) {
+export function ReportDialog({ open, kind, onClose }: Props) {
+  const copy = COPY[kind];
+
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [includeDiagnostics, setIncludeDiagnostics] = useState(false);
-  const [diagnostics, setDiagnostics] = useState<BugReportDiagnostics | null>(null);
+  const [diagnostics, setDiagnostics] = useState<ReportDiagnostics | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,7 +93,7 @@ export function BugReportDialog({ open, onClose }: Props) {
     void gatherDiagnostics()
       .then(setDiagnostics)
       .catch((err) => {
-        console.error('[bug-report] gatherDiagnostics failed', err);
+        console.error('[report] gatherDiagnostics failed', err);
         setIncludeDiagnostics(false);
       });
   }, [includeDiagnostics, diagnostics]);
@@ -67,7 +106,7 @@ export function BugReportDialog({ open, onClose }: Props) {
       : trimmedSubject.length > SUBJECT_MAX
         ? `Subject must be ${SUBJECT_MAX} characters or fewer.`
         : trimmedBody.length === 0
-          ? 'Description is required.'
+          ? 'A description is required.'
           : trimmedBody.length > BODY_MAX
             ? `Description must be ${BODY_MAX} characters or fewer.`
             : null;
@@ -79,16 +118,20 @@ export function BugReportDialog({ open, onClose }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await submitBugReport({
+      await submitReport({
+        type: kind,
         subject: trimmedSubject,
         body: trimmedBody,
         diagnostics: includeDiagnostics ? (diagnostics ?? undefined) : undefined
       });
       onClose();
-      notify.success('Bug report sent');
+      notify.success(copy.success);
     } catch (err) {
       // Keep the writer's text so they can retry; never lose a report silently.
-      notify.error("Couldn't send bug report", err);
+      notify.error(
+        kind === 'bug' ? "Couldn't send bug report" : "Couldn't send feedback",
+        err
+      );
       setError(err instanceof Error ? err.message : String(err));
       setBusy(false);
     }
@@ -112,8 +155,8 @@ export function BugReportDialog({ open, onClose }: Props) {
       <Dialog.Portal>
         <Dialog.Overlay className="modal-backdrop" />
         <Dialog.Content
-          className="modal-dialog modal-sheet bug-report-modal"
-          aria-label="Report a bug"
+          className="modal-dialog modal-sheet report-modal"
+          aria-label={copy.title}
           onKeyDown={handleKeyDown}
         >
           <button
@@ -125,18 +168,15 @@ export function BugReportDialog({ open, onClose }: Props) {
           >
             ×
           </button>
-          <div className="modal-eyebrow">Feedback</div>
-          <Dialog.Title className="modal-title">Report a bug</Dialog.Title>
-          <Dialog.Description className="modal-desc">
-            Goes straight to our tracker. Only what you write here is sent —
-            never your documents.
-          </Dialog.Description>
+          <div className="modal-eyebrow">{copy.eyebrow}</div>
+          <Dialog.Title className="modal-title">{copy.title}</Dialog.Title>
+          <Dialog.Description className="modal-desc">{copy.desc}</Dialog.Description>
 
-          <div className="bug-field">
-            <label htmlFor="bug-subject">Subject</label>
+          <div className="report-field">
+            <label htmlFor="report-subject">Subject</label>
             <input
               ref={subjectRef}
-              id="bug-subject"
+              id="report-subject"
               type="text"
               value={subject}
               maxLength={SUBJECT_MAX}
@@ -148,16 +188,16 @@ export function BugReportDialog({ open, onClose }: Props) {
             />
           </div>
 
-          <div className="bug-field">
-            <label htmlFor="bug-body">What happened?</label>
+          <div className="report-field">
+            <label htmlFor="report-body">{copy.bodyLabel}</label>
             <textarea
-              id="bug-body"
+              id="report-body"
               value={body}
               maxLength={BODY_MAX}
               onChange={(e) => setBody(e.target.value)}
               disabled={busy}
               rows={6}
-              placeholder="What you did, what you expected, and what happened instead."
+              placeholder={copy.bodyPlaceholder}
             />
           </div>
 
@@ -172,7 +212,7 @@ export function BugReportDialog({ open, onClose }: Props) {
           </label>
 
           {includeDiagnostics && diagnostics && (
-            <pre className="bug-diagnostics-preview">
+            <pre className="report-diagnostics-preview">
               {JSON.stringify(diagnostics, null, 2)}
             </pre>
           )}
@@ -189,7 +229,7 @@ export function BugReportDialog({ open, onClose }: Props) {
               onClick={() => void handleSend()}
               disabled={!canSend}
             >
-              {busy ? 'Sending…' : 'Send report'}
+              {busy ? copy.submitting : copy.submit}
             </button>
           </div>
         </Dialog.Content>

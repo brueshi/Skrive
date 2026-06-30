@@ -4703,31 +4703,32 @@ body {
   font-size: 0.75rem;
 }
 
-/* ===================== Bug report modal (SKR-130) =====================
-   A larger instance of the shared .modal-sheet language — the per-element
-   bumps below scale this dialog up while leaving the .modal-sheet baseline
-   (toast scale) calm for other adopters. */
-.modal-sheet.bug-report-modal {
+/* ===================== Report modal (SKR-130) =====================
+   The in-app bug/feedback reporter. A larger instance of the shared
+   .modal-sheet language — the per-element bumps below scale this dialog up
+   while leaving the .modal-sheet baseline (toast scale) calm for other
+   adopters. */
+.modal-sheet.report-modal {
   width: 34rem;
   padding: 1.875rem 2rem;
 }
 
-.bug-report-modal .modal-eyebrow {
+.report-modal .modal-eyebrow {
   margin-bottom: 0.375rem;
   font-size: 13px;
 }
 
-.bug-report-modal .modal-title {
+.report-modal .modal-title {
   margin-bottom: 0.5rem;
   font-size: 1.375rem;
 }
 
-.bug-report-modal .modal-desc {
+.report-modal .modal-desc {
   margin-bottom: 1.5rem;
   font-size: 0.9375rem;
 }
 
-.bug-report-modal .modal-dismiss {
+.report-modal .modal-dismiss {
   top: 1rem;
   right: 1rem;
   width: 26px;
@@ -4735,17 +4736,17 @@ body {
   font-size: 18px;
 }
 
-.bug-report-modal .modal-checkbox {
+.report-modal .modal-checkbox {
   margin-bottom: 1.5rem;
   font-size: 0.875rem;
 }
 
-.bug-report-modal .modal-button {
+.report-modal .modal-button {
   padding: 0.625rem 1.375rem;
   font-size: 0.875rem;
 }
 
-.bug-field {
+.report-field {
   display: flex;
   flex-direction: column;
   gap: 0.4375rem;
@@ -4753,15 +4754,15 @@ body {
   font-size: 0.875rem;
 }
 
-.bug-field label {
+.report-field label {
   color: var(--skrive-muted);
   font-size: 0.8125rem;
   font-weight: 500;
   letter-spacing: 0.01em;
 }
 
-.bug-field input,
-.bug-field textarea {
+.report-field input,
+.report-field textarea {
   background: color-mix(in srgb, var(--skrive-muted) 5%, transparent);
   border: 1px solid var(--skrive-rule);
   border-radius: 10px;
@@ -4775,26 +4776,26 @@ body {
     background var(--skrive-duration-quick) var(--skrive-easing);
 }
 
-.bug-field input::placeholder,
-.bug-field textarea::placeholder {
+.report-field input::placeholder,
+.report-field textarea::placeholder {
   color: color-mix(in srgb, var(--skrive-muted) 70%, transparent);
 }
 
-.bug-field textarea {
+.report-field textarea {
   resize: vertical;
   min-height: 9.5rem;
   line-height: 1.55;
 }
 
-.bug-field input:focus,
-.bug-field textarea:focus {
+.report-field input:focus,
+.report-field textarea:focus {
   border-color: var(--skrive-accent);
   background: var(--skrive-bg);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--skrive-accent) 16%, transparent);
   outline: none;
 }
 
-.bug-diagnostics-preview {
+.report-diagnostics-preview {
   margin: -0.25rem 0 1.25rem;
   padding: 0.75rem 0.875rem;
   background: color-mix(in srgb, var(--skrive-muted) 7%, transparent);

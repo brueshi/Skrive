@@ -90,10 +90,12 @@ const APP_LICENSE_LABEL = 'PolyForm Noncommercial 1.0.0';
 
 export function SettingsView({
   appVersion,
-  onReportBug
+  onReportBug,
+  onSendFeedback
 }: {
   appVersion: string;
   onReportBug: () => void;
+  onSendFeedback: () => void;
 }) {
   const [section, setSection] = useState<SectionId>('general');
   const reduced = useReducedMotion();
@@ -113,7 +115,13 @@ export function SettingsView({
       case 'updates':
         return <UpdatesPane appVersion={appVersion} />;
       case 'about':
-        return <AboutPane appVersion={appVersion} onReportBug={onReportBug} />;
+        return (
+          <AboutPane
+            appVersion={appVersion}
+            onReportBug={onReportBug}
+            onSendFeedback={onSendFeedback}
+          />
+        );
     }
   }
 
@@ -884,10 +892,12 @@ function renderUpdaterBody(
 
 function AboutPane({
   appVersion,
-  onReportBug
+  onReportBug,
+  onSendFeedback
 }: {
   appVersion: string;
   onReportBug: () => void;
+  onSendFeedback: () => void;
 }) {
   async function reveal() {
     try {
@@ -953,6 +963,19 @@ function AboutPane({
               onClick={onReportBug}
             >
               Report a bug
+            </button>
+          }
+        />
+        <SettingRow
+          label="Send feedback"
+          desc="Ideas, requests, or what could be better — sent straight to our tracker, in the app."
+          control={
+            <button
+              type="button"
+              className="settings-secondary-button"
+              onClick={onSendFeedback}
+            >
+              Send feedback
             </button>
           }
         />

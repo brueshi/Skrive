@@ -21,7 +21,8 @@ import { Sidebar } from './components/sidebar/Sidebar';
 import { SearchModal } from './components/modals/SearchModal';
 import { RenameModal } from './components/modals/RenameModal';
 import { NewProjectDialog } from './components/modals/NewProjectDialog';
-import { BugReportDialog } from './components/modals/BugReportDialog';
+import { ReportDialog } from './components/modals/ReportDialog';
+import type { ReportType } from './lib/report';
 import { CheatSheetModal } from './components/modals/CheatSheetModal';
 import { CommandPalette } from './components/cmdk/CommandPalette';
 import { FileSwitcher } from './components/cmdk/FileSwitcher';
@@ -298,7 +299,10 @@ export function App() {
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [cheatSheetOpen, setCheatSheetOpen] = useState(false);
-  const [bugReportOpen, setBugReportOpen] = useState(false);
+  const [report, setReport] = useState<{ open: boolean; kind: ReportType }>({
+    open: false,
+    kind: 'bug'
+  });
 
   // Toggle helpers honour mutual exclusion: opening one cmdk-class
   // modal closes its sibling so the modal stack stays one-deep.
@@ -319,7 +323,8 @@ export function App() {
       toggleCheatSheet: () => setCheatSheetOpen((o) => !o),
       openRename: (path: string) => openRenameModal(path),
       openNewProject: () => setNewProjectOpen(true),
-      openBugReport: () => setBugReportOpen(true)
+      openBugReport: () => setReport({ open: true, kind: 'bug' }),
+      openFeedback: () => setReport({ open: true, kind: 'feedback' })
     }),
     [openRenameModal]
   );
@@ -446,7 +451,8 @@ export function App() {
         {activeView === 'settings' ? (
           <SettingsView
             appVersion={appVersion}
-            onReportBug={() => setBugReportOpen(true)}
+            onReportBug={() => setReport({ open: true, kind: 'bug' })}
+            onSendFeedback={() => setReport({ open: true, kind: 'feedback' })}
           />
         ) : manifest ? (
           <>
@@ -585,9 +591,10 @@ export function App() {
         open={newProjectOpen}
         onClose={() => setNewProjectOpen(false)}
       />
-      <BugReportDialog
-        open={bugReportOpen}
-        onClose={() => setBugReportOpen(false)}
+      <ReportDialog
+        open={report.open}
+        kind={report.kind}
+        onClose={() => setReport((r) => ({ ...r, open: false }))}
       />
       <CommandPalette
         open={paletteOpen}
