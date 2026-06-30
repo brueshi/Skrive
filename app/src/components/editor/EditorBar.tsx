@@ -13,10 +13,15 @@
 import { useSyncExternalStore } from 'react';
 import { Toolbar } from './menus/Toolbar';
 import { getActiveBlockMenu, subscribeActiveBlockMenu } from './active-surface';
-import { SourceToggle } from '../chrome/SourceToggle';
+import { CopyPageButton } from './CopyPageButton';
 import { SaveStatus } from '../chrome/SaveStatus';
 import './EditorBar.css';
 
+// The bar's three zones, all over a centered formatting toolbar: ephemeral save
+// confirmation in the left gutter, the toolbar centered to the writing measure,
+// and the Copy action in the right gutter. The rendered/source switch lives in
+// the command palette (Skrive is rendered-first; Source is an occasional peek),
+// so it's deliberately absent here.
 export function EditorBar() {
   const controller = useSyncExternalStore(
     subscribeActiveBlockMenu,
@@ -25,10 +30,12 @@ export function EditorBar() {
 
   return (
     <div className="editor-bar">
-      {controller && <Toolbar controller={controller} />}
-      <div className="editor-bar-controls">
-        <SourceToggle />
+      <div className="editor-bar-left">
         <SaveStatus />
+      </div>
+      {controller && <Toolbar controller={controller} />}
+      <div className="editor-bar-right">
+        <CopyPageButton />
       </div>
     </div>
   );

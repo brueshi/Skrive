@@ -6,6 +6,7 @@
 export * from './types';
 export { parseDocument, type ParseOptions } from './parse';
 export { serializeDocument } from './serialize';
+export { documentToPlainText } from './plaintext';
 export {
   generateBlockId,
   makeIdGenerator,

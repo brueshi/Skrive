@@ -1,0 +1,100 @@
+/* "Copy page" split button (SKR-126). Styled as a sibling to the rendered/source
+   chip-segmented control: a 26px bordered pill divided into a primary action and
+   a chevron that opens the copy-as menu. Quiet by default (muted), warming on
+   hover, so it reads as ambient chrome rather than a call to action. */
+.copy-page {
+  display: inline-flex;
+  align-items: stretch;
+  height: 26px;
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-md);
+  overflow: hidden;
+}
+
+.copy-page-main,
+.copy-page-chevron {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+  color: var(--skrive-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.copy-page-main {
+  gap: 0.4rem;
+  padding: 0 0.6rem;
+}
+
+.copy-page-chevron {
+  padding: 0 0.35rem;
+  border-left: 1px solid var(--skrive-rule);
+}
+
+.copy-page-main:hover,
+.copy-page-chevron:hover,
+.copy-page-chevron[data-state='open'] {
+  color: var(--skrive-fg);
+  background: var(--skrive-rule);
+}
+
+.copy-page-label {
+  line-height: 1;
+}
+
+/* Copy -> check crossfade, mirroring the preview copy affordance so the two
+   copy controls feel identical. Both glyphs rest sharp; the blur (and a small
+   scale) exists only mid-transition, bridging the swap so it reads as one
+   continuous change rather than a muddy opacity cross-dissolve. 220ms ease-out
+   is calibrated for that blur — fast enough for a micro-interaction, slow
+   enough that the blur reads as "filling the gap". */
+.copy-page-glyphs {
+  position: relative;
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+.copy-page-glyph {
+  position: absolute;
+  inset: 0;
+  transition:
+    opacity 220ms var(--skrive-easing-out),
+    filter 220ms var(--skrive-easing-out),
+    transform 220ms var(--skrive-easing-out);
+}
+/* Resting: copy shown sharp, check waiting blurred behind it. */
+.copy-page-glyph.is-check {
+  opacity: 0;
+  filter: blur(5px);
+  transform: scale(0.8);
+  color: var(--skrive-accent);
+}
+/* Copied: the two swap, each passing through blur on the way. */
+.copy-page-main.copied .copy-page-glyph.is-copy {
+  opacity: 0;
+  filter: blur(5px);
+  transform: scale(0.8);
+}
+.copy-page-main.copied .copy-page-glyph.is-check {
+  opacity: 1;
+  filter: blur(0);
+  transform: scale(1);
+}
+/* The label keeps its text (no width shift / hard cut); the accent color +
+   the check glyph carry the "copied" signal. */
+.copy-page-main.copied {
+  color: var(--skrive-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .copy-page-main,
+  .copy-page-chevron,
+  .copy-page-glyph {
+    transition: none;
+  }
+}
