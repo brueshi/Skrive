@@ -6,7 +6,8 @@
   "workspaces": [
     "app",
     "shared",
-    "native/diff"
+    "native/diff",
+    "services/bug-relay"
   ],
   "scripts": {
     "start": "bash shell-zig/dev-macos.sh",

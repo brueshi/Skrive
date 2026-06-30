@@ -1,0 +1,8 @@
+# Local dev secrets for `wrangler dev`. Copy this file to `.dev.vars` (which is
+# gitignored) and fill in real values. NEVER commit .dev.vars.
+
+LINEAR_API_KEY="lin_api_xxxxxxxxxxxxxxxxxxxxxxxx"
+
+# Optional — set this to enable Turnstile verification locally. Leave it out to
+# skip Turnstile while testing the happy path.
+# TURNSTILE_SECRET="0x_your_turnstile_secret_key"
