@@ -10,7 +10,8 @@
 // are no-ops until Stage 3b — never letting the browser mutate structure behind
 // the model's back.
 
-import { generateBlockId, type BlockNode, type Document, type InlineNode, type TableBlock } from '../blockmodel';
+import { generateBlockId, parseDocument, type BlockNode, type Document, type InlineNode, type TableBlock } from '../blockmodel';
+import { markdownForPaste } from '../clipboard/htmlToMarkdown';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto } from './render';
 import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, sameLeaf } from './doc-position';
@@ -178,6 +179,15 @@ export class BlockSurface {
 
   private onKeyDown = (event: Event): void => {
     const e = event as KeyboardEvent;
+    // Cmd/Ctrl+Shift+V = paste literally (escape hatch for prose with incidental
+    // * - # that would otherwise be read as Markdown). The native shell doesn't
+    // issue a paste event for this chord, so we read the clipboard ourselves and
+    // insert it as plain text. preventDefault stops any native default.
+    if (e.code === 'KeyV' && e.shiftKey && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      void this.pasteLiteralFromClipboard();
+      return;
+    }
     // Tab moves between table cells (no modifier); in a list item it nests
     // (Shift+Tab outdents). Outside a table or list, Tab keeps its native focus
     // behaviour (the early return below without preventDefault).
@@ -753,13 +763,147 @@ export class BlockSurface {
     }
   };
 
+  // Paste-in interpretation (SKR-119). Rich sources (web pages, Notion, Obsidian
+  // reading view) carry `text/html`; we convert it to canonical Markdown and parse
+  // that into real blocks. Plain Markdown sources (Obsidian source mode, editors,
+  // terminals) carry only `text/plain`, which we also parse as Markdown — the full
+  // round trip. Cmd/Ctrl+Shift+V opts out, landing the clipboard verbatim.
   private onPaste = (event: Event): void => {
     const e = event as ClipboardEvent;
-    const text = e.clipboardData?.getData('text/plain');
-    if (typeof text !== 'string' || text.length === 0) return;
+    const data = e.clipboardData;
+    if (!data) return;
+    const plain = data.getData('text/plain');
+    const html = data.getData('text/html');
+
+    // Rich HTML wins; fall back to interpreting plain text as Markdown.
+    const fromHtml = html ? markdownForPaste(html) : null;
+    const markdown = fromHtml ?? (plain && plain.length > 0 ? plain : null);
+    if (markdown == null) return;
     e.preventDefault();
-    this.pasteText(text);
+    // Block insert only lands at a collapsed caret in a top-level inline leaf.
+    // Anywhere else (nested list/quote, code, table cell, or a selection) falls
+    // back to the plain split-paste for v1 — see SKR-119 scope.
+    if (!this.insertMarkdownBlocks(markdown)) {
+      this.pasteText(plain && plain.length > 0 ? plain : markdown);
+    }
   };
+
+  // Cmd/Ctrl+Shift+V handler: read the OS clipboard's plain text (via the shell
+  // bridge, falling back to the async Clipboard API) and insert it literally,
+  // bypassing Markdown interpretation.
+  private async pasteLiteralFromClipboard(): Promise<void> {
+    let text = '';
+    try {
+      const bridge = (window as unknown as {
+        skrive?: { clipboard?: { readText?: () => Promise<string> } };
+      }).skrive;
+      if (bridge?.clipboard?.readText) text = await bridge.clipboard.readText();
+      else if (navigator.clipboard?.readText) text = await navigator.clipboard.readText();
+    } catch {
+      return;
+    }
+    if (text.length > 0) this.pasteText(text);
+  }
+
+  // Parse `md` into blocks and insert them at a collapsed caret in a top-level
+  // inline-text block. Returns false (declining) when the caret isn't such a spot,
+  // or the parse yields nothing, so the caller can fall back to a plain paste.
+  //
+  // Placement (SKR-119): a lone paragraph merges inline into the caret block,
+  // carrying its marks — seamless, like typing it. Anything structured or
+  // multi-block splits the caret block: head keeps the text before the caret,
+  // the pasted blocks land between, and the tail continues after. An empty caret
+  // block is fully replaced.
+  private insertMarkdownBlocks(md: string): boolean {
+    const parsed = parseDocument(md).blocks;
+    if (parsed.length === 0) return false;
+
+    const t = this.leafTarget();
+    // No caret in the surface (unfocused, or a selection that doesn't resolve to a
+    // leaf — easy to hit when focus is elsewhere): append at the document end so a
+    // paste never silently vanishes, rather than declining to a fallback that also
+    // needs a caret.
+    if (!t) {
+      this.appendMarkdownBlocks(parsed);
+      return true;
+    }
+    // A caret that isn't a collapsed, top-level inline leaf (nested list/quote,
+    // code, table cell, or a selection) falls back to the plain paste path, which
+    // handles those in place — see SKR-119 scope.
+    if (!t.collapsed || !isInlineText(t.leaf) || !this.isTopLevel(t.blockEl, t.leaf.id)) {
+      return false;
+    }
+    const index = this.doc.blocks.findIndex((b) => b.id === t.leaf.id);
+    if (index < 0) return false;
+
+    const [head, tail] = splitInline(t.leaf.inline, t.start);
+
+    // Seamless single-paragraph merge.
+    const only = parsed[0]!;
+    if (parsed.length === 1 && only.type === 'paragraph') {
+      const merged: BlockNode = { ...t.leaf, inline: [...head, ...only.inline, ...tail], dirty: true };
+      this.commitBlock(index, merged);
+      this.reconcile();
+      const caret = inlineLength(head) + inlineLength(only.inline);
+      writeSelection(this.container, collapsedRange({ leaf: { kind: 'block', id: merged.id }, offset: caret }), 'paste');
+      this.scheduleSerialize();
+      return true;
+    }
+
+    // Structured / multi-block paste: split the caret block around the insertion.
+    const headEmpty = inlineLength(head) === 0;
+    const tailEmpty = inlineLength(tail) === 0;
+    const isHeading = t.leaf.type === 'heading';
+    const level = t.leaf.type === 'heading' ? t.leaf.level : 1;
+    // Clean seam before the first pasted block; later blocks keep the parsed gaps.
+    const inserted = parsed.map((b, i) => (i === 0 ? { ...b, gapBefore: null } : b));
+
+    const out: BlockNode[] = [];
+    if (!headEmpty) out.push({ ...t.leaf, inline: head, dirty: true });
+    out.push(...inserted);
+
+    let caret: { id: string; offset: number };
+    if (!tailEmpty) {
+      const tailBlock = this.newInlineBlock(isHeading ? 'heading' : 'paragraph', tail, level);
+      out.push(tailBlock);
+      caret = { id: tailBlock.id, offset: 0 };
+    } else {
+      caret = this.caretAfterInserted(out, inserted);
+    }
+
+    const blocks = this.doc.blocks.slice();
+    blocks.splice(index, 1, ...out);
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    writeSelection(this.container, collapsedRange({ leaf: { kind: 'block', id: caret.id }, offset: caret.offset }), 'paste');
+    this.scheduleSerialize();
+    return true;
+  }
+
+  // Append parsed blocks at the document end and place the caret after them.
+  // Used when a paste arrives with no caret target (unfocused surface).
+  private appendMarkdownBlocks(parsed: BlockNode[]): void {
+    const inserted = parsed.map((b, i) => (i === 0 ? { ...b, gapBefore: null } : b));
+    const out: BlockNode[] = [...inserted];
+    const caret = this.caretAfterInserted(out, inserted);
+    this.doc = { ...this.doc, blocks: [...this.doc.blocks, ...out] };
+    this.reconcile();
+    this.focus();
+    writeSelection(this.container, collapsedRange({ leaf: { kind: 'block', id: caret.id }, offset: caret.offset }), 'paste');
+    this.scheduleSerialize();
+  }
+
+  // The caret landing after a run of inserted blocks: the end of the last block
+  // when it's inline text, otherwise a fresh trailing paragraph (so the caret
+  // never lands on a code/table/rule/list block). Pushes that paragraph onto
+  // `out` when it creates one.
+  private caretAfterInserted(out: BlockNode[], inserted: BlockNode[]): { id: string; offset: number } {
+    const last = inserted[inserted.length - 1]!;
+    if (isInlineText(last)) return { id: last.id, offset: inlineLength(last.inline) };
+    const landing = this.newInlineBlock('paragraph', [], 1);
+    out.push(landing);
+    return { id: landing.id, offset: 0 };
+  }
 
   // Paste plain text, splitting runs of newlines into separate paragraphs (SKR-118
   // Stage 3). A single paragraph's worth goes through the normal insert (which also

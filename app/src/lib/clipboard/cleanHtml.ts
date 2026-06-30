@@ -14,6 +14,10 @@
 //   - <u>, which has no faithful Markdown form. hast-util-to-mdast maps it to
 //     emphasis by default; per the "drop unrepresentable formatting" decision
 //     we drop the underline rather than silently reinterpret it as italic.
+//   - <b>/<strong> that wraps the entire text of a heading. Sites that bold
+//     their headings (e.g. anthropic.com) would otherwise yield `## **Title**`;
+//     the heading already carries the emphasis, so the wrapper is redundant.
+//     Partial bold inside a heading is left alone — that is real emphasis.
 //
 // It is intentionally narrow: a new source-specific quirk gets its own named
 // rule here rather than a catch-all that risks dropping real formatting.
@@ -23,6 +27,7 @@ import type { Element, Root } from 'hast';
 
 const CANCELS_BOLD = /font-weight\s*:\s*(?:normal|400)\b/i;
 const CANCELS_ITALIC = /font-style\s*:\s*normal\b/i;
+const HEADINGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
 
 function inlineStyle(node: Element): string {
   const style = node.properties?.style;
@@ -39,11 +44,27 @@ function shouldUnwrap(node: Element): boolean {
   return false;
 }
 
+// True when `node` is the heading's only meaningful child — i.e. the bold spans
+// the whole heading. Whitespace-only text siblings (Notion/WebKit pad with
+// them) don't count as content, so `<h2> <strong>X</strong> </h2>` still matches.
+function wrapsWholeHeading(node: Element, parent: Element): boolean {
+  if (!HEADINGS.has(parent.tagName)) return false;
+  if (node.tagName !== 'b' && node.tagName !== 'strong') return false;
+  return parent.children.every(
+    (child) =>
+      child === node ||
+      (child.type === 'text' && child.value.trim() === '')
+  );
+}
+
 export function rehypeCleanRichText() {
   return (tree: Root): void => {
     visit(tree, 'element', (node, index, parent) => {
       if (parent == null || index == null) return;
-      if (!shouldUnwrap(node)) return;
+      const unwrap =
+        shouldUnwrap(node) ||
+        (parent.type === 'element' && wrapsWholeHeading(node, parent));
+      if (!unwrap) return;
       // Replace the unwrapped element with its children, then re-visit from
       // the same index so the now-exposed children are themselves cleaned
       // (Google Docs nests these wrappers several deep).

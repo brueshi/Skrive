@@ -30,6 +30,41 @@ import remarkGfm from 'remark-gfm';
 import remarkStringify from 'remark-stringify';
 import { rehypeCleanRichText } from './cleanHtml';
 
+// Notion copies a callout block as an `<aside>…</aside>` wrapper, but *escaped*
+// (`&lt;aside&gt;`), so it survives the HTML pipeline as literal `<aside>` /
+// `</aside>` text lines rather than an element the converter could map. The
+// faithful Skrive equivalent of a callout is a blockquote, so fold the marked
+// region into one. Narrow by design: only a matched open/close pair on their own
+// lines is converted, so prose that merely mentions `<aside>` is left untouched.
+const ASIDE_OPEN = /^\\?<aside>\\?\s*$/;
+const ASIDE_CLOSE = /^\\?<\/aside>\s*$/;
+
+function convertNotionCallouts(md: string): string {
+  if (!ASIDE_OPEN.test(md) && !/\n\\?<aside>/.test(md)) return md;
+  const lines = md.split('\n');
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!ASIDE_OPEN.test(lines[i]!)) {
+      out.push(lines[i]!);
+      continue;
+    }
+    let close = i + 1;
+    while (close < lines.length && !ASIDE_CLOSE.test(lines[close]!)) close++;
+    if (close >= lines.length) {
+      // No closing marker — not a callout; leave the line as-is.
+      out.push(lines[i]!);
+      continue;
+    }
+    const inner = lines.slice(i + 1, close);
+    while (inner.length && inner[0]!.trim() === '') inner.shift();
+    while (inner.length && inner[inner.length - 1]!.trim() === '') inner.pop();
+    if (out.length && out[out.length - 1]!.trim() !== '') out.push('');
+    out.push(...inner.map((l) => (l.trim() === '' ? '>' : `> ${l}`)));
+    i = close; // skip the closing marker
+  }
+  return out.join('\n');
+}
+
 const processor = unified()
   .use(rehypeParse, { fragment: true })
   .use(rehypeCleanRichText)
@@ -55,7 +90,7 @@ const processor = unified()
  */
 export function htmlToMarkdown(html: string): string {
   if (html.trim() === '') return '';
-  return String(processor.processSync(html)).trim();
+  return convertNotionCallouts(String(processor.processSync(html)).trim());
 }
 
 /**
