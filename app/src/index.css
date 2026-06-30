@@ -993,6 +993,82 @@ body {
   color: #fff;
 }
 
+/* ===================== Modern modal "sheet" (toast language) =====================
+   Opt-in modifier that brings a dialog into the unified toast-card look: a soft
+   rounded surface lifted by a layered shadow (no hard border), an eyebrow over a
+   title, and a quiet in-card dismiss in the corner. Scoped entirely under
+   .modal-sheet so the older modals keep their styling until each is migrated. */
+.modal-sheet {
+  border: none;
+  border-radius: 16px;
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.18),
+    0 4px 12px rgba(0, 0, 0, 0.08);
+  padding: 1.25rem 1.3125rem;
+}
+
+.modal-sheet .modal-eyebrow {
+  margin: 0 0 0.3125rem;
+  padding-right: 1.5rem;
+  font-size: 12px;
+  font-weight: 450;
+  letter-spacing: 0.01em;
+  color: var(--skrive-muted);
+}
+
+.modal-sheet .modal-title {
+  margin: 0 0 0.4375rem;
+  padding-right: 1.5rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.modal-sheet .modal-desc {
+  margin: 0 0 1.125rem;
+}
+
+/* In-card dismiss, mirrored from .toast-card-dismiss. */
+.modal-sheet .modal-dismiss {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--skrive-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.55;
+  transition:
+    opacity var(--skrive-duration-quick) var(--skrive-easing),
+    background var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.modal-sheet .modal-dismiss:hover:not(:disabled) {
+  opacity: 1;
+  background: color-mix(in srgb, var(--skrive-muted) 16%, transparent);
+}
+
+.modal-sheet .modal-dismiss:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Rounder buttons inside the sheet, to match the soft card. */
+.modal-sheet .modal-button {
+  border-radius: 9px;
+  padding: 0.5rem 1.1rem;
+}
+
 .app-body {
   flex: 1;
   display: flex;
@@ -4625,6 +4701,110 @@ body {
 .np-location-row .modal-button {
   padding: 0.4rem 0.75rem;
   font-size: 0.75rem;
+}
+
+/* ===================== Bug report modal (SKR-130) =====================
+   A larger instance of the shared .modal-sheet language — the per-element
+   bumps below scale this dialog up while leaving the .modal-sheet baseline
+   (toast scale) calm for other adopters. */
+.modal-sheet.bug-report-modal {
+  width: 34rem;
+  padding: 1.875rem 2rem;
+}
+
+.bug-report-modal .modal-eyebrow {
+  margin-bottom: 0.375rem;
+  font-size: 13px;
+}
+
+.bug-report-modal .modal-title {
+  margin-bottom: 0.5rem;
+  font-size: 1.375rem;
+}
+
+.bug-report-modal .modal-desc {
+  margin-bottom: 1.5rem;
+  font-size: 0.9375rem;
+}
+
+.bug-report-modal .modal-dismiss {
+  top: 1rem;
+  right: 1rem;
+  width: 26px;
+  height: 26px;
+  font-size: 18px;
+}
+
+.bug-report-modal .modal-checkbox {
+  margin-bottom: 1.5rem;
+  font-size: 0.875rem;
+}
+
+.bug-report-modal .modal-button {
+  padding: 0.625rem 1.375rem;
+  font-size: 0.875rem;
+}
+
+.bug-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4375rem;
+  margin-bottom: 1.125rem;
+  font-size: 0.875rem;
+}
+
+.bug-field label {
+  color: var(--skrive-muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.bug-field input,
+.bug-field textarea {
+  background: color-mix(in srgb, var(--skrive-muted) 5%, transparent);
+  border: 1px solid var(--skrive-rule);
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 0.9375rem;
+  transition:
+    border-color var(--skrive-duration-quick) var(--skrive-easing),
+    box-shadow var(--skrive-duration-quick) var(--skrive-easing),
+    background var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.bug-field input::placeholder,
+.bug-field textarea::placeholder {
+  color: color-mix(in srgb, var(--skrive-muted) 70%, transparent);
+}
+
+.bug-field textarea {
+  resize: vertical;
+  min-height: 9.5rem;
+  line-height: 1.55;
+}
+
+.bug-field input:focus,
+.bug-field textarea:focus {
+  border-color: var(--skrive-accent);
+  background: var(--skrive-bg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--skrive-accent) 16%, transparent);
+  outline: none;
+}
+
+.bug-diagnostics-preview {
+  margin: -0.25rem 0 1.25rem;
+  padding: 0.75rem 0.875rem;
+  background: color-mix(in srgb, var(--skrive-muted) 7%, transparent);
+  border-radius: 10px;
+  color: var(--skrive-muted);
+  font-family: var(--skrive-mono-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ===================== Rename modal (Phase 11) ===================== */

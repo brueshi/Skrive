@@ -86,6 +86,7 @@ export type CommandDeps = {
   toggleCheatSheet: () => void;
   openRename: (path: string) => void;
   openNewProject: () => void;
+  openBugReport: () => void;
 };
 
 export const COMMAND_GROUP_ORDER: CommandGroup[] = [
@@ -722,6 +723,12 @@ export function buildRegistry(deps: CommandDeps): {
       group: 'Help',
       shortcut: get('help.cheatSheet'),
       run: () => deps.toggleCheatSheet()
+    },
+    {
+      id: 'help.reportBug',
+      label: 'Report a bug…',
+      group: 'Help',
+      run: () => deps.openBugReport()
     }
   ];
 
