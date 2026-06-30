@@ -10,12 +10,13 @@
 // are no-ops until Stage 3b — never letting the browser mutate structure behind
 // the model's back.
 
-import { generateBlockId, parseDocument, type BlockNode, type Document, type InlineNode, type TableBlock } from '../blockmodel';
+import { generateBlockId, parseDocument, serializeDocument, type BlockNode, type Document, type InlineNode, type TableBlock } from '../blockmodel';
 import { markdownForPaste } from '../clipboard/htmlToMarkdown';
+import { buildClipboardPayload } from '../clipboard/copyOut';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto } from './render';
 import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
-import { collapsedRange, isCollapsed, sameLeaf } from './doc-position';
-import { deleteAcross, deleteBlock, mergeBackward, mergeForward, replaceAcross } from './range-ops';
+import { collapsedRange, isCollapsed, sameLeaf, type DocPos, type DocRange } from './doc-position';
+import { deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, replaceAcross } from './range-ops';
 import { findBlockById, updateBlockById } from './tree';
 import { enterInContainer, exitContainer, type StructuralResult } from './structural';
 import { changeListType, findImmediateList, indentItem, liftItemToParagraph, outdentItem } from './list-ops';
@@ -34,6 +35,7 @@ import {
   splitInline,
   toggleMarkInInline
 } from './inline-ops';
+import { DocHistory, type EditKind } from './history';
 
 /** A block type the insert menu / commands can apply to the current block. */
 export type BlockTypeSpec =
@@ -88,7 +90,14 @@ function isInlineText(block: BlockNode): block is InlineTextBlock {
 }
 
 export class BlockSurface {
-  private doc: Document;
+  // Authoritative document. Assigned through the `doc` setter everywhere except
+  // the constructor and undo/redo, so every edit funnels one history snapshot.
+  private _doc: Document;
+  private readonly history = new DocHistory();
+  // Hint the setter reads for the next snapshot's edit kind, then resets. Typing
+  // and delete set it so consecutive ones coalesce; everything else is its own
+  // undo step.
+  private nextEditKind: EditKind = 'other';
   private readonly container: HTMLElement;
   private readonly registry = new BlockViewRegistry();
   private readonly onDocChange?: (doc: Document) => void;
@@ -105,7 +114,7 @@ export class BlockSurface {
 
   constructor(opts: BlockSurfaceOptions) {
     this.container = opts.container;
-    this.doc = opts.doc;
+    this._doc = opts.doc; // bypass the setter: initial load is not an undoable edit
     this.onDocChange = opts.onDocChange;
 
     this.container.contentEditable = 'true';
@@ -122,10 +131,51 @@ export class BlockSurface {
 
     this.container.addEventListener('beforeinput', this.onBeforeInput, { capture: true });
     this.container.addEventListener('paste', this.onPaste, { capture: true });
+    this.container.addEventListener('copy', this.onCopy, { capture: true });
+    this.container.addEventListener('cut', this.onCut, { capture: true });
     this.container.addEventListener('compositionstart', this.onCompositionStart, true);
     this.container.addEventListener('compositionend', this.onCompositionEnd, true);
     this.container.addEventListener('keydown', this.onKeyDown, true);
     document.addEventListener('selectionchange', this.onDocSelectionChange);
+  }
+
+  // The document. Reads are plain; every assignment records a pre-edit snapshot
+  // for undo (using nextEditKind for coalescing) before swapping in the new doc.
+  // Reading the selection is deferred to the moment a snapshot is actually
+  // pushed, so coalesced keystrokes never touch the DOM on the hot path.
+  private get doc(): Document {
+    return this._doc;
+  }
+  private set doc(next: Document) {
+    this.history.record(
+      this._doc,
+      () => readSelection(this.container),
+      this.nextEditKind,
+      performance.now()
+    );
+    this.nextEditKind = 'other';
+    this._doc = next;
+  }
+
+  /** Undo the last edit (Cmd/Ctrl+Z). Restores the prior document and selection,
+   *  bypassing the setter so the restore isn't itself recorded. */
+  undo(): void {
+    const restored = this.history.undo({ doc: this._doc, sel: readSelection(this.container) });
+    if (!restored) return;
+    this._doc = restored.doc;
+    this.reconcile();
+    if (restored.sel) writeSelection(this.container, restored.sel, 'undo');
+    this.scheduleSerialize();
+  }
+
+  /** Redo the last undone edit (Cmd/Ctrl+Shift+Z / Cmd+Y). */
+  redo(): void {
+    const restored = this.history.redo({ doc: this._doc, sel: readSelection(this.container) });
+    if (!restored) return;
+    this._doc = restored.doc;
+    this.reconcile();
+    if (restored.sel) writeSelection(this.container, restored.sel, 'redo');
+    this.scheduleSerialize();
   }
 
   /** Register (or clear, with null) the select->bubble observer. Fired
@@ -168,6 +218,8 @@ export class BlockSurface {
   destroy(): void {
     this.container.removeEventListener('beforeinput', this.onBeforeInput, true);
     this.container.removeEventListener('paste', this.onPaste, true);
+    this.container.removeEventListener('copy', this.onCopy, true);
+    this.container.removeEventListener('cut', this.onCut, true);
     this.container.removeEventListener('compositionstart', this.onCompositionStart, true);
     this.container.removeEventListener('compositionend', this.onCompositionEnd, true);
     this.container.removeEventListener('keydown', this.onKeyDown, true);
@@ -186,6 +238,20 @@ export class BlockSurface {
     if (e.code === 'KeyV' && e.shiftKey && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       void this.pasteLiteralFromClipboard();
+      return;
+    }
+    // Undo / redo (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z, and Ctrl+Y on Windows). The
+    // surface owns history; native contenteditable undo mutates the DOM behind
+    // the model, so we claim the chord and drive our own stack.
+    if (e.code === 'KeyZ' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      if (e.shiftKey) this.redo();
+      else this.undo();
+      return;
+    }
+    if (e.code === 'KeyY' && e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      this.redo();
       return;
     }
     // Tab moves between table cells (no modifier); in a list item it nests
@@ -743,7 +809,13 @@ export class BlockSurface {
     if (this.composing) return; // IME composes natively; reconcile on end
     const e = event as InputEvent;
     const type = e.inputType;
-    if (type === 'insertText' && typeof e.data === 'string') {
+    if (type === 'historyUndo' || type === 'historyRedo') {
+      // Backstop for any native undo path (the Edit menu, trackpad gestures):
+      // drive our own history so the DOM never diverges from the model.
+      e.preventDefault();
+      if (type === 'historyUndo') this.undo();
+      else this.redo();
+    } else if (type === 'insertText' && typeof e.data === 'string') {
       e.preventDefault();
       this.applyInsertText(e.data);
     } else if (type === 'insertParagraph' || type === 'insertLineBreak') {
@@ -803,6 +875,116 @@ export class BlockSurface {
       return;
     }
     if (text.length > 0) this.pasteText(text);
+  }
+
+  // Copy / cut (SKR-127). Both serialize the selection to clean Markdown and
+  // dual-write it (matching paste-in and the Copy page button), so a round trip
+  // through the clipboard stays canonical instead of dragging the rendered DOM.
+  // Cut then deletes the selected range. Collapsed selections are left to the
+  // browser (nothing to copy).
+  private onCopy = (event: Event): void => {
+    this.writeSelectionToClipboard(event as ClipboardEvent);
+  };
+
+  private onCut = (event: Event): void => {
+    if (this.writeSelectionToClipboard(event as ClipboardEvent)) this.deleteSelection();
+  };
+
+  // Write the current selection to the clipboard as Markdown (text/plain) + its
+  // rendered HTML (text/html). Returns false (declining the event) when there's
+  // nothing to copy. Selections bounded by a barrier (code block / table cell)
+  // can't serialize to Markdown cleanly, so they fall back to the visible text.
+  private writeSelectionToClipboard(e: ClipboardEvent): boolean {
+    const data = e.clipboardData;
+    if (!data) return false;
+    const range = readSelection(this.container);
+    if (!range || isCollapsed(range)) return false;
+    const md = this.serializeSelectionMarkdown(range);
+    if (md != null && md !== '') {
+      const { text, html } = buildClipboardPayload(md);
+      data.setData('text/plain', text);
+      data.setData('text/html', html);
+    } else {
+      const text = window.getSelection()?.toString() ?? '';
+      if (text === '') return false;
+      data.setData('text/plain', text);
+    }
+    e.preventDefault();
+    return true;
+  }
+
+  // Serialize just the selected range to Markdown by deleting everything before
+  // and after it from a copy of the document, then serializing what remains.
+  // Reuses deleteAcross (which already handles nested and multi-block ranges);
+  // null when an endpoint isn't an inline leaf, so the caller falls back to text.
+  private serializeSelectionMarkdown(range: DocRange): string | null {
+    const [start, end] = this.orderRange(range);
+    if (start.leaf.kind !== 'block' || end.leaf.kind !== 'block') return null;
+
+    // Selection within a single block: emit just the inline slice, not the
+    // block's Markdown. Selecting a word inside a heading must copy the word
+    // (with any real marks), not `# word` — the `#` is the block's, not the text's.
+    if (start.leaf.id === end.leaf.id) {
+      const block = findBlockById(this.doc.blocks, start.leaf.id);
+      if (block && (block.type === 'paragraph' || block.type === 'heading')) {
+        const sliced = splitInline(splitInline(block.inline, end.offset)[0], start.offset)[1];
+        const para: BlockNode = {
+          type: 'paragraph',
+          id: generateBlockId(),
+          durable: false,
+          src: null,
+          gapBefore: null,
+          dirty: true,
+          inline: sliced
+        };
+        return serializeDocument({ blocks: [para], trailingGap: '' });
+      }
+      if (block && block.type === 'code_block') {
+        return block.text.slice(start.offset, end.offset);
+      }
+    }
+
+    const inlineLeaves = documentLeaves(this.doc.blocks).filter((l) => l.kind === 'inline');
+    if (inlineLeaves.length === 0) return null;
+    const firstId = inlineLeaves[0]!.id;
+    const lastId = inlineLeaves[inlineLeaves.length - 1]!.id;
+    const lastBlock = findBlockById(this.doc.blocks, lastId);
+    const lastLen =
+      lastBlock && (lastBlock.type === 'paragraph' || lastBlock.type === 'heading')
+        ? inlineLength(lastBlock.inline)
+        : 0;
+    const afterTrimmed = deleteAcross(this.doc.blocks, end.leaf.id, end.offset, lastId, lastLen);
+    if (!afterTrimmed) return null;
+    const sliced = deleteAcross(afterTrimmed.blocks, firstId, 0, start.leaf.id, start.offset);
+    if (!sliced) return null;
+    return serializeDocument({ blocks: sliced.blocks, trailingGap: '' });
+  }
+
+  // Delete the current selection (the cut path). Mirrors a Backspace over a
+  // selection; a discrete undo step.
+  private deleteSelection(): void {
+    const range = readSelection(this.container);
+    if (!range || isCollapsed(range)) return;
+    const [start, end] = this.orderRange(range);
+    if (start.leaf.kind !== 'block' || end.leaf.kind !== 'block') return;
+    const r = deleteAcross(this.doc.blocks, start.leaf.id, start.offset, end.leaf.id, end.offset);
+    if (r) this.applyStructural(r);
+  }
+
+  // Order a selection's endpoints into document order (start before end).
+  private orderRange(range: DocRange): [DocPos, DocPos] {
+    const leaves = documentLeaves(this.doc.blocks);
+    const indexOf = (p: DocPos): number => {
+      if (p.leaf.kind !== 'block') return -1;
+      const id = p.leaf.id;
+      return leaves.findIndex((l) => l.id === id);
+    };
+    const ai = indexOf(range.anchor);
+    const fi = indexOf(range.focus);
+    if (ai !== fi) return ai <= fi ? [range.anchor, range.focus] : [range.focus, range.anchor];
+    return range.anchor.offset <= range.focus.offset
+      ? [range.anchor, range.focus]
+      : [range.focus, range.anchor];
   }
 
   // Parse `md` into blocks and insert them at a collapsed caret in a top-level
@@ -964,6 +1146,7 @@ export class BlockSurface {
   };
 
   private applyInsertText(text: string): void {
+    this.nextEditKind = 'type'; // consecutive keystrokes coalesce into one undo
     const cell = this.cellTarget();
     if (cell) {
       if (cell.spansCells) return;
@@ -1012,6 +1195,7 @@ export class BlockSurface {
   }
 
   private applyDeleteBackward(): void {
+    this.nextEditKind = 'delete'; // consecutive deletes coalesce into one undo
     const cell = this.cellTarget();
     if (cell) {
       // A selection dragged across cells means "delete the whole table" (the
@@ -1077,6 +1261,7 @@ export class BlockSurface {
   }
 
   private applyDeleteForward(): void {
+    this.nextEditKind = 'delete'; // consecutive deletes coalesce into one undo
     const cell = this.cellTarget();
     if (cell) {
       // Cross-cell selection: delete the whole table (mirror of Backspace).
