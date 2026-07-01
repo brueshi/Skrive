@@ -12,6 +12,7 @@
 
 import { generateBlockId, parseDocument, serializeDocument, type BlockNode, type Document, type InlineNode, type TableBlock } from '../blockmodel';
 import { markdownForPaste } from '../clipboard/htmlToMarkdown';
+import { plainTextParagraphs } from '../clipboard/plainText';
 import { buildClipboardPayload } from '../clipboard/copyOut';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto } from './render';
 import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
@@ -856,7 +857,7 @@ export class BlockSurface {
     // Anywhere else (nested list/quote, code, table cell, or a selection) falls
     // back to the plain split-paste for v1 — see SKR-119 scope.
     if (!this.insertMarkdownBlocks(markdown)) {
-      this.pasteText(plain && plain.length > 0 ? plain : markdown);
+      this.pasteText(plain && plain.length > 0 ? plain : markdown, 'flow');
     }
   };
 
@@ -874,7 +875,7 @@ export class BlockSurface {
     } catch {
       return;
     }
-    if (text.length > 0) this.pasteText(text);
+    if (text.length > 0) this.pasteText(text, 'literal');
   }
 
   // Copy / cut (SKR-127). Both serialize the selection to clean Markdown and
@@ -1087,15 +1088,23 @@ export class BlockSurface {
     return { id: landing.id, offset: 0 };
   }
 
-  // Paste plain text, splitting runs of newlines into separate paragraphs (SKR-118
-  // Stage 3). A single paragraph's worth goes through the normal insert (which also
-  // handles replacing a selection). Multi-paragraph paste is supported at a
-  // collapsed caret in a top-level inline leaf: the caret splits the block, the
-  // first pasted paragraph joins the head, the last joins the tail, the rest land
+  // Paste plain text (SKR-118 Stage 3; segmentation reworked in SKR-148).
+  // Interpreted paste ('flow') applies CommonMark paragraph semantics: blank
+  // lines separate paragraphs, single newlines flow as spaces, line edges are
+  // trimmed. Literal paste ('literal', Cmd/Ctrl+Shift+V) keeps every line as its
+  // own paragraph, verbatim — the escape hatch for line-oriented text. A single
+  // paragraph's worth goes through the normal insert (which also handles
+  // replacing a selection). Multi-paragraph paste is supported at a collapsed
+  // caret in a top-level inline leaf: the caret splits the block, the first
+  // pasted paragraph joins the head, the last joins the tail, the rest land
   // between. A caret in a container / code / cell falls back to a single-block
-  // insert (newlines -> spaces) rather than risk corrupting it — refined later.
-  private pasteText(raw: string): void {
-    const segments = raw.replace(/\r/g, '').split(/\n+/).filter((s) => s.length > 0);
+  // insert (paragraphs joined by spaces) rather than risk corrupting it —
+  // refined later.
+  private pasteText(raw: string, mode: 'flow' | 'literal'): void {
+    const segments =
+      mode === 'literal'
+        ? raw.replace(/\r/g, '').split(/\n+/).filter((s) => s.length > 0)
+        : plainTextParagraphs(raw);
     if (segments.length <= 1) {
       this.applyInsertText(segments.join(' '));
       return;

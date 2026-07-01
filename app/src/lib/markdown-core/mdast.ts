@@ -21,6 +21,28 @@ import type { Root } from 'mdast';
 const extensions = [gfmTable()];
 const mdastExtensions = [gfmTableFromMarkdown()];
 
+// A soft break is presentation, not content: CommonMark renders the single
+// newline inside a paragraph as a space, so hard-wrapped source must not paint
+// its wrap points in the editor. A soft break only ever lives in a `text` node's
+// value (hard breaks are distinct `break` nodes; `code`/`inlineCode`/`html`
+// values keep their newlines). Normalizing here — in the one shared parser —
+// keeps the block model and the idempotence guard in step by construction: a
+// wrapped paragraph and its flowed canonical form parse mdast-equal, so a clean
+// or edit-reverted block still restores its original bytes.
+function flowSoftBreaks(node: { type?: string; value?: string; children?: unknown[] }): void {
+  if (node.type === 'text' && node.value !== undefined && node.value.includes('\n')) {
+    node.value = node.value.replace(/\n/g, ' ');
+    return;
+  }
+  if (node.children) {
+    for (const child of node.children) {
+      flowSoftBreaks(child as { type?: string; value?: string; children?: unknown[] });
+    }
+  }
+}
+
 export function parseMarkdown(md: string): Root {
-  return fromMarkdown(md, { extensions, mdastExtensions }) as Root;
+  const root = fromMarkdown(md, { extensions, mdastExtensions }) as Root;
+  flowSoftBreaks(root);
+  return root;
 }
