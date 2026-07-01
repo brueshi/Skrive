@@ -107,6 +107,11 @@ export class BlockSurface {
   private selectionCb: ((info: SelectionInfo | null) => void) | null = null;
   private selScheduled = false;
   private savedLink: { blockId: string; start: number; end: number } | null = null;
+  // The last caret observed INSIDE the surface, kept across focus loss. WKWebView
+  // collapses a blurred contenteditable's selection (Chromium preserves it, so the
+  // gate harness is blind to this), which made block commands no-op the moment a
+  // menu took focus — the generalized form of the savedLink dodge (SKR-151).
+  private lastCaret: { blockId: string; caret: number } | null = null;
   private slash: { blockId: string; slashOffset: number } | null = null;
   private slashCb: ((state: SlashMenuState | null) => void) | null = null;
   // The block object each top-level element was last rendered from, so the
@@ -645,10 +650,25 @@ export class BlockSurface {
 
   private currentInlineBlock(): { block: InlineTextBlock; index: number; blockEl: HTMLElement; caret: number } | null {
     const ctx = caretContext(this.container, this.registry);
-    if (!ctx) return null;
-    const found = this.findBlock(ctx.blockEl);
-    if (!found || !isInlineText(found.block)) return null;
-    return { block: found.block, index: found.index, blockEl: ctx.blockEl, caret: ctx.start };
+    if (ctx) {
+      const found = this.findBlock(ctx.blockEl);
+      if (!found || !isInlineText(found.block)) return null;
+      this.lastCaret = { blockId: found.block.id, caret: ctx.start };
+      return { block: found.block, index: found.index, blockEl: ctx.blockEl, caret: ctx.start };
+    }
+    // No live selection in the surface — fall back to the last observed caret so
+    // a command issued from a menu that took focus still targets the right block.
+    // Only the null case falls back: a live caret in a nested/non-inline context
+    // must keep returning null (the commands' existing gating).
+    const saved = this.lastCaret;
+    if (!saved) return null;
+    const index = this.doc.blocks.findIndex((b) => b.id === saved.blockId);
+    if (index < 0) return null;
+    const block = this.doc.blocks[index]!;
+    if (!isInlineText(block)) return null;
+    const blockEl = this.registry.get(block.id);
+    if (!blockEl) return null;
+    return { block, index, blockEl, caret: Math.min(saved.caret, inlineLength(block.inline)) };
   }
 
   private handleSlashAfterInsert(text: string): void {
@@ -690,9 +710,23 @@ export class BlockSurface {
   };
 
   private emitSelection(): void {
+    this.recordCaret();
     const cb = this.selectionCb;
     if (!cb) return;
     cb(this.selectionSummary());
+  }
+
+  // Keep lastCaret fresh from the selection observer, so a command issued after
+  // focus moves to a menu (which collapses the selection in WKWebView) still
+  // knows the block it should act on. A selection outside the surface records
+  // nothing — the last in-surface caret stays. This runs on every selection
+  // change (every keystroke moves the caret), so it must stay O(1): read the id
+  // off the element and leave model validation to the command-time fallback.
+  private recordCaret(): void {
+    const ctx = caretContext(this.container, this.registry);
+    if (!ctx) return;
+    const blockId = ctx.blockEl.getAttribute(BLOCK_ID_ATTR);
+    if (blockId != null) this.lastCaret = { blockId, caret: ctx.start };
   }
 
   /** Build the current selection's formatting summary, or null when focus is

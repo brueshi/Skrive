@@ -144,6 +144,7 @@ declare global {
     __skriveBlockSurface?: {
       serialize(): string;
       blockCount(): number;
+      setBlockType(spec: { kind: 'paragraph' } | { kind: 'heading'; level: number }): void;
     };
   }
 }
@@ -158,7 +159,10 @@ function BlockSurfaceMount({ body }: { body: string }) {
     setCtx({ surface: s, controller });
     window.__skriveBlockSurface = {
       serialize: () => serializeDocument(s.getDocument()),
-      blockCount: () => s.getDocument().blocks.length
+      blockCount: () => s.getDocument().blocks.length,
+      // The command path a menu drives, callable after the matrix clears the
+      // live selection — the WKWebView blurred-selection simulation (SKR-151).
+      setBlockType: (spec) => s.setBlockType(spec)
     };
     return () => {
       controller.destroy();

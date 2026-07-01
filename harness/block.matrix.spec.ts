@@ -112,6 +112,28 @@ test('Stage 3b: Enter splits a block and Backspace merges it back', async ({ pag
   expect(serializeDocument(parseDocument(md)), 'stable after merge').toBe(md);
 });
 
+test('Stage 3b: block commands survive selection loss (WKWebView blur simulation)', async ({ page }) => {
+  // SKR-151: WKWebView collapses a blurred contenteditable's selection when a
+  // menu takes focus (Chromium preserves it, so the gate alone is blind).
+  // Simulate the loss deterministically: place the caret, clear the selection,
+  // then drive the same command path the menu uses — the saved-caret fallback
+  // must still convert the right block.
+  await open(page, 5);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.waitForTimeout(80); // let the rAF selection observer record the caret
+
+  await page.evaluate(() => {
+    window.getSelection()?.removeAllRanges();
+    window.__skriveBlockSurface!.setBlockType({ kind: 'heading', level: 2 });
+  });
+  await page.waitForTimeout(80);
+
+  const md = await serialized(page);
+  // The converted block re-serializes canonically, escaping the marker's underscores.
+  expect(md, 'the caret block converted despite the lost selection').toContain('## SKRIVE\\_FIRST\\_BLOCK');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
 test('Stage 3b: Delete at a block end merges the next block in', async ({ page }) => {
   await open(page, 5);
   const before = await page.evaluate(() => window.__skriveBlockSurface!.blockCount());
