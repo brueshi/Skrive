@@ -27,7 +27,7 @@ import {
   type ProjectUiState,
   type TabState
 } from '@skrive/shared';
-import type { LayoutMode } from '@skrive/shared';
+import type { LayoutMode, SidebarSortKey } from '@skrive/shared';
 import { computeLineDiff } from '../lib/diff/line-diff';
 import {
   mightHaveLeadingFrontmatter,
@@ -142,6 +142,13 @@ type State = {
   sidebarVisible: boolean;
   sidebarWidth: number;
 
+  /** Project-relative file paths pinned to the sidebar's Favorites zone,
+   *  in pin order. Mirrors SidebarState.pinned; persisted per-project. */
+  pinned: string[];
+
+  /** How the "All" file tree is ordered. Persisted per-project. */
+  sortKey: SidebarSortKey;
+
   /** Floating top-right backlinks panel (phase 6). Toggled from the
    *  Header; reads `linkGraph.getBacklinks(activeTab.path)` on open. */
   backlinksPanelOpen: boolean;
@@ -228,6 +235,10 @@ type Actions = {
   setSidebarVisible(v: boolean): void;
   toggleSidebar(): void;
   setSidebarWidth(width: number): void;
+  /** Pin or unpin a file path to the sidebar's Favorites zone. */
+  togglePin(path: string): void;
+  /** Set how the "All" file tree is ordered. */
+  setSortKey(key: SidebarSortKey): void;
 
   setActiveView(view: WorkspaceView): void;
   toggleSettings(): void;
@@ -524,7 +535,9 @@ function snapshotProjectState(state: State): ProjectUiState | null {
     lastOpenedMs: Date.now(),
     sidebar: {
       visible: state.sidebarVisible,
-      width: state.sidebarWidth
+      width: state.sidebarWidth,
+      pinned: state.pinned,
+      sortKey: state.sortKey
     },
     tabs: state.tabs.map(
       (tab): TabState => ({
@@ -767,6 +780,8 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   sidebarVisible: true,
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
+  pinned: [],
+  sortKey: 'name',
 
   backlinksPanelOpen: false,
   frontmatterPanelOpen: false,
@@ -844,7 +859,9 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
       const sidebarState = persisted?.sidebar ?? {
         visible: true,
-        width: SIDEBAR_DEFAULT_WIDTH
+        width: SIDEBAR_DEFAULT_WIDTH,
+        pinned: [],
+        sortKey: 'name' as SidebarSortKey
       };
 
       // Phase 10: pull the project's history mode (git vs checkpoint)
@@ -870,6 +887,8 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         activeTabIndex: -1,
         sidebarVisible: sidebarState.visible,
         sidebarWidth: clampSidebarWidth(sidebarState.width),
+        pinned: sidebarState.pinned ?? [],
+        sortKey: sidebarState.sortKey ?? 'name',
         activeView: 'editor',
         lintReport: null,
         historyMode,
@@ -1252,6 +1271,11 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         nextActive = Math.min(activeTabIndex, next.length - 1);
       set({ tabs: next, activeTabIndex: nextActive });
     }
+    const pins = get().pinned;
+    if (pins.includes(relPath)) {
+      set({ pinned: pins.filter((p) => p !== relPath) });
+      scheduleImmediateSave(get);
+    }
     await projectModel()?.remove(relPath);
   },
 
@@ -1272,6 +1296,12 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         nextActive = i === -1 ? Math.min(activeTabIndex, survivors.length - 1) : i;
       }
       set({ tabs: survivors, activeTabIndex: nextActive });
+    }
+    const pins = get().pinned;
+    const prunedPins = pins.filter((p) => !p.startsWith(prefix));
+    if (prunedPins.length !== pins.length) {
+      set({ pinned: prunedPins });
+      scheduleImmediateSave(get);
     }
     // Drop every manifest file under the deleted directory from the
     // model. The watcher's per-file unlink events echo this; both paths
@@ -1303,6 +1333,21 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     if (get().sidebarWidth === clamped) return;
     set({ sidebarWidth: clamped });
     scheduleDebouncedSave(get);
+  },
+
+  togglePin(path: string) {
+    const current = get().pinned;
+    const next = current.includes(path)
+      ? current.filter((p) => p !== path)
+      : [...current, path];
+    set({ pinned: next });
+    scheduleImmediateSave(get);
+  },
+
+  setSortKey(key: SidebarSortKey) {
+    if (get().sortKey === key) return;
+    set({ sortKey: key });
+    scheduleImmediateSave(get);
   },
 
   // ============================ Workspace view ============================
@@ -1478,6 +1523,17 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         // If the renamed file was the active tab, focus stays on it
         // — activeTabIndex doesn't move because we mutated in place.
         void activeTabIndex;
+      }
+    }
+    // Repoint a pin at the renamed file so Favorites survives a rename.
+    {
+      const pins = get().pinned;
+      const i = pins.indexOf(oldPath);
+      if (i >= 0) {
+        const repointed = pins.slice();
+        repointed[i] = newPath;
+        set({ pinned: repointed });
+        scheduleImmediateSave(get);
       }
     }
   },

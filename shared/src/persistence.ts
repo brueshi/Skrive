@@ -34,9 +34,20 @@ export type TabState = {
   splitDividerRatio: number;
 };
 
+/** How the "All" file tree is ordered. 'created' needs a birthtime from
+ *  the native scanner (Zig core); the other two derive from data the
+ *  manifest already carries. */
+export type SidebarSortKey = 'name' | 'modified' | 'created';
+
 export type SidebarState = {
   visible: boolean;
   width: number;
+  /** Project-relative file paths pinned to the Favorites zone at the top
+   *  of the sidebar, in pin order. Optional for back-compat with state
+   *  files written before pins existed; absent reads as empty. */
+  pinned?: string[];
+  /** File-tree ordering. Optional for back-compat; absent reads as 'name'. */
+  sortKey?: SidebarSortKey;
 };
 
 export type ProjectUiState = {
@@ -228,7 +239,12 @@ export function defaultProjectUiState(
     projectPath,
     projectName,
     lastOpenedMs: Date.now(),
-    sidebar: { visible: true, width: DEFAULT_SIDEBAR_WIDTH },
+    sidebar: {
+      visible: true,
+      width: DEFAULT_SIDEBAR_WIDTH,
+      pinned: [],
+      sortKey: 'name'
+    },
     tabs: [],
     activeTabIndex: -1
   };

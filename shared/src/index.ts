@@ -103,6 +103,7 @@ export type {
   ProjectUiState,
   RecentFile,
   RecentProject,
+  SidebarSortKey,
   SidebarState,
   SlugFormat,
   SurfaceId,
