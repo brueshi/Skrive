@@ -265,7 +265,7 @@ export class BlockSurface {
         // Tab steps cell-to-cell; off the last/first cell it exits the table
         // (instead of dead-ending) so the table is never a one-way trap.
         if (!this.moveCell(cell, e.shiftKey ? -1 : 1)) {
-          this.exitTable(cell.tableId, e.shiftKey ? 'before' : 'after');
+          this.exitBarrier(cell.tableId, e.shiftKey ? 'before' : 'after');
         }
         return;
       }
@@ -289,7 +289,7 @@ export class BlockSurface {
     // can't reliably leave a <table>, worst of all when the table is the last
     // block). Outside a table — or mid-cell — fall through to native movement.
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      if (this.handleTableArrow(e)) e.preventDefault();
+      if (this.handleTableArrow(e) || this.handleCodeArrow(e)) e.preventDefault();
       return;
     }
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
@@ -1210,7 +1210,7 @@ export class BlockSurface {
       // A selection dragged across cells means "delete the whole table" (the
       // select-it-and-hit-Delete gesture); a barrier can't be partial-cut.
       if (cell.spansCells) {
-        this.removeTable(cell.tableId);
+        this.removeBarrier(cell.tableId);
         return;
       }
       if (cell.collapsed && cell.start === 0) return; // start of cell: no merge back
@@ -1234,6 +1234,12 @@ export class BlockSurface {
     }
 
     if (t.collapsed && t.start === 0) {
+      if (t.leaf.type === 'code_block' && t.leaf.text.length === 0) {
+        // Backspace on an EMPTY code block removes it (the barrier mirror of the
+        // table gesture); non-empty code keeps its boundary — clear the text first.
+        this.removeBarrier(t.leaf.id);
+        return;
+      }
       if (isInlineText(t.leaf) && findImmediateList(this.doc.blocks, t.leaf.id)) {
         // Backspace at the start of a list item removes its marker: outdent one
         // level, or lift the item out to a paragraph at the top level.
@@ -1275,7 +1281,7 @@ export class BlockSurface {
     if (cell) {
       // Cross-cell selection: delete the whole table (mirror of Backspace).
       if (cell.spansCells) {
-        this.removeTable(cell.tableId);
+        this.removeBarrier(cell.tableId);
         return;
       }
       const cellLen = inlineLength(cell.inline);
@@ -1295,6 +1301,10 @@ export class BlockSurface {
     const len = t.leaf.type === 'code_block' ? t.leaf.text.length : isInlineText(t.leaf) ? inlineLength(t.leaf.inline) : 0;
 
     if (t.collapsed && t.start >= len) {
+      if (t.leaf.type === 'code_block' && t.leaf.text.length === 0) {
+        this.removeBarrier(t.leaf.id); // mirror of the Backspace empty-block gesture
+        return;
+      }
       if (isInlineText(t.leaf)) {
         // Pull the next inline leaf up into this one (across a container boundary).
         const r = mergeForward(this.doc.blocks, t.leaf.id);
@@ -1552,21 +1562,21 @@ export class BlockSurface {
       case 'ArrowUp':
         return cell.row > 0
           ? this.focusCell(table, cell.row - 1, cell.col, cell.start)
-          : this.exitTable(cell.tableId, 'before');
+          : this.exitBarrier(cell.tableId, 'before');
       case 'ArrowDown':
         return cell.row < rows - 1
           ? this.focusCell(table, cell.row + 1, cell.col, cell.start)
-          : this.exitTable(cell.tableId, 'after');
+          : this.exitBarrier(cell.tableId, 'after');
       case 'ArrowLeft':
         if (cell.start > 0) return false; // move within the cell's text
         if (cell.col > 0) return this.focusCellEnd(table, cell.row, cell.col - 1);
         if (cell.row > 0) return this.focusCellEnd(table, cell.row - 1, cols - 1);
-        return this.exitTable(cell.tableId, 'before');
+        return this.exitBarrier(cell.tableId, 'before');
       case 'ArrowRight':
         if (cell.start < len) return false; // move within the cell's text
         if (cell.col < cols - 1) return this.focusCell(table, cell.row, cell.col + 1, 0);
         if (cell.row < rows - 1) return this.focusCell(table, cell.row + 1, 0, 0);
-        return this.exitTable(cell.tableId, 'after');
+        return this.exitBarrier(cell.tableId, 'after');
       default:
         return false;
     }
@@ -1588,13 +1598,35 @@ export class BlockSurface {
     return this.focusCell(table, row, col, inlineLength(table.rows[row]?.[col] ?? []));
   }
 
-  // Step the caret out of a (top-level) table to the adjacent block. Lands at the
-  // end of the previous inline block / start of the next; when there is no inline
-  // block to land in (e.g. the table is the last block, or the neighbour is
-  // another barrier), seed an empty paragraph there so the table is never a trap.
-  private exitTable(tableId: string, dir: 'before' | 'after'): boolean {
-    const index = this.doc.blocks.findIndex((b) => b.id === tableId);
-    if (index < 0) return false; // nested table: leave it to native movement
+  // Arrow-out of a code block at its edges (SKR-152): ArrowDown on the last line
+  // or ArrowRight at the very end exits below; ArrowUp on the first line or
+  // ArrowLeft at the very start exits above. Interior movement stays native —
+  // this only claims the keystrokes native movement cannot serve (the code block
+  // as first/last block is otherwise a caret trap).
+  private handleCodeArrow(e: KeyboardEvent): boolean {
+    const t = this.leafTarget();
+    if (!t || !t.collapsed || t.leaf.type !== 'code_block') return false;
+    if (!this.isTopLevel(t.blockEl, t.leaf.id)) return false;
+    const text = t.leaf.text;
+    const onLastLine = text.indexOf('\n', t.start) === -1;
+    const onFirstLine = t.start === 0 || text.lastIndexOf('\n', t.start - 1) === -1;
+    if ((e.key === 'ArrowRight' && t.start >= text.length) || (e.key === 'ArrowDown' && onLastLine)) {
+      return this.exitBarrier(t.leaf.id, 'after');
+    }
+    if ((e.key === 'ArrowLeft' && t.start === 0) || (e.key === 'ArrowUp' && onFirstLine)) {
+      return this.exitBarrier(t.leaf.id, 'before');
+    }
+    return false;
+  }
+
+  // Step the caret out of a (top-level) barrier block — a table or a code block —
+  // to the adjacent block. Lands at the end of the previous inline block / start
+  // of the next; when there is no inline block to land in (e.g. the barrier is
+  // the last block, or the neighbour is another barrier), seed an empty paragraph
+  // there so a barrier is never a trap.
+  private exitBarrier(blockId: string, dir: 'before' | 'after'): boolean {
+    const index = this.doc.blocks.findIndex((b) => b.id === blockId);
+    if (index < 0) return false; // nested barrier: leave it to native movement
     const neighbor = dir === 'before' ? this.doc.blocks[index - 1] : this.doc.blocks[index + 1];
     if (neighbor && (neighbor.type === 'paragraph' || neighbor.type === 'heading')) {
       const el = this.leafElementById(neighbor.id);
@@ -1613,10 +1645,11 @@ export class BlockSurface {
     return true;
   }
 
-  // Delete a whole table (the select-across-cells gesture). Removes the block and
-  // lands the caret on the nearest inline neighbour (see range-ops.deleteBlock).
-  private removeTable(tableId: string): void {
-    const r = deleteBlock(this.doc.blocks, tableId);
+  // Delete a whole barrier block (a table via the select-across-cells gesture, an
+  // empty code block via Backspace/Delete). Removes the block and lands the caret
+  // on the nearest inline neighbour (see range-ops.deleteBlock).
+  private removeBarrier(blockId: string): void {
+    const r = deleteBlock(this.doc.blocks, blockId);
     if (r) this.applyStructural(r);
     this.closeSlash();
   }

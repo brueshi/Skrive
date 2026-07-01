@@ -112,6 +112,46 @@ test('Stage 3b: Enter splits a block and Backspace merges it back', async ({ pag
   expect(serializeDocument(parseDocument(md)), 'stable after merge').toBe(md);
 });
 
+test('Stage 3b: a code block is never a trap (SKR-152)', async ({ page }) => {
+  // Arrow-out at the fence edges and Backspace-on-empty removal — the barrier
+  // affordances tables and dividers already have.
+  await open(page, 5);
+  await caretAt(page, 'SKRIVE_LAST_BLOCK');
+  await page.keyboard.press('Enter'); // fresh paragraph, now the last block
+  await page.keyboard.type('/code');
+  await expect(page.getByRole('listbox', { name: 'Insert block' })).toBeVisible();
+  await page.keyboard.press('Enter'); // convert it to a code block
+  await page.waitForTimeout(50);
+  await page.keyboard.type('const x = 1;', { delay: 8 });
+
+  // ArrowDown on the last line of the LAST block exits below into a seeded paragraph.
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.type('BELOWCODE', { delay: 8 });
+  await page.waitForTimeout(80);
+  let md = await serialized(page);
+  expect(md, 'code text landed in the fence').toContain('const x = 1;');
+  expect(md, 'exited below the fence').toContain('BELOWCODE');
+  expect(md.indexOf('BELOWCODE'), 'paragraph sits after the code block').toBeGreaterThan(md.indexOf('const x = 1;'));
+  expect(md, 'the paragraph was not swallowed by the fence').not.toContain('const x = 1;\nBELOWCODE');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+
+  // An EMPTY code block is removed by Backspace, caret landing on the neighbour.
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('/code');
+  await expect(page.getByRole('listbox', { name: 'Insert block' })).toBeVisible();
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(50);
+  const before = await page.evaluate(() => window.__skriveBlockSurface!.blockCount());
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(80);
+  expect(await page.evaluate(() => window.__skriveBlockSurface!.blockCount()), 'empty fence removed').toBe(before - 1);
+  await page.keyboard.type(' AFTERDEL', { delay: 8 });
+  await page.waitForTimeout(80);
+  md = await serialized(page);
+  expect(md, 'caret landed on the inline neighbour').toContain('BELOWCODE AFTERDEL');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
 test('Stage 3b: Delete at a block end merges the next block in', async ({ page }) => {
   await open(page, 5);
   const before = await page.evaluate(() => window.__skriveBlockSurface!.blockCount());
