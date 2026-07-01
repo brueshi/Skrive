@@ -91,6 +91,12 @@ function inlineToModel(nodes: PhrasingContent[] | undefined, marks: InlineMarks)
         out.push(...kids);
         break;
       }
+      case 'delete': {
+        const kids = inlineToModel(n.children, { ...marks, strikethrough: true });
+        if (!kids) return null;
+        out.push(...kids);
+        break;
+      }
       case 'link': {
         const kids = inlineToModel(n.children, { ...marks, link: { href: n.url ?? '', title: n.title ?? null } });
         if (!kids) return null;
@@ -153,7 +159,11 @@ function listToModel(node: List, ctx: ParseCtx, base: BlockBaseInit): BlockNode 
   for (const item of node.children ?? []) {
     const kids = mapListItemChildren(item, ctx);
     if (!kids) return null;
-    items.push({ spread: item.spread === true, children: kids });
+    const li: ListItem = { spread: item.spread === true, children: kids };
+    // GFM task-list state: mdast carries `checked: boolean` for task items and
+    // null/undefined for plain items — only the boolean is modeled.
+    if (typeof item.checked === 'boolean') li.checked = item.checked;
+    items.push(li);
   }
   if (items.length === 0) return null;
 

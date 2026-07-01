@@ -20,9 +20,23 @@
 import type { Heading, Paragraph, PhrasingContent, Root } from 'mdast';
 import { unified } from 'unified';
 import remarkStringify from 'remark-stringify';
+import { gfmStrikethroughToMarkdown } from 'mdast-util-gfm-strikethrough';
+
+// The strikethrough extension (SKR-142) teaches the stringifier `delete` nodes
+// and the matching `~` escaping in plain text, mirroring what the shared parser
+// now models — the two must widen together or the idempotence guard mis-fires.
+// remark-stringify only reads toMarkdown extensions from processor data (the
+// mechanism remark-gfm uses), not from its options, hence the micro-plugin.
+function strikethroughSerialization(this: import('unified').Processor): void {
+  const data = this.data();
+  const extensions = (data.toMarkdownExtensions ??= []);
+  extensions.push(gfmStrikethroughToMarkdown());
+}
 
 // `*` emphasis/strong matches the canonical style this serializer emits.
-const stringifier = unified().use(remarkStringify, { emphasis: '*', strong: '*' });
+const stringifier = unified()
+  .use(strikethroughSerialization)
+  .use(remarkStringify, { emphasis: '*', strong: '*' });
 
 // Serialize a single mdast block. remark-stringify terminates the document with a
 // newline; block joining is the caller's job, so strip it.
@@ -37,29 +51,35 @@ export type LinkRef = { href: string; title: string | null };
 // mark context it sits in. A substrate's inline content is flattened into these,
 // coalescing adjacent text with the same context, before the nested mdast tree is
 // rebuilt.
-export type InlineItem = { em: boolean; strong: boolean; link: LinkRef | null } & (
+export type InlineItem = {
+  em: boolean;
+  strong: boolean;
+  strikethrough: boolean;
+  link: LinkRef | null;
+} & (
   | { kind: 'text' | 'code'; text: string }
   | { kind: 'image'; url: string; alt: string; title: string | null }
   | { kind: 'break' }
 );
 
 export function sameInlineContext(a: InlineItem, b: InlineItem): boolean {
-  if (a.em !== b.em || a.strong !== b.strong) return false;
+  if (a.em !== b.em || a.strong !== b.strong || a.strikethrough !== b.strikethrough) return false;
   if (a.link === null || b.link === null) return a.link === b.link;
   return a.link.href === b.link.href && a.link.title === b.link.title;
 }
 
-type Wrapper = 'em' | 'strong' | 'link';
+type Wrapper = 'strikethrough' | 'em' | 'strong' | 'link';
 
 // Outer-wrapper preference when the lookahead ties — i.e. a span where two or
 // more marks are exactly coextensive. Mark order is normalized, so the original
 // nesting of coextensive marks is unrecoverable; this order is chosen so the
-// common written forms survive re-parse exactly: `***x***` parses em-outside-
-// strong (so em must wrap first), and a fully-bold link is conventionally written
-// `**[label](url)**` (strong before link). The minority forms (`**_x_**`,
+// common written forms survive re-parse exactly: `~~**x**~~` parses delete-
+// outside-strong (so strikethrough must wrap first), `***x***` parses em-outside-
+// strong (em before strong), and a fully-bold link is conventionally written
+// `**[label](url)**` (strong before link). The minority forms (`**~~x~~**`,
 // `[**label**](url)`) canonicalize to the majority nesting when dirtied —
 // identical rendering, flipped tree.
-const WRAPPER_PRIORITY: readonly Wrapper[] = ['em', 'strong', 'link'];
+const WRAPPER_PRIORITY: readonly Wrapper[] = ['strikethrough', 'em', 'strong', 'link'];
 
 // The link-key separator: a NUL, which can never appear in a URL or a link title,
 // so two genuinely different links never collapse to the same grouping key (a
@@ -69,6 +89,7 @@ const LINK_KEY_SEP = String.fromCharCode(0);
 // A wrapper's grouping key at one run: null when the run does not carry the mark;
 // links key on href+title so differently-targeted adjacent links never merge.
 function wrapperKey(item: InlineItem, w: Wrapper): string | null {
+  if (w === 'strikethrough') return item.strikethrough ? 'strikethrough' : null;
   if (w === 'em') return item.em ? 'em' : null;
   if (w === 'strong') return item.strong ? 'strong' : null;
   if (!item.link) return null;
@@ -76,6 +97,7 @@ function wrapperKey(item: InlineItem, w: Wrapper): string | null {
 }
 
 function withoutWrapper(item: InlineItem, w: Wrapper): InlineItem {
+  if (w === 'strikethrough') return { ...item, strikethrough: false };
   if (w === 'em') return { ...item, em: false };
   if (w === 'strong') return { ...item, strong: false };
   return { ...item, link: null };
@@ -129,7 +151,8 @@ export function buildPhrasing(items: InlineItem[]): PhrasingContent[] {
     }
     const chosen = best;
     const inner = buildPhrasing(items.slice(i, i + bestLen).map((it) => withoutWrapper(it, chosen)));
-    if (chosen === 'em') out.push({ type: 'emphasis', children: inner });
+    if (chosen === 'strikethrough') out.push({ type: 'delete', children: inner });
+    else if (chosen === 'em') out.push({ type: 'emphasis', children: inner });
     else if (chosen === 'strong') out.push({ type: 'strong', children: inner });
     else if (item.link) {
       out.push({ type: 'link', url: item.link.href, title: item.link.title, children: inner });

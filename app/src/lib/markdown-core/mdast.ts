@@ -4,22 +4,26 @@
 // configuration, or the two would disagree about what a string means and the
 // guard would mis-fire.
 //
-// GFM is enabled for *tables only* — not the full GFM umbrella. Tables are a
-// modeled construct; strikethrough, task lists, and autolinks are deliberately
-// left as plain CommonMark text so they stay frozen rather than silently losing
-// their syntax when an edited block re-serializes. Widen this only when those
-// constructs are actually modeled.
+// GFM is enabled for *tables, strikethrough, and task lists only* (the latter
+// two adopted in SKR-142) — not the full GFM umbrella. All three are modeled
+// constructs; autolinks are deliberately left as plain CommonMark text so they
+// stay frozen rather than silently losing their syntax when an edited block
+// re-serializes. Widen this only when a construct is actually modeled.
 
 import { fromMarkdown } from 'mdast-util-from-markdown';
+import { gfmStrikethrough } from 'micromark-extension-gfm-strikethrough';
 import { gfmTable } from 'micromark-extension-gfm-table';
+import { gfmTaskListItem } from 'micromark-extension-gfm-task-list-item';
+import { gfmStrikethroughFromMarkdown } from 'mdast-util-gfm-strikethrough';
 import { gfmTableFromMarkdown } from 'mdast-util-gfm-table';
+import { gfmTaskListItemFromMarkdown } from 'mdast-util-gfm-task-list-item';
 import type { Root } from 'mdast';
 
 // Constructed once and reused — the extension factories return stateless config
 // that fromMarkdown only reads, so rebuilding them per parse was pure allocation
 // on a hot path (the serialize idempotence guard parses on every snapshot).
-const extensions = [gfmTable()];
-const mdastExtensions = [gfmTableFromMarkdown()];
+const extensions = [gfmTable(), gfmStrikethrough(), gfmTaskListItem()];
+const mdastExtensions = [gfmTableFromMarkdown(), gfmStrikethroughFromMarkdown(), gfmTaskListItemFromMarkdown()];
 
 // A soft break is presentation, not content: CommonMark renders the single
 // newline inside a paragraph as a space, so hard-wrapped source must not paint
