@@ -112,6 +112,45 @@ test('Stage 3b: Enter splits a block and Backspace merges it back', async ({ pag
   expect(serializeDocument(parseDocument(md)), 'stable after merge').toBe(md);
 });
 
+// Caret at the end of a real HEADING element. The adversarial fixture also puts
+// literal `## …` strings inside paragraphs, so a bare getByText can match the
+// wrong block — scope to heading tags.
+async function caretAtHeading(page: Page, marker: string): Promise<void> {
+  const loc = page.locator('h1, h2, h3', { hasText: marker }).first();
+  await loc.scrollIntoViewIfNeeded();
+  await loc.click();
+  await page.keyboard.press('End');
+}
+
+test('Stage 3b: Enter at the end of a heading drops to body text', async ({ page }) => {
+  // SKR-150: the new block after a heading is a paragraph (Docs convention);
+  // a mid-heading split still keeps the heading type for the remainder.
+  await open(page, 5);
+  await caretAtHeading(page, 'What the draft knows');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('BODYTEXT', { delay: 8 });
+  await page.waitForTimeout(80);
+
+  const md = await serialized(page);
+  expect(md, 'heading intact').toContain('## What the draft knows');
+  expect(md, 'new block is a paragraph, not a heading').toContain('\n\nBODYTEXT');
+  expect(md).not.toContain('## BODYTEXT');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+
+  // Mid-heading split keeps the heading type for the right half. The 5-block
+  // corpus has exactly one real heading; reuse it (part one left it intact).
+  await caretAtHeading(page, 'What the draft knows');
+  for (let i = 0; i < ' knows'.length; i++) await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(80);
+
+  const md2 = await serialized(page);
+  expect(md2, 'left half keeps its level').toContain('## What the draft');
+  // The right half keeps its leading space, canonically escaped in heading context.
+  expect(md2, 'right half stays a heading').toContain('## &#x20;knows');
+  expect(serializeDocument(parseDocument(md2)), 'stable').toBe(md2);
+});
+
 test('Stage 3b: Delete at a block end merges the next block in', async ({ page }) => {
   await open(page, 5);
   const before = await page.evaluate(() => window.__skriveBlockSurface!.blockCount());
