@@ -597,27 +597,33 @@ test('Stage 4: typing over a cross-block selection replaces it', async ({ page }
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
-test('Stage 4: pasting multiple lines creates multiple blocks', async ({ page }) => {
+test('Stage 4: pasting plain text follows CommonMark paragraph semantics', async ({ page }) => {
+  // SKR-148: blank lines separate paragraphs; single newlines are soft breaks
+  // that flow into the paragraph as spaces.
   await open(page, 5);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');
   await page.keyboard.press('Enter');
   await page.keyboard.type('HEAD'); // a fresh block, caret at its end
   const before = await page.evaluate(() => window.__skriveBlockSurface!.blockCount());
 
-  // Paste three lines at the caret (synthetic paste event with plain text).
+  // Paste three paragraphs at the caret (synthetic paste event with plain text);
+  // the middle one is hard-wrapped and must land as ONE flowing paragraph.
   await page.evaluate(() => {
     const root = document.querySelector('.bespoke-root');
     if (!root) throw new Error('no surface root');
     const dt = new DataTransfer();
-    dt.setData('text/plain', 'one\ntwo\nthree');
+    dt.setData('text/plain', 'one\n\ntwo wraps\nacross lines\n\nthree');
     root.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
   });
   await page.waitForTimeout(80);
 
   expect(await page.evaluate(() => window.__skriveBlockSurface!.blockCount()), 'two new blocks').toBe(before + 2);
   const md = await serialized(page);
-  expect(md, 'first pasted line joined the caret block').toContain('HEADone');
-  expect(md).toContain('two');
+  expect(md, 'first pasted paragraph joined the caret block').toContain('HEADone');
+  // The wrapped paragraph is ONE block whose bytes keep the wrap (fidelity)...
+  expect(md, 'pasted bytes preserved verbatim').toContain('two wraps\nacross lines');
+  // ...while the model (and so the DOM) flows the soft break as a space.
+  await expect(page.locator('p', { hasText: 'two wraps across lines' })).toBeVisible();
   expect(md).toContain('three');
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
