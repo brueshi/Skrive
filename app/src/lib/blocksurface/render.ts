@@ -42,6 +42,7 @@ function renderInlineNode(node: InlineNode): Node {
   if (marks.code) dom = wrap('code', dom);
   if (marks.em) dom = wrap('em', dom);
   if (marks.strong) dom = wrap('strong', dom);
+  if (marks.strikethrough) dom = wrap('s', dom);
   if (marks.link) {
     const a = document.createElement('a');
     a.href = marks.link.href;

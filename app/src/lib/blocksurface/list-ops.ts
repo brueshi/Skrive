@@ -75,7 +75,8 @@ export function indentItem(blocks: BlockNode[], leafId: string, gen: () => strin
           if (itemHasLeaf(item, leafId)) {
             if (k === 0) return null; // no previous sibling to nest under
             const prev = b.items[k - 1]!;
-            const moving: ListItem = { spread: item.spread, children: item.children };
+            // Spread-copy so task-list state (checked) travels with the item.
+            const moving: ListItem = { ...item };
             const last = prev.children[prev.children.length - 1];
             const prevChildren =
               last && isList(last) && last.type === b.type
@@ -136,7 +137,8 @@ export function outdentItem(blocks: BlockNode[], leafId: string, gen: () => stri
             const after = child.items.slice(k + 1);
             const liftedChildren =
               after.length > 0 ? [...lifted.children, listLike(child, after, gen)] : lifted.children.slice();
-            const liftedItem: ListItem = { spread: lifted.spread, children: liftedChildren };
+            // Spread-copy so task-list state (checked) survives the lift.
+            const liftedItem: ListItem = { ...lifted, children: liftedChildren };
             const parentChildren =
               before.length > 0
                 ? parentItem.children.map((c, idx) => (idx === ci ? { ...child, items: before, dirty: true } : c))
