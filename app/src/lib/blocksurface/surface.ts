@@ -1034,6 +1034,9 @@ export class BlockSurface {
     }
 
     // Structured / multi-block paste: split the caret block around the insertion.
+    // A leading/trailing pasted PARAGRAPH merges with the split halves — prose
+    // continues at the caret, matching the single-paragraph seamless merge —
+    // while structural blocks (heading, list, code, ...) keep their own block.
     const headEmpty = inlineLength(head) === 0;
     const tailEmpty = inlineLength(tail) === 0;
     const isHeading = t.leaf.type === 'heading';
@@ -1041,12 +1044,26 @@ export class BlockSurface {
     // Clean seam before the first pasted block; later blocks keep the parsed gaps.
     const inserted = parsed.map((b, i) => (i === 0 ? { ...b, gapBefore: null } : b));
 
+    const first = inserted[0]!;
+    const last = inserted[inserted.length - 1]!;
+    const firstPara = !headEmpty && first.type === 'paragraph' ? first : null;
+    const lastPara = !tailEmpty && last !== first && last.type === 'paragraph' ? last : null;
+
     const out: BlockNode[] = [];
-    if (!headEmpty) out.push({ ...t.leaf, inline: head, dirty: true });
-    out.push(...inserted);
+    if (firstPara) {
+      out.push({ ...t.leaf, inline: [...head, ...firstPara.inline], dirty: true });
+    } else {
+      if (!headEmpty) out.push({ ...t.leaf, inline: head, dirty: true });
+      out.push(first);
+    }
+    out.push(...inserted.slice(1, lastPara ? -1 : undefined));
 
     let caret: { id: string; offset: number };
-    if (!tailEmpty) {
+    if (lastPara) {
+      const merged: BlockNode = { ...lastPara, inline: [...lastPara.inline, ...tail], dirty: true };
+      out.push(merged);
+      caret = { id: merged.id, offset: inlineLength(lastPara.inline) };
+    } else if (!tailEmpty) {
       const tailBlock = this.newInlineBlock(isHeading ? 'heading' : 'paragraph', tail, level);
       out.push(tailBlock);
       caret = { id: tailBlock.id, offset: 0 };
