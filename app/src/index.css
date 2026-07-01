@@ -147,6 +147,9 @@
   --skrive-duration-quick: 110ms;
   --skrive-duration-standard: 150ms;
   --skrive-duration-slow: 160ms;
+  /* Sidebar collapse/expand — a drawer-range glide, slower than `slow` so
+     the rail reads as sliding out rather than snapping shut. */
+  --skrive-duration-drawer: 220ms;
   --skrive-easing: cubic-bezier(0.4, 0, 0.2, 1);
   --skrive-easing-out: cubic-bezier(0.16, 1, 0.3, 1);
 
@@ -270,8 +273,8 @@ body {
   margin-top: calc(-1 * var(--skrive-shell-pad));
   margin-bottom: calc(-1 * var(--skrive-shell-pad));
   margin-left: calc(-1 * var(--skrive-shell-pad));
-  /* Keep the base `.sidebar { overflow: hidden auto }` — vertical
-     scrolls when the file tree overflows. */
+  /* The rail clips (base `.sidebar { overflow: hidden }`); the vertical
+     scroll for an overflowing tree lives on `.sidebar-inner`. */
 }
 
 /* The header's tabs slot — fills the middle of the topbar between the
@@ -1206,7 +1209,9 @@ body {
 
   width: var(--skrive-sidebar-width, 260px);
   flex-shrink: 0;
-  overflow: hidden auto;
+  /* Clip horizontally so the inner wrapper can slide out on collapse;
+     vertical scroll lives on `.sidebar-inner` now. */
+  overflow: hidden;
   background: var(--skrive-bg);
   font-family: var(--skrive-ui-font);
   font-size: 13px;
@@ -1217,16 +1222,37 @@ body {
      repaint the editor card next door. */
   contain: layout style paint;
   /* ease-out for collapse feels noticeably snappier than the symmetric
-     curve at the same duration: the user gets visible motion within
-     the first 50ms instead of waiting for the curve's mid-point. */
+     curve at the same duration. Opacity fades faster than the width
+     shrinks so the rail is gone before it can look squished. */
   transition:
-    width var(--skrive-duration-slow) var(--skrive-easing-out),
+    width var(--skrive-duration-drawer) var(--skrive-easing-out),
     opacity var(--skrive-duration-slow) var(--skrive-easing-out);
+}
+
+/* Holds the sidebar's content at full width and slides it out on collapse
+   (translateX) so rows glide off-edge instead of compressing as the rail
+   narrows. Owns the vertical scroll + is the sticky-header context. */
+.sidebar-inner {
+  width: var(--skrive-sidebar-width, 260px);
+  align-self: flex-start;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden auto;
+  transition: transform var(--skrive-duration-drawer) var(--skrive-easing-out);
 }
 
 .sidebar.collapsed {
   width: 0;
   opacity: 0;
+}
+
+.sidebar.collapsed .sidebar-inner {
+  /* A subtle drift, not a full slide-out — the content eases toward the
+     closing edge while the opacity fade carries it away. A full
+     translateX(-100%) reads as the rows racing off-screen. */
+  transform: translateX(-1.25rem);
 }
 
 .sidebar.dragging {
@@ -1236,14 +1262,26 @@ body {
   transition: opacity var(--skrive-duration-slow) var(--skrive-easing-out);
 }
 
+.sidebar.dragging .sidebar-inner {
+  /* Content tracks the cursor 1:1 during resize — no lag. */
+  transition: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .sidebar {
+  .sidebar,
+  .sidebar-inner {
     transition: none;
   }
 }
 
 .resize-handle {
-  width: 4px;
+  /* The visible seam is thin, but the hit area spans the whole trough
+     between the rail and the editor card (the card's margin-left). The box
+     is widened by that gap and pulled back with a negative margin, so the
+     clickable/hover area covers the trough while the layout footprint stays
+     the thin seam — clicking anywhere in the gap now hits the handle. */
+  width: calc(4px + var(--skrive-shell-gap));
+  margin-right: calc(-1 * var(--skrive-shell-gap));
   flex-shrink: 0;
   cursor: col-resize;
   position: relative;
@@ -1266,6 +1304,16 @@ body {
 .resize-handle:hover::before,
 .resize-handle.dragging::before {
   background: var(--skrive-fg);
+}
+
+/* Collapsed state: a thin invisible strip pinned to the window's left edge
+   that reveals the sidebar on click. Wider than the resize line for an
+   easy target; the hover line (::before) is the only visible affordance. */
+.resize-handle.reveal {
+  /* Same trough-spanning hit area (inherits the negative margin), just a
+     touch wider at the edge and a pointer cursor for the reveal click. */
+  width: calc(10px + var(--skrive-shell-gap));
+  cursor: pointer;
 }
 
 .sidebar .section-header {

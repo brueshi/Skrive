@@ -28,7 +28,6 @@ import {
 } from 'react';
 import type { FileEntry, SidebarSortKey } from '@skrive/shared';
 import {
-  SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
   selectActivePath,
@@ -490,6 +489,7 @@ export function Sidebar() {
   const sidebarWidth = useProjectStore((s) => s.sidebarWidth);
   const setSidebarWidth = useProjectStore((s) => s.setSidebarWidth);
   const setSidebarVisible = useProjectStore((s) => s.setSidebarVisible);
+  const toggleSidebar = useProjectStore((s) => s.toggleSidebar);
   const createFile = useProjectStore((s) => s.createFile);
   const createDirectory = useProjectStore((s) => s.createDirectory);
   const deleteFile = useProjectStore((s) => s.deleteFile);
@@ -657,62 +657,137 @@ export function Sidebar() {
   }, [pendingDelete, deleteFile, deleteDirectory]);
 
   // ---------- Drag-to-resize ----------
+  //
+  // The drag is driven imperatively: on every pointer move we write the
+  // width CSS var straight to the DOM (coalesced to one rAF per frame) and
+  // only commit to the store on release. Routing each move through React
+  // state would re-render the whole tree per frame and stutter the drag.
 
+  const asideRef = useRef<HTMLElement>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const dragStartRef = useRef<{ x: number; w: number } | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const pendingXRef = useRef(0);
+  // Last width written during the current drag; committed to the store on
+  // release. Stays put when a drag collapses (below the threshold) so
+  // re-opening returns to the pre-drag size.
+  const dragWidthRef = useRef(sidebarWidth);
+  // Tears down the in-flight drag (listeners, rAF, body styles). Stored in a
+  // ref so an unmount mid-drag — or the next press — can call it too.
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  // Set true once a press becomes a real drag, so the `click` that trails a
+  // drag doesn't also toggle the sidebar.
+  const justDraggedRef = useRef(false);
 
+  const CLICK_MOVE_THRESHOLD_PX = 4;
+  // Pulling the handle left past this width snaps the sidebar shut. The
+  // stored width stays put, so re-opening returns to the prior size.
+  const COLLAPSE_THRESHOLD_PX = 100;
+
+  // Pointer events here handle *dragging only* (resize + drag-to-collapse).
+  // Collapse/reveal on a plain click is owned by onClick below, because
+  // WKWebView doesn't reliably deliver pointerup for a motionless press —
+  // only the high-level `click` event survives that. The drag doesn't engage
+  // (no cursor/isDragging) until the pointer actually moves past the
+  // threshold, so a motionless press leaves no state to clean up.
   const startDrag = useCallback(
     (e: PointerEvent<HTMLDivElement>) => {
       if (e.button !== 0) return;
-      e.preventDefault();
-      setIsDragging(true);
-      dragStartRef.current = { x: e.clientX, w: sidebarWidth };
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-    },
-    [sidebarWidth]
-  );
+      dragCleanupRef.current?.(); // clear any dangling gesture
+      const el = e.currentTarget;
+      const pointerId = e.pointerId;
+      const startX = e.clientX;
+      const startW = sidebarWidth;
+      dragWidthRef.current = sidebarWidth;
+      justDraggedRef.current = false;
+      let moved = false;
 
-  // When the toggle button was retired (Phase 13c), we lost the chrome
-  // affordance for collapsing the sidebar. Drag-to-collapse fills the
-  // gap: pulling the resize handle below this threshold snaps the
-  // sidebar shut. The stored width stays put, so a subsequent ⌘[ to
-  // re-open returns to whatever size it was at before.
-  const COLLAPSE_THRESHOLD_PX = 100;
-
-  useEffect(() => {
-    if (!isDragging) return;
-    function onMove(e: globalThis.PointerEvent) {
-      const start = dragStartRef.current;
-      if (!start) return;
-      const next = start.w + (e.clientX - start.x);
-      if (next < COLLAPSE_THRESHOLD_PX) {
-        setSidebarVisible(false);
-        setIsDragging(false);
-        dragStartRef.current = null;
+      const cleanup = () => {
+        if (rafRef.current !== null) {
+          cancelAnimationFrame(rafRef.current);
+          rafRef.current = null;
+        }
+        el.removeEventListener('pointermove', onMove);
+        el.removeEventListener('pointerup', onUp);
+        el.removeEventListener('pointercancel', onUp);
+        try {
+          el.releasePointerCapture(pointerId);
+        } catch {
+          // Not captured / already released — ignore.
+        }
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
-        return;
-      }
-      setSidebarWidth(next);
-    }
-    function onUp() {
-      setIsDragging(false);
-      dragStartRef.current = null;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    }
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp, { once: true });
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-    };
-  }, [isDragging, setSidebarWidth, setSidebarVisible]);
+        dragCleanupRef.current = null;
+        setIsDragging(false);
+      };
 
-  const resetWidth = useCallback(() => {
-    setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
-  }, [setSidebarWidth]);
+      const apply = () => {
+        rafRef.current = null;
+        const dx = pendingXRef.current - startX;
+        if (!moved && Math.abs(dx) <= CLICK_MOVE_THRESHOLD_PX) return;
+        if (!moved) {
+          // First real movement — engage the drag.
+          moved = true;
+          justDraggedRef.current = true;
+          setIsDragging(true);
+          document.body.style.cursor = 'col-resize';
+          document.body.style.userSelect = 'none';
+        }
+        const raw = startW + dx;
+        if (raw < COLLAPSE_THRESHOLD_PX) {
+          cleanup();
+          setSidebarVisible(false); // dragged shut; keep stored width
+          return;
+        }
+        const clamped = Math.max(
+          SIDEBAR_MIN_WIDTH,
+          Math.min(SIDEBAR_MAX_WIDTH, raw)
+        );
+        dragWidthRef.current = clamped;
+        asideRef.current?.style.setProperty(
+          '--skrive-sidebar-width',
+          `${clamped}px`
+        );
+      };
+
+      function onMove(ev: globalThis.PointerEvent) {
+        pendingXRef.current = ev.clientX;
+        if (rafRef.current === null) {
+          rafRef.current = requestAnimationFrame(apply);
+        }
+      }
+      function onUp() {
+        const wasResize = moved;
+        cleanup();
+        if (wasResize) setSidebarWidth(dragWidthRef.current);
+        // A motionless release is a click — onClick handles the toggle.
+      }
+
+      try {
+        el.setPointerCapture(pointerId);
+      } catch {
+        // Capture is best-effort; element listeners still fire without it.
+      }
+      dragCleanupRef.current = cleanup;
+      el.addEventListener('pointermove', onMove);
+      el.addEventListener('pointerup', onUp);
+      el.addEventListener('pointercancel', onUp);
+    },
+    [sidebarWidth, setSidebarWidth, setSidebarVisible]
+  );
+
+  // Click owns collapse/reveal — the one release event WKWebView delivers
+  // reliably. Ignores the click that trails a drag (resize / drag-collapse).
+  const toggleFromHandle = useCallback(() => {
+    dragCleanupRef.current?.();
+    if (justDraggedRef.current) {
+      justDraggedRef.current = false;
+      return;
+    }
+    toggleSidebar();
+  }, [toggleSidebar]);
+
+  // Safety net: tear down a drag if the component unmounts mid-gesture.
+  useEffect(() => () => dragCleanupRef.current?.(), []);
 
   const fileCount = manifest?.files.length ?? 0;
   const sidebarStyle = {
@@ -722,6 +797,7 @@ export function Sidebar() {
   return (
     <>
       <aside
+        ref={asideRef}
         className={`sidebar${sidebarVisible ? '' : ' collapsed'}${
           isDragging ? ' dragging' : ''
         }`}
@@ -731,6 +807,9 @@ export function Sidebar() {
         // @ts-expect-error inert is a string attribute in HTML
         inert={!sidebarVisible ? '' : undefined}
       >
+        {/* Inner keeps its full width as the rail collapses and slides out
+            via translateX, so rows glide off rather than squishing to fit. */}
+        <div className="sidebar-inner">
         <header className="section-header">
           {manifest ? (
             <DropdownMenu.Root>
@@ -906,21 +985,32 @@ export function Sidebar() {
             </div>
           </>
         )}
+        </div>
       </aside>
 
-      {sidebarVisible && (
-        <div
-          className={`resize-handle${isDragging ? ' dragging' : ''}`}
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize sidebar"
-          aria-valuenow={sidebarWidth}
-          aria-valuemin={SIDEBAR_MIN_WIDTH}
-          aria-valuemax={SIDEBAR_MAX_WIDTH}
-          onPointerDown={startDrag}
-          onDoubleClick={resetWidth}
-        />
-      )}
+      {/* Always mounted. When the sidebar is open it's the resize handle;
+          when collapsed it becomes a thin, invisible edge strip that reveals
+          the sidebar on click (a faint line surfaces on hover). */}
+      <div
+        className={`resize-handle${isDragging ? ' dragging' : ''}${
+          sidebarVisible ? '' : ' reveal'
+        }`}
+        role={sidebarVisible ? 'separator' : 'button'}
+        aria-orientation={sidebarVisible ? 'vertical' : undefined}
+        aria-label={sidebarVisible ? 'Resize sidebar' : 'Show sidebar'}
+        aria-valuenow={sidebarVisible ? sidebarWidth : undefined}
+        aria-valuemin={sidebarVisible ? SIDEBAR_MIN_WIDTH : undefined}
+        aria-valuemax={sidebarVisible ? SIDEBAR_MAX_WIDTH : undefined}
+        tabIndex={0}
+        onPointerDown={sidebarVisible ? startDrag : undefined}
+        onClick={toggleFromHandle}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            toggleSidebar();
+          }
+        }}
+      />
 
       <DeleteConfirmModal
         open={pendingDelete !== null}
