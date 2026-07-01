@@ -1352,8 +1352,11 @@ export class BlockSurface {
     const [left, right] = splitInline(inline, t.start);
 
     const leftBlock: BlockNode = { ...t.leaf, inline: left, dirty: true };
+    // Enter at the END of a heading drops to body text (the Docs/Notion
+    // convention); splitting mid-heading keeps the heading type for the rest.
+    const rightType = t.leaf.type === 'heading' && inlineLength(right) === 0 ? 'paragraph' : t.leaf.type;
     const level = t.leaf.type === 'heading' ? t.leaf.level : 1;
-    const rightBlock = this.newInlineBlock(t.leaf.type, right, level);
+    const rightBlock = this.newInlineBlock(rightType, right, level);
 
     const blocks = this.doc.blocks.slice();
     blocks.splice(index, 1, leftBlock, rightBlock);
