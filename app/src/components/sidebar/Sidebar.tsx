@@ -23,9 +23,10 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
-  type PointerEvent
+  type PointerEvent,
+  type ReactNode
 } from 'react';
-import type { FileEntry } from '@skrive/shared';
+import type { FileEntry, SidebarSortKey } from '@skrive/shared';
 import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
@@ -41,8 +42,43 @@ import * as ContextMenu from '@radix-ui/react-context-menu';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { DeleteConfirmModal } from '../DeleteConfirmModal';
 import { DocIcon } from '../icons/DocIcon';
+import { IconClock } from '../icons/IconClock';
 import { IconFolder } from '../icons/IconFolder';
 import { IconPlus } from '../icons/IconPlus';
+import { IconSort } from '../icons/IconSort';
+import { IconStar } from '../icons/IconStar';
+
+/** How many recently-opened files the Recents zone shows. */
+const RECENT_DISPLAY_CAP = 5;
+
+const SORT_LABELS: Record<SidebarSortKey, string> = {
+  name: 'Name',
+  modified: 'Recently modified',
+  created: 'Recently created'
+};
+
+type FileCompare = (a: FileEntry, b: FileEntry) => number;
+
+// Comparator for the "All" tree's files. Folders always stay alphabetical
+// (a folder has no meaningful modified/created stamp of its own).
+function fileComparator(sortKey: SidebarSortKey): FileCompare {
+  switch (sortKey) {
+    case 'modified':
+      return (a, b) =>
+        (b.modifiedMs ?? 0) - (a.modifiedMs ?? 0) ||
+        a.name.localeCompare(b.name);
+    case 'created':
+      // createdMs lands with the native scanner (Zig core) in SKR-138 —
+      // until then this falls back to modified time, and the sort menu
+      // doesn't yet offer the option.
+      return (a, b) =>
+        (b.modifiedMs ?? 0) - (a.modifiedMs ?? 0) ||
+        a.name.localeCompare(b.name);
+    case 'name':
+    default:
+      return (a, b) => a.name.localeCompare(b.name);
+  }
+}
 
 type TreeFolder = {
   name: string;
@@ -57,7 +93,7 @@ function projectName(root: string | null | undefined): string {
   return parts[parts.length - 1] ?? root;
 }
 
-function buildTree(files: FileEntry[]): TreeFolder {
+function buildTree(files: FileEntry[], fileCompare: FileCompare): TreeFolder {
   const root: TreeFolder = { name: '', path: '', folders: [], files: [] };
   const byPath = new Map<string, TreeFolder>();
   byPath.set('', root);
@@ -86,7 +122,7 @@ function buildTree(files: FileEntry[]): TreeFolder {
 
   const sortFolder = (folder: TreeFolder) => {
     folder.folders.sort((a, b) => a.name.localeCompare(b.name));
-    folder.files.sort((a, b) => a.name.localeCompare(b.name));
+    folder.files.sort(fileCompare);
     folder.folders.forEach(sortFolder);
   };
   sortFolder(root);
@@ -131,8 +167,10 @@ type FileRowProps = {
   depth: number;
   lastChild: boolean;
   parentChain: boolean[];
+  pinned: boolean;
   onRename: (file: FileEntry) => void;
   onDelete: (file: FileEntry) => void;
+  onTogglePin: (file: FileEntry) => void;
 };
 
 function FileRow({
@@ -140,8 +178,10 @@ function FileRow({
   depth,
   lastChild,
   parentChain,
+  pinned,
   onRename,
-  onDelete
+  onDelete,
+  onTogglePin
 }: FileRowProps) {
   const activePath = useProjectStore(selectActivePath);
   const openTab = useProjectStore((s) => s.openTab);
@@ -185,10 +225,23 @@ function FileRow({
                 <span className="file-filename">{resolved.secondary}</span>
               )}
             </span>
+            {pinned && (
+              <span className="file-pin-marker" aria-hidden="true">
+                <IconStar size={16} filled />
+              </span>
+            )}
           </button>
         </ContextMenu.Trigger>
         <ContextMenu.Portal>
           <ContextMenu.Content className="ctx-menu">
+            <ContextMenu.Item
+              className="ctx-item"
+              onSelect={() => onTogglePin(file)}
+            >
+              <span className="ctx-label">
+                {pinned ? 'Remove from Favorites' : 'Pin to Favorites'}
+              </span>
+            </ContextMenu.Item>
             <ContextMenu.Item
               className="ctx-item"
               onSelect={() => onRename(file)}
@@ -216,9 +269,11 @@ type FolderTreeProps = {
   lastChild: boolean;
   parentChain: boolean[];
   collapsed: ReadonlySet<string>;
+  pinnedPaths: ReadonlySet<string>;
   onToggle: (path: string) => void;
   onFileRename: (file: FileEntry) => void;
   onFileDelete: (file: FileEntry) => void;
+  onFileTogglePin: (file: FileEntry) => void;
   onDirDelete: (dir: string) => void;
 };
 
@@ -229,9 +284,11 @@ function FolderTree(props: FolderTreeProps) {
     lastChild,
     parentChain,
     collapsed,
+    pinnedPaths,
     onToggle,
     onFileRename,
     onFileDelete,
+    onFileTogglePin,
     onDirDelete
   } = props;
   const isExpanded = !collapsed.has(folder.path);
@@ -303,8 +360,10 @@ function FolderTree(props: FolderTreeProps) {
                     i === folder.files.length - 1 && folder.folders.length === 0
                   }
                   parentChain={chain}
+                  pinned={pinnedPaths.has(file.path)}
                   onRename={onFileRename}
                   onDelete={onFileDelete}
+                  onTogglePin={onFileTogglePin}
                 />
               ))}
             </ul>
@@ -322,6 +381,98 @@ function FolderTree(props: FolderTreeProps) {
         </>
       )}
     </>
+  );
+}
+
+// ============================ Special groups ============================
+
+// A flat, labelled group surfaced above the folder tree (Favorites, Recents).
+// Rows render at depth 0 with no spine guides. Renders nothing when empty so
+// the zones only appear when they hold something.
+type SpecialGroupProps = {
+  title: string;
+  icon: ReactNode;
+  files: FileEntry[];
+  pinnedPaths: ReadonlySet<string>;
+  onRename: (file: FileEntry) => void;
+  onDelete: (file: FileEntry) => void;
+  onTogglePin: (file: FileEntry) => void;
+};
+
+function SpecialGroup({
+  title,
+  icon,
+  files,
+  pinnedPaths,
+  onRename,
+  onDelete,
+  onTogglePin
+}: SpecialGroupProps) {
+  if (files.length === 0) return null;
+  return (
+    <div className="sidebar-pins">
+      <div className="sidebar-pins__header">
+        {icon}
+        <span className="sidebar-pins__title">{title}</span>
+        <span className="sidebar-pins__count">{files.length}</span>
+      </div>
+      <ul className="files">
+        {files.map((file, i) => (
+          <FileRow
+            key={file.path}
+            file={file}
+            depth={0}
+            lastChild={i === files.length - 1}
+            parentChain={[]}
+            pinned={pinnedPaths.has(file.path)}
+            onRename={onRename}
+            onDelete={onDelete}
+            onTogglePin={onTogglePin}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// Sort control for the "All" tree. Currently offers Name + Recently
+// modified; Recently created joins once the native scanner supplies a
+// birthtime. Persists via the store's setSortKey.
+function SortMenu({
+  sortKey,
+  onChange
+}: {
+  sortKey: SidebarSortKey;
+  onChange: (key: SidebarSortKey) => void;
+}) {
+  const options: SidebarSortKey[] = ['name', 'modified'];
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Sort files"
+          title={`Sort: ${SORT_LABELS[sortKey]}`}
+        >
+          <IconSort size={16} />
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content className="ctx-menu" align="end" sideOffset={4}>
+          {options.map((key) => (
+            <DropdownMenu.Item
+              key={key}
+              className="ctx-item"
+              onSelect={() => onChange(key)}
+            >
+              <span className="ctx-label">{SORT_LABELS[key]}</span>
+              {sortKey === key && <span className="ctx-shortcut">✓</span>}
+            </DropdownMenu.Item>
+          ))}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }
 
@@ -343,6 +494,11 @@ export function Sidebar() {
   const createDirectory = useProjectStore((s) => s.createDirectory);
   const deleteFile = useProjectStore((s) => s.deleteFile);
   const deleteDirectory = useProjectStore((s) => s.deleteDirectory);
+  const pinned = useProjectStore((s) => s.pinned);
+  const togglePin = useProjectStore((s) => s.togglePin);
+  const sortKey = useProjectStore((s) => s.sortKey);
+  const setSortKey = useProjectStore((s) => s.setSortKey);
+  const recentFiles = usePreferencesStore((s) => s.recentFiles);
 
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
     () => new Set()
@@ -353,8 +509,39 @@ export function Sidebar() {
   const [pendingDelete, setPendingDelete] = useState<DeleteTarget | null>(null);
 
   const tree = useMemo(
-    () => buildTree(manifest?.files ?? []),
-    [manifest?.files]
+    () => buildTree(manifest?.files ?? [], fileComparator(sortKey)),
+    [manifest?.files, sortKey]
+  );
+
+  const pinnedPaths = useMemo(() => new Set(pinned), [pinned]);
+
+  // Recently-opened files for this project, most-recent first, resolved to
+  // live files (skipping any that have since gone away) and capped. Same
+  // source + filtering as the command-palette switcher.
+  const recentEntries = useMemo(() => {
+    if (!manifest) return [];
+    const byPath = new Map(manifest.files.map((f) => [f.path, f]));
+    return recentFiles
+      .filter((r) => r.projectPath === manifest.root)
+      .map((r) => byPath.get(r.filePath))
+      .filter((f): f is FileEntry => f !== undefined)
+      .slice(0, RECENT_DISPLAY_CAP);
+  }, [recentFiles, manifest]);
+
+  // Resolve pins to live files in pin order, skipping any whose file has
+  // gone away. Deletes/renames prune the stored list, so a miss here is
+  // only a transient window between a watcher event and the store catching
+  // up — rendering nothing for it is the safe outcome.
+  const pinnedFiles = useMemo(() => {
+    const byPath = new Map((manifest?.files ?? []).map((f) => [f.path, f]));
+    return pinned
+      .map((p) => byPath.get(p))
+      .filter((f): f is FileEntry => f !== undefined);
+  }, [pinned, manifest?.files]);
+
+  const toggleFilePin = useCallback(
+    (file: FileEntry) => togglePin(file.path),
+    [togglePin]
   );
 
   const toggleCollapse = useCallback((p: string) => {
@@ -653,39 +840,72 @@ export function Sidebar() {
           </p>
         )}
 
-        <div className="file-groups">
-          {tree.files.length > 0 && (
-            <ul className="files">
-              {tree.files.map((file, i) => (
-                <FileRow
-                  key={file.path}
-                  file={file}
+        <SpecialGroup
+          title="Favorites"
+          icon={<IconStar size={16} filled />}
+          files={pinnedFiles}
+          pinnedPaths={pinnedPaths}
+          onRename={renameFile}
+          onDelete={requestDeleteFile}
+          onTogglePin={toggleFilePin}
+        />
+        <SpecialGroup
+          title="Recents"
+          icon={<IconClock size={16} />}
+          files={recentEntries}
+          pinnedPaths={pinnedPaths}
+          onRename={renameFile}
+          onDelete={requestDeleteFile}
+          onTogglePin={toggleFilePin}
+        />
+
+        {manifest && fileCount > 0 && (
+          <>
+            <div className="sidebar-pins__header sidebar-all-header">
+              <span className="sidebar-pins__title">All</span>
+              <span className="sidebar-pins__count">{fileCount}</span>
+              <SortMenu sortKey={sortKey} onChange={setSortKey} />
+            </div>
+            <div className="file-groups">
+              {tree.files.length > 0 && (
+                <ul className="files">
+                  {tree.files.map((file, i) => (
+                    <FileRow
+                      key={file.path}
+                      file={file}
+                      depth={0}
+                      lastChild={
+                        i === tree.files.length - 1 &&
+                        tree.folders.length === 0
+                      }
+                      parentChain={[]}
+                      pinned={pinnedPaths.has(file.path)}
+                      onRename={renameFile}
+                      onDelete={requestDeleteFile}
+                      onTogglePin={toggleFilePin}
+                    />
+                  ))}
+                </ul>
+              )}
+              {tree.folders.map((folder, i) => (
+                <FolderTree
+                  key={folder.path}
+                  folder={folder}
                   depth={0}
-                  lastChild={
-                    i === tree.files.length - 1 && tree.folders.length === 0
-                  }
+                  lastChild={i === tree.folders.length - 1}
                   parentChain={[]}
-                  onRename={renameFile}
-                  onDelete={requestDeleteFile}
+                  collapsed={collapsed}
+                  pinnedPaths={pinnedPaths}
+                  onToggle={toggleCollapse}
+                  onFileRename={renameFile}
+                  onFileDelete={requestDeleteFile}
+                  onFileTogglePin={toggleFilePin}
+                  onDirDelete={requestDeleteDirectory}
                 />
               ))}
-            </ul>
-          )}
-          {tree.folders.map((folder, i) => (
-            <FolderTree
-              key={folder.path}
-              folder={folder}
-              depth={0}
-              lastChild={i === tree.folders.length - 1}
-              parentChain={[]}
-              collapsed={collapsed}
-              onToggle={toggleCollapse}
-              onFileRename={renameFile}
-              onFileDelete={requestDeleteFile}
-              onDirDelete={requestDeleteDirectory}
-            />
-          ))}
-        </div>
+            </div>
+          </>
+        )}
       </aside>
 
       {sidebarVisible && (

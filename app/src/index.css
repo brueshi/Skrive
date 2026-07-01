@@ -1604,6 +1604,80 @@ body {
   box-shadow: inset 2px 0 0 var(--skrive-fg);
 }
 
+/* Favorites — pinned files surfaced above the folder tree. A flat list
+   (pins render at depth 0, no spine guides), separated from the tree by a
+   hairline so the curated zone reads apart from containment. */
+.sidebar .sidebar-pins {
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--skrive-rule);
+}
+
+.sidebar .sidebar-pins__header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 1rem;
+  color: var(--skrive-muted);
+}
+
+.sidebar .sidebar-pins__title {
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Quiet count at the trailing edge of a special-group header — a neutral
+   tabular number, not a coloured badge. */
+.sidebar .sidebar-pins__count {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--skrive-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* "All" section header — the folder tree's heading. No leading icon, so its
+   title is indented to align with the iconned Favorites/Recents titles; it
+   also carries the sort control. */
+.sidebar .sidebar-all-header {
+  margin-top: 0.25rem;
+}
+
+.sidebar .sidebar-all-header .sidebar-pins__title {
+  margin-left: calc(16px + 0.375rem);
+}
+
+/* Keep the 22px sort button from inflating the header row height. */
+.sidebar .sidebar-all-header .icon-button {
+  margin-block: -0.25rem;
+}
+
+/* Pinned-state marker on a tree file row: a small dimmed star at the
+   trailing edge, ambient status rather than an action. Redundant inside
+   the Favorites zone (every row is pinned there), so hidden in it. */
+.sidebar .file-pin-marker {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.75rem;
+  height: 0.75rem;
+  color: var(--skrive-muted);
+  opacity: 0.7;
+}
+
+.sidebar .file-pin-marker svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.sidebar .sidebar-pins .file-pin-marker {
+  display: none;
+}
+
 /* Ancestor spines are inline-styled per row by `buildSpineStyle()` in
    the component. The set of spine columns drawn on a given row is
    computed from its ancestor-lastness chain: a spine at column d is
