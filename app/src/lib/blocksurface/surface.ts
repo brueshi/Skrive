@@ -869,6 +869,10 @@ export class BlockSurface {
     const markdown = fromHtml ?? (plain && plain.length > 0 ? plain : null);
     if (markdown == null) return;
     e.preventDefault();
+    // A code block takes the clipboard verbatim — newlines intact, no Markdown
+    // interpretation (Notion / VS Code / Obsidian all paste literally into code).
+    // Must run before segmentation, which would flow the newlines to spaces (F24).
+    if (this.pasteIntoCode(plain && plain.length > 0 ? plain : markdown)) return;
     // Block insert only lands at a collapsed caret in a top-level inline leaf.
     // Anywhere else (nested list/quote, code, table cell, or a selection) falls
     // back to the plain split-paste for v1 — see SKR-119 scope.
@@ -876,6 +880,21 @@ export class BlockSurface {
       this.pasteText(plain && plain.length > 0 ? plain : markdown, 'flow');
     }
   };
+
+  // Paste verbatim into a code block: splice the raw clipboard text — newlines and
+  // all — into block.text, replacing any selection within the block. Returns false
+  // when the caret isn't in a single code block, so the caller runs the normal
+  // interpreted paste. Line endings are normalized to \n (the model's one policy);
+  // otherwise the text is untouched — no Markdown parsing, no newline flowing.
+  private pasteIntoCode(text: string): boolean {
+    const t = this.leafTarget();
+    if (!t || t.leaf.type !== 'code_block' || t.spansBlocks) return false;
+    const raw = text.replace(/\r\n?/g, '\n');
+    const next = t.leaf.text.slice(0, t.start) + raw + t.leaf.text.slice(t.end);
+    this.editCodeText(t.leaf, t.blockEl, next, t.start + raw.length);
+    this.scheduleSerialize();
+    return true;
+  }
 
   // Cmd/Ctrl+Shift+V handler: read the OS clipboard's plain text (via the shell
   // bridge, falling back to the async Clipboard API) and insert it literally,
