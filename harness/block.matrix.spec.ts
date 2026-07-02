@@ -667,6 +667,25 @@ test('Stage 4: pasting plain text follows CommonMark paragraph semantics', async
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
+test('Stage 4: pasting into a code block keeps newlines literal (SKR-162)', async ({ page }) => {
+  // A code block takes the clipboard verbatim; the flow path must not collapse the
+  // newlines to spaces the way it does for prose.
+  await open(page, 5);
+  await insertViaMenu(page, 'code');
+  await page.evaluate(() => {
+    const root = document.querySelector('.bespoke-root');
+    if (!root) throw new Error('no surface root');
+    const dt = new DataTransfer();
+    dt.setData('text/plain', 'const a = 1;\nconst b = 2;');
+    root.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await page.waitForTimeout(80);
+  const md = await serialized(page);
+  expect(md, 'both pasted lines land as separate lines in the code block').toContain('const a = 1;\nconst b = 2;');
+  expect(md).toMatch(/```/);
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
 test('Stage 4: selecting across a divider and deleting removes it', async ({ page }) => {
   await open(page, 5);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');
