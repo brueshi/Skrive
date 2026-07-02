@@ -25,6 +25,7 @@ export type InlineMarks = {
   em?: boolean;
   strong?: boolean;
   code?: boolean;
+  strikethrough?: boolean;
   link?: { href: string; title: string | null };
 };
 
@@ -81,6 +82,10 @@ export type ListItem = {
   /** The item's own rhythm — whether ITS child blocks are blank-line separated,
    *  distinct from the list's spread (blank lines between items). */
   spread: boolean;
+  /** GFM task-list state (SKR-142): true/false for `- [x]` / `- [ ]`, absent for
+   *  a plain item. Lives in the `.md` bytes themselves — no managed-layer
+   *  dependency. */
+  checked?: boolean;
   children: BlockNode[];
 };
 export type BulletListBlock = BlockBase & {

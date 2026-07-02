@@ -256,6 +256,10 @@ function markEl(tag: string, marks: InlineMarks): InlineMarks {
       return { ...marks, em: true };
     case 'code':
       return { ...marks, code: true };
+    case 's':
+    case 'del':
+    case 'strike':
+      return { ...marks, strikethrough: true };
     default:
       return marks;
   }

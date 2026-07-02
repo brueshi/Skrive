@@ -45,6 +45,7 @@ function collectInline(nodes: InlineNode[], breaks: 'keep' | 'space'): InlineIte
     const context = {
       em: m.em === true,
       strong: m.strong === true,
+      strikethrough: m.strikethrough === true,
       link: m.link ? { href: m.link.href, title: m.link.title } : null
     };
     let item: InlineItem | null = null;
@@ -64,6 +65,7 @@ function collectInline(nodes: InlineNode[], breaks: 'keep' | 'space'): InlineIte
       (prev.kind === 'text' || prev.kind === 'code') &&
       prev.em === item.em &&
       prev.strong === item.strong &&
+      prev.strikethrough === item.strikethrough &&
       ((prev.link === null && item.link === null) ||
         (prev.link !== null &&
           item.link !== null &&
@@ -116,8 +118,13 @@ function serializeList(block: BulletListBlock | OrderedListBlock): string {
   const delimiter = block.type === 'ordered_list' && block.delimiter === ')' ? ')' : '.';
 
   const rendered = block.items.map((item, index) => {
-    const prefix = ordered ? `${start + index}${delimiter} ` : `${marker} `;
-    const indent = ' '.repeat(prefix.length);
+    const markerPrefix = ordered ? `${start + index}${delimiter} ` : `${marker} `;
+    // A GFM task checkbox is item CONTENT, not marker structure: continuation
+    // lines indent to the marker width only, or a nested block at checkbox
+    // depth would re-parse as indented code.
+    const checkbox = typeof item.checked === 'boolean' ? `[${item.checked ? 'x' : ' '}] ` : '';
+    const prefix = markerPrefix + checkbox;
+    const indent = ' '.repeat(markerPrefix.length);
     const body = item.children.map((child) => canonicalBlock(child)).join(item.spread === true ? '\n\n' : '\n');
     return body
       .split('\n')
