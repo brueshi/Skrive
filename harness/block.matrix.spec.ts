@@ -739,6 +739,40 @@ test('Stage 4: clicking below a trailing barrier seeds a paragraph (SKR-192 / F5
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
+test('Stage 4: Enter in a table cell steps to the cell below (SKR-180 / F46)', async ({ page }) => {
+  // Enter in a cell used to be a silent no-op; it now moves to the cell directly
+  // below (spreadsheet-style), so A lands in the header cell and B in the body
+  // cell of the same column.
+  await open(page, 5);
+  await insertViaMenu(page, 'table'); // caret in cell (0,0)
+  await page.keyboard.type('A');
+  await page.keyboard.press('Enter'); // -> cell (1,0)
+  await page.keyboard.type('B');
+  await page.waitForTimeout(80);
+  const md = await serialized(page);
+  expect(md, 'A in the header cell, col 0').toMatch(/\|\s*A\s*\|\s*\|/);
+  expect(md, 'B stepped down to the body cell, col 0').toMatch(/\|\s*B\s*\|\s*\|/);
+  expect(md, 'Enter did not append B into the same cell').not.toContain('AB');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('Stage 4: Enter in the last table row exits below the table (SKR-180 / F46)', async ({ page }) => {
+  await open(page, 1);
+  await insertViaMenu(page, 'table');
+  await page.keyboard.press('Tab'); // (0,0) -> (0,1)
+  await page.keyboard.press('Tab'); // -> (1,0), the last row
+  await page.keyboard.type('C');
+  const before = await page.evaluate(() => window.__skriveBlockSurface!.blockCount());
+  await page.keyboard.press('Enter'); // last row -> exit below the table
+  await page.waitForTimeout(50);
+  await page.keyboard.type('OUT');
+  await page.waitForTimeout(60);
+  const md = await serialized(page);
+  expect(md, 'typed text landed in a paragraph after the table').toMatch(/\|[\s\S]*\|\n\nOUT/);
+  expect(await page.evaluate(() => window.__skriveBlockSurface!.blockCount()), 'a paragraph was seeded').toBe(before + 1);
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
 test('Stage 4: selecting across a divider and deleting removes it', async ({ page }) => {
   await open(page, 5);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');

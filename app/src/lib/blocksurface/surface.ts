@@ -1493,6 +1493,19 @@ export class BlockSurface {
   // Stage 3e only at top level (nested split / list-item Enter is 3f); the
   // original keeps its id and first half, the new block mints an id (split mints).
   private applyEnter(): void {
+    // Enter in a table cell steps to the cell directly below, and exits below the
+    // table from the last row — a spreadsheet-style move (F46). Was a silent no-op.
+    // (An in-cell line break isn't used: a cell serializes its breaks to a space on
+    // the Markdown floor, so it wouldn't round-trip until .folio.)
+    const cell = this.cellTarget();
+    if (cell) {
+      if (cell.spansCells) return;
+      const table = findBlockById(this.doc.blocks, cell.tableId);
+      if (!table || table.type !== 'table') return;
+      if (cell.row < table.rows.length - 1) this.focusCell(table, cell.row + 1, cell.col, cell.start);
+      else this.exitBarrier(cell.tableId, 'after');
+      return;
+    }
     const t = this.leafTarget();
     if (!t || t.spansBlocks) return;
     if (t.leaf.type === 'code_block') {
