@@ -78,6 +78,55 @@ describe('htmlToMarkdown drops unrepresentable formatting', () => {
   });
 });
 
+// SKR-161: Google Docs and Word carry emphasis as inline style on a <span>
+// (font-weight:700, font-style:italic), not as a <b>/<i> tag — so without a
+// promotion pass every bold/italic run pasted as plain text. Synthetic fragments
+// modelled on the real clipboard shapes (no personal capture is committed).
+describe('promotes style-based emphasis (Google Docs / Word)', () => {
+  it('promotes a font-weight:700 span to bold', () => {
+    const html = '<p><span style="font-weight:700">strong</span> word</p>';
+    expect(htmlToMarkdown(html)).toBe('**strong** word');
+  });
+
+  it('promotes a font-style:italic span to italic', () => {
+    const html = '<p><span style="font-style:italic">slanted</span> word</p>';
+    expect(htmlToMarkdown(html)).toBe('*slanted* word');
+  });
+
+  it('promotes a span carrying both weight and style', () => {
+    const html = '<p><span style="font-weight:700;font-style:italic">both</span></p>';
+    expect(htmlToMarkdown(html)).toBe('***both***');
+  });
+
+  it('respects the cascade: an inner font-weight:400 span stays plain', () => {
+    // Google Docs sets font-weight:700 on the <li> and on the label span, but the
+    // value span explicitly resets to 400 — only the label should bold.
+    const html =
+      '<ul><li style="font-weight:700">' +
+      '<span style="font-weight:700">Label</span>' +
+      '<span style="font-weight:400">: value</span>' +
+      '</li></ul>';
+    expect(htmlToMarkdown(html)).toBe('- **Label**: value');
+  });
+
+  it('unwraps the Google Docs guid wrapper but keeps the inner styled bold', () => {
+    const html =
+      '<b style="font-weight:normal"><p><span style="font-weight:700">real</span></p></b>';
+    expect(htmlToMarkdown(html)).toBe('**real**');
+  });
+
+  it('keeps Word bold that carries mso-bidi-font-weight:normal', () => {
+    // The cancel regex used to substring-match this and destroy real Word bold.
+    const html = '<p><b style="font-weight:bold;mso-bidi-font-weight:normal">Word bold</b></p>';
+    expect(htmlToMarkdown(html)).toBe('**Word bold**');
+  });
+
+  it('does not add redundant bold when a styled run fills a heading', () => {
+    const html = '<h2><span style="font-weight:700">Title</span></h2>';
+    expect(htmlToMarkdown(html)).toBe('## Title');
+  });
+});
+
 describe('markdownForPaste decision', () => {
   it('returns null for blank or whitespace HTML so plain paste runs', () => {
     expect(markdownForPaste('')).toBeNull();
