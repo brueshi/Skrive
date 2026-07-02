@@ -103,6 +103,13 @@ export class BlockSurface {
   private readonly registry = new BlockViewRegistry();
   private readonly onDocChange?: (doc: Document) => void;
   private debounceTimer: number | null = null;
+  // The deferred idle-callback handle for the cold path, and whether the doc has
+  // changed since we last handed a snapshot to the consumer. Together they let
+  // flush() drain synchronously even after the debounce fired and deferred the
+  // real emit into requestIdleCallback — the window where a bare timer check is
+  // blind and ⌘S/quit would otherwise persist a stale body (SKR-154 / F01/F03).
+  private idleHandle: number | null = null;
+  private dirtySinceEmit = false;
   private composing = false;
   private selectionCb: ((info: SelectionInfo | null) => void) | null = null;
   private selScheduled = false;
@@ -207,13 +214,18 @@ export class BlockSurface {
     this.container.focus();
   }
 
-  /** Flush any pending debounced cold-path call immediately (save / blur). */
+  /** Drain any pending cold-path snapshot immediately (save / blur / unmount).
+   *  Cancels both the debounce and a deferred idle emit, then hands the consumer
+   *  a fresh snapshot iff the doc changed since the last emit. Idempotent: a
+   *  second call with nothing pending is a no-op, so double-draining (e.g. a
+   *  closeTab flush followed by the unmount flush) never re-emits stale state. */
   flush(): void {
     if (this.debounceTimer != null) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
-      this.onDocChange?.(this.doc);
     }
+    this.cancelIdle();
+    if (this.dirtySinceEmit) this.emitDocChange();
   }
 
   destroy(): void {
@@ -225,7 +237,11 @@ export class BlockSurface {
     this.container.removeEventListener('compositionend', this.onCompositionEnd, true);
     this.container.removeEventListener('keydown', this.onKeyDown, true);
     document.removeEventListener('selectionchange', this.onDocSelectionChange);
+    // Teardown cancels pending work without emitting — the caller is responsible
+    // for flush()ing first if it wants the last edit saved (BlockEditor does).
+    // Cancelling the idle handle stops a deferred emit firing after teardown (F03).
     if (this.debounceTimer != null) clearTimeout(this.debounceTimer);
+    this.cancelIdle();
   }
 
   // --- marks: keyboard shortcuts + commands --------------------------------
@@ -1714,17 +1730,43 @@ export class BlockSurface {
 
   private scheduleSerialize(): void {
     if (!this.onDocChange) return;
+    // The doc changed; a snapshot is now owed. flush() reads this to know an emit
+    // is still pending even after the debounce hands off to requestIdleCallback.
+    this.dirtySinceEmit = true;
     if (this.debounceTimer != null) clearTimeout(this.debounceTimer);
     this.debounceTimer = window.setTimeout(() => {
       this.debounceTimer = null;
       // Run the cold path (serialize + store write + lint + app re-render) during
       // an idle gap so it never lands between keystrokes — the "type 3, pause,
-      // 4th" hitch. flush() (Cmd-S / quit) still runs it synchronously.
-      const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void })
+      // 4th" hitch. flush() (Cmd-S / quit / unmount) still runs it synchronously.
+      // Track the idle handle so flush()/destroy() can cancel a deferred emit.
+      const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number })
         .requestIdleCallback;
-      if (typeof ric === 'function') ric(() => this.onDocChange?.(this.doc), { timeout: 1000 });
-      else this.onDocChange?.(this.doc);
+      if (typeof ric === 'function') {
+        this.idleHandle = ric(() => {
+          this.idleHandle = null;
+          this.emitDocChange();
+        }, { timeout: 1000 });
+      } else {
+        this.emitDocChange();
+      }
     }, SERIALIZE_DEBOUNCE_MS);
+  }
+
+  /** Hand the current document to the consumer and clear the pending flag. The
+   *  single choke point through which a snapshot ever reaches onDocChange. */
+  private emitDocChange(): void {
+    this.dirtySinceEmit = false;
+    this.onDocChange?.(this.doc);
+  }
+
+  /** Cancel a deferred idle emit if one is scheduled. */
+  private cancelIdle(): void {
+    if (this.idleHandle == null) return;
+    const cancel = (globalThis as { cancelIdleCallback?: (handle: number) => void })
+      .cancelIdleCallback;
+    if (typeof cancel === 'function') cancel(this.idleHandle);
+    this.idleHandle = null;
   }
 }
 
