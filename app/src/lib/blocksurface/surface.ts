@@ -17,7 +17,7 @@ import { buildClipboardPayload } from '../clipboard/copyOut';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto } from './render';
 import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, sameLeaf, type DocPos, type DocRange } from './doc-position';
-import { deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, replaceAcross } from './range-ops';
+import { deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
 import { findBlockById, updateBlockById } from './tree';
 import { enterInContainer, exitContainer, type StructuralResult } from './structural';
 import { changeListType, findImmediateList, indentItem, liftItemToParagraph, outdentItem } from './list-ops';
@@ -944,6 +944,12 @@ export class BlockSurface {
     if (start.leaf.id === end.leaf.id) {
       const block = findBlockById(this.doc.blocks, start.leaf.id);
       if (block && (block.type === 'paragraph' || block.type === 'heading')) {
+        // A selection covering the whole block keeps its type — copying an entire
+        // heading yields `# Title`, not bare text (F35). A partial slice strips to
+        // a paragraph, so copying a word out of a heading never carries the `#`.
+        if (start.offset <= 0 && end.offset >= inlineLength(block.inline)) {
+          return serializeDocument({ blocks: [{ ...block, gapBefore: null, dirty: true }], trailingGap: '' });
+        }
         const sliced = splitInline(splitInline(block.inline, end.offset)[0], start.offset)[1];
         const para: BlockNode = {
           type: 'paragraph',
@@ -961,20 +967,46 @@ export class BlockSurface {
       }
     }
 
-    const inlineLeaves = documentLeaves(this.doc.blocks).filter((l) => l.kind === 'inline');
-    if (inlineLeaves.length === 0) return null;
-    const firstId = inlineLeaves[0]!.id;
-    const lastId = inlineLeaves[inlineLeaves.length - 1]!.id;
-    const lastBlock = findBlockById(this.doc.blocks, lastId);
-    const lastLen =
-      lastBlock && (lastBlock.type === 'paragraph' || lastBlock.type === 'heading')
-        ? inlineLength(lastBlock.inline)
-        : 0;
-    const afterTrimmed = deleteAcross(this.doc.blocks, end.leaf.id, end.offset, lastId, lastLen);
-    if (!afterTrimmed) return null;
-    const sliced = deleteAcross(afterTrimmed.blocks, firstId, 0, start.leaf.id, start.offset);
-    if (!sliced) return null;
-    return serializeDocument({ blocks: sliced.blocks, trailingGap: '' });
+    // Multi-leaf selection: keep exactly the blocks the selection spans and trim
+    // the two endpoint leaves in place. Dropping every leaf outside the
+    // [start, end] index range stops an unselected barrier (code / table) that
+    // sits beyond the document's first/last inline leaf from leaking onto the
+    // clipboard (F32); trimming the endpoints in place — rather than merging them
+    // into the document's first/last leaf, whose type used to win — keeps each
+    // endpoint its own block type (F33). Fully-covered barriers between the ends
+    // are kept, since the selection genuinely spans them.
+    const startLeafId = start.leaf.id;
+    const endLeafId = end.leaf.id;
+    const leaves = documentLeaves(this.doc.blocks);
+    const si = leaves.findIndex((l) => l.id === startLeafId);
+    const ei = leaves.findIndex((l) => l.id === endLeafId);
+    if (si < 0 || ei < 0 || si > ei) return null;
+
+    // Endpoints must be inline text to head/tail-trim to Markdown; a barrier
+    // endpoint (code / table) defers to the caller's plain-text fallback.
+    const startBlock = findBlockById(this.doc.blocks, startLeafId);
+    const endBlock = findBlockById(this.doc.blocks, endLeafId);
+    if (!startBlock || !endBlock || !isInlineText(startBlock) || !isInlineText(endBlock)) return null;
+
+    const dropIds = new Set<string>();
+    for (let i = 0; i < leaves.length; i++) if (i < si || i > ei) dropIds.add(leaves[i]!.id);
+
+    let sliced = removeBlocks(this.doc.blocks, dropIds);
+    sliced = updateBlockById(sliced, startLeafId, (b) => {
+      const inline = (b as { inline: InlineNode[] }).inline;
+      return { ...b, inline: deleteRangeInInline(inline, 0, start.offset), dirty: true } as BlockNode;
+    });
+    sliced = updateBlockById(sliced, endLeafId, (b) => {
+      const inline = (b as { inline: InlineNode[] }).inline;
+      return { ...b, inline: deleteRangeInInline(inline, end.offset, inlineLength(inline)), dirty: true } as BlockNode;
+    });
+    // Dropping the blocks before the selection leaves the new first block's
+    // gap (the blank line that separated it from what was removed) as leading
+    // blank lines on the copy; clear it so the slice starts at its content.
+    if (sliced.length > 0 && sliced[0]!.gapBefore) {
+      sliced = [{ ...sliced[0]!, gapBefore: null } as BlockNode, ...sliced.slice(1)];
+    }
+    return serializeDocument({ blocks: sliced, trailingGap: '' });
   }
 
   // Delete the current selection (the cut path). Mirrors a Backspace over a
