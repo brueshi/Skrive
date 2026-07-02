@@ -2,15 +2,26 @@
 // mutates the focused block's inline content here, then the block is re-rendered
 // from the new model — the model stays authoritative, the DOM is derived.
 //
-// Offsets match the selection mapping: only text contributes length (a mark
-// wrapper is presentation; an atomic inline is passed through without advancing
-// the count, matching range.toString()). All ops return a NEW array — blocks are
-// immutable, so an edit replaces the one block object.
+// Offset space (SKR-155): a mark wrapper is presentation and contributes nothing,
+// but every leaf occupies width — a text run its character count, and an ATOM
+// (inline image / hard break) exactly ONE unit (the PM/Notion convention). Atoms
+// used to be zero-width and passed through untouched, which duplicated them on a
+// split, resurrected them on a cross-block delete, and made them undeletable;
+// giving them a cell in the offset space lets delete/split/insert address them.
+// The DOM<->offset mapping in selection.ts counts atoms the same way, so a
+// DOM-derived offset and a model offset stay identical. All ops return a NEW
+// array — blocks are immutable, so an edit replaces the one block object.
 
 import type { InlineMarks, InlineNode } from '../blockmodel';
 
 function isText(node: InlineNode): node is Extract<InlineNode, { kind: 'text' }> {
   return node.kind === 'text';
+}
+
+/** Width of a leaf in the flat offset space: a text run's length, or one unit for
+ *  an atom (image / hard break). */
+function nodeWidth(node: InlineNode): number {
+  return isText(node) ? node.text.length : 1;
 }
 
 /** Insert text at a flat offset, inheriting the marks of the text run the caret
@@ -22,19 +33,28 @@ export function insertTextInInline(nodes: InlineNode[], offset: number, text: st
   let acc = 0;
   let done = false;
   for (const node of nodes) {
-    if (!isText(node)) {
-      out.push(node);
-      continue;
-    }
-    const len = node.text.length;
-    if (!done && offset <= acc + len) {
-      const local = offset - acc;
-      out.push({ kind: 'text', text: node.text.slice(0, local) + text + node.text.slice(local), marks: node.marks });
-      done = true;
+    if (isText(node)) {
+      const len = node.text.length;
+      if (!done && offset <= acc + len) {
+        const local = offset - acc;
+        out.push({ kind: 'text', text: node.text.slice(0, local) + text + node.text.slice(local), marks: node.marks });
+        done = true;
+      } else {
+        out.push(node);
+      }
+      acc += len;
     } else {
+      // Atom (width 1). A caret resting at or before its cell inserts a fresh text
+      // run in front of it, inheriting the atom's marks. An offset landing on the
+      // text|atom seam is consumed by the preceding text run first (offset <= acc +
+      // len above), so this only fires when nothing text precedes the point.
+      if (!done && offset <= acc) {
+        out.push({ kind: 'text', text, marks: node.marks });
+        done = true;
+      }
       out.push(node);
+      acc += 1;
     }
-    acc += len;
   }
   if (!done) {
     let marks: InlineMarks = {};
@@ -57,30 +77,29 @@ export function deleteRangeInInline(nodes: InlineNode[], start: number, end: num
   const out: InlineNode[] = [];
   let acc = 0;
   for (const node of nodes) {
-    if (!isText(node)) {
+    const nodeStart = acc;
+    const nodeEnd = acc + nodeWidth(node);
+    acc = nodeEnd;
+    // A leaf entirely outside [start, end) survives untouched. This is the whole
+    // fix for an atom: its one-unit cell is dropped exactly when the range covers
+    // it, and kept otherwise — no more unconditional pass-through.
+    if (nodeEnd <= start || nodeStart >= end) {
       out.push(node);
       continue;
     }
-    const len = node.text.length;
-    const nodeStart = acc;
-    const nodeEnd = acc + len;
-    if (nodeEnd <= start || nodeStart >= end) {
-      out.push(node);
-    } else {
-      const left = node.text.slice(0, Math.max(0, start - nodeStart));
-      const right = node.text.slice(Math.max(0, end - nodeStart));
-      const kept = left + right;
-      if (kept.length > 0) out.push({ kind: 'text', text: kept, marks: node.marks });
-    }
-    acc += len;
+    if (!isText(node)) continue; // an overlapped atom is removed
+    const left = node.text.slice(0, Math.max(0, start - nodeStart));
+    const right = node.text.slice(Math.max(0, end - nodeStart));
+    const kept = left + right;
+    if (kept.length > 0) out.push({ kind: 'text', text: kept, marks: node.marks });
   }
   return out;
 }
 
-/** Total flat length of an inline run (text only; matches the offset model). */
+/** Total flat length of an inline run: text characters plus one per atom. */
 export function inlineLength(nodes: InlineNode[]): number {
   let n = 0;
-  for (const node of nodes) if (isText(node)) n += node.text.length;
+  for (const node of nodes) n += nodeWidth(node);
   return n;
 }
 
@@ -117,7 +136,10 @@ function mapRange(
   let acc = 0;
   for (const node of nodes) {
     if (!isText(node)) {
+      // Atoms carry no toggleable marks, but they hold a cell in the offset space,
+      // so advance past it or every offset after an atom would be misaligned.
       out.push(node);
+      acc += 1;
       continue;
     }
     const s = acc;
@@ -146,7 +168,10 @@ export function rangeHasMark(nodes: InlineNode[], start: number, end: number, ma
   let acc = 0;
   let any = false;
   for (const node of nodes) {
-    if (!isText(node)) continue;
+    if (!isText(node)) {
+      acc += 1; // atom holds a cell in the offset space; keep later offsets aligned
+      continue;
+    }
     const s = acc;
     const e = acc + node.text.length;
     acc = e;
@@ -162,7 +187,10 @@ export function rangeHasLink(nodes: InlineNode[], start: number, end: number): b
   let acc = 0;
   let any = false;
   for (const node of nodes) {
-    if (!isText(node)) continue;
+    if (!isText(node)) {
+      acc += 1;
+      continue;
+    }
     const s = acc;
     const e = acc + node.text.length;
     acc = e;
@@ -181,7 +209,10 @@ export function linkHrefInRange(nodes: InlineNode[], start: number, end: number)
   let href: string | null = null;
   let any = false;
   for (const node of nodes) {
-    if (!isText(node)) continue;
+    if (!isText(node)) {
+      acc += 1;
+      continue;
+    }
     const s = acc;
     const e = acc + node.text.length;
     acc = e;

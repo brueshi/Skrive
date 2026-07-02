@@ -121,6 +121,18 @@ describe('deleteAcross', () => {
     const r = deleteAcross(d.blocks, leafId(d.blocks, 'hello'), 1, leafId(d.blocks, 'hello'), 4);
     expect(ser(r!.blocks, d)).toBe('ho\n');
   });
+
+  it('does not resurrect inline atoms from the deleted interior (SKR-155 / F05)', () => {
+    // Each paragraph is text-image-text; the range runs from before the first
+    // image to after the second, so both images fall inside the cut. With atoms
+    // as width-1 the head/tail slices drop them instead of passing them through.
+    const d = doc('a![x](u)b\n\nc![y](v)d\n');
+    const r = deleteAcross(d.blocks, leafId(d.blocks, 'ab'), 1, leafId(d.blocks, 'cd'), 2);
+    expect(r).not.toBeNull();
+    const out = ser(r!.blocks, d);
+    expect(out).toBe('ad\n');
+    expect(out).not.toContain('!['); // no image markdown survived
+  });
 });
 
 describe('replaceAcross', () => {
