@@ -37,6 +37,7 @@ import {
 } from '../lib/frontmatter';
 import { runProjectLint } from '../lib/lint';
 import type { LintWorkerResponse } from '../lib/lint/lint-worker-protocol';
+import { flushActiveEditor } from '../components/editor/active-editor';
 import { notify } from '../lib/notify';
 import { logDuration, now as perfNow } from '../lib/perf';
 import {
@@ -1026,6 +1027,12 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   },
 
   async closeTab(index: number) {
+    // Drain the active surface's pending snapshot into the store before we read
+    // the body for the best-effort save. The disk write below runs before the
+    // BlockEditor unmounts, so its own cleanup flush is too late — without this
+    // an edit made inside the debounce/idle window is persisted stale on close
+    // (SKR-154 / F02). flush() is idempotent, so the later unmount flush no-ops.
+    flushActiveEditor();
     const { tabs, activeTabIndex } = get();
     const tab = tabs[index];
     if (!tab) return;

@@ -51,6 +51,12 @@ export function BlockEditor({ body, onChange }: Props): React.ReactElement {
       setActiveEditorFlush(null);
       setActiveBlockMenu(null);
       controller.destroy();
+      // Drain the pending snapshot before teardown so a tab switch / view
+      // toggle within the debounce window doesn't drop the last edit — destroy()
+      // only cancels, it never emits. RawSourceView does the same in its cleanup
+      // (SKR-154 / F02). The unmounting instance's onChange closure still points
+      // at this tab's index, so the flush routes to the right tab.
+      surface.flush();
       surface.destroy();
       setCtx(null);
     };
