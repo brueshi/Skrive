@@ -4,13 +4,30 @@
 // characters — so they never shift the flat offset; the mapping counts text, not
 // structure.
 //
-// DOM -> offset uses a Range's text length (robust across nested mark spans).
-// offset -> DOM walks the block's text nodes. Atomic inlines (img / hard break)
-// are rare in prose and refined later; Stage 3a is validated on text.
+// DOM <-> offset both count atoms as one unit (SKR-155), matching the model in
+// inline-ops.ts so a DOM-derived offset and a model offset are the same number.
+// DOM -> offset walks to the boundary summing text characters plus one per atom;
+// offset -> DOM walks leaves (text nodes + atoms) to the target. A real hard-break
+// atom is tagged HARD_BREAK_ATTR so it is distinguished from the bare <br> an empty
+// block carries for height (that placeholder is zero-width, like the empty model).
 
-import { BLOCK_ID_ATTR } from './render';
+import { BLOCK_ID_ATTR, HARD_BREAK_ATTR } from './render';
 import type { BlockViewRegistry } from './render';
 import { isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
+
+/** An inline atom in the DOM: an image, or a real hard break (not the placeholder
+ *  <br> an empty block carries). Each occupies one unit of offset space. */
+function isAtomEl(node: Node): boolean {
+  if (node.nodeType !== Node.ELEMENT_NODE) return false;
+  const el = node as Element;
+  const tag = el.tagName.toLowerCase();
+  return tag === 'img' || (tag === 'br' && el.hasAttribute(HARD_BREAK_ATTR));
+}
+
+// Selects the atoms a block might contain. When a block has none — the
+// overwhelming common case for prose — offset equals text length and the cheap
+// Range measurement is exact, so the atom-aware walk is skipped on the hot path.
+const ATOM_SELECTOR = `img, br[${HARD_BREAK_ATTR}]`;
 
 /** The top-level block element the caret sits in, or null. Walks up to the first
  *  ancestor whose id is a registered top-level block (nested blocks are not
@@ -50,39 +67,98 @@ export function focusedLeafElement(container: HTMLElement): HTMLElement | null {
   return null;
 }
 
-/** Flat character offset of a DOM point within a block. Counts the text from the
- *  block's start to the point — mark wrappers contribute nothing, so the offset
- *  is stable regardless of how the characters are wrapped. */
+// Total offset-width of a DOM subtree: text characters plus one per atom. Mark
+// wrappers contribute nothing; the walk descends through them.
+function subtreeWidth(node: Node): number {
+  if (node.nodeType === Node.TEXT_NODE) return (node as Text).data.length;
+  if (isAtomEl(node)) return 1;
+  let n = 0;
+  for (const child of node.childNodes as unknown as Iterable<Node>) n += subtreeWidth(child);
+  return n;
+}
+
+/** Flat offset of a DOM point within a block: text characters plus one per atom
+ *  from the block's start to the point. Stable regardless of how the characters
+ *  are wrapped, and — unlike `range.toString()` — counts atoms consistently across
+ *  engines (a <br>'s string form differs between WebKit and Chromium). */
 export function flatOffsetFromDOM(blockEl: HTMLElement, node: Node, offset: number): number {
-  const range = document.createRange();
-  range.selectNodeContents(blockEl);
-  try {
-    range.setEnd(node, offset);
-  } catch {
-    return blockEl.textContent?.length ?? 0;
+  if (blockEl.querySelector(ATOM_SELECTOR) === null) {
+    // No atoms: offset is pure text length, so the single native Range call the
+    // hot path used before SKR-155 still holds exactly.
+    const range = document.createRange();
+    range.selectNodeContents(blockEl);
+    try {
+      range.setEnd(node, offset);
+    } catch {
+      return blockEl.textContent?.length ?? 0;
+    }
+    return range.toString().length;
   }
-  return range.toString().length;
+  let total = 0;
+  let done = false;
+  const walk = (n: Node): void => {
+    if (done) return;
+    if (n === node) {
+      // The boundary is here: a text point counts its char offset; an element
+      // point counts the full width of the first `offset` children.
+      if (n.nodeType === Node.TEXT_NODE) {
+        total += Math.min(offset, (n as Text).data.length);
+      } else {
+        const kids = n.childNodes;
+        for (let i = 0; i < offset && i < kids.length; i++) total += subtreeWidth(kids[i]!);
+      }
+      done = true;
+      return;
+    }
+    if (n.nodeType === Node.TEXT_NODE) {
+      total += (n as Text).data.length;
+      return;
+    }
+    if (isAtomEl(n)) {
+      total += 1;
+      return;
+    }
+    for (const child of n.childNodes as unknown as Iterable<Node>) {
+      walk(child);
+      if (done) return;
+    }
+  };
+  walk(blockEl);
+  // Node outside the block (shouldn't happen): fall back to the full width.
+  return done ? total : subtreeWidth(blockEl);
 }
 
-function textNodesOf(root: Node): Text[] {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const out: Text[] = [];
-  for (let n = walker.nextNode(); n; n = walker.nextNode()) out.push(n as Text);
-  return out;
+/** A DOM caret point immediately before or after an atom element, expressed
+ *  against the atom's parent so the caret sits adjacent to it. */
+function atomPoint(atom: Node, side: 'before' | 'after'): { node: Node; offset: number } {
+  const parent = atom.parentNode ?? atom;
+  const index = Array.prototype.indexOf.call(parent.childNodes, atom);
+  return { node: parent, offset: side === 'before' ? index : index + 1 };
 }
 
-/** The DOM point (text node + offset) for a flat offset within a block. Clamps
- *  past-end to the block's last text position. */
+/** The DOM point for a flat offset within a block. Lands inside a text node when
+ *  the offset falls in one, adjacent to an atom when it falls on an atom boundary,
+ *  and clamps past-end to the block's last position. */
 export function domPointFromFlatOffset(blockEl: HTMLElement, target: number): { node: Node; offset: number } {
-  const texts = textNodesOf(blockEl);
   let acc = 0;
-  for (const t of texts) {
-    if (acc + t.length >= target) return { node: t, offset: Math.max(0, target - acc) };
-    acc += t.length;
+  let last: { node: Node; offset: number } = { node: blockEl, offset: 0 };
+  const walker = document.createTreeWalker(blockEl, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (n.nodeType === Node.TEXT_NODE) {
+      const t = n as Text;
+      if (acc + t.length >= target) return { node: t, offset: Math.max(0, target - acc) };
+      acc += t.length;
+      last = { node: t, offset: t.length };
+    } else if (isAtomEl(n)) {
+      // A boundary at or before this atom (with no preceding text to absorb it)
+      // places the caret just before it; otherwise consume its cell.
+      if (target <= acc) return atomPoint(n, 'before');
+      acc += 1;
+      last = atomPoint(n, 'after');
+    }
+    // Mark-wrapper elements are not counted; the walker descends into them.
   }
-  const last = texts[texts.length - 1];
-  if (last) return { node: last, offset: last.length };
-  return { node: blockEl, offset: 0 };
+  return last;
 }
 
 /** Place a collapsed caret at a flat offset within a block.

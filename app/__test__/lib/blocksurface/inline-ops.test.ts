@@ -18,6 +18,8 @@ import {
 import type { InlineNode } from '../../../src/lib/blockmodel';
 
 const text = (t: string, marks: InlineNode['marks'] = {}): InlineNode => ({ kind: 'text', text: t, marks });
+const img = (url = 'u', marks: InlineNode['marks'] = {}): InlineNode => ({ kind: 'image', url, alt: '', title: null, marks });
+const brk = (marks: InlineNode['marks'] = {}): InlineNode => ({ kind: 'break', marks });
 
 describe('insertTextInInline', () => {
   it('inserts into a plain run', () => {
@@ -103,6 +105,53 @@ describe('splitInline', () => {
   it('splits at the start (empty left) and end (empty right)', () => {
     expect(splitInline([text('hi')], 0)).toEqual([[], [text('hi')]]);
     expect(splitInline([text('hi')], 2)).toEqual([[text('hi')], []]);
+  });
+});
+
+// SKR-155: atoms (image / hard break) occupy exactly one unit of offset space.
+describe('atoms in the offset space', () => {
+  it('inlineLength counts each atom as one unit', () => {
+    expect(inlineLength([text('ab'), img(), text('cd')])).toBe(5);
+    expect(inlineLength([img(), brk()])).toBe(2);
+  });
+
+  it('deleteRangeInInline removes an atom when the range covers its cell (F06)', () => {
+    // Backspace at the caret just after the break deletes [2,3) — the break's cell.
+    expect(deleteRangeInInline([text('ab'), brk(), text('cd')], 2, 3)).toEqual([text('ab'), text('cd')]);
+  });
+
+  it('deleteRangeInInline keeps an atom whose cell is outside the range', () => {
+    expect(deleteRangeInInline([text('ab'), img(), text('cd')], 0, 1)).toEqual([text('b'), img(), text('cd')]);
+  });
+
+  it('deleteRangeInInline removes only the atoms inside a spanning range (F05)', () => {
+    // a i0 b i1 c  ->  offsets a[0] i0[1] b[2] i1[3] c[4]; delete [1,4) drops both atoms + b.
+    const nodes = [text('a'), img('0'), text('b'), img('1'), text('c')];
+    expect(deleteRangeInInline(nodes, 1, 4)).toEqual([text('a'), text('c')]);
+  });
+
+  it('splitInline sends an atom to exactly one side, never both (F04)', () => {
+    const nodes = [text('ab'), img(), text('cd')];
+    // Split after the image (offset 3): image stays on the left.
+    expect(splitInline(nodes, 3)).toEqual([[text('ab'), img()], [text('cd')]]);
+    // Split before the image (offset 2): image goes to the right.
+    expect(splitInline(nodes, 2)).toEqual([[text('ab')], [img(), text('cd')]]);
+  });
+
+  it('insertTextInInline lands text on the correct side of an atom', () => {
+    expect(insertTextInInline([img()], 0, 'X')).toEqual([text('X'), img()]);
+    expect(insertTextInInline([img()], 1, 'X')).toEqual([img(), text('X')]);
+    // The text|atom seam is consumed by the preceding run (append), not a new run.
+    expect(insertTextInInline([text('ab'), img()], 2, 'X')).toEqual([text('abX'), img()]);
+    // Between two atoms.
+    expect(insertTextInInline([img('0'), img('1')], 1, 'X')).toEqual([img('0'), text('X'), img('1')]);
+  });
+
+  it('mark walkers stay aligned across an atom', () => {
+    // b is bold and sits at offset 2 (after "a" and the image cell at [1,2)).
+    const nodes = [text('a'), img(), text('b', { strong: true })];
+    expect(rangeHasMark(nodes, 2, 3, 'strong')).toBe(true);
+    expect(rangeHasMark(nodes, 0, 1, 'strong')).toBe(false);
   });
 });
 

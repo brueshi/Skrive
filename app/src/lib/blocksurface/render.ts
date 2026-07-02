@@ -12,6 +12,10 @@
 import type { BlockNode, InlineMarks, InlineNode } from '../blockmodel';
 
 export const BLOCK_ID_ATTR = 'data-block-id';
+// Marks a rendered hard-break atom so the offset mapping can tell it apart from
+// the bare <br> an empty block needs for height/caret (which has zero width in
+// the model). Only real breaks carry a cell in the offset space (SKR-155).
+export const HARD_BREAK_ATTR = 'data-hard-break';
 
 // Wrap a node in an element, returning the wrapper. Innermost-first composition.
 function wrap(tag: string, child: Node): HTMLElement {
@@ -35,7 +39,9 @@ function renderInlineNode(node: InlineNode): Node {
     if (node.title != null) img.title = node.title;
     dom = img;
   } else {
-    dom = document.createElement('br');
+    const br = document.createElement('br');
+    br.setAttribute(HARD_BREAK_ATTR, '');
+    dom = br;
   }
 
   const marks: InlineMarks = node.marks;
