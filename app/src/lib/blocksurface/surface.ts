@@ -1176,13 +1176,37 @@ export class BlockSurface {
   private onCompositionEnd = (): void => {
     this.composing = false;
     // The IME mutated the focused block's DOM natively; read it back into the
-    // model without re-rendering (the caret the IME left is correct).
+    // model without re-rendering (the caret the IME left is correct). Every
+    // editable leaf must be covered or the composed text lives only in the DOM
+    // and is lost on the next serialize / re-render (SKR-156 / F82).
+
+    // A table cell: focusedLeafElement resolves the whole table, so read the
+    // specific cell out of the selection and write just that cell back.
+    const cell = this.cellTarget();
+    if (cell) {
+      this.updateCellModel(cell, readInlineFromDOM(cell.cellEl));
+      this.scheduleSerialize();
+      return;
+    }
+
     const blockEl = focusedLeafElement(this.container);
     if (!blockEl) return;
     const id = blockEl.getAttribute(BLOCK_ID_ATTR);
     if (id == null) return;
     const leaf = findBlockById(this.doc.blocks, id);
-    if (!leaf || !isInlineText(leaf)) return;
+    if (!leaf) return;
+
+    // A code block: its content is a raw <code> text node, not inline runs. Read
+    // the text straight from the DOM into the model — not via editCodeText, which
+    // re-renders and would move the caret the IME just committed.
+    if (leaf.type === 'code_block') {
+      const text = (blockEl.querySelector('code') ?? blockEl).textContent ?? '';
+      this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, id, (b) => (b.type === 'code_block' ? ({ ...b, text, dirty: true } as BlockNode) : b)) };
+      this.scheduleSerialize();
+      return;
+    }
+
+    if (!isInlineText(leaf)) return;
     this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, id, (b) => ({ ...b, inline: readInlineFromDOM(blockEl), dirty: true }) as BlockNode) };
     this.scheduleSerialize();
   };
