@@ -44,7 +44,7 @@ function inlineLeaf(blocks: BlockNode[], id: string): Extract<BlockNode, { type:
 // Remove the blocks whose ids are in `ids` from anywhere in the tree, pruning a
 // list item / list / blockquote that empties as a result. Ancestors of a removal
 // are marked dirty so they re-serialize around the change.
-function removeBlocks(blocks: BlockNode[], ids: Set<string>): BlockNode[] {
+export function removeBlocks(blocks: BlockNode[], ids: Set<string>): BlockNode[] {
   const walk = (nodes: BlockNode[]): BlockNode[] => {
     const out: BlockNode[] = [];
     for (const b of nodes) {
