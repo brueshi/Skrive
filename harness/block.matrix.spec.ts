@@ -686,6 +686,37 @@ test('Stage 4: pasting into a code block keeps newlines literal (SKR-162)', asyn
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
+test('Stage 4: ArrowDown exits a terminal code block, seeding a paragraph (SKR-152)', async ({ page }) => {
+  // A code block that is the last block used to be a one-way trap (native caret
+  // can't leave it). ArrowDown on the last line now exits below, seeding a block.
+  await open(page, 1);
+  await insertViaMenu(page, 'code'); // code block becomes the last block
+  await page.keyboard.type('x = 1');
+  const before = await page.evaluate(() => window.__skriveBlockSurface!.blockCount());
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(50);
+  await page.keyboard.type('AFTERCODE');
+  await page.waitForTimeout(60);
+  const md = await serialized(page);
+  expect(md, 'code kept its line').toContain('x = 1');
+  expect(md, 'typed text landed after the fence, not inside it').toMatch(/```[\s\S]*?```\n\nAFTERCODE/);
+  expect(await page.evaluate(() => window.__skriveBlockSurface!.blockCount()), 'a paragraph was seeded').toBe(before + 1);
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('Stage 4: Backspace deletes an empty code block (SKR-152)', async ({ page }) => {
+  await open(page, 1);
+  const before = await page.evaluate(() => window.__skriveBlockSurface!.blockCount());
+  await insertViaMenu(page, 'code'); // empty code block, caret inside
+  expect(await page.evaluate(() => window.__skriveBlockSurface!.blockCount())).toBe(before + 1);
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(60);
+  expect(await page.evaluate(() => window.__skriveBlockSurface!.blockCount()), 'empty code block removed').toBe(before);
+  const md = await serialized(page);
+  expect(md).not.toMatch(/```/);
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
 test('Stage 4: selecting across a divider and deleting removes it', async ({ page }) => {
   await open(page, 5);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');
