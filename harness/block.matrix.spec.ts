@@ -717,6 +717,28 @@ test('Stage 4: Backspace deletes an empty code block (SKR-152)', async ({ page }
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
+test('Stage 4: clicking below a trailing barrier seeds a paragraph (SKR-192 / F57)', async ({ page }) => {
+  // A code block as the last block has no caret home below it; a click in the
+  // empty area under the document should seed a paragraph rather than no-op.
+  await open(page, 1);
+  await insertViaMenu(page, 'code');
+  await page.keyboard.type('code');
+  const before = await page.evaluate(() => window.__skriveBlockSurface!.blockCount());
+  // Synthetic click below the last block (layout-independent: compute the point).
+  await page.evaluate(() => {
+    const root = document.querySelector('.bespoke-root') as HTMLElement;
+    const rect = root.lastElementChild!.getBoundingClientRect();
+    root.dispatchEvent(new MouseEvent('click', { clientX: rect.left + 5, clientY: rect.bottom + 20, bubbles: true }));
+  });
+  await page.waitForTimeout(50);
+  await page.keyboard.type('BELOW');
+  await page.waitForTimeout(60);
+  const md = await serialized(page);
+  expect(md, 'paragraph seeded after the fence').toMatch(/```[\s\S]*?```\n\nBELOW/);
+  expect(await page.evaluate(() => window.__skriveBlockSurface!.blockCount())).toBe(before + 1);
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
 test('Stage 4: selecting across a divider and deleting removes it', async ({ page }) => {
   await open(page, 5);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');

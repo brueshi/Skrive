@@ -144,6 +144,7 @@ export class BlockSurface {
     this.container.addEventListener('compositionstart', this.onCompositionStart, true);
     this.container.addEventListener('compositionend', this.onCompositionEnd, true);
     this.container.addEventListener('keydown', this.onKeyDown, true);
+    this.container.addEventListener('click', this.onClick);
     document.addEventListener('selectionchange', this.onDocSelectionChange);
   }
 
@@ -236,6 +237,7 @@ export class BlockSurface {
     this.container.removeEventListener('compositionstart', this.onCompositionStart, true);
     this.container.removeEventListener('compositionend', this.onCompositionEnd, true);
     this.container.removeEventListener('keydown', this.onKeyDown, true);
+    this.container.removeEventListener('click', this.onClick);
     document.removeEventListener('selectionchange', this.onDocSelectionChange);
     // Teardown cancels pending work without emitting — the caller is responsible
     // for flush()ing first if it wants the last edit saved (BlockEditor does).
@@ -1240,6 +1242,33 @@ export class BlockSurface {
     writeSelection(this.container, collapsedRange({ leaf: { kind: 'block', id: last.id }, offset: lastSeg.length }), 'paste');
     this.scheduleSerialize();
   }
+
+  // Click below the last block: give it a caret home. Native placement lands
+  // inside a trailing barrier's fence/cell or nowhere (F57), so a click in the
+  // empty area under the document places the caret at the end of a trailing inline
+  // block, or seeds a fresh paragraph after a trailing barrier so the document is
+  // never un-appendable. Bound to `click` (not pointerup — WKWebView drops it on a
+  // motionless press).
+  private onClick = (event: Event): void => {
+    const last = this.doc.blocks[this.doc.blocks.length - 1];
+    if (!last) return;
+    const lastEl = this.registry.get(last.id);
+    if (!lastEl) return;
+    // Only act on a click strictly below the last block — its own content, and the
+    // gaps between blocks, are handled by native placement.
+    if ((event as MouseEvent).clientY <= lastEl.getBoundingClientRect().bottom) return;
+    if (isInlineText(last)) {
+      this.focus();
+      setCaret(lastEl, inlineLength(last.inline));
+      return;
+    }
+    const para = this.newInlineBlock('paragraph', [], 1);
+    this.doc = { ...this.doc, blocks: [...this.doc.blocks, para] };
+    this.reconcile();
+    this.focus();
+    writeSelection(this.container, collapsedRange({ leaf: { kind: 'block', id: para.id }, offset: 0 }), 'structural');
+    this.scheduleSerialize();
+  };
 
   private onCompositionStart = (): void => {
     this.composing = true;
