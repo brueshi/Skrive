@@ -9,7 +9,8 @@
 // understood a construct, because a clean or frozen block emits its verbatim
 // `src` — fidelity depends only on the source map tiling the document exactly.
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { describe, it, expect } from 'vitest';
@@ -92,22 +93,39 @@ describe('block-model fidelity gate', () => {
   });
 });
 
-function mdFilesIn(rel: string): string[] {
-  const dir = join(repoRoot, rel);
-  try {
-    return readdirSync(dir)
-      .filter((f) => f.endsWith('.md'))
-      .map((f) => join(rel, f));
-  } catch {
-    return [];
-  }
+// The committed fixture corpus, driven off `git ls-files` so the gate tests
+// exactly what CI sees — no more, no less. The previous readdirSync walk was
+// non-recursive with a silent catch→[], so `docs/fixtures` (whose .md live only
+// in subdirectories) contributed nothing and the corpus silently shrank to
+// `planning/`; and `planning/` is gitignored, so under CI it collapsed to an
+// empty set while a bare "found docs" assertion still passed. Reading tracked
+// files fixes every part of that: the walk is recursive, a vanished/renamed
+// directory surfaces as an empty set the floor assertion rejects, and — because
+// it reads only committed files, not whatever untracked fixtures happen to sit
+// on the local disk — the corpus is identical locally and in CI.
+//
+// Dual-mode note (SKR-193 rescope): once `.md` moves to text→text source mode
+// (SKR-197), byte-round-trip stops being a save-path contract. This stays as the
+// serialization-floor gate the export pipeline (SKR-199) feeds — the layer that
+// turns a `.folio` block tree back into faithful Markdown.
+function trackedMarkdown(rel: string): string[] {
+  const out = execFileSync('git', ['ls-files', '-z', '--', rel], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    maxBuffer: 1 << 24
+  });
+  return out.split('\0').filter((f) => f.endsWith('.md'));
 }
 
-const targets = [...mdFilesIn('planning'), ...mdFilesIn('docs/fixtures')];
+// Guardrail: 44 tracked fixtures round-trip today. A floor well under that count
+// still fails loudly if the corpus ever silently collapses (the bug this ticket
+// exists to kill), without being brittle to adding or pruning a fixture or two.
+const CORPUS_FLOOR = 40;
+const targets = trackedMarkdown('docs/fixtures');
 
-describe('block-model round-trip on real repo docs', () => {
-  it('found docs to test', () => {
-    expect(targets.length).toBeGreaterThan(0);
+describe('serialization-floor fidelity on the committed corpus', () => {
+  it(`covers a real corpus, not an empty set (>= ${CORPUS_FLOOR} committed docs)`, () => {
+    expect(targets.length).toBeGreaterThanOrEqual(CORPUS_FLOOR);
   });
 
   it.each(targets)('round-trips byte-identical: %s', (rel) => {
