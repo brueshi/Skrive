@@ -475,7 +475,7 @@ export class BlockSurface {
   /** Convert the current block's type, or insert a divider. Keeps the inline
    *  content (and the block id) across a paragraph<->heading change. */
   setBlockType(spec: BlockTypeSpec): void {
-    const cur = this.currentInlineBlock();
+    const cur = this.currentConvertibleBlock();
     if (!cur) return;
     if (spec.kind === 'divider') {
       this.replaceWithDivider(cur);
@@ -484,7 +484,7 @@ export class BlockSurface {
     // A type change invalidates the captured src (it would re-serialize as the old
     // construct), so drop it; the seam gap is unchanged.
     const base = { id: cur.block.id, durable: cur.block.durable, src: null, gapBefore: cur.block.gapBefore, dirty: true };
-    const inline = cur.block.inline;
+    const inline = cur.inline;
 
     // Container conversions wrap the inline in a fresh nested paragraph (which gets
     // its own id) so the caret lands in an editable leaf inside the container.
@@ -665,6 +665,27 @@ export class BlockSurface {
     const found = this.findBlock(ctx.blockEl);
     if (!found || !isInlineText(found.block)) return null;
     return { block: found.block, index: found.index, blockEl: ctx.blockEl, caret: ctx.start };
+  }
+
+  // The block a Turn-into acts on, with the inline content to carry across the
+  // conversion. An inline-text block carries its own inline; a code block converts
+  // too (F45 — otherwise the whole type menu is a dead no-op inside code): its text
+  // becomes a single flowed paragraph, newlines flowing to spaces (Joe's call).
+  // Other barriers (table / hr / frozen) aren't convertible and return null.
+  private currentConvertibleBlock(): { block: BlockNode; index: number; blockEl: HTMLElement; caret: number; inline: InlineNode[] } | null {
+    const ctx = caretContext(this.container, this.registry);
+    if (!ctx) return null;
+    const found = this.findBlock(ctx.blockEl);
+    if (!found) return null;
+    if (isInlineText(found.block)) {
+      return { block: found.block, index: found.index, blockEl: ctx.blockEl, caret: ctx.start, inline: found.block.inline };
+    }
+    if (found.block.type === 'code_block') {
+      const text = found.block.text.replace(/\n/g, ' ');
+      const inline: InlineNode[] = text.length > 0 ? [{ kind: 'text', text, marks: {} }] : [];
+      return { block: found.block, index: found.index, blockEl: ctx.blockEl, caret: 0, inline };
+    }
+    return null;
   }
 
   private handleSlashAfterInsert(text: string): void {
