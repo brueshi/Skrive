@@ -14,7 +14,7 @@ import { generateBlockId, parseDocument, serializeDocument, type BlockNode, type
 import { markdownForPaste } from '../clipboard/htmlToMarkdown';
 import { plainTextParagraphs } from '../clipboard/plainText';
 import { buildClipboardPayload } from '../clipboard/copyOut';
-import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto } from './render';
+import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto, setCodeContent } from './render';
 import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, sameLeaf, type DocPos, type DocRange } from './doc-position';
 import { deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
@@ -281,7 +281,7 @@ export class BlockSurface {
         // Tab steps cell-to-cell; off the last/first cell it exits the table
         // (instead of dead-ending) so the table is never a one-way trap.
         if (!this.moveCell(cell, e.shiftKey ? -1 : 1)) {
-          this.exitTable(cell.tableId, e.shiftKey ? 'before' : 'after');
+          this.exitBarrier(cell.tableId, e.shiftKey ? 'before' : 'after');
         }
         return;
       }
@@ -305,7 +305,7 @@ export class BlockSurface {
     // can't reliably leave a <table>, worst of all when the table is the last
     // block). Outside a table — or mid-cell — fall through to native movement.
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      if (this.handleTableArrow(e)) e.preventDefault();
+      if (this.handleTableArrow(e) || this.handleCodeArrow(e)) e.preventDefault();
       return;
     }
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
@@ -1341,6 +1341,18 @@ export class BlockSurface {
       return;
     }
 
+    // Backspace on an EMPTY code block deletes it (mirror of removeTable); a
+    // non-empty block keeps its no-op boundary (SKR-152). Checked independent of
+    // the reported offset: an empty <code> carries a placeholder <br>, whose
+    // range.toString() length is 0 in Chromium but can read as 1 in WKWebView —
+    // an empty block has only one caret position either way.
+    if (t.collapsed && t.leaf.type === 'code_block' && t.leaf.text.length === 0) {
+      const r = deleteBlock(this.doc.blocks, t.leaf.id);
+      if (r) this.applyStructural(r);
+      this.closeSlash();
+      return;
+    }
+
     if (t.collapsed && t.start === 0) {
       if (isInlineText(t.leaf) && findImmediateList(this.doc.blocks, t.leaf.id)) {
         // Backspace at the start of a list item removes its marker: outdent one
@@ -1403,7 +1415,11 @@ export class BlockSurface {
     const len = t.leaf.type === 'code_block' ? t.leaf.text.length : isInlineText(t.leaf) ? inlineLength(t.leaf.inline) : 0;
 
     if (t.collapsed && t.start >= len) {
-      if (isInlineText(t.leaf)) {
+      if (t.leaf.type === 'code_block' && len === 0) {
+        // Delete on an EMPTY code block removes it (mirror of Backspace-at-start).
+        const r = deleteBlock(this.doc.blocks, t.leaf.id);
+        if (r) this.applyStructural(r);
+      } else if (isInlineText(t.leaf)) {
         // Pull the next inline leaf up into this one (across a container boundary).
         const r = mergeForward(this.doc.blocks, t.leaf.id);
         if (r) this.applyStructural(r);
@@ -1663,21 +1679,48 @@ export class BlockSurface {
       case 'ArrowUp':
         return cell.row > 0
           ? this.focusCell(table, cell.row - 1, cell.col, cell.start)
-          : this.exitTable(cell.tableId, 'before');
+          : this.exitBarrier(cell.tableId, 'before');
       case 'ArrowDown':
         return cell.row < rows - 1
           ? this.focusCell(table, cell.row + 1, cell.col, cell.start)
-          : this.exitTable(cell.tableId, 'after');
+          : this.exitBarrier(cell.tableId, 'after');
       case 'ArrowLeft':
         if (cell.start > 0) return false; // move within the cell's text
         if (cell.col > 0) return this.focusCellEnd(table, cell.row, cell.col - 1);
         if (cell.row > 0) return this.focusCellEnd(table, cell.row - 1, cols - 1);
-        return this.exitTable(cell.tableId, 'before');
+        return this.exitBarrier(cell.tableId, 'before');
       case 'ArrowRight':
         if (cell.start < len) return false; // move within the cell's text
         if (cell.col < cols - 1) return this.focusCell(table, cell.row, cell.col + 1, 0);
         if (cell.row < rows - 1) return this.focusCell(table, cell.row + 1, 0, 0);
-        return this.exitTable(cell.tableId, 'after');
+        return this.exitBarrier(cell.tableId, 'after');
+      default:
+        return false;
+    }
+  }
+
+  // Arrow-key exit for a code block: like handleTableArrow, at the fence's edges
+  // step the caret OUT to the adjacent block (seeding a paragraph when the code
+  // block is the last block), since the native caret can't reliably leave a code
+  // block and dead-ends there (SKR-152). Mid-text arrows fall through to native
+  // movement. Returns true when it handled the key (caller preventDefaults).
+  private handleCodeArrow(e: KeyboardEvent): boolean {
+    const t = this.leafTarget();
+    if (!t || !t.collapsed || t.leaf.type !== 'code_block') return false;
+    if (!this.isTopLevel(t.blockEl, t.leaf.id)) return false; // nested: native
+    const text = t.leaf.text;
+    const at = t.start;
+    switch (e.key) {
+      case 'ArrowRight':
+        return at >= text.length ? this.exitBarrier(t.leaf.id, 'after') : false;
+      case 'ArrowLeft':
+        return at <= 0 ? this.exitBarrier(t.leaf.id, 'before') : false;
+      case 'ArrowDown':
+        // On the last visual line (no newline at or after the caret) -> exit below.
+        return text.indexOf('\n', at) === -1 ? this.exitBarrier(t.leaf.id, 'after') : false;
+      case 'ArrowUp':
+        // On the first line (no newline before the caret) -> exit above.
+        return text.lastIndexOf('\n', at - 1) === -1 ? this.exitBarrier(t.leaf.id, 'before') : false;
       default:
         return false;
     }
@@ -1703,9 +1746,12 @@ export class BlockSurface {
   // end of the previous inline block / start of the next; when there is no inline
   // block to land in (e.g. the table is the last block, or the neighbour is
   // another barrier), seed an empty paragraph there so the table is never a trap.
-  private exitTable(tableId: string, dir: 'before' | 'after'): boolean {
-    const index = this.doc.blocks.findIndex((b) => b.id === tableId);
-    if (index < 0) return false; // nested table: leave it to native movement
+  // Step the caret out of a barrier block (table / code block) to the adjacent
+  // inline block, seeding a fresh paragraph when none exists — so a barrier is
+  // never a one-way trap, whether it sits mid-document or is the last block.
+  private exitBarrier(blockId: string, dir: 'before' | 'after'): boolean {
+    const index = this.doc.blocks.findIndex((b) => b.id === blockId);
+    if (index < 0) return false; // nested barrier: leave it to native movement
     const neighbor = dir === 'before' ? this.doc.blocks[index - 1] : this.doc.blocks[index + 1];
     if (neighbor && (neighbor.type === 'paragraph' || neighbor.type === 'heading')) {
       const el = this.leafElementById(neighbor.id);
@@ -1753,7 +1799,7 @@ export class BlockSurface {
     if (leaf.type !== 'code_block') return;
     this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, leaf.id, (b) => ({ ...b, text: next, dirty: true }) as BlockNode) };
     const code = blockEl.querySelector('code') ?? blockEl;
-    code.textContent = next;
+    setCodeContent(code as HTMLElement, next);
     setCaret(blockEl, caret);
   }
 

@@ -59,6 +59,15 @@ function renderInlineNode(node: InlineNode): Node {
   return dom;
 }
 
+// Set a code block's text, adding a <br> placeholder when the block is empty so
+// it keeps height and an addressable caret — the same reason an empty inline run
+// gets one. Without it an empty <code> has no child and WKWebView cannot place a
+// caret inside it, so a fresh or fully-deleted code block becomes unenterable.
+export function setCodeContent(code: HTMLElement, text: string): void {
+  code.textContent = text;
+  if (text === '') code.appendChild(document.createElement('br'));
+}
+
 // Render a block's inline content. An empty inline run still needs a <br> so the
 // block has height and an addressable caret position.
 function renderInline(nodes: InlineNode[], host: HTMLElement): void {
@@ -99,7 +108,7 @@ export function renderBlock(block: BlockNode): HTMLElement {
     case 'code_block': {
       el = document.createElement('pre');
       const code = document.createElement('code');
-      code.textContent = block.text;
+      setCodeContent(code, block.text);
       el.appendChild(code);
       break;
     }
