@@ -482,10 +482,10 @@ export function App() {
                   onClose={closeDiff}
                 />
               ) : activeTab ? (
-                // Editor modes (rendered + source) share the persistent toolbar
-                // band (EditorBar, SKR-123); the surface below it switches on
-                // rawView. Diff is a separate takeover with its own chrome, so
-                // it sits outside the band (handled above).
+                // Both editors share the persistent toolbar band (EditorBar,
+                // SKR-123); the surface below it switches on the tab's mode
+                // (rich `.folio` vs Markdown). Diff is a separate takeover with
+                // its own chrome, so it sits outside the band (handled above).
                 <>
                   <EditorBar />
                   <div className="workspace-surface">

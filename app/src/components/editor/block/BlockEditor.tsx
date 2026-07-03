@@ -25,9 +25,9 @@ import './BlockEditor.css';
 
 // Model-in / model-out (SKR-196). The surface edits the canonical block model
 // directly; serialization is the caller's concern, not the editor's. This is the
-// seam the dual-mode split routes through: Markdown mode wraps this with a
-// parse/serialize adapter (MarkdownBlockEditor), while `.folio` rich mode mounts
-// it with the model as the canonical store and no Markdown serializer in sight.
+// rich `.folio` editor: it mounts with the model as the canonical store and no
+// Markdown serializer in sight. Markdown files never mount this — they edit raw
+// text (RawSourceView) with a rendered preview (SKR-197).
 type Props = {
   /** Initial block-model document. Read once on mount; uncontrolled thereafter. */
   doc: Document;
