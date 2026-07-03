@@ -183,6 +183,25 @@ jobs:
             shell-zig/windows/installer/Skrive-Setup.exe
             shell-zig/windows/installer/appcast-win.xml
 
+      - name: Notify skrive.md of a shipped release
+        # Ping the marketing site so it rebuilds and its build-time GitHub
+        # releases fetch picks up this version (changelog + download section).
+        # Only stable v* tags: prereleases (labs-*, win-labs-*) are filtered
+        # out of the changelog anyway, so a rebuild for them is wasted.
+        # The default GITHUB_TOKEN cannot dispatch across repos, so this uses
+        # a dedicated PAT with `contents: write` on brueshi/skrive.md, stored
+        # as the SKRIVE_MD_DISPATCH_PAT secret in this repo.
+        if: github.event_name == 'push' && env.HAS_SIGNING == 'true' && startsWith(github.ref_name, 'v')
+        env:
+          DISPATCH_PAT: ${{ secrets.SKRIVE_MD_DISPATCH_PAT }}
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${DISPATCH_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/brueshi/skrive.md/dispatches \
+            -d "{\"event_type\":\"skrive-released\",\"client_payload\":{\"tag\":\"${GITHUB_REF_NAME}\"}}"
+
       # --- Dispatch: artifacts without a release ---------------------------
       - name: Upload build artifacts (dispatch)
         if: github.event_name == 'workflow_dispatch'
