@@ -29,12 +29,10 @@ import {
 } from '@skrive/shared';
 import type { LayoutMode, SidebarSortKey } from '@skrive/shared';
 import { computeLineDiff } from '../lib/diff/line-diff';
-import {
-  mightHaveLeadingFrontmatter,
-  parseFrontmatter,
-  serializeFrontmatter,
-  stampAutoFields
-} from '../lib/frontmatter';
+import { parseFrontmatter } from '../lib/frontmatter';
+import { buildSavePayload, fileMode, type EditorMode } from './save';
+import type { Document } from '../lib/blockmodel';
+import type { FolioMeta } from '../lib/folio';
 import { runProjectLint } from '../lib/lint';
 import type { LintWorkerResponse } from '../lib/lint/lint-worker-protocol';
 import { flushActiveEditor } from '../components/editor/active-editor';
@@ -99,12 +97,26 @@ export type TabDiffState = {
 
 export type Tab = {
   path: string;
+  /** The editing path this tab routes through, decided once at open from the
+   *  file extension (SKR-196). `markdown` edits text and saves text -> text;
+   *  `rich` edits the block model and saves the native `.folio` format. */
+  mode: EditorMode;
   /** Body without the leading frontmatter block. The editor reads/writes
-   *  this; the full file is reassembled at save time. */
+   *  this; the full file is reassembled at save time. Markdown mode only. */
   body: string;
   /** Parsed YAML frontmatter for the file. Populated on openTab; mutated
    *  by the FrontmatterPanel; auto-stamped fields refreshed on save. */
   frontmatter: FrontmatterMap;
+  /** The canonical block model for a `rich` (`.folio`) tab — the model-mode
+   *  analogue of `body`. Absent on markdown tabs. Set on open, synced from the
+   *  surface on edit, serialized to `.folio` on save. */
+  model?: Document;
+  /** Document identity for a `rich` tab (folio schema §3): read from the file on
+   *  open, minted once on create, written back unchanged. Absent on markdown. */
+  docId?: string;
+  /** Document metadata for a `rich` tab (title, createdAt, preserved unknowns).
+   *  Absent on markdown tabs. */
+  docMeta?: FolioMeta;
   dirty: boolean;
   /** SHA-256 of the file as last loaded or saved. Baseline for external-change
    *  detection — compared against the on-disk file before an auto-save so we
@@ -682,13 +694,6 @@ function findEntry(
 }
 
 /**
- * Build the on-disk file contents for a tab. Re-stamps auto-fields,
- * absorbs any leading `---` block the user typed straight into the
- * editor body into the structured map, and concatenates the serialized
- * frontmatter with the body. Mutates `tab.frontmatter` and `tab.body`
- * if absorption happened so the panel reflects the absorbed fields.
- */
-/**
  * Build a DiffSide from a HistoryEntry. Fetches the historical content
  * via the appropriate IPC; the returned `label` is short (subject
  * line, manual pin name, or "Autosave") so the DiffView pane header
@@ -735,42 +740,6 @@ function resolveCurrentSide(tab: Tab): DiffSide {
     label: 'Current',
     source: 'current'
   };
-}
-
-function buildSavePayload(tab: Tab): string {
-  // Absorb a leading frontmatter block the user typed into the editor.
-  // Only attempts this when the structured map is currently empty —
-  // otherwise we'd be silently merging two sources of truth.
-  if (
-    Object.keys(tab.frontmatter).length === 0 &&
-    mightHaveLeadingFrontmatter(tab.body)
-  ) {
-    const extracted = parseFrontmatter(tab.body);
-    if (Object.keys(extracted.frontmatter).length > 0) {
-      tab.frontmatter = extracted.frontmatter;
-      tab.body = extracted.body;
-    }
-  }
-  stampAutoFields(tab.frontmatter, tab.body);
-  const body = usePreferencesStore.getState().formatOnSave
-    ? normalizeMarkdownSpacing(tab.body)
-    : tab.body;
-  return serializeFrontmatter(tab.frontmatter) + body;
-}
-
-/** Conservative "format on save": tidy whitespace without touching what
- *  renders. Whitespace-only lines are cleared (they're blank either way,
- *  and never Markdown hard breaks, which live as trailing spaces on
- *  *content* lines and are preserved here), and the file ends with
- *  exactly one trailing newline. Deliberately does not reflow, collapse
- *  blank runs, or restyle, so it can't change meaning or mangle code. */
-function normalizeMarkdownSpacing(body: string): string {
-  const cleared = body
-    .split('\n')
-    .map((line) => (/^[ \t]+$/.test(line) ? '' : line))
-    .join('\n')
-    .replace(/\n+$/, '');
-  return cleared.length === 0 ? '' : `${cleared}\n`;
 }
 
 export const useProjectStore = create<State & Actions>((set, get) => ({
@@ -988,6 +957,14 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       logDuration(`file-switch (cached) ${path}`, start);
       return;
     }
+    const mode = fileMode(path);
+    if (mode === 'rich') {
+      // Native `.folio` documents open on the rich (block-model) path in the
+      // next stage (SKR-196 PR3). Until that lands, opening one is guarded so a
+      // `.folio` never renders as broken Markdown through the interim surface.
+      notify.warn('This document type is not editable yet in this build.');
+      return;
+    }
     // Read body fresh from disk for the new tab. Parse the leading
     // frontmatter so the editor sees the body sans-fence and the panel
     // sees the structured map. The full file is reassembled at save time.
@@ -996,6 +973,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const parsed = parseFrontmatter(content.body);
     const newTab: Tab = {
       path,
+      mode,
       body: parsed.body,
       frontmatter: parsed.frontmatter,
       dirty: false,
