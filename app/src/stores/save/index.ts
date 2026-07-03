@@ -7,6 +7,7 @@
 
 import { buildMarkdownPayload, type MarkdownSaveTab } from './markdown-save';
 import { buildFolioPayload } from './folio-save';
+import { buildTextPayload } from './text-save';
 import type { EditorMode } from './file-mode';
 import type { Document } from '../../lib/blockmodel';
 import type { FolioMeta } from '../../lib/folio';
@@ -14,6 +15,7 @@ import type { FolioMeta } from '../../lib/folio';
 export { fileMode, type EditorMode } from './file-mode';
 export { type MarkdownSaveTab } from './markdown-save';
 export { type FolioSaveTab } from './folio-save';
+export { type TextSaveTab } from './text-save';
 
 /** The fields the dispatcher reads off a tab. The store's full `Tab` satisfies
  *  this structurally; `model`/`docId`/`docMeta` are present only on rich tabs. */
@@ -27,8 +29,8 @@ export type SaveTab = MarkdownSaveTab & {
 /**
  * Build the on-disk bytes for a tab, routed by mode. A markdown tab goes to the
  * text->text path; a rich (`.folio`) tab serializes its model to the native
- * format. Mutates a markdown tab's frontmatter/body via absorption (callers pass a
- * clone).
+ * format; a plain-text (`.txt`) tab writes its body verbatim. Mutates a markdown
+ * tab's frontmatter/body via absorption (callers pass a clone).
  */
 export function buildSavePayload(tab: SaveTab): string {
   if (tab.mode === 'rich') {
@@ -38,6 +40,9 @@ export function buildSavePayload(tab: SaveTab): string {
       throw new Error('Cannot save a rich (.folio) tab without a model, docId, and docMeta.');
     }
     return buildFolioPayload({ model: tab.model, docId: tab.docId, docMeta: tab.docMeta });
+  }
+  if (tab.mode === 'text') {
+    return buildTextPayload(tab);
   }
   return buildMarkdownPayload(tab);
 }

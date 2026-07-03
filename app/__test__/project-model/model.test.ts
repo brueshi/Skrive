@@ -103,6 +103,34 @@ describe('manifest derivation', () => {
     expect(model.manifest().files.map((f) => f.path)).toEqual(['a.md']);
   });
 
+  it('lists plain-text files in the manifest (so they open + show)', () => {
+    // SKR-204: a `.txt` is an openable non-Markdown file — it surfaces in the
+    // sidebar like a `.folio`, but a true asset (image) stays out.
+    const model = makeModel([
+      file('notes.md', '# Notes'),
+      file('log.txt', 'plain contents'),
+      file('logo.png', null)
+    ]);
+    const files = model.manifest().files.map((f) => f.path);
+    expect(files).toContain('log.txt');
+    expect(files).not.toContain('logo.png');
+    // No Markdown frontmatter is invented, even if the text starts with `---`.
+    expect(model.manifest().files.find((f) => f.path === 'log.txt')!.frontmatter).toEqual({});
+  });
+
+  it('adds a new .txt on upsert (bumps) and does not churn on re-save', () => {
+    const model = makeModel([file('a.md', 'x')]);
+    expect(model.upsert('log.txt', 'hello')).toBe(true); // new file -> shows up
+    expect(model.currentVersion()).toBe(2);
+    expect(model.manifest().files.map((f) => f.path)).toEqual(['a.md', 'log.txt']);
+    // A content re-save carries no manifest-relevant change (no frontmatter).
+    expect(model.upsert('log.txt', 'hello world')).toBe(false);
+    expect(model.currentVersion()).toBe(2);
+    expect(model.remove('log.txt')).toBe(true);
+    expect(model.currentVersion()).toBe(3);
+    expect(model.manifest().files.map((f) => f.path)).toEqual(['a.md']);
+  });
+
   it('treats .skrive.toml changes as structure-relevant', () => {
     const model = makeModel([file('a.md', 'x')]);
     expect(model.upsert('.skrive.toml', '[project]\nname = "Renamed"\n')).toBe(

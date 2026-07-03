@@ -543,6 +543,7 @@ export function Sidebar() {
   const setSidebarVisible = useProjectStore((s) => s.setSidebarVisible);
   const toggleSidebar = useProjectStore((s) => s.toggleSidebar);
   const createFile = useProjectStore((s) => s.createFile);
+  const createTextFile = useProjectStore((s) => s.createTextFile);
   const createFolioDocument = useProjectStore((s) => s.createFolioDocument);
   const createDirectory = useProjectStore((s) => s.createDirectory);
   const deleteFile = useProjectStore((s) => s.deleteFile);
@@ -558,9 +559,9 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
     () => new Set()
   );
-  const [creating, setCreating] = useState<'folio' | 'markdown' | 'folder' | null>(
-    null
-  );
+  const [creating, setCreating] = useState<
+    'folio' | 'markdown' | 'text' | 'folder' | null
+  >(null);
   const [newName, setNewName] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<DeleteTarget | null>(null);
@@ -626,11 +627,14 @@ export function Sidebar() {
 
   // ---------- Create flow ----------
 
-  const startCreate = useCallback((kind: 'folio' | 'markdown' | 'folder') => {
-    setCreating(kind);
-    setNewName('');
-    setCreateError(null);
-  }, []);
+  const startCreate = useCallback(
+    (kind: 'folio' | 'markdown' | 'text' | 'folder') => {
+      setCreating(kind);
+      setNewName('');
+      setCreateError(null);
+    },
+    []
+  );
 
   const cancelCreate = useCallback(() => {
     setCreating(null);
@@ -649,6 +653,8 @@ export function Sidebar() {
         await createFolioDocument(trimmed);
       } else if (creating === 'markdown') {
         await createFile(trimmed);
+      } else if (creating === 'text') {
+        await createTextFile(trimmed);
       } else if (creating === 'folder') {
         await createDirectory(trimmed);
       }
@@ -663,6 +669,7 @@ export function Sidebar() {
     creating,
     createFolioDocument,
     createFile,
+    createTextFile,
     createDirectory,
     cancelCreate
   ]);
@@ -966,6 +973,12 @@ export function Sidebar() {
                   </DropdownMenu.Item>
                   <DropdownMenu.Item
                     className="ctx-item"
+                    onSelect={() => startCreate('text')}
+                  >
+                    <span className="ctx-label">New text file</span>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    className="ctx-item"
                     onSelect={() => startCreate('folder')}
                   >
                     <span className="ctx-label">New folder</span>
@@ -990,7 +1003,9 @@ export function Sidebar() {
                   ? 'document name'
                   : creating === 'markdown'
                     ? 'filename.md'
-                    : 'folder-name'
+                    : creating === 'text'
+                      ? 'filename.txt'
+                      : 'folder-name'
               }
             />
             {createError && <p className="create-error">{createError}</p>}
