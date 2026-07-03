@@ -1,14 +1,15 @@
-// True raw-Markdown source view (SKR-97). A power-user peek over the *same*
-// canonical buffer the block surface edits: `body` is already serialized
-// Markdown, so this is a plain textarea bound to it. Toggling back to the
-// rendered surface remounts BlockEditor, which re-parses the (possibly edited)
-// body — so the round trip is the existing parseDocument∘serializeDocument.
+// Raw-Markdown editor (SKR-97, promoted to the primary `.md` editing surface in
+// SKR-197). A plain textarea bound to the tab `body`, which is already the
+// canonical Markdown: editing is text -> text, and the save writes those bytes
+// verbatim — there is no parse -> model -> serialize round trip on this path, so
+// the SKR-153 fidelity bug class cannot recur here. The block model never touches
+// `.md`; the preview (MarkdownView) renders via the unified md -> HTML pipeline.
 //
-// Mirrors the BlockEditor contract: uncontrolled (body read once on mount; App
-// keys it by tab path), edits flow out as a debounced snapshot, and the
-// active-editor flush hook drains the latest value on ⌘S / quit / view toggle.
-// A textarea is not the gated keystroke path (that is the contenteditable block
-// surface), so a debounced store write is fine here.
+// Uncontrolled (body read once on mount; App keys it by tab path), edits flow out
+// as a debounced snapshot (plus an undebounced onLiveInput for the live preview),
+// and the active-editor flush hook drains the latest value on S / quit / layout
+// switch. A textarea is not the gated keystroke path (that is the contenteditable
+// block surface), so a debounced store write is fine here.
 
 import { useEffect, useRef } from 'react';
 import { setActiveEditorFlush } from '../active-editor';
@@ -51,7 +52,8 @@ export function RawSourceView({
       if (el) onChangeRef.current(el.value);
     };
     // Single-slot flush hook, shared with BlockEditor; only one surface is
-    // mounted at a time (App swaps on rawView), so registering here is safe.
+    // mounted at a time (App swaps by tab mode / layout), so registering here
+    // is safe.
     setActiveEditorFlush(flush);
     return () => {
       flush();

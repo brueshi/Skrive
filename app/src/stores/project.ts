@@ -132,10 +132,6 @@ export type Tab = {
    *  this tab (keeping it dirty) until the writer resolves it via Overwrite or
    *  an explicit ⌘S. Not persisted. */
   conflict: boolean;
-  /** True when this tab shows the raw Markdown source view instead of the
-   *  rendered block surface (SKR-97). In-memory only — a transient peek that
-   *  resets to rendered on restart, so it is deliberately not persisted. */
-  rawView: boolean;
   layoutMode: LayoutMode;
   splitDividerRatio: number;
   /** Cursor + scroll persisted in the per-project state (Phase 9).
@@ -239,7 +235,6 @@ type Actions = {
   /** Sync the edited block model back onto a rich (`.folio`) tab. The
    *  model-mode analogue of setTabBody; marks dirty, skips Markdown lint. */
   setTabModel(index: number, next: Document): void;
-  setTabRawView(index: number, value: boolean): void;
   /** Set the Markdown-mode layout (raw / split / preview). Persisted per tab. */
   setTabLayoutMode(index: number, mode: LayoutMode): void;
   /** Set the split-view divider ratio (raw | preview). Debounced-persisted. */
@@ -1031,7 +1026,6 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       dirty: false,
       diskHash: content.hash,
       conflict: false,
-      rawView: false,
       layoutMode: hydrate?.applyOverrides
         ? hydrate.layoutMode
         : DEFAULT_LAYOUT_MODE,
@@ -1152,16 +1146,6 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     set({ tabs: nextTabs });
     // No scheduleLint: a `.folio` document is not Markdown, so the Markdown
     // lint/link engine does not apply to it.
-  },
-
-  setTabRawView(index: number, value: boolean) {
-    const { tabs } = get();
-    const tab = tabs[index];
-    if (!tab || tab.rawView === value) return;
-    const nextTabs = tabs.slice();
-    nextTabs[index] = { ...tab, rawView: value };
-    // In-memory only (see Tab.rawView) — no persistence scheduling.
-    set({ tabs: nextTabs });
   },
 
   setTabLayoutMode(index: number, mode: LayoutMode) {
@@ -1709,9 +1693,12 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const { tabs, activeTabIndex } = get();
     const tab = tabs[activeTabIndex];
     if (!tab) return;
-    // The diff pane mirrors how the tab is being viewed: a rendered diff for the
-    // block surface, a raw-text diff when the source view is showing.
-    const diffMode: 'diff-raw' | 'diff-preview' = tab.rawView
+    // The diff pane mirrors how the tab is being viewed: a raw-text diff when
+    // Markdown source is on screen (source or split layout), a rendered diff
+    // otherwise (preview layout, or a rich `.folio` tab).
+    const showingSource =
+      tab.mode === 'markdown' && tab.layoutMode !== 'preview';
+    const diffMode: 'diff-raw' | 'diff-preview' = showingSource
       ? 'diff-raw'
       : 'diff-preview';
     try {
