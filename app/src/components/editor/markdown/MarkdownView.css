@@ -1,0 +1,53 @@
+/* Markdown source mode split layout (SKR-197). Source on the left, live preview
+   on the right, with a draggable divider. Each pane is a flex column so the
+   RawSourceView (height:100%) and the Preview (.preview-host flex:1) fill it and
+   scroll independently. */
+
+.md-split {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+}
+
+.md-split-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Left pane's width is set inline (flex-basis) from the divider ratio; the
+   preview pane takes the rest. */
+.md-split-pane--preview {
+  flex: 1 1 0;
+}
+
+.md-split-divider {
+  flex: 0 0 auto;
+  width: 10px;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  touch-action: none;
+}
+
+.md-split-divider::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--skrive-border, rgba(0, 0, 0, 0.12));
+  transition: background 0.12s ease;
+}
+
+.md-split-divider:hover::before,
+.md-split-divider:active::before {
+  background: var(--skrive-accent, #6b6b8a);
+}

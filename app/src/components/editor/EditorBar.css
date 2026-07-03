@@ -7,7 +7,12 @@
 .editor-bar {
   position: relative;
   flex: 0 0 auto;
-  min-height: calc(28px + 0.7rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Taller than the bare control so the centered toolbar / layout switch has
+     breathing room from the tab chrome above and the writing surface below. */
+  min-height: calc(28px + 1.2rem);
   background: var(--skrive-bg);
   border-bottom: 1px solid var(--skrive-rule);
 }
@@ -22,7 +27,71 @@
   bottom: 0;
   display: flex;
   align-items: center;
+  gap: 0.5rem;
   z-index: 1;
+}
+
+/* Markdown source-mode layout switch (SKR-197): a segmented pill control
+   (Markdown / Split / Preview) centered in the bar's middle band, where the
+   formatting toolbar sits in rich mode. The track is recessed; a single raised
+   thumb slides + resizes to the active segment. The track carries no layout
+   border (an inset shadow paints the edge) so the JS-measured thumb aligns to
+   the buttons' offsetLeft without a border to account for. */
+.md-layout-toggle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: fit-content;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--skrive-shell-bg);
+  box-shadow: inset 0 0 0 1px var(--skrive-card-border);
+}
+
+.md-layout-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  border-radius: 999px;
+  background: var(--skrive-card-bg);
+  box-shadow: var(--skrive-card-shadow);
+  pointer-events: none;
+  z-index: 0;
+  transition:
+    transform 0.26s cubic-bezier(0.32, 0.72, 0, 1),
+    width 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.md-layout-btn {
+  position: relative;
+  z-index: 1;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 4px 14px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: var(--skrive-muted);
+  transition: color 0.2s ease;
+}
+
+.md-layout-btn:hover:not(.active) {
+  color: var(--skrive-fg);
+}
+
+.md-layout-btn.active {
+  color: var(--skrive-fg);
+  font-weight: 500;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .md-layout-thumb {
+    transition: none;
+  }
 }
 
 .editor-bar-left {

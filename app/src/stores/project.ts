@@ -58,13 +58,11 @@ export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 500;
 export const SIDEBAR_DEFAULT_WIDTH = 260;
 
-// Vestigial after the editor cutover (SKR-111): the raw/split/preview surfaces
-// were retired, so layoutMode/splitDividerRatio are no longer read by the
-// renderer. They are kept on the tab and in the persisted schema only so the
-// on-disk shape (and its Zig-core mirror) stays stable across versions; the
-// value just round-trips. 'split' is avoided as the default so the dead
-// split-only diff guards never trip.
-const DEFAULT_LAYOUT_MODE: LayoutMode = 'preview';
+// Markdown-mode layout (SKR-197): raw source / split / rendered preview.
+// layoutMode + splitDividerRatio ride on the tab and persist per project. A new
+// Markdown tab opens in split (edit the source with a live preview beside it);
+// `.folio` rich tabs ignore layoutMode (they have a single editing surface).
+const DEFAULT_LAYOUT_MODE: LayoutMode = 'split';
 const DEFAULT_SPLIT_RATIO = 0.5;
 const DEBOUNCED_SAVE_MS = 1000;
 
@@ -242,6 +240,10 @@ type Actions = {
    *  model-mode analogue of setTabBody; marks dirty, skips Markdown lint. */
   setTabModel(index: number, next: Document): void;
   setTabRawView(index: number, value: boolean): void;
+  /** Set the Markdown-mode layout (raw / split / preview). Persisted per tab. */
+  setTabLayoutMode(index: number, mode: LayoutMode): void;
+  /** Set the split-view divider ratio (raw | preview). Debounced-persisted. */
+  setTabSplitDividerRatio(index: number, ratio: number): void;
   setTabCursor(index: number, line: number, column: number): void;
   setTabScrollTop(index: number, top: number): void;
 
@@ -1160,6 +1162,30 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     nextTabs[index] = { ...tab, rawView: value };
     // In-memory only (see Tab.rawView) — no persistence scheduling.
     set({ tabs: nextTabs });
+  },
+
+  setTabLayoutMode(index: number, mode: LayoutMode) {
+    const { tabs } = get();
+    const tab = tabs[index];
+    if (!tab || tab.layoutMode === mode) return;
+    const nextTabs = tabs.slice();
+    nextTabs[index] = { ...tab, layoutMode: mode };
+    set({ tabs: nextTabs });
+    // A layout choice is a deliberate, immediate-tier preference.
+    scheduleImmediateSave(get);
+  },
+
+  setTabSplitDividerRatio(index: number, ratio: number) {
+    const { tabs } = get();
+    const tab = tabs[index];
+    if (!tab) return;
+    const clamped = clampRatio(ratio);
+    if (tab.splitDividerRatio === clamped) return;
+    const nextTabs = tabs.slice();
+    nextTabs[index] = { ...tab, splitDividerRatio: clamped };
+    set({ tabs: nextTabs });
+    // Drag: debounced tier, same as scroll/sidebar-width.
+    scheduleDebouncedSave(get);
   },
 
   setTabCursor(index: number, line: number, column: number) {
