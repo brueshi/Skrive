@@ -35,6 +35,17 @@ export const MARKDOWN_EXT = /\.(md|markdown)$/i;
  *  entry (so they show in the sidebar and can be opened) but are not Markdown:
  *  no body is parsed, no link-graph edges, no lint. */
 export const FOLIO_EXT = /\.folio$/i;
+/** Plain-text files (SKR-204). Like `.folio`, openable non-Markdown files that
+ *  earn a manifest entry so they surface in the sidebar and open in plain-text
+ *  mode — no body parse, no links, no lint. (HTML/RTF join this set with their
+ *  viewers in SKR-205/206.) */
+export const TEXT_EXT = /\.(txt|text)$/i;
+/** Non-Markdown formats that are nonetheless openable, and so carry a manifest
+ *  entry. Markdown is classified separately (it also carries a body + links). */
+const OPENABLE_NONMARKDOWN_EXT = [FOLIO_EXT, TEXT_EXT];
+function isOpenableNonMarkdown(relPath: string): boolean {
+  return OPENABLE_NONMARKDOWN_EXT.some((re) => re.test(relPath));
+}
 const SKRIVE_TOML = '.skrive.toml';
 const SEARCH_HIT_CAP = 500;
 // Snippet cap from the Rust port — long lines truncate with an ellipsis.
@@ -63,9 +74,10 @@ function basenameOf(relPath: string): string {
   return relPath.split('/').pop() ?? relPath;
 }
 
-/** A manifest entry for a native `.folio` document — no Markdown frontmatter or
- *  links; present so the file lists in the sidebar and can be opened. */
-function folioEntry(
+/** A manifest entry for an openable non-Markdown file (`.folio`, `.txt`, …) — no
+ *  Markdown frontmatter or links; present so the file lists in the sidebar and
+ *  can be opened. */
+function openableEntry(
   relPath: string,
   sizeBytes: number,
   modifiedMs: number
@@ -231,12 +243,13 @@ export class ProjectModel {
           frontmatter: parseFrontmatter(file.body).frontmatter,
           outgoingLinks: []
         });
-      } else if (FOLIO_EXT.test(file.path)) {
-        // A native document: a manifest entry (no Markdown body/links), plus
-        // tracked as a linkable file so a Markdown link to it resolves.
+      } else if (isOpenableNonMarkdown(file.path)) {
+        // An openable non-Markdown file (`.folio`, `.txt`): a manifest entry (no
+        // Markdown body/links), plus tracked as a linkable file so a Markdown
+        // link to it resolves.
         this.nonMarkdown.add(file.path);
         this.entries.push(
-          folioEntry(file.path, file.sizeBytes ?? 0, file.modifiedMs ?? 0)
+          openableEntry(file.path, file.sizeBytes ?? 0, file.modifiedMs ?? 0)
         );
       } else {
         this.nonMarkdown.add(file.path);
@@ -274,8 +287,8 @@ export class ProjectModel {
       this.version++;
       return true;
     }
-    if (FOLIO_EXT.test(relPath)) {
-      return this.upsertFolio(relPath, meta);
+    if (isOpenableNonMarkdown(relPath)) {
+      return this.upsertOpenable(relPath, meta);
     }
     if (!MARKDOWN_EXT.test(relPath)) {
       this.nonMarkdown.add(relPath);
@@ -307,13 +320,14 @@ export class ProjectModel {
     return changed;
   }
 
-  /** Add or refresh a native `.folio` document's manifest entry. A new document
-   *  bumps the version (it appears in the sidebar); a re-save of an existing one
-   *  is a no-op — a folio carries no frontmatter to change, so its content edits
-   *  never churn the manifest (mirrors the Markdown content-only-save behavior). */
-  private upsertFolio(relPath: string, meta: UpsertMeta): boolean {
+  /** Add or refresh an openable non-Markdown file's manifest entry (`.folio`,
+   *  `.txt`). A new file bumps the version (it appears in the sidebar); a re-save
+   *  of an existing one is a no-op — these carry no frontmatter to change, so
+   *  their content edits never churn the manifest (mirrors the Markdown
+   *  content-only-save behavior). */
+  private upsertOpenable(relPath: string, meta: UpsertMeta): boolean {
     this.nonMarkdown.add(relPath);
-    const entry = folioEntry(
+    const entry = openableEntry(
       relPath,
       meta.sizeBytes ?? 0,
       meta.modifiedMs ?? Date.now()

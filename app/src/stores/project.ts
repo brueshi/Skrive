@@ -773,13 +773,14 @@ function resolveCurrentSide(tab: Tab): DiffSide {
   };
 }
 
-// The body to feed the (Markdown-oriented) project model after writing a tab. A
-// rich (`.folio`) tab registers its path with an EMPTY body: the file stays in
-// the manifest/sidebar, but its JSON is never parsed as Markdown for links or
-// lint (the engine is catalog, never custodian — folio content is not the
-// Markdown model's concern). A markdown tab feeds its real bytes.
+// The body to feed the (Markdown-oriented) project model after writing a tab.
+// Only a markdown tab feeds its real bytes. A rich (`.folio`) or plain-text
+// (`.txt`) tab registers its path with an EMPTY body: the file stays in the
+// manifest/sidebar, but its content is never parsed as Markdown for links or lint
+// (the engine is catalog, never custodian — non-Markdown content is not the
+// Markdown model's concern).
 function modelSyncBody(mode: EditorMode, payload: string): string {
-  return mode === 'rich' ? '' : payload;
+  return mode === 'markdown' ? payload : '';
 }
 
 // Write a `.folio` document to `relPath` and open it. Exclusive-create first so
@@ -1051,6 +1052,11 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         docId: folio.docId,
         docMeta: folio.docMeta
       };
+    } else if (mode === 'text') {
+      // Plain text (SKR-204): the whole file is the editable body — no
+      // frontmatter parse (a `.txt`'s leading `---` is content, not metadata) and
+      // no block model.
+      contentFields = { body: content.body, frontmatter: {} };
     } else {
       const parsed = parseFrontmatter(content.body);
       contentFields = { body: parsed.body, frontmatter: parsed.frontmatter };

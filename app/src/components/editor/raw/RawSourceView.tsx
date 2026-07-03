@@ -26,6 +26,9 @@ type Props = {
    * lint path; this is a separate, cheap, presentation-only signal.
    */
   onLiveInput?: (next: string) => void;
+  /** Accessible label for the textarea. Defaults to the Markdown-source wording;
+   *  plain-text mode (SKR-204) passes its own. */
+  ariaLabel?: string;
 };
 
 const SNAPSHOT_DELAY_MS = 250;
@@ -33,7 +36,8 @@ const SNAPSHOT_DELAY_MS = 250;
 export function RawSourceView({
   body,
   onChange,
-  onLiveInput
+  onLiveInput,
+  ariaLabel = 'Raw Markdown source'
 }: Props): React.ReactElement {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const onChangeRef = useRef(onChange);
@@ -86,7 +90,7 @@ export function RawSourceView({
         autoComplete="off"
         autoCorrect="off"
         autoCapitalize="off"
-        aria-label="Raw Markdown source"
+        aria-label={ariaLabel}
         onInput={onInput}
         onBlur={() => {
           const el = textareaRef.current;

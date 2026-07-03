@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
 import { BlockEditor } from './components/editor/block/BlockEditor';
 import { MarkdownView } from './components/editor/markdown/MarkdownView';
+import { RawSourceView } from './components/editor/raw/RawSourceView';
 import { EditorBar } from './components/editor/EditorBar';
 import { flushActiveEditor } from './components/editor/active-editor';
 import { installPasteCapture } from './lib/clipboard/capturePaste';
@@ -497,6 +498,15 @@ export function App() {
                         key={activeTab.path}
                         doc={activeTab.model}
                         onChange={(doc) => setTabModel(activeTabIndex, doc)}
+                      />
+                    ) : activeTab.mode === 'text' ? (
+                      // Plain-text mode (SKR-204): raw text edit, no rendered
+                      // preview and no frontmatter. Keyed per file (uncontrolled).
+                      <RawSourceView
+                        key={activeTab.path}
+                        body={activeTab.body}
+                        onChange={(next) => setTabBody(activeTabIndex, next)}
+                        ariaLabel="Plain text"
                       />
                     ) : (
                       // Markdown source mode (SKR-197): edit raw text, see a
