@@ -21,13 +21,21 @@ export type ResolvedTitle = {
   secondary: string | null;
 };
 
+/** Native `.folio` is not surfaced as a format: its extension is hidden in
+ *  display names (a document reads as "notes", not "notes.folio"). Markdown keeps
+ *  its extension. Display-only — the real path/name still drives operations. */
+export function stripFolioExtension(name: string): string {
+  return name.replace(/\.folio$/i, '');
+}
+
 export function resolveTitle(file: FileEntry): ResolvedTitle {
+  const name = stripFolioExtension(file.name);
   const fm = file.frontmatter['title'];
   if (typeof fm === 'string') {
     const trimmed = fm.trim();
     if (trimmed) {
-      return { primary: trimmed, secondary: file.name };
+      return { primary: trimmed, secondary: name };
     }
   }
-  return { primary: file.name, secondary: null };
+  return { primary: name, secondary: null };
 }

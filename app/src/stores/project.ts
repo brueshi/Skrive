@@ -31,8 +31,16 @@ import type { LayoutMode, SidebarSortKey } from '@skrive/shared';
 import { computeLineDiff } from '../lib/diff/line-diff';
 import { parseFrontmatter } from '../lib/frontmatter';
 import { buildSavePayload, fileMode, type EditorMode } from './save';
-import type { Document } from '../lib/blockmodel';
-import type { FolioMeta } from '../lib/folio';
+import { generateBlockId, type Document } from '../lib/blockmodel';
+import {
+  folioToModel,
+  generateDocId,
+  parseFolio,
+  serializeFolio,
+  FolioForwardError,
+  type FolioDocument,
+  type FolioMeta
+} from '../lib/folio';
 import { runProjectLint } from '../lib/lint';
 import type { LintWorkerResponse } from '../lib/lint/lint-worker-protocol';
 import { flushActiveEditor } from '../components/editor/active-editor';
@@ -230,6 +238,9 @@ type Actions = {
   clearPendingSelection(index: number): void;
 
   setTabBody(index: number, next: string): void;
+  /** Sync the edited block model back onto a rich (`.folio`) tab. The
+   *  model-mode analogue of setTabBody; marks dirty, skips Markdown lint. */
+  setTabModel(index: number, next: Document): void;
   setTabRawView(index: number, value: boolean): void;
   setTabCursor(index: number, line: number, column: number): void;
   setTabScrollTop(index: number, top: number): void;
@@ -241,6 +252,9 @@ type Actions = {
   forceSaveTab(path: string): Promise<void>;
 
   createFile(relPath: string): Promise<void>;
+  /** Create a fresh, empty native `.folio` document (mints a docId + createdAt),
+   *  then open it. The extension is appended if absent. */
+  createFolioDocument(relPath: string): Promise<void>;
   createDirectory(relPath: string): Promise<void>;
   deleteFile(relPath: string): Promise<void>;
   deleteDirectory(relPath: string): Promise<void>;
@@ -627,7 +641,7 @@ async function syncWatchedChanges(getState: () => State & Actions): Promise<void
       }
       try {
         const content = await window.skrive.fs.readFile(manifest.root, path);
-        await client.upsert(path, content.body, {
+        await client.upsert(path, modelSyncBody(fileMode(path), content.body), {
           modifiedMs: content.modifiedMs
         });
       } catch {
@@ -740,6 +754,15 @@ function resolveCurrentSide(tab: Tab): DiffSide {
     label: 'Current',
     source: 'current'
   };
+}
+
+// The body to feed the (Markdown-oriented) project model after writing a tab. A
+// rich (`.folio`) tab registers its path with an EMPTY body: the file stays in
+// the manifest/sidebar, but its JSON is never parsed as Markdown for links or
+// lint (the engine is catalog, never custodian — folio content is not the
+// Markdown model's concern). A markdown tab feeds its real bytes.
+function modelSyncBody(mode: EditorMode, payload: string): string {
+  return mode === 'rich' ? '' : payload;
 }
 
 export const useProjectStore = create<State & Actions>((set, get) => ({
@@ -958,24 +981,51 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       return;
     }
     const mode = fileMode(path);
-    if (mode === 'rich') {
-      // Native `.folio` documents open on the rich (block-model) path in the
-      // next stage (SKR-196 PR3). Until that lands, opening one is guarded so a
-      // `.folio` never renders as broken Markdown through the interim surface.
-      notify.warn('This document type is not editable yet in this build.');
-      return;
-    }
-    // Read body fresh from disk for the new tab. Parse the leading
-    // frontmatter so the editor sees the body sans-fence and the panel
-    // sees the structured map. The full file is reassembled at save time.
+    // Read the file fresh from disk. A markdown file parses its leading
+    // frontmatter so the editor sees the body sans-fence; a rich `.folio` parses
+    // the native JSON into the block model and carries its identity (docId /
+    // docMeta) alongside. The full file is reassembled at save time by the mode's
+    // save path (stores/save).
     const start = perfNow();
     const content = await window.skrive.fs.readFile(manifest.root, path);
-    const parsed = parseFrontmatter(content.body);
+
+    let contentFields: Pick<
+      Tab,
+      'body' | 'frontmatter' | 'model' | 'docId' | 'docMeta'
+    >;
+    if (mode === 'rich') {
+      let folio: FolioDocument;
+      try {
+        folio = parseFolio(content.body);
+      } catch (err) {
+        // Never open a partial document. A forward-version / zip file is "made by
+        // a newer Skrive"; anything else is a malformed file. Surface and abort.
+        const name = path.split('/').pop() ?? path;
+        if (err instanceof FolioForwardError) {
+          notify.warn(`"${name}" was made by a newer version of Skrive and can't be opened here.`);
+        } else {
+          notify.error(
+            `"${name}" could not be opened: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+        return;
+      }
+      contentFields = {
+        body: '',
+        frontmatter: {},
+        model: folioToModel(folio),
+        docId: folio.docId,
+        docMeta: folio.docMeta
+      };
+    } else {
+      const parsed = parseFrontmatter(content.body);
+      contentFields = { body: parsed.body, frontmatter: parsed.frontmatter };
+    }
+
     const newTab: Tab = {
       path,
       mode,
-      body: parsed.body,
-      frontmatter: parsed.frontmatter,
+      ...contentFields,
       dirty: false,
       diskHash: content.hash,
       conflict: false,
@@ -1090,6 +1140,18 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     scheduleLint();
   },
 
+  setTabModel(index: number, next: Document) {
+    const { tabs } = get();
+    const tab = tabs[index];
+    if (!tab) return;
+    if (next === tab.model) return;
+    const nextTabs = tabs.slice();
+    nextTabs[index] = { ...tab, model: next, dirty: true };
+    set({ tabs: nextTabs });
+    // No scheduleLint: a `.folio` document is not Markdown, so the Markdown
+    // lint/link engine does not apply to it.
+  },
+
   setTabRawView(index: number, value: boolean) {
     const { tabs } = get();
     const tab = tabs[index];
@@ -1135,7 +1197,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const writable: Tab = { ...tab, frontmatter: { ...tab.frontmatter } };
     const payload = buildSavePayload(writable);
     const hash = await window.skrive.fs.writeFile(manifest.root, tab.path, payload);
-    void projectModel()?.upsert(tab.path, payload);
+    void projectModel()?.upsert(tab.path, modelSyncBody(tab.mode, payload));
     const nextTabs = tabs.slice();
     nextTabs[activeTabIndex] = {
       ...writable,
@@ -1173,7 +1235,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       const idx = i;
       writes.push(
         window.skrive.fs.writeFile(manifest.root, t.path, payload).then((hash) => {
-          void projectModel()?.upsert(t.path, payload);
+          void projectModel()?.upsert(t.path, modelSyncBody(t.mode, payload));
           updatedTabs[idx] = { ...writable, dirty: false, diskHash: hash };
         })
       );
@@ -1201,7 +1263,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const writable: Tab = { ...tab, frontmatter: { ...tab.frontmatter } };
     const payload = buildSavePayload(writable);
     const hash = await window.skrive.fs.writeFile(manifest.root, path, payload);
-    void projectModel()?.upsert(path, payload);
+    void projectModel()?.upsert(path, modelSyncBody(tab.mode, payload));
     const nextTabs = get().tabs.slice();
     const j = nextTabs.findIndex((t) => t.path === path);
     const existing = nextTabs[j];
@@ -1227,6 +1289,31 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     await window.skrive.fs.newFile(manifest.root, normalized);
     // Awaited: openTab needs the new entry in the manifest, and the
     // client guarantees the model update lands before this resolves.
+    await projectModel()?.upsert(normalized, '');
+    await get().openTab(normalized);
+  },
+
+  async createFolioDocument(relPath: string) {
+    const { manifest } = get();
+    if (!manifest) return;
+    const normalized = relPath.endsWith('.folio') ? relPath : `${relPath}.folio`;
+    // Mint identity once, here (folio schema §3). A fresh document opens on a
+    // single empty paragraph — a caret-ready first line (it renders as a <br>
+    // placeholder), like a new document in any rich editor. createdAt is
+    // immutable and never re-stamped on save.
+    const doc: FolioDocument = {
+      schemaVersion: 1,
+      docId: generateDocId(),
+      docMeta: { title: null, createdAt: new Date().toISOString() },
+      blocks: [{ id: generateBlockId(), type: 'paragraph', inline: [] }]
+    };
+    // Exclusive create first so naming a new document the same as an existing
+    // file errors (surfaced by the caller) instead of clobbering it, then write
+    // the canonical bytes.
+    await window.skrive.fs.newFile(manifest.root, normalized);
+    await window.skrive.fs.writeFile(manifest.root, normalized, serializeFolio(doc));
+    // Register the path only (empty body) — folio content is not the Markdown
+    // model's concern (see modelSyncBody).
     await projectModel()?.upsert(normalized, '');
     await get().openTab(normalized);
   },

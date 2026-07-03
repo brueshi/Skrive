@@ -17,10 +17,14 @@ import {
 import { DocIcon } from '../icons/DocIcon';
 import { IconDotUnsaved } from '../icons/IconDotUnsaved';
 import { IconX } from '../icons/IconX';
+import { stripFolioExtension } from '../../lib/title';
 
 function leafName(p: string): string {
   const lastSep = p.lastIndexOf('/');
-  return lastSep === -1 ? p : p.slice(lastSep + 1);
+  const base = lastSep === -1 ? p : p.slice(lastSep + 1);
+  // Hide the `.folio` extension in the tab, matching the sidebar — the native
+  // format is not surfaced. Markdown keeps its extension.
+  return stripFolioExtension(base);
 }
 
 export function TabBar() {

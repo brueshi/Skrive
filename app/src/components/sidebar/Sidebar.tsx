@@ -491,6 +491,7 @@ export function Sidebar() {
   const setSidebarVisible = useProjectStore((s) => s.setSidebarVisible);
   const toggleSidebar = useProjectStore((s) => s.toggleSidebar);
   const createFile = useProjectStore((s) => s.createFile);
+  const createFolioDocument = useProjectStore((s) => s.createFolioDocument);
   const createDirectory = useProjectStore((s) => s.createDirectory);
   const deleteFile = useProjectStore((s) => s.deleteFile);
   const deleteDirectory = useProjectStore((s) => s.deleteDirectory);
@@ -503,7 +504,9 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
     () => new Set()
   );
-  const [creating, setCreating] = useState<'file' | 'folder' | null>(null);
+  const [creating, setCreating] = useState<'folio' | 'markdown' | 'folder' | null>(
+    null
+  );
   const [newName, setNewName] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<DeleteTarget | null>(null);
@@ -555,7 +558,7 @@ export function Sidebar() {
 
   // ---------- Create flow ----------
 
-  const startCreate = useCallback((kind: 'file' | 'folder') => {
+  const startCreate = useCallback((kind: 'folio' | 'markdown' | 'folder') => {
     setCreating(kind);
     setNewName('');
     setCreateError(null);
@@ -574,7 +577,9 @@ export function Sidebar() {
       return;
     }
     try {
-      if (creating === 'file') {
+      if (creating === 'folio') {
+        await createFolioDocument(trimmed);
+      } else if (creating === 'markdown') {
         await createFile(trimmed);
       } else if (creating === 'folder') {
         await createDirectory(trimmed);
@@ -585,7 +590,14 @@ export function Sidebar() {
     } catch (e) {
       setCreateError(e instanceof Error ? e.message : String(e));
     }
-  }, [newName, creating, createFile, createDirectory, cancelCreate]);
+  }, [
+    newName,
+    creating,
+    createFolioDocument,
+    createFile,
+    createDirectory,
+    cancelCreate
+  ]);
 
   const handleNewKey = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
@@ -874,9 +886,15 @@ export function Sidebar() {
                 >
                   <DropdownMenu.Item
                     className="ctx-item"
-                    onSelect={() => startCreate('file')}
+                    onSelect={() => startCreate('folio')}
                   >
                     <span className="ctx-label">New file</span>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    className="ctx-item"
+                    onSelect={() => startCreate('markdown')}
+                  >
+                    <span className="ctx-label">New Markdown file</span>
                   </DropdownMenu.Item>
                   <DropdownMenu.Item
                     className="ctx-item"
@@ -899,7 +917,13 @@ export function Sidebar() {
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={handleNewKey}
               onBlur={() => void confirmCreate()}
-              placeholder={creating === 'file' ? 'filename.md' : 'folder-name'}
+              placeholder={
+                creating === 'folio'
+                  ? 'document name'
+                  : creating === 'markdown'
+                    ? 'filename.md'
+                    : 'folder-name'
+              }
             />
             {createError && <p className="create-error">{createError}</p>}
           </div>
