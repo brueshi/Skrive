@@ -8,7 +8,7 @@
 // exclusively the `.folio` rich editor now — the SKR-153 round-trip class cannot
 // recur here because there is no parse -> model -> serialize cycle.
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LayoutMode } from '@skrive/shared';
 import { RawSourceView } from '../raw/RawSourceView';
 import { Preview } from '../Preview';
@@ -47,6 +47,33 @@ export function MarkdownView({
   const splitRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
 
+  // The preview renders from a live mirror of the source text, updated per
+  // animation frame straight from the textarea — so it feels instant, decoupled
+  // from the debounced store write (which stays the save / lint cadence). The
+  // effect resyncs the mirror whenever the canonical body changes (a settled
+  // edit, or an external change), which is a no-op when they've already
+  // converged during typing.
+  const [liveBody, setLiveBody] = useState(body);
+  useEffect(() => setLiveBody(body), [body]);
+  const rafRef = useRef<number | null>(null);
+  const pendingRef = useRef(body);
+
+  const onLiveInput = useCallback((text: string) => {
+    pendingRef.current = text;
+    if (rafRef.current != null) return; // coalesce a burst to one render/frame
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      setLiveBody(pendingRef.current);
+    });
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    },
+    []
+  );
+
   const onDividerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     dragging.current = true;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -73,7 +100,7 @@ export function MarkdownView({
 
   const preview = (
     <Preview
-      body={body}
+      body={liveBody}
       filePath={filePath}
       projectRoot={projectRoot}
       onInternalLink={onInternalLink}
@@ -93,7 +120,7 @@ export function MarkdownView({
   return (
     <div className="md-split" ref={splitRef}>
       <div className="md-split-pane" style={{ flexBasis: `${leftPct}%` }}>
-        <RawSourceView body={body} onChange={onChange} />
+        <RawSourceView body={body} onChange={onChange} onLiveInput={onLiveInput} />
       </div>
       <div
         className="md-split-divider"

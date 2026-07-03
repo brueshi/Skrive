@@ -19,14 +19,26 @@ type Props = {
   body: string;
   /** Receives the textarea value on the debounced snapshot, on blur, and on flush. */
   onChange: (next: string) => void;
+  /**
+   * Fires on every input with the live value, undebounced — for a live preview
+   * that must feel instant. The debounced `onChange` remains the store / save /
+   * lint path; this is a separate, cheap, presentation-only signal.
+   */
+  onLiveInput?: (next: string) => void;
 };
 
 const SNAPSHOT_DELAY_MS = 250;
 
-export function RawSourceView({ body, onChange }: Props): React.ReactElement {
+export function RawSourceView({
+  body,
+  onChange,
+  onLiveInput
+}: Props): React.ReactElement {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onLiveInputRef = useRef(onLiveInput);
+  onLiveInputRef.current = onLiveInput;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -49,12 +61,16 @@ export function RawSourceView({ body, onChange }: Props): React.ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const scheduleSnapshot = () => {
+  const onInput = () => {
+    const el = textareaRef.current;
+    // Live, undebounced signal for the preview; the store write below stays
+    // debounced.
+    if (el && onLiveInputRef.current) onLiveInputRef.current(el.value);
     if (timerRef.current != null) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
-      const el = textareaRef.current;
-      if (el) onChangeRef.current(el.value);
+      const cur = textareaRef.current;
+      if (cur) onChangeRef.current(cur.value);
     }, SNAPSHOT_DELAY_MS);
   };
 
@@ -69,7 +85,7 @@ export function RawSourceView({ body, onChange }: Props): React.ReactElement {
         autoCorrect="off"
         autoCapitalize="off"
         aria-label="Raw Markdown source"
-        onInput={scheduleSnapshot}
+        onInput={onInput}
         onBlur={() => {
           const el = textareaRef.current;
           if (el) onChangeRef.current(el.value);
