@@ -3,14 +3,13 @@
 // active tab is a Markdown file (where the formatting toolbar is absent). `.folio`
 // rich tabs show the toolbar there instead and get no layout switch.
 
-import { Fragment } from 'react';
 import { useProjectStore } from '../../stores/project';
 import type { LayoutMode } from '@skrive/shared';
 
 const MODES: ReadonlyArray<{ mode: LayoutMode; label: string }> = [
-  { mode: 'raw', label: 'markdown' },
-  { mode: 'split', label: 'split' },
-  { mode: 'preview', label: 'preview' }
+  { mode: 'raw', label: 'Markdown' },
+  { mode: 'split', label: 'Split' },
+  { mode: 'preview', label: 'Preview' }
 ];
 
 export function MarkdownLayoutToggle() {
@@ -22,24 +21,18 @@ export function MarkdownLayoutToggle() {
 
   return (
     <div className="md-layout-toggle" role="group" aria-label="Editor layout">
-      {MODES.map(({ mode, label }, i) => {
+      {MODES.map(({ mode, label }) => {
         const active = tab.layoutMode === mode;
         return (
-          <Fragment key={mode}>
-            {i > 0 && (
-              <span className="md-layout-sep" aria-hidden="true">
-                |
-              </span>
-            )}
-            <button
-              type="button"
-              className={`md-layout-btn${active ? ' active' : ''}`}
-              aria-pressed={active}
-              onClick={() => setTabLayoutMode(activeTabIndex, mode)}
-            >
-              {label}
-            </button>
-          </Fragment>
+          <button
+            key={mode}
+            type="button"
+            className={`md-layout-btn${active ? ' active' : ''}`}
+            aria-pressed={active}
+            onClick={() => setTabLayoutMode(activeTabIndex, mode)}
+          >
+            {label}
+          </button>
         );
       })}
     </div>

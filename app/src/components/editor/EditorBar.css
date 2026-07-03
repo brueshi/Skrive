@@ -26,44 +26,47 @@
   z-index: 1;
 }
 
-/* Markdown source-mode layout switch (SKR-197): a centered text control,
-   markdown | split | preview, filling the bar's middle band where the formatting
-   toolbar would sit in rich mode. Centered the same way — margin auto over a
-   full-width row. */
+/* Markdown source-mode layout switch (SKR-197): a segmented pill control
+   (Markdown / Split / Preview) centered in the bar's middle band, where the
+   formatting toolbar sits in rich mode. The track is recessed; the active
+   segment rests raised on a soft pill. */
 .md-layout-toggle {
   display: flex;
-  justify-content: center;
   align-items: center;
-  gap: 0.55rem;
+  gap: 2px;
+  width: fit-content;
   margin: 0 auto;
-  padding: 0.35rem 0;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--skrive-shell-bg);
+  border: 1px solid var(--skrive-card-border);
 }
 
 .md-layout-btn {
   border: none;
   background: transparent;
   cursor: pointer;
-  padding: 2px 2px;
+  padding: 4px 14px;
+  border-radius: 999px;
   font: inherit;
   font-size: 0.8rem;
-  letter-spacing: 0.01em;
+  line-height: 1.2;
   color: var(--skrive-muted);
-  transition: color 0.12s ease;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease,
+    box-shadow 0.14s ease;
 }
 
-.md-layout-btn:hover {
+.md-layout-btn:hover:not(.active) {
   color: var(--skrive-fg);
 }
 
 .md-layout-btn.active {
+  background: var(--skrive-card-bg);
   color: var(--skrive-fg);
-  font-weight: 600;
-}
-
-.md-layout-sep {
-  color: var(--skrive-rule);
-  font-size: 0.8rem;
-  user-select: none;
+  font-weight: 500;
+  box-shadow: var(--skrive-card-shadow);
 }
 
 .editor-bar-left {
