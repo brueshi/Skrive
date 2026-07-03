@@ -31,6 +31,10 @@ import { extract } from './link-graph/extract';
 import { LinkGraph } from './link-graph/graph';
 
 export const MARKDOWN_EXT = /\.(md|markdown)$/i;
+/** Native rich documents (SKR-196). Openable documents that carry a manifest
+ *  entry (so they show in the sidebar and can be opened) but are not Markdown:
+ *  no body is parsed, no link-graph edges, no lint. */
+export const FOLIO_EXT = /\.folio$/i;
 const SKRIVE_TOML = '.skrive.toml';
 const SEARCH_HIT_CAP = 500;
 // Snippet cap from the Rust port — long lines truncate with an ellipsis.
@@ -57,6 +61,23 @@ export type RenamePlan = {
 
 function basenameOf(relPath: string): string {
   return relPath.split('/').pop() ?? relPath;
+}
+
+/** A manifest entry for a native `.folio` document — no Markdown frontmatter or
+ *  links; present so the file lists in the sidebar and can be opened. */
+function folioEntry(
+  relPath: string,
+  sizeBytes: number,
+  modifiedMs: number
+): FileEntry {
+  return {
+    path: relPath,
+    name: basenameOf(relPath),
+    sizeBytes,
+    modifiedMs,
+    frontmatter: {},
+    outgoingLinks: []
+  };
 }
 
 /** Lowercase stem of a project-relative path, or null if it has none. */
@@ -210,6 +231,13 @@ export class ProjectModel {
           frontmatter: parseFrontmatter(file.body).frontmatter,
           outgoingLinks: []
         });
+      } else if (FOLIO_EXT.test(file.path)) {
+        // A native document: a manifest entry (no Markdown body/links), plus
+        // tracked as a linkable file so a Markdown link to it resolves.
+        this.nonMarkdown.add(file.path);
+        this.entries.push(
+          folioEntry(file.path, file.sizeBytes ?? 0, file.modifiedMs ?? 0)
+        );
       } else {
         this.nonMarkdown.add(file.path);
       }
@@ -246,6 +274,9 @@ export class ProjectModel {
       this.version++;
       return true;
     }
+    if (FOLIO_EXT.test(relPath)) {
+      return this.upsertFolio(relPath, meta);
+    }
     if (!MARKDOWN_EXT.test(relPath)) {
       this.nonMarkdown.add(relPath);
       return false;
@@ -276,6 +307,27 @@ export class ProjectModel {
     return changed;
   }
 
+  /** Add or refresh a native `.folio` document's manifest entry. A new document
+   *  bumps the version (it appears in the sidebar); a re-save of an existing one
+   *  is a no-op — a folio carries no frontmatter to change, so its content edits
+   *  never churn the manifest (mirrors the Markdown content-only-save behavior). */
+  private upsertFolio(relPath: string, meta: UpsertMeta): boolean {
+    this.nonMarkdown.add(relPath);
+    const entry = folioEntry(
+      relPath,
+      meta.sizeBytes ?? 0,
+      meta.modifiedMs ?? Date.now()
+    );
+    const existingIndex = this.entries.findIndex((f) => f.path === relPath);
+    if (existingIndex === -1) {
+      this.entries.splice(sortedInsertIndex(this.entries, relPath), 0, entry);
+      this.version++;
+      return true;
+    }
+    this.entries[existingIndex] = entry;
+    return false;
+  }
+
   /** Drop a file. Returns true when the manifest changed. */
   remove(relPath: string): boolean {
     if (relPath === SKRIVE_TOML) {
@@ -286,10 +338,12 @@ export class ProjectModel {
       return true;
     }
     this.nonMarkdown.delete(relPath);
-    if (!this.bodies.delete(relPath)) return false;
-    this.graph.forget(relPath);
+    if (this.bodies.delete(relPath)) this.graph.forget(relPath);
+    // A file has a manifest entry when it is Markdown or a native document; drop
+    // it and report the change. Tracked assets (no entry) are a silent no-op.
     const index = this.entries.findIndex((f) => f.path === relPath);
-    if (index !== -1) this.entries.splice(index, 1);
+    if (index === -1) return false;
+    this.entries.splice(index, 1);
     this.version++;
     return true;
   }

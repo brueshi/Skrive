@@ -74,6 +74,35 @@ describe('manifest derivation', () => {
     expect(model.currentVersion()).toBe(4);
   });
 
+  it('lists native .folio documents in the manifest (so they open + show)', () => {
+    // A .folio is listed with a null body in the snapshot, like an asset — but
+    // unlike an asset it is an openable document and must appear in the manifest.
+    const model = makeModel([
+      file('notes.md', '# Notes'),
+      file('doc.folio', null),
+      file('logo.png', null)
+    ]);
+    const files = model.manifest().files.map((f) => f.path);
+    expect(files).toContain('doc.folio');
+    expect(files).not.toContain('logo.png'); // a true asset stays out
+    // No Markdown frontmatter is invented for it.
+    expect(model.manifest().files.find((f) => f.path === 'doc.folio')!.frontmatter).toEqual({});
+  });
+
+  it('adds a new .folio on upsert (bumps) and does not churn on re-save', () => {
+    const model = makeModel([file('a.md', 'x')]);
+    expect(model.upsert('doc.folio', '')).toBe(true); // new document -> shows up
+    expect(model.currentVersion()).toBe(2);
+    expect(model.manifest().files.map((f) => f.path)).toEqual(['a.md', 'doc.folio']);
+    // A content re-save of the folio carries no manifest-relevant change.
+    expect(model.upsert('doc.folio', '')).toBe(false);
+    expect(model.currentVersion()).toBe(2);
+    // Removal drops the entry and bumps.
+    expect(model.remove('doc.folio')).toBe(true);
+    expect(model.currentVersion()).toBe(3);
+    expect(model.manifest().files.map((f) => f.path)).toEqual(['a.md']);
+  });
+
   it('treats .skrive.toml changes as structure-relevant', () => {
     const model = makeModel([file('a.md', 'x')]);
     expect(model.upsert('.skrive.toml', '[project]\nname = "Renamed"\n')).toBe(

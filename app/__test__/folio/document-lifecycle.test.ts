@@ -17,13 +17,14 @@ import {
 import { richFixture } from './fixture';
 
 describe('.folio document lifecycle (create -> open -> save)', () => {
-  it('mints a valid empty document and a no-op save is byte-identical', () => {
-    // The exact shape createFolioDocument writes for a fresh document.
+  it('mints a fresh document (one empty paragraph) and a no-op save is byte-identical', () => {
+    // The shape createFolioDocument writes for a new document: a caret-ready
+    // single empty paragraph.
     const doc: FolioDocument = {
       schemaVersion: 1,
       docId: generateDocId(),
       docMeta: { title: null, createdAt: '2026-07-03T00:00:00.000Z' },
-      blocks: []
+      blocks: [{ id: 'aaaaaaaaaa', type: 'paragraph', inline: [] }]
     };
     expect(DOC_ID_RE.test(doc.docId)).toBe(true);
 

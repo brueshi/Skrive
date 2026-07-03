@@ -52,7 +52,10 @@ export function runProjectLint(input: LintEngineInput): ProjectLintReport {
   const fileAsts = new Map<string, MdastRoot>();
   if (fileScopeActive) {
     for (const file of manifest.files) {
-      const body = bodies.get(file.path) ?? '';
+      // Only files with a Markdown body are lintable. Native `.folio` documents
+      // carry a manifest entry but no body, so they are skipped here (and below).
+      if (!bodies.has(file.path)) continue;
+      const body = bodies.get(file.path)!;
       fileAsts.set(file.path, parseAstCached(file.path, body));
     }
     pruneAstCache(manifest.files);
@@ -65,7 +68,8 @@ export function runProjectLint(input: LintEngineInput): ProjectLintReport {
       pushAll(findings, rule.run(projectCtx, severity));
     } else {
       for (const file of manifest.files) {
-        const body = bodies.get(file.path) ?? '';
+        if (!bodies.has(file.path)) continue; // non-Markdown document (e.g. .folio)
+        const body = bodies.get(file.path)!;
         const ast = fileAsts.get(file.path)!;
         const fileCtx: FileLintContext = {
           path: file.path,

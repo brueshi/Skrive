@@ -31,7 +31,7 @@ import type { LayoutMode, SidebarSortKey } from '@skrive/shared';
 import { computeLineDiff } from '../lib/diff/line-diff';
 import { parseFrontmatter } from '../lib/frontmatter';
 import { buildSavePayload, fileMode, type EditorMode } from './save';
-import type { Document } from '../lib/blockmodel';
+import { generateBlockId, type Document } from '../lib/blockmodel';
 import {
   folioToModel,
   generateDocId,
@@ -1297,13 +1297,15 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const { manifest } = get();
     if (!manifest) return;
     const normalized = relPath.endsWith('.folio') ? relPath : `${relPath}.folio`;
-    // Mint identity once, here (folio schema §3). A fresh document is an empty
-    // block tree; createdAt is immutable and never re-stamped on save.
+    // Mint identity once, here (folio schema §3). A fresh document opens on a
+    // single empty paragraph — a caret-ready first line (it renders as a <br>
+    // placeholder), like a new document in any rich editor. createdAt is
+    // immutable and never re-stamped on save.
     const doc: FolioDocument = {
       schemaVersion: 1,
       docId: generateDocId(),
       docMeta: { title: null, createdAt: new Date().toISOString() },
-      blocks: []
+      blocks: [{ id: generateBlockId(), type: 'paragraph', inline: [] }]
     };
     // Exclusive create first so naming a new document the same as an existing
     // file errors (surfaced by the caller) instead of clobbering it, then write
