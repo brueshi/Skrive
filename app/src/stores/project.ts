@@ -41,6 +41,13 @@ import {
   type FolioDocument,
   type FolioMeta
 } from '../lib/folio';
+import {
+  EXPORT_FORMATS,
+  exportFolio,
+  exportTargetPath,
+  type ExportFormatId
+} from '../lib/export';
+import { stripFolioExtension } from '../lib/title';
 import { runProjectLint } from '../lib/lint';
 import type { LintWorkerResponse } from '../lib/lint/lint-worker-protocol';
 import { flushActiveEditor } from '../components/editor/active-editor';
@@ -253,6 +260,11 @@ type Actions = {
    *  then open it. The extension is appended if absent. */
   createFolioDocument(relPath: string): Promise<void>;
   createDirectory(relPath: string): Promise<void>;
+  /** Export a native `.folio` document to an open format (Markdown / HTML / TXT /
+   *  RTF), writing the result into the project folder beside the source. Honest,
+   *  lossy-where-the-target-can't export — not a fidelity contract. Never clobbers
+   *  an existing file (see `exportTargetPath`). */
+  exportDocument(path: string, format: ExportFormatId): Promise<void>;
   deleteFile(relPath: string): Promise<void>;
   deleteDirectory(relPath: string): Promise<void>;
 
@@ -1326,6 +1338,37 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     // model's concern (see modelSyncBody).
     await projectModel()?.upsert(normalized, '');
     await get().openTab(normalized);
+  },
+
+  async exportDocument(path: string, format: ExportFormatId) {
+    const { manifest } = get();
+    if (!manifest) return;
+    // Export is a `.folio`-only operation (the native format is the source of
+    // truth we project out of). The UI only offers it on `.folio` files; this
+    // guard makes that a contract, not a convention.
+    if (fileMode(path) !== 'rich') return;
+    const fmt = EXPORT_FORMATS.find((f) => f.id === format);
+    if (!fmt) return;
+
+    const displayName = stripFolioExtension(path.split('/').pop() ?? path);
+    let target: string;
+    try {
+      const content = await window.skrive.fs.readFile(manifest.root, path);
+      const folio = parseFolio(content.body);
+      const bytes = exportFolio(folio, format, { title: displayName });
+      // Uniquify against the live manifest so an export never clobbers a
+      // same-named file. Exclusive-create then write mirrors the folio create
+      // path; the watcher surfaces the new file in the sidebar.
+      const existing = new Set(manifest.files.map((f) => f.path));
+      target = exportTargetPath(path, fmt.extension, (p) => existing.has(p));
+      await window.skrive.fs.newFile(manifest.root, target);
+      await window.skrive.fs.writeFile(manifest.root, target, bytes);
+    } catch (err) {
+      logProjectError('exportDocument', err);
+      notify.error(`Couldn't export ${displayName}`, err);
+      return;
+    }
+    notify.success(`Exported ${target.split('/').pop()}`);
   },
 
   async createDirectory(relPath: string) {

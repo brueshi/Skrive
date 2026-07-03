@@ -35,6 +35,8 @@ import {
 } from '../../stores/project';
 import { usePreferencesStore } from '../../stores/preferences';
 import { resolveTitle } from '../../lib/title';
+import { fileMode } from '../../stores/save';
+import { EXPORT_FORMATS, type ExportFormatId } from '../../lib/export';
 import { platformShortcut } from '../../lib/commands/shortcut-display';
 import { notify } from '../../lib/notify';
 import * as ContextMenu from '@radix-ui/react-context-menu';
@@ -170,6 +172,7 @@ type FileRowProps = {
   onRename: (file: FileEntry) => void;
   onDelete: (file: FileEntry) => void;
   onTogglePin: (file: FileEntry) => void;
+  onExport: (file: FileEntry, format: ExportFormatId) => void;
 };
 
 function FileRow({
@@ -180,7 +183,8 @@ function FileRow({
   pinned,
   onRename,
   onDelete,
-  onTogglePin
+  onTogglePin,
+  onExport
 }: FileRowProps) {
   const activePath = useProjectStore(selectActivePath);
   const openTab = useProjectStore((s) => s.openTab);
@@ -193,6 +197,7 @@ function FileRow({
     [spineDepths, depth]
   );
   const resolved = resolveTitle(file);
+  const isFolio = fileMode(file.path) === 'rich';
 
   function handleKey(e: KeyboardEvent<HTMLButtonElement>) {
     if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -248,6 +253,29 @@ function FileRow({
               <span className="ctx-label">Rename…</span>
               <span className="ctx-shortcut">F2</span>
             </ContextMenu.Item>
+            {isFolio && (
+              <ContextMenu.Sub>
+                <ContextMenu.SubTrigger className="ctx-item">
+                  <span className="ctx-label">Export as</span>
+                  <span className="ctx-shortcut" aria-hidden="true">
+                    ›
+                  </span>
+                </ContextMenu.SubTrigger>
+                <ContextMenu.Portal>
+                  <ContextMenu.SubContent className="ctx-menu" sideOffset={2}>
+                    {EXPORT_FORMATS.map((fmt) => (
+                      <ContextMenu.Item
+                        key={fmt.id}
+                        className="ctx-item"
+                        onSelect={() => onExport(file, fmt.id)}
+                      >
+                        <span className="ctx-label">{fmt.label}</span>
+                      </ContextMenu.Item>
+                    ))}
+                  </ContextMenu.SubContent>
+                </ContextMenu.Portal>
+              </ContextMenu.Sub>
+            )}
             <ContextMenu.Item
               className="ctx-item destructive"
               onSelect={() => onDelete(file)}
@@ -273,6 +301,7 @@ type FolderTreeProps = {
   onFileRename: (file: FileEntry) => void;
   onFileDelete: (file: FileEntry) => void;
   onFileTogglePin: (file: FileEntry) => void;
+  onFileExport: (file: FileEntry, format: ExportFormatId) => void;
   onDirDelete: (dir: string) => void;
 };
 
@@ -288,6 +317,7 @@ function FolderTree(props: FolderTreeProps) {
     onFileRename,
     onFileDelete,
     onFileTogglePin,
+    onFileExport,
     onDirDelete
   } = props;
   const isExpanded = !collapsed.has(folder.path);
@@ -363,6 +393,7 @@ function FolderTree(props: FolderTreeProps) {
                   onRename={onFileRename}
                   onDelete={onFileDelete}
                   onTogglePin={onFileTogglePin}
+                  onExport={onFileExport}
                 />
               ))}
             </ul>
@@ -396,6 +427,7 @@ type SpecialGroupProps = {
   onRename: (file: FileEntry) => void;
   onDelete: (file: FileEntry) => void;
   onTogglePin: (file: FileEntry) => void;
+  onExport: (file: FileEntry, format: ExportFormatId) => void;
 };
 
 function SpecialGroup({
@@ -405,7 +437,8 @@ function SpecialGroup({
   pinnedPaths,
   onRename,
   onDelete,
-  onTogglePin
+  onTogglePin,
+  onExport
 }: SpecialGroupProps) {
   if (files.length === 0) return null;
   return (
@@ -427,6 +460,7 @@ function SpecialGroup({
             onRename={onRename}
             onDelete={onDelete}
             onTogglePin={onTogglePin}
+            onExport={onExport}
           />
         ))}
       </ul>
@@ -495,6 +529,7 @@ export function Sidebar() {
   const createDirectory = useProjectStore((s) => s.createDirectory);
   const deleteFile = useProjectStore((s) => s.deleteFile);
   const deleteDirectory = useProjectStore((s) => s.deleteDirectory);
+  const exportDocument = useProjectStore((s) => s.exportDocument);
   const pinned = useProjectStore((s) => s.pinned);
   const togglePin = useProjectStore((s) => s.togglePin);
   const sortKey = useProjectStore((s) => s.sortKey);
@@ -545,6 +580,13 @@ export function Sidebar() {
   const toggleFilePin = useCallback(
     (file: FileEntry) => togglePin(file.path),
     [togglePin]
+  );
+
+  const handleExport = useCallback(
+    (file: FileEntry, format: ExportFormatId) => {
+      void exportDocument(file.path, format);
+    },
+    [exportDocument]
   );
 
   const toggleCollapse = useCallback((p: string) => {
@@ -951,6 +993,7 @@ export function Sidebar() {
           onRename={renameFile}
           onDelete={requestDeleteFile}
           onTogglePin={toggleFilePin}
+          onExport={handleExport}
         />
         <SpecialGroup
           title="Recents"
@@ -960,6 +1003,7 @@ export function Sidebar() {
           onRename={renameFile}
           onDelete={requestDeleteFile}
           onTogglePin={toggleFilePin}
+          onExport={handleExport}
         />
 
         {manifest && fileCount > 0 && (
@@ -986,6 +1030,7 @@ export function Sidebar() {
                       onRename={renameFile}
                       onDelete={requestDeleteFile}
                       onTogglePin={toggleFilePin}
+                      onExport={handleExport}
                     />
                   ))}
                 </ul>
@@ -1003,6 +1048,7 @@ export function Sidebar() {
                   onFileRename={renameFile}
                   onFileDelete={requestDeleteFile}
                   onFileTogglePin={toggleFilePin}
+                  onFileExport={handleExport}
                   onDirDelete={requestDeleteDirectory}
                 />
               ))}

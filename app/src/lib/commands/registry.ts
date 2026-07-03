@@ -19,6 +19,8 @@
 import { flushActiveEditor } from '../../components/editor/active-editor';
 import { getActiveBlockMenu } from '../../components/editor/active-surface';
 import { useProjectStore, logProjectError } from '../../stores/project';
+import { fileMode } from '../../stores/save';
+import { EXPORT_FORMATS } from '../export';
 import { notify } from '../notify';
 
 // ============================ Types ============================
@@ -121,6 +123,14 @@ const whenActiveTabDirty = () => {
   );
 };
 const whenMultipleTabs = () => useProjectStore.getState().tabs.length > 1;
+
+/** Export acts on the active document and only makes sense for a native `.folio`
+ *  (the format we project out of). */
+const whenActiveFolio = () => {
+  const s = useProjectStore.getState();
+  const tab = s.tabs[s.activeTabIndex];
+  return s.manifest !== null && tab != null && fileMode(tab.path) === 'rich';
+};
 
 /** The Insert commands act on the block surface, so they're runnable only when
  *  it's mounted — i.e. a document is open in the rendered (not raw / not diff)
@@ -502,6 +512,21 @@ export function buildRegistry(deps: CommandDeps): {
         if (tab) deps.openRename(tab.path);
       }
     },
+    // One "Export as <format>" per registered format. Runnable only for a native
+    // `.folio` document; acts on the active tab.
+    ...EXPORT_FORMATS.map(
+      (fmt): Command => ({
+        id: `file.export.${fmt.id}`,
+        label: `Export as ${fmt.label}`,
+        group: 'File',
+        when: whenActiveFolio,
+        run: () => {
+          const s = useProjectStore.getState();
+          const tab = s.tabs[s.activeTabIndex];
+          if (tab) void s.exportDocument(tab.path, fmt.id);
+        }
+      })
+    ),
 
     // ============ Tabs ============
     {
