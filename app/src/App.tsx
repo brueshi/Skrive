@@ -6,8 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
 import { BlockEditor } from './components/editor/block/BlockEditor';
-import { MarkdownBlockEditor } from './components/editor/block/MarkdownBlockEditor';
-import { RawSourceView } from './components/editor/raw/RawSourceView';
+import { MarkdownView } from './components/editor/markdown/MarkdownView';
 import { EditorBar } from './components/editor/EditorBar';
 import { flushActiveEditor } from './components/editor/active-editor';
 import { installPasteCapture } from './lib/clipboard/capturePaste';
@@ -73,6 +72,9 @@ export function App() {
   const activeTabIndex = useProjectStore((s) => s.activeTabIndex);
   const setTabBody = useProjectStore((s) => s.setTabBody);
   const setTabModel = useProjectStore((s) => s.setTabModel);
+  const setTabSplitDividerRatio = useProjectStore(
+    (s) => s.setTabSplitDividerRatio
+  );
   const saveAllDirty = useProjectStore((s) => s.saveAllDirty);
   const openProjectFromDialog = useProjectStore(
     (s) => s.openProjectFromDialog
@@ -487,17 +489,7 @@ export function App() {
                 <>
                   <EditorBar />
                   <div className="workspace-surface">
-                    {activeTab.mode === 'markdown' && activeTab.rawView ? (
-                      // Raw Markdown source view over the same buffer (SKR-97).
-                      // Markdown-only (rich has no Markdown source). Keyed by path
-                      // + view so a file switch or a toggle remounts and re-reads
-                      // the (possibly edited) body.
-                      <RawSourceView
-                        key={`${activeTab.path}:raw`}
-                        body={activeTab.body}
-                        onChange={(next) => setTabBody(activeTabIndex, next)}
-                      />
-                    ) : activeTab.mode === 'rich' && activeTab.model ? (
+                    {activeTab.mode === 'rich' && activeTab.model ? (
                       // Rich (`.folio`) mode: the block model is canonical. The
                       // surface edits it directly and saves the native format —
                       // no Markdown serializer on this path (SKR-196).
@@ -507,13 +499,21 @@ export function App() {
                         onChange={(doc) => setTabModel(activeTabIndex, doc)}
                       />
                     ) : (
-                      // Markdown mode: the block surface renders a preview and
-                      // this adapter keeps the text buffer in sync; the save path
-                      // stays text -> text (SKR-196). Keyed per file (uncontrolled).
-                      <MarkdownBlockEditor
+                      // Markdown source mode (SKR-197): edit raw text, see a
+                      // rendered preview (raw / split / preview by layoutMode).
+                      // Save is text -> text; the block model never touches `.md`.
+                      // Keyed per file (uncontrolled).
+                      <MarkdownView
                         key={activeTab.path}
                         body={activeTab.body}
                         onChange={(next) => setTabBody(activeTabIndex, next)}
+                        filePath={activeTab.path}
+                        projectRoot={manifest?.root ?? ''}
+                        layoutMode={activeTab.layoutMode}
+                        splitRatio={activeTab.splitDividerRatio}
+                        onSplitRatioChange={(r) =>
+                          setTabSplitDividerRatio(activeTabIndex, r)
+                        }
                       />
                     )}
                   </div>

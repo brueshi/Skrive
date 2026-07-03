@@ -126,13 +126,30 @@ describe('source toggle (⌘⇧E)', () => {
     expect(binding?.when?.()).toBe(false);
   });
 
-  it("toggles the active tab's raw source view when run", () => {
-    const tab = { path: 'a.md', rawView: false } as unknown as Tab;
+  it("cycles the active markdown tab's layout (raw -> split -> preview) when run", () => {
+    const tab = {
+      path: 'a.md',
+      mode: 'markdown',
+      layoutMode: 'split'
+    } as unknown as Tab;
     useProjectStore.setState({ tabs: [tab], activeTabIndex: 0 });
     binding?.run?.();
-    expect(useProjectStore.getState().tabs[0]?.rawView).toBe(true);
+    expect(useProjectStore.getState().tabs[0]?.layoutMode).toBe('preview');
     binding?.run?.();
-    expect(useProjectStore.getState().tabs[0]?.rawView).toBe(false);
+    expect(useProjectStore.getState().tabs[0]?.layoutMode).toBe('raw');
+    binding?.run?.();
+    expect(useProjectStore.getState().tabs[0]?.layoutMode).toBe('split');
+  });
+
+  it('is a no-op on a rich (.folio) tab', () => {
+    const tab = {
+      path: 'a.folio',
+      mode: 'rich',
+      layoutMode: 'split'
+    } as unknown as Tab;
+    useProjectStore.setState({ tabs: [tab], activeTabIndex: 0 });
+    binding?.run?.();
+    expect(useProjectStore.getState().tabs[0]?.layoutMode).toBe('split');
   });
 });
 

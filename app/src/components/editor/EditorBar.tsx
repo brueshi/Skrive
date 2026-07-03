@@ -14,6 +14,7 @@ import { useSyncExternalStore } from 'react';
 import { Toolbar } from './menus/Toolbar';
 import { getActiveBlockMenu, subscribeActiveBlockMenu } from './active-surface';
 import { CopyPageButton } from './CopyPageButton';
+import { MarkdownLayoutToggle } from './MarkdownLayoutToggle';
 import { SaveStatus } from '../chrome/SaveStatus';
 import './EditorBar.css';
 
@@ -35,6 +36,7 @@ export function EditorBar() {
       </div>
       {controller && <Toolbar controller={controller} />}
       <div className="editor-bar-right">
+        <MarkdownLayoutToggle />
         <CopyPageButton />
       </div>
     </div>

@@ -332,18 +332,23 @@ export function buildRegistry(deps: CommandDeps): {
       display: '⌘⇧E',
       scope: 'window',
       group: 'View',
-      label: 'Toggle source view',
+      label: 'Cycle editor layout',
       commandId: 'view.toggleSource',
       when: whenActiveTab,
-      // Flush-then-flip: drain the outgoing surface's pending edits into the
-      // canonical body, then toggle the raw source view. Both are synchronous
-      // store writes inside one keydown handler, so React re-renders once and
-      // the incoming view mounts reading the fully-flushed body — no edit loss.
+      // Flush-then-switch: drain the outgoing surface's pending edits into the
+      // canonical body, then cycle the Markdown layout (source -> split ->
+      // preview). Both are synchronous store writes inside one keydown handler,
+      // so React re-renders once and the incoming view mounts reading the
+      // fully-flushed body — no edit loss. Markdown-only; rich tabs have no
+      // layout to cycle.
       run: () => {
         flushActiveEditor();
         const s = useProjectStore.getState();
         const tab = s.tabs[s.activeTabIndex];
-        if (tab) s.setTabRawView(s.activeTabIndex, !tab.rawView);
+        if (!tab || tab.mode !== 'markdown') return;
+        const order = ['raw', 'split', 'preview'] as const;
+        const next = order[(order.indexOf(tab.layoutMode) + 1) % order.length]!;
+        s.setTabLayoutMode(s.activeTabIndex, next);
       }
     },
 
@@ -572,7 +577,7 @@ export function buildRegistry(deps: CommandDeps): {
     },
     {
       id: 'view.toggleSource',
-      label: 'Toggle source view',
+      label: 'Cycle editor layout',
       group: 'View',
       shortcut: get('view.toggleSource'),
       when: whenActiveTab,
@@ -580,7 +585,10 @@ export function buildRegistry(deps: CommandDeps): {
         flushActiveEditor();
         const s = useProjectStore.getState();
         const tab = s.tabs[s.activeTabIndex];
-        if (tab) s.setTabRawView(s.activeTabIndex, !tab.rawView);
+        if (!tab || tab.mode !== 'markdown') return;
+        const order = ['raw', 'split', 'preview'] as const;
+        const next = order[(order.indexOf(tab.layoutMode) + 1) % order.length]!;
+        s.setTabLayoutMode(s.activeTabIndex, next);
       }
     },
 
