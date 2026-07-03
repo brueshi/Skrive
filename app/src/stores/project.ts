@@ -774,6 +774,23 @@ function modelSyncBody(mode: EditorMode, payload: string): string {
   return mode === 'rich' ? '' : payload;
 }
 
+// Write a `.folio` document to `relPath` and open it. Exclusive-create first so
+// the path can't clobber an existing file, then the canonical bytes; register
+// the path with an empty body (folio content is not the Markdown model's
+// concern, see modelSyncBody). Shared by fresh-document creation and the
+// `.md`/import -> `.folio` conversion, which differ only in how `doc` is built.
+async function writeFolioAndOpen(
+  get: () => State & Actions,
+  manifestRoot: string,
+  relPath: string,
+  doc: FolioDocument
+): Promise<void> {
+  await window.skrive.fs.newFile(manifestRoot, relPath);
+  await window.skrive.fs.writeFile(manifestRoot, relPath, serializeFolio(doc));
+  await projectModel()?.upsert(relPath, '');
+  await get().openTab(relPath);
+}
+
 export const useProjectStore = create<State & Actions>((set, get) => ({
   manifest: null,
   tabs: [],
@@ -1329,15 +1346,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       docMeta: { title: null, createdAt: new Date().toISOString() },
       blocks: [{ id: generateBlockId(), type: 'paragraph', inline: [] }]
     };
-    // Exclusive create first so naming a new document the same as an existing
-    // file errors (surfaced by the caller) instead of clobbering it, then write
-    // the canonical bytes.
-    await window.skrive.fs.newFile(manifest.root, normalized);
-    await window.skrive.fs.writeFile(manifest.root, normalized, serializeFolio(doc));
-    // Register the path only (empty body) — folio content is not the Markdown
-    // model's concern (see modelSyncBody).
-    await projectModel()?.upsert(normalized, '');
-    await get().openTab(normalized);
+    await writeFolioAndOpen(get, manifest.root, normalized, doc);
   },
 
   async exportDocument(path: string, format: ExportFormatId) {
