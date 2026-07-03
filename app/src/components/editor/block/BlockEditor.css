@@ -11,12 +11,15 @@
   color: var(--skrive-fg);
 }
 
-/* The scrolling writing area below the fixed toolbar (mirrors rich-body). */
+/* The scrolling writing area below the fixed toolbar (mirrors rich-body).
+   position: relative anchors the custom caret in scroller-content coordinates
+   (SKR-202), so it rides the scroll without a listener. */
 .block-editor-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   width: 100%;
+  position: relative;
 }
 
 .block-editor-surface {
@@ -110,4 +113,45 @@
 .block-editor-surface a {
   color: var(--skrive-accent, #2563eb);
   text-decoration: underline;
+}
+
+/* Custom-drawn caret (SKR-202): the module hides the native caret and paints
+   .skrive-caret at glyph height instead. During IME composition the native
+   caret is restored — WebKit owns the marked-text geometry. */
+.block-editor-surface.custom-caret {
+  caret-color: transparent;
+}
+
+.block-editor-surface.custom-caret.is-composing {
+  caret-color: var(--skrive-fg);
+}
+
+.skrive-caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--skrive-fg);
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.skrive-caret.is-visible {
+  visibility: visible;
+  animation: skrive-caret-blink 1.06s infinite;
+}
+
+/* Crisp on/off, native cadence: solid for the first half-cycle (and immediately
+   after every move — the module rewinds the animation), dark for the second. */
+@keyframes skrive-caret-blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+
+  50.001%,
+  100% {
+    opacity: 0;
+  }
 }
