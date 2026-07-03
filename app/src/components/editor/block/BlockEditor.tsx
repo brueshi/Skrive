@@ -13,6 +13,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { BlockSurface } from '../../../lib/blocksurface';
+import { attachCustomCaret } from '../../../lib/blocksurface/caret';
 import { parseDocument, serializeDocument } from '../../../lib/blockmodel';
 import { setActiveEditorFlush } from '../active-editor';
 import { setActiveBlockMenu } from '../active-surface';
@@ -31,18 +32,23 @@ type Props = {
 
 export function BlockEditor({ body, onChange }: Props): React.ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const caretRef = useRef<HTMLDivElement>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const [ctx, setCtx] = useState<{ surface: BlockSurface; controller: BlockMenuController } | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host) return;
+    const scroller = bodyRef.current;
+    const caretEl = caretRef.current;
+    if (!host || !scroller || !caretEl) return;
     const surface = new BlockSurface({
       container: host,
       doc: parseDocument(body),
       onDocChange: (doc) => onChangeRef.current(serializeDocument(doc))
     });
+    const caret = attachCustomCaret({ surface: host, scroller, caret: caretEl });
     const controller = new BlockMenuController(surface);
     setCtx({ surface, controller });
     setActiveEditorFlush(() => surface.flush());
@@ -51,6 +57,7 @@ export function BlockEditor({ body, onChange }: Props): React.ReactElement {
       setActiveEditorFlush(null);
       setActiveBlockMenu(null);
       controller.destroy();
+      caret.destroy();
       // Drain the pending snapshot before teardown so a tab switch / view
       // toggle within the debounce window doesn't drop the last edit — destroy()
       // only cancels, it never emits. RawSourceView does the same in its cleanup
@@ -66,8 +73,9 @@ export function BlockEditor({ body, onChange }: Props): React.ReactElement {
 
   return (
     <div className="block-editor">
-      <div className="block-editor-body">
+      <div ref={bodyRef} className="block-editor-body">
         <div ref={hostRef} className="block-editor-surface" />
+        <div ref={caretRef} className="skrive-caret" aria-hidden="true" />
       </div>
       {ctx && <SelectionBubble controller={ctx.controller} />}
       {ctx && <LinkEditor controller={ctx.controller} />}
