@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
-import { BlockEditor } from './components/editor/block/BlockEditor';
+import { MarkdownBlockEditor } from './components/editor/block/MarkdownBlockEditor';
 import { RawSourceView } from './components/editor/raw/RawSourceView';
 import { EditorBar } from './components/editor/EditorBar';
 import { flushActiveEditor } from './components/editor/active-editor';
@@ -497,8 +497,9 @@ export function App() {
                     ) : (
                       // The bespoke block surface is the default editor
                       // (SKR-111). Keyed per file so a file switch remounts
-                      // (uncontrolled).
-                      <BlockEditor
+                      // (uncontrolled). Markdown mode edits through the model via
+                      // this adapter; the save path stays text -> text (SKR-196).
+                      <MarkdownBlockEditor
                         key={activeTab.path}
                         body={activeTab.body}
                         onChange={(next) => setTabBody(activeTabIndex, next)}

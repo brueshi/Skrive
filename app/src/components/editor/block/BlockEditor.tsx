@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { BlockSurface } from '../../../lib/blocksurface';
 import { attachCustomCaret } from '../../../lib/blocksurface/caret';
-import { parseDocument, serializeDocument } from '../../../lib/blockmodel';
+import type { Document } from '../../../lib/blockmodel';
 import { setActiveEditorFlush } from '../active-editor';
 import { setActiveBlockMenu } from '../active-surface';
 import { BlockMenuController } from '../menus/BlockMenuController';
@@ -23,14 +23,19 @@ import { LinkEditor } from '../menus/LinkEditor';
 import { BlockSlashMenu } from '../menus/BlockSlashMenu';
 import './BlockEditor.css';
 
+// Model-in / model-out (SKR-196). The surface edits the canonical block model
+// directly; serialization is the caller's concern, not the editor's. This is the
+// seam the dual-mode split routes through: Markdown mode wraps this with a
+// parse/serialize adapter (MarkdownBlockEditor), while `.folio` rich mode mounts
+// it with the model as the canonical store and no Markdown serializer in sight.
 type Props = {
-  /** Initial canonical Markdown body. Read once on mount; uncontrolled thereafter. */
-  body: string;
-  /** Receives the serialized body on the surface's debounced snapshot. */
-  onChange: (next: string) => void;
+  /** Initial block-model document. Read once on mount; uncontrolled thereafter. */
+  doc: Document;
+  /** Receives the edited document on the surface's debounced snapshot. */
+  onChange: (next: Document) => void;
 };
 
-export function BlockEditor({ body, onChange }: Props): React.ReactElement {
+export function BlockEditor({ doc, onChange }: Props): React.ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const caretRef = useRef<HTMLDivElement>(null);
@@ -45,8 +50,8 @@ export function BlockEditor({ body, onChange }: Props): React.ReactElement {
     if (!host || !scroller || !caretEl) return;
     const surface = new BlockSurface({
       container: host,
-      doc: parseDocument(body),
-      onDocChange: (doc) => onChangeRef.current(serializeDocument(doc))
+      doc,
+      onDocChange: (next) => onChangeRef.current(next)
     });
     const caret = attachCustomCaret({ surface: host, scroller, caret: caretEl });
     const controller = new BlockMenuController(surface);
@@ -67,7 +72,7 @@ export function BlockEditor({ body, onChange }: Props): React.ReactElement {
       surface.destroy();
       setCtx(null);
     };
-    // Uncontrolled: body is intentionally read once. App remounts per file via key.
+    // Uncontrolled: doc is intentionally read once. App remounts per file via key.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
