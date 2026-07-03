@@ -34,6 +34,7 @@ import { buildSavePayload, fileMode, type EditorMode } from './save';
 import { generateBlockId, type Document } from '../lib/blockmodel';
 import {
   folioToModel,
+  modelToFolio,
   generateDocId,
   parseFolio,
   serializeFolio,
@@ -41,6 +42,7 @@ import {
   type FolioDocument,
   type FolioMeta
 } from '../lib/folio';
+import { importKind, sourceToModel } from '../lib/import';
 import {
   EXPORT_FORMATS,
   exportFolio,
@@ -265,6 +267,12 @@ type Actions = {
    *  lossy-where-the-target-can't export — not a fidelity contract. Never clobbers
    *  an existing file (see `exportTargetPath`). */
   exportDocument(path: string, format: ExportFormatId): Promise<void>;
+  /** Convert an open-format source file (Markdown / HTML / plain text) into a
+   *  new native `.folio` document and open it. The explicit "Make this a Skrive
+   *  document" upgrade: it mints a fresh docId, writes a *new* `.folio`, and
+   *  leaves the source file untouched — never a silent in-place enrichment (the
+   *  portability rule). No-ops for a path that isn't a convertible source. */
+  convertToFolio(path: string): Promise<void>;
   deleteFile(relPath: string): Promise<void>;
   deleteDirectory(relPath: string): Promise<void>;
 
@@ -772,6 +780,23 @@ function resolveCurrentSide(tab: Tab): DiffSide {
 // Markdown model's concern). A markdown tab feeds its real bytes.
 function modelSyncBody(mode: EditorMode, payload: string): string {
   return mode === 'rich' ? '' : payload;
+}
+
+// Write a `.folio` document to `relPath` and open it. Exclusive-create first so
+// the path can't clobber an existing file, then the canonical bytes; register
+// the path with an empty body (folio content is not the Markdown model's
+// concern, see modelSyncBody). Shared by fresh-document creation and the
+// `.md`/import -> `.folio` conversion, which differ only in how `doc` is built.
+async function writeFolioAndOpen(
+  get: () => State & Actions,
+  manifestRoot: string,
+  relPath: string,
+  doc: FolioDocument
+): Promise<void> {
+  await window.skrive.fs.newFile(manifestRoot, relPath);
+  await window.skrive.fs.writeFile(manifestRoot, relPath, serializeFolio(doc));
+  await projectModel()?.upsert(relPath, '');
+  await get().openTab(relPath);
 }
 
 export const useProjectStore = create<State & Actions>((set, get) => ({
@@ -1329,15 +1354,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       docMeta: { title: null, createdAt: new Date().toISOString() },
       blocks: [{ id: generateBlockId(), type: 'paragraph', inline: [] }]
     };
-    // Exclusive create first so naming a new document the same as an existing
-    // file errors (surfaced by the caller) instead of clobbering it, then write
-    // the canonical bytes.
-    await window.skrive.fs.newFile(manifest.root, normalized);
-    await window.skrive.fs.writeFile(manifest.root, normalized, serializeFolio(doc));
-    // Register the path only (empty body) — folio content is not the Markdown
-    // model's concern (see modelSyncBody).
-    await projectModel()?.upsert(normalized, '');
-    await get().openTab(normalized);
+    await writeFolioAndOpen(get, manifest.root, normalized, doc);
   },
 
   async exportDocument(path: string, format: ExportFormatId) {
@@ -1369,6 +1386,37 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       return;
     }
     notify.success(`Exported ${target.split('/').pop()}`);
+  },
+
+  async convertToFolio(path: string) {
+    const { manifest } = get();
+    if (!manifest) return;
+    const kind = importKind(path);
+    if (kind === null) return; // not a convertible source (or already `.folio`)
+
+    const displayName = path.split('/').pop() ?? path;
+    let target: string;
+    try {
+      const content = await window.skrive.fs.readFile(manifest.root, path);
+      const { model, title } = sourceToModel(content.body, kind);
+      // Mint a fresh identity — the source has none. createdAt stamped now; the
+      // source's own frontmatter dates aren't a folio concept.
+      const doc = modelToFolio(model, {
+        docId: generateDocId(),
+        docMeta: { title, createdAt: new Date().toISOString() }
+      });
+      // A new `.folio` beside the source (`notes.md` -> `notes.folio`), never
+      // clobbering an existing file. The source keeps its own extension and is
+      // left untouched — the upgrade never enriches in place (portability rule).
+      const existing = new Set(manifest.files.map((f) => f.path));
+      target = exportTargetPath(path, 'folio', (p) => existing.has(p));
+      await writeFolioAndOpen(get, manifest.root, target, doc);
+    } catch (err) {
+      logProjectError('convertToFolio', err);
+      notify.error(`Couldn't convert ${displayName}`, err);
+      return;
+    }
+    notify.success(`Converted to ${stripFolioExtension(target.split('/').pop() ?? target)}`);
   },
 
   async createDirectory(relPath: string) {
