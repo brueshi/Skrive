@@ -258,6 +258,9 @@ type Actions = {
   forceSaveTab(path: string): Promise<void>;
 
   createFile(relPath: string): Promise<void>;
+  /** Create a fresh, empty `.txt` plain-text file (extension appended if absent),
+   *  then open it in plain-text mode. */
+  createTextFile(relPath: string): Promise<void>;
   /** Create a fresh, empty native `.folio` document (mints a docId + createdAt),
    *  then open it. The extension is appended if absent. */
   createFolioDocument(relPath: string): Promise<void>;
@@ -1342,6 +1345,17 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     await window.skrive.fs.newFile(manifest.root, normalized);
     // Awaited: openTab needs the new entry in the manifest, and the
     // client guarantees the model update lands before this resolves.
+    await projectModel()?.upsert(normalized, '');
+    await get().openTab(normalized);
+  },
+
+  async createTextFile(relPath: string) {
+    const { manifest } = get();
+    if (!manifest) return;
+    const normalized = relPath.endsWith('.txt') ? relPath : `${relPath}.txt`;
+    await window.skrive.fs.newFile(manifest.root, normalized);
+    // Registers an openable non-Markdown entry (see ProjectModel.upsertOpenable);
+    // awaited so openTab finds it. Opens empty in plain-text mode.
     await projectModel()?.upsert(normalized, '');
     await get().openTab(normalized);
   },
