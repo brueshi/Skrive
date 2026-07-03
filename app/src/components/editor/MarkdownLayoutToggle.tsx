@@ -39,7 +39,7 @@ export function MarkdownLayoutToggle() {
             aria-label={label}
             onClick={() => setTabLayoutMode(activeTabIndex, mode)}
           >
-            <Icon size={18} />
+            <Icon size={22} />
           </button>
         );
       })}

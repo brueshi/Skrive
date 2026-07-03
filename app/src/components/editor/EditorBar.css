@@ -26,45 +26,39 @@
   z-index: 1;
 }
 
-/* Markdown source-mode layout switch (SKR-197): a compact segmented control. */
+/* Markdown source-mode layout switch (SKR-197): three spaced mode buttons with
+   the muted document icons; the active one rests on a soft pill. */
 .md-layout-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 1px;
-  padding: 2px;
-  border-radius: 7px;
-  background: var(--skrive-rule);
+  gap: 6px;
 }
 
 .md-layout-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 26px;
+  width: 34px;
+  height: 30px;
   border: none;
-  border-radius: 5px;
+  border-radius: 8px;
   background: transparent;
   cursor: pointer;
-  /* The icons are full-colour art; inactive tabs read as slightly recessed via
-     opacity + a touch of desaturation, active pops to full strength on a pill. */
-  opacity: 0.55;
-  filter: saturate(0.85);
+  /* Inactive modes sit back (dimmed); the active one comes forward on a soft
+     pill at full strength. */
+  opacity: 0.5;
   transition:
     background 0.12s ease,
-    opacity 0.12s ease,
-    filter 0.12s ease;
+    opacity 0.12s ease;
 }
 
 .md-layout-btn:hover {
-  opacity: 0.85;
-  filter: saturate(1);
+  opacity: 0.8;
 }
 
 .md-layout-btn.active {
-  background: var(--skrive-bg);
+  background: var(--skrive-rule);
   opacity: 1;
-  filter: saturate(1);
 }
 
 .editor-bar-left {

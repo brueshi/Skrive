@@ -1,12 +1,13 @@
-// Markdown "preview" mode icon (SKR-197): a document with a rendered/preview
-// eye glyph. Full-colour art.
+// Markdown "preview" mode icon (SKR-197): a document with a rendered/preview eye.
+// Recoloured onto Skrive's muted, theme-adaptive filled-icon tokens; the iris
+// takes the slate-indigo accent.
 
 type Props = {
   size?: number;
   className?: string;
 };
 
-export function IconModePreview({ size = 18, className = '' }: Props) {
+export function IconModePreview({ size = 22, className = '' }: Props) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -18,33 +19,36 @@ export function IconModePreview({ size = 18, className = '' }: Props) {
     >
       <path
         d="m39 3.5h-24c-2.5 0-4.7 2.2-4.7 4.5l-0.1 48.2c0 2.5 2.3 5.1 4.8 5.1h34.4c2.6 0 5.3-2.2 5.3-5.1v-37.6c0-1.2-0.5-2.5-1.3-3.3l-12.2-11.2c-0.5-0.4-1.3-0.6-2.2-0.6z"
-        fill="#D9DBDB"
+        fill="var(--skrive-icon-doc-edge)"
       />
       <path
         d="m37.6 4h-23.3c-1.9 0-3.8 1.4-3.8 3.6v47.7c0 1.9 1.5 3.4 3.5 3.4h34.4c2.2 0 3.6-1.7 3.6-3.4v-37.6c0-0.8-0.1-1.2-0.4-1.4l-12.8-12c-0.2-0.2-0.7-0.3-1.2-0.3z"
-        fill="#D5E3FF"
+        fill="var(--skrive-icon-doc-page)"
       />
       <path
         d="m13.5 57.5c-1 0-1.9-0.9-1.9-1.9v-48.2c0-1.3 1.4-2.4 2.7-2.4h22.7l0.1 7.7c0 2.7 1.9 4.8 4.9 4.8h8.8v38c0 0.9-0.9 2-1.8 2h-35.5z"
-        fill="#C7DAFD"
+        fill="var(--skrive-icon-doc-page)"
       />
       <path
         d="m37.6 3h-23.3c-2.5 0-4.9 2-4.9 4.6v47.8c0 2.6 2 4.4 4.5 4.4h34.7c2.5 0 4.6-1.8 4.6-4.3v-37.8c0-1.1-0.4-2.3-1-2.9l-11.9-10.9c-0.7-0.7-1.6-0.9-2.7-0.9zm-0.4 2v7.7c0 2.8 2 4.8 4.8 4.8h8.7v0.3l0.1 37.5c0 1-1.1 2.5-2.5 2.5h-34.1c-1.3 0-2.6-1-2.6-2.5v-47.7c0-1.4 1.4-2.6 2.7-2.6h22.9z"
-        fill="#384554"
+        fill="var(--skrive-icon-doc-ink)"
       />
-      <path d="m39.4 6 10.2 9.5h-7.4c-1.6 0-2.8-1.1-2.8-2.8v-6.7z" fill="#6B97FC" />
+      <path
+        d="m39.4 6 10.2 9.5h-7.4c-1.6 0-2.8-1.1-2.8-2.8v-6.7z"
+        fill="var(--skrive-icon-doc-edge)"
+      />
       <path
         d="m45.6 32.9c-1.5-2-5.4-6.5-12.3-6.9h-1.8-2.5c-5.9 0.4-9.9 4.1-11.9 6.7l3.8 3.9s3.1 2.8 9.2 3.2h2.3c7.2-0.3 11.2-4.4 13.2-6.9z"
-        fill="#FFFFFF"
+        fill="var(--skrive-icon-doc-page)"
       />
       <path
         d="m31.4 24.7c-4.8 0-7.5 1.3-9.4 2.4-1.9 1.2-3.5 2.5-5.7 5-0.4 0.6-0.4 1.3 0 1.7 3.7 5 8.2 7.2 15.1 7.3 5.9-0.1 10.5-2.1 14.1-6.2l0.8-1c0.4-0.4 0.5-1.2 0.1-1.7-0.7-0.9-2.1-2.8-5.5-4.8-3.2-1.7-5.9-2.7-9.5-2.7zm5.4 3.1c2.8 0.8 5.9 3 7.4 5.1v0.1c-0.7 1.1-3.8 4-7.6 5.2 1.3-1.3 2.3-3.1 2.3-5.3-0.1-2-0.8-3.8-2-5.1h-0.1zm-11 0c-1.2 1.3-2.1 3-2.1 5 0 2.1 0.9 3.9 2.2 5.4-2.6-0.7-5.5-2.5-7.5-5.3 2-2.4 4.7-4.2 7.4-5.1z"
-        fill="#3F4A5A"
+        fill="var(--skrive-icon-doc-ink)"
       />
-      <ellipse cx="31.3" cy="32.9" rx="5.5" ry="5.5" fill="#6B97FC" />
+      <ellipse cx="31.3" cy="32.9" rx="5.5" ry="5.5" fill="var(--skrive-accent)" />
       <path
         d="m34.2 32c-0.3 0.3-0.5 0.4-1 0.4-0.8 0-1.4-0.6-1.4-1.4 0-0.4 0.2-0.8 0.4-1-0.3-0.2-0.6-0.2-0.9-0.2-1.7 0-3.1 1.5-3.1 3.1s1.3 3.1 3.1 3.1 3.1-1.5 3.1-3.1c0-0.3-0.1-0.6-0.2-0.9z"
-        fill="#3F4A5A"
+        fill="var(--skrive-icon-doc-ink)"
       />
     </svg>
   );
