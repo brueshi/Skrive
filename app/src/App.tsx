@@ -5,6 +5,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
+import { BlockEditor } from './components/editor/block/BlockEditor';
 import { MarkdownBlockEditor } from './components/editor/block/MarkdownBlockEditor';
 import { RawSourceView } from './components/editor/raw/RawSourceView';
 import { EditorBar } from './components/editor/EditorBar';
@@ -71,6 +72,7 @@ export function App() {
   const activeTab = useProjectStore(selectActiveTab);
   const activeTabIndex = useProjectStore((s) => s.activeTabIndex);
   const setTabBody = useProjectStore((s) => s.setTabBody);
+  const setTabModel = useProjectStore((s) => s.setTabModel);
   const saveAllDirty = useProjectStore((s) => s.saveAllDirty);
   const openProjectFromDialog = useProjectStore(
     (s) => s.openProjectFromDialog
@@ -485,20 +487,29 @@ export function App() {
                 <>
                   <EditorBar />
                   <div className="workspace-surface">
-                    {activeTab.rawView ? (
+                    {activeTab.mode === 'markdown' && activeTab.rawView ? (
                       // Raw Markdown source view over the same buffer (SKR-97).
-                      // Keyed by path + view so a file switch or a toggle
-                      // remounts and re-reads the (possibly edited) body.
+                      // Markdown-only (rich has no Markdown source). Keyed by path
+                      // + view so a file switch or a toggle remounts and re-reads
+                      // the (possibly edited) body.
                       <RawSourceView
                         key={`${activeTab.path}:raw`}
                         body={activeTab.body}
                         onChange={(next) => setTabBody(activeTabIndex, next)}
                       />
+                    ) : activeTab.mode === 'rich' && activeTab.model ? (
+                      // Rich (`.folio`) mode: the block model is canonical. The
+                      // surface edits it directly and saves the native format —
+                      // no Markdown serializer on this path (SKR-196).
+                      <BlockEditor
+                        key={activeTab.path}
+                        doc={activeTab.model}
+                        onChange={(doc) => setTabModel(activeTabIndex, doc)}
+                      />
                     ) : (
-                      // The bespoke block surface is the default editor
-                      // (SKR-111). Keyed per file so a file switch remounts
-                      // (uncontrolled). Markdown mode edits through the model via
-                      // this adapter; the save path stays text -> text (SKR-196).
+                      // Markdown mode: the block surface renders a preview and
+                      // this adapter keeps the text buffer in sync; the save path
+                      // stays text -> text (SKR-196). Keyed per file (uncontrolled).
                       <MarkdownBlockEditor
                         key={activeTab.path}
                         body={activeTab.body}
