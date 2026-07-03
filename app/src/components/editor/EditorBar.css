@@ -40,27 +40,31 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 22px;
+  width: 30px;
+  height: 26px;
   border: none;
   border-radius: 5px;
   background: transparent;
-  color: var(--skrive-fg-muted, var(--skrive-fg));
-  opacity: 0.7;
   cursor: pointer;
+  /* The icons are full-colour art; inactive tabs read as slightly recessed via
+     opacity + a touch of desaturation, active pops to full strength on a pill. */
+  opacity: 0.55;
+  filter: saturate(0.85);
   transition:
     background 0.12s ease,
-    opacity 0.12s ease;
+    opacity 0.12s ease,
+    filter 0.12s ease;
 }
 
 .md-layout-btn:hover {
-  opacity: 1;
+  opacity: 0.85;
+  filter: saturate(1);
 }
 
 .md-layout-btn.active {
   background: var(--skrive-bg);
-  color: var(--skrive-fg);
   opacity: 1;
+  filter: saturate(1);
 }
 
 .editor-bar-left {

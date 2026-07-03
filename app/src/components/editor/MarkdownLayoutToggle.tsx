@@ -4,18 +4,18 @@
 
 import { useProjectStore } from '../../stores/project';
 import type { LayoutMode } from '@skrive/shared';
-import { IconLayoutRaw } from '../icons/IconLayoutRaw';
-import { IconLayoutSplit } from '../icons/IconLayoutSplit';
-import { IconLayoutPreview } from '../icons/IconLayoutPreview';
+import { IconModeRaw } from '../icons/IconModeRaw';
+import { IconModeSplit } from '../icons/IconModeSplit';
+import { IconModePreview } from '../icons/IconModePreview';
 
 const MODES: ReadonlyArray<{
   mode: LayoutMode;
   label: string;
-  Icon: typeof IconLayoutSplit;
+  Icon: typeof IconModeSplit;
 }> = [
-  { mode: 'raw', label: 'Source', Icon: IconLayoutRaw },
-  { mode: 'split', label: 'Split', Icon: IconLayoutSplit },
-  { mode: 'preview', label: 'Preview', Icon: IconLayoutPreview }
+  { mode: 'raw', label: 'Source', Icon: IconModeRaw },
+  { mode: 'split', label: 'Split', Icon: IconModeSplit },
+  { mode: 'preview', label: 'Preview', Icon: IconModePreview }
 ];
 
 export function MarkdownLayoutToggle() {
@@ -39,7 +39,7 @@ export function MarkdownLayoutToggle() {
             aria-label={label}
             onClick={() => setTabLayoutMode(activeTabIndex, mode)}
           >
-            <Icon size={16} />
+            <Icon size={18} />
           </button>
         );
       })}
