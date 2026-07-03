@@ -26,39 +26,44 @@
   z-index: 1;
 }
 
-/* Markdown source-mode layout switch (SKR-197): three spaced mode buttons with
-   the muted document icons; the active one rests on a soft pill. */
+/* Markdown source-mode layout switch (SKR-197): a centered text control,
+   markdown | split | preview, filling the bar's middle band where the formatting
+   toolbar would sit in rich mode. Centered the same way — margin auto over a
+   full-width row. */
 .md-layout-toggle {
-  display: inline-flex;
+  display: flex;
+  justify-content: center;
   align-items: center;
-  gap: 6px;
+  gap: 0.55rem;
+  margin: 0 auto;
+  padding: 0.35rem 0;
 }
 
 .md-layout-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 30px;
   border: none;
-  border-radius: 8px;
   background: transparent;
   cursor: pointer;
-  /* Inactive modes sit back (dimmed); the active one comes forward on a soft
-     pill at full strength. */
-  opacity: 0.5;
-  transition:
-    background 0.12s ease,
-    opacity 0.12s ease;
+  padding: 2px 2px;
+  font: inherit;
+  font-size: 0.8rem;
+  letter-spacing: 0.01em;
+  color: var(--skrive-muted);
+  transition: color 0.12s ease;
 }
 
 .md-layout-btn:hover {
-  opacity: 0.8;
+  color: var(--skrive-fg);
 }
 
 .md-layout-btn.active {
-  background: var(--skrive-rule);
-  opacity: 1;
+  color: var(--skrive-fg);
+  font-weight: 600;
+}
+
+.md-layout-sep {
+  color: var(--skrive-rule);
+  font-size: 0.8rem;
+  user-select: none;
 }
 
 .editor-bar-left {

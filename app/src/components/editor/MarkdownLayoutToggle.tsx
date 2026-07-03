@@ -1,21 +1,16 @@
-// Markdown source-mode layout switch (SKR-197). A three-way segmented control —
-// source / split / preview — shown in the EditorBar only when the active tab is a
-// Markdown file. `.folio` rich tabs have a single editing surface and no toggle.
+// Markdown source-mode layout switch (SKR-197). A centered text control —
+// markdown | split | preview — shown in the EditorBar's middle band only when the
+// active tab is a Markdown file (where the formatting toolbar is absent). `.folio`
+// rich tabs show the toolbar there instead and get no layout switch.
 
+import { Fragment } from 'react';
 import { useProjectStore } from '../../stores/project';
 import type { LayoutMode } from '@skrive/shared';
-import { IconModeRaw } from '../icons/IconModeRaw';
-import { IconModeSplit } from '../icons/IconModeSplit';
-import { IconModePreview } from '../icons/IconModePreview';
 
-const MODES: ReadonlyArray<{
-  mode: LayoutMode;
-  label: string;
-  Icon: typeof IconModeSplit;
-}> = [
-  { mode: 'raw', label: 'Source', Icon: IconModeRaw },
-  { mode: 'split', label: 'Split', Icon: IconModeSplit },
-  { mode: 'preview', label: 'Preview', Icon: IconModePreview }
+const MODES: ReadonlyArray<{ mode: LayoutMode; label: string }> = [
+  { mode: 'raw', label: 'markdown' },
+  { mode: 'split', label: 'split' },
+  { mode: 'preview', label: 'preview' }
 ];
 
 export function MarkdownLayoutToggle() {
@@ -27,20 +22,24 @@ export function MarkdownLayoutToggle() {
 
   return (
     <div className="md-layout-toggle" role="group" aria-label="Editor layout">
-      {MODES.map(({ mode, label, Icon }) => {
+      {MODES.map(({ mode, label }, i) => {
         const active = tab.layoutMode === mode;
         return (
-          <button
-            key={mode}
-            type="button"
-            className={`md-layout-btn${active ? ' active' : ''}`}
-            aria-pressed={active}
-            title={label}
-            aria-label={label}
-            onClick={() => setTabLayoutMode(activeTabIndex, mode)}
-          >
-            <Icon size={22} />
-          </button>
+          <Fragment key={mode}>
+            {i > 0 && (
+              <span className="md-layout-sep" aria-hidden="true">
+                |
+              </span>
+            )}
+            <button
+              type="button"
+              className={`md-layout-btn${active ? ' active' : ''}`}
+              aria-pressed={active}
+              onClick={() => setTabLayoutMode(activeTabIndex, mode)}
+            >
+              {label}
+            </button>
+          </Fragment>
         );
       })}
     </div>

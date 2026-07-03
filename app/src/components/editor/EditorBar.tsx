@@ -34,9 +34,12 @@ export function EditorBar() {
       <div className="editor-bar-left">
         <SaveStatus />
       </div>
+      {/* The middle band: the formatting toolbar for a live block surface
+          (rich `.folio`), or the layout switch for Markdown. Mutually exclusive
+          — a Markdown tab has no surface, so only one ever renders. */}
       {controller && <Toolbar controller={controller} />}
+      <MarkdownLayoutToggle />
       <div className="editor-bar-right">
-        <MarkdownLayoutToggle />
         <CopyPageButton />
       </div>
     </div>
