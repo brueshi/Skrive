@@ -21,6 +21,7 @@ import { getActiveBlockMenu } from '../../components/editor/active-surface';
 import { useProjectStore, logProjectError } from '../../stores/project';
 import { fileMode } from '../../stores/save';
 import { EXPORT_FORMATS } from '../export';
+import { importKind } from '../import';
 import { notify } from '../notify';
 
 // ============================ Types ============================
@@ -130,6 +131,14 @@ const whenActiveFolio = () => {
   const s = useProjectStore.getState();
   const tab = s.tabs[s.activeTabIndex];
   return s.manifest !== null && tab != null && fileMode(tab.path) === 'rich';
+};
+
+/** The `.md`/import -> `.folio` upgrade acts on the active tab, and only when it's
+ *  a convertible source (Markdown / HTML / plain text — not already a `.folio`). */
+const whenActiveConvertible = () => {
+  const s = useProjectStore.getState();
+  const tab = s.tabs[s.activeTabIndex];
+  return s.manifest !== null && tab != null && importKind(tab.path) !== null;
 };
 
 /** The Insert commands act on the block surface, so they're runnable only when
@@ -527,6 +536,17 @@ export function buildRegistry(deps: CommandDeps): {
         }
       })
     ),
+    {
+      id: 'file.convertToFolio',
+      label: 'Convert to Skrive document',
+      group: 'File',
+      when: whenActiveConvertible,
+      run: () => {
+        const s = useProjectStore.getState();
+        const tab = s.tabs[s.activeTabIndex];
+        if (tab) void s.convertToFolio(tab.path);
+      }
+    },
 
     // ============ Tabs ============
     {

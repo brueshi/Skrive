@@ -37,6 +37,7 @@ import { usePreferencesStore } from '../../stores/preferences';
 import { resolveTitle } from '../../lib/title';
 import { fileMode } from '../../stores/save';
 import { EXPORT_FORMATS, type ExportFormatId } from '../../lib/export';
+import { importKind } from '../../lib/import';
 import { platformShortcut } from '../../lib/commands/shortcut-display';
 import { notify } from '../../lib/notify';
 import * as ContextMenu from '@radix-ui/react-context-menu';
@@ -173,6 +174,7 @@ type FileRowProps = {
   onDelete: (file: FileEntry) => void;
   onTogglePin: (file: FileEntry) => void;
   onExport: (file: FileEntry, format: ExportFormatId) => void;
+  onConvert: (file: FileEntry) => void;
 };
 
 function FileRow({
@@ -184,7 +186,8 @@ function FileRow({
   onRename,
   onDelete,
   onTogglePin,
-  onExport
+  onExport,
+  onConvert
 }: FileRowProps) {
   const activePath = useProjectStore(selectActivePath);
   const openTab = useProjectStore((s) => s.openTab);
@@ -198,6 +201,7 @@ function FileRow({
   );
   const resolved = resolveTitle(file);
   const isFolio = fileMode(file.path) === 'rich';
+  const canConvert = importKind(file.path) !== null;
 
   function handleKey(e: KeyboardEvent<HTMLButtonElement>) {
     if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -276,6 +280,14 @@ function FileRow({
                 </ContextMenu.Portal>
               </ContextMenu.Sub>
             )}
+            {canConvert && (
+              <ContextMenu.Item
+                className="ctx-item"
+                onSelect={() => onConvert(file)}
+              >
+                <span className="ctx-label">Convert to Skrive document</span>
+              </ContextMenu.Item>
+            )}
             <ContextMenu.Item
               className="ctx-item destructive"
               onSelect={() => onDelete(file)}
@@ -302,6 +314,7 @@ type FolderTreeProps = {
   onFileDelete: (file: FileEntry) => void;
   onFileTogglePin: (file: FileEntry) => void;
   onFileExport: (file: FileEntry, format: ExportFormatId) => void;
+  onFileConvert: (file: FileEntry) => void;
   onDirDelete: (dir: string) => void;
 };
 
@@ -318,6 +331,7 @@ function FolderTree(props: FolderTreeProps) {
     onFileDelete,
     onFileTogglePin,
     onFileExport,
+    onFileConvert,
     onDirDelete
   } = props;
   const isExpanded = !collapsed.has(folder.path);
@@ -394,6 +408,7 @@ function FolderTree(props: FolderTreeProps) {
                   onDelete={onFileDelete}
                   onTogglePin={onFileTogglePin}
                   onExport={onFileExport}
+                  onConvert={onFileConvert}
                 />
               ))}
             </ul>
@@ -428,6 +443,7 @@ type SpecialGroupProps = {
   onDelete: (file: FileEntry) => void;
   onTogglePin: (file: FileEntry) => void;
   onExport: (file: FileEntry, format: ExportFormatId) => void;
+  onConvert: (file: FileEntry) => void;
 };
 
 function SpecialGroup({
@@ -438,7 +454,8 @@ function SpecialGroup({
   onRename,
   onDelete,
   onTogglePin,
-  onExport
+  onExport,
+  onConvert
 }: SpecialGroupProps) {
   if (files.length === 0) return null;
   return (
@@ -461,6 +478,7 @@ function SpecialGroup({
             onDelete={onDelete}
             onTogglePin={onTogglePin}
             onExport={onExport}
+            onConvert={onConvert}
           />
         ))}
       </ul>
@@ -530,6 +548,7 @@ export function Sidebar() {
   const deleteFile = useProjectStore((s) => s.deleteFile);
   const deleteDirectory = useProjectStore((s) => s.deleteDirectory);
   const exportDocument = useProjectStore((s) => s.exportDocument);
+  const convertToFolio = useProjectStore((s) => s.convertToFolio);
   const pinned = useProjectStore((s) => s.pinned);
   const togglePin = useProjectStore((s) => s.togglePin);
   const sortKey = useProjectStore((s) => s.sortKey);
@@ -587,6 +606,13 @@ export function Sidebar() {
       void exportDocument(file.path, format);
     },
     [exportDocument]
+  );
+
+  const handleConvert = useCallback(
+    (file: FileEntry) => {
+      void convertToFolio(file.path);
+    },
+    [convertToFolio]
   );
 
   const toggleCollapse = useCallback((p: string) => {
@@ -994,6 +1020,7 @@ export function Sidebar() {
           onDelete={requestDeleteFile}
           onTogglePin={toggleFilePin}
           onExport={handleExport}
+          onConvert={handleConvert}
         />
         <SpecialGroup
           title="Recents"
@@ -1004,6 +1031,7 @@ export function Sidebar() {
           onDelete={requestDeleteFile}
           onTogglePin={toggleFilePin}
           onExport={handleExport}
+          onConvert={handleConvert}
         />
 
         {manifest && fileCount > 0 && (
@@ -1031,6 +1059,7 @@ export function Sidebar() {
                       onDelete={requestDeleteFile}
                       onTogglePin={toggleFilePin}
                       onExport={handleExport}
+                      onConvert={handleConvert}
                     />
                   ))}
                 </ul>
@@ -1049,6 +1078,7 @@ export function Sidebar() {
                   onFileDelete={requestDeleteFile}
                   onFileTogglePin={toggleFilePin}
                   onFileExport={handleExport}
+                  onFileConvert={handleConvert}
                   onDirDelete={requestDeleteDirectory}
                 />
               ))}
