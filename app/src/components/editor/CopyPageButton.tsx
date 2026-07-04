@@ -1,9 +1,10 @@
 // "Copy page" split button for the editor bar (SKR-126), the export half of the
 // clipboard round trip (paste-in is SKR-119). The primary action copies the
-// whole document as Markdown (rich dual-write, matching the preview copy); the
-// chevron opens a menu to copy as Markdown or as plain text (Markdown syntax
-// stripped). Lives in the right-floated editor-bar controls so it's available in
-// both rendered and source views.
+// whole document as Markdown (rich dual-write); the chevron opens a menu to copy
+// as Markdown or as plain text (Markdown syntax stripped). Lives in the
+// right-floated editor-bar controls so it's available in both rendered and source
+// views — the single copy affordance for a page (the old floating preview-pane
+// copy button was removed in SKR-208).
 //
 // Reads the document from the project store (works across views, unlike the
 // surface which only exists in rendered mode), flushing any pending debounced
