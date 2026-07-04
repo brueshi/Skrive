@@ -32,7 +32,9 @@
   --input-fg: var(--skrive-fg);
   --input-border: var(--skrive-rule);
   --input-focus-border: var(--skrive-focus-ring);
-  --input-focus-glow: color-mix(in srgb, var(--skrive-focus-ring) 35%, transparent);
+  /* Glow strength: 35% (the old settings value) read too loud once every
+     field wore it (Joe, 2026-07-04) — quietened to 20%. */
+  --input-focus-glow: color-mix(in srgb, var(--skrive-focus-ring) 20%, transparent);
 
   /* Segmented / Toggle / Stepper (SKR-212) — promoted from the settings
    * kit. The sunken-track and off-state greys hoist here from the
