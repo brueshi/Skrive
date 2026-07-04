@@ -24,19 +24,10 @@
 // `onInternalLink` callback (Phase 6 wires this through to the project
 // store; Phase 2 ignores them).
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { renderMarkdown, stripLeadingFrontmatter } from '../../lib/preview/markdown';
+import { useMemo, useRef } from 'react';
+import { renderMarkdown } from '../../lib/preview/markdown';
 import { skriveAssetResolver } from '../../lib/preview/imageResolver';
-import { buildClipboardPayload } from '../../lib/clipboard/copyOut';
-import {
-  writeRichToClipboard,
-  writeTextToClipboard
-} from '../../lib/clipboard/systemClipboard';
-import { IconCopy } from '../icons/IconCopy';
-import { IconCheck } from '../icons/IconCheck';
 import { PreviewOutlineRail } from './PreviewOutlineRail';
-
-const COPIED_FEEDBACK_MS = 1600;
 
 type Props = {
   body: string;
@@ -111,40 +102,6 @@ export function Preview({
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const innerRef = useRef<HTMLDivElement | null>(null);
 
-  // Copy-out for preview mode. The editor's copy handler doesn't cover this
-  // surface, and the browser's native copy of the rendered DOM drags the
-  // theme background into rich targets. This button copies the whole document
-  // as a clean dual-write payload built from the renderer, not the DOM, so
-  // there's no styling to bleed. Frontmatter is stripped to match what the
-  // preview shows.
-  const [copied, setCopied] = useState(false);
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const documentBody = stripLeadingFrontmatter(body).trim();
-
-  useEffect(() => {
-    return () => {
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-    };
-  }, []);
-
-  async function copyDocument() {
-    const { text, html: rendered } = buildClipboardPayload(documentBody);
-    try {
-      await writeRichToClipboard(rendered, text);
-    } catch {
-      // Some environments refuse rich clipboard writes; fall back to plain.
-      try {
-        await writeTextToClipboard(text);
-      } catch (err) {
-        console.warn('[skrive] copy to clipboard failed:', err);
-        return;
-      }
-    }
-    setCopied(true);
-    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-    copyTimerRef.current = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
-  }
-
   // Scroll the preview to a same-document heading. An empty fragment
   // ("#") is the conventional "back to top". Fragments may be percent-
   // encoded by the renderer for non-ASCII slugs, so decode before
@@ -218,25 +175,6 @@ export function Preview({
           dangerouslySetInnerHTML={{ __html: html }}
         />
       </div>
-      {documentBody !== '' && (
-        <button
-          type="button"
-          className={`preview-copy${copied ? ' copied' : ''}`}
-          title={copied ? 'Copied' : 'Copy document'}
-          aria-label={
-            copied ? 'Document copied to clipboard' : 'Copy document to clipboard'
-          }
-          onClick={copyDocument}
-        >
-          {/* Both glyphs are stacked and crossfaded in CSS; a brief blur
-              bridges the copy -> check swap so it reads as one continuous
-              state change rather than a hard cut. */}
-          <span className="preview-copy-glyphs">
-            <IconCopy size={16} className="preview-copy-glyph is-copy" />
-            <IconCheck size={16} className="preview-copy-glyph is-check" />
-          </span>
-        </button>
-      )}
       {showRail && (
         <PreviewOutlineRail
           scrollerRef={scrollerRef}
