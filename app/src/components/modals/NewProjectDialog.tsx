@@ -10,6 +10,7 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { DialogShell } from '../ui/Dialog';
+import { Button } from '../ui/Button';
 import { useEffect, useRef, useState } from 'react';
 import { logProjectError, useProjectStore } from '../../stores/project';
 import { notify } from '../../lib/notify';
@@ -134,14 +135,13 @@ export function NewProjectDialog({ open, onClose }: Props) {
                 value={parent ?? ''}
                 placeholder="Click Browse to choose…"
               />
-              <button
-                type="button"
-                className="modal-button secondary"
+              <Button
+                size="sm"
                 onClick={() => void browseLocation()}
                 disabled={busy}
               >
                 Browse…
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -163,22 +163,19 @@ export function NewProjectDialog({ open, onClose }: Props) {
           {error && <p className="modal-error">{error}</p>}
 
           <div className="modal-actions">
-            <button
-              type="button"
-              className="modal-button secondary"
+            <Button
               onClick={onClose}
               disabled={busy}
             >
               Cancel
-            </button>
-            <button
-              type="button"
-              className="modal-button primary"
+            </Button>
+            <Button
+              variant="primary"
               onClick={() => void handleCreate()}
               disabled={!canCreate}
             >
               {busy ? 'Creating…' : 'Create'}
-            </button>
+            </Button>
           </div>
     </DialogShell>
   );

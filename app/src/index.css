@@ -786,59 +786,7 @@ body {
   justify-content: flex-end;
 }
 
-.modal-button {
-  /* 9px pairs with the sheet frame's 16px radius (an off-scale value Stage 4
-     revisits when these buttons migrate onto ui/Button). */
-  padding: 0.5rem 1.1rem;
-  border-radius: 9px;
-  font: inherit;
-  font-size: 0.8125rem;
-  cursor: pointer;
-  border: 1px solid var(--skrive-rule);
-  background: transparent;
-  color: var(--skrive-fg);
-  transition:
-    background-color var(--skrive-duration-quick) var(--skrive-easing),
-    border-color var(--skrive-duration-quick) var(--skrive-easing),
-    color var(--skrive-duration-quick) var(--skrive-easing),
-    opacity var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.modal-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.modal-button.secondary {
-  color: var(--skrive-muted);
-}
-
-.modal-button.secondary:not(:disabled):hover {
-  border-color: var(--skrive-muted);
-  color: var(--skrive-fg);
-}
-
-/* Primary action — a solid fill so it leads without a heavy outline,
-   matching the Done button and empty-state primary. */
-.modal-button.primary:not(.destructive) {
-  border-color: transparent;
-  background: var(--skrive-fg);
-  color: var(--skrive-bg);
-}
-
-.modal-button.primary:not(.destructive):not(:disabled):hover {
-  opacity: 0.85;
-}
-
-.modal-button.primary.destructive {
-  border-color: var(--skrive-danger);
-  color: var(--skrive-danger);
-}
-
-.modal-button.primary.destructive:not(:disabled):hover {
-  background: var(--skrive-danger-fill);
-  color: #fff;
-}
+/* Modal action buttons are ui/Button (SKR-210); only the row layout is ours. */
 
 /* ===================== Sheet content anatomy =====================
    The sheet surface is the DialogShell default (SKR-211), so its content
@@ -961,40 +909,7 @@ body {
   margin-top: 0.5rem;
 }
 
-.empty-state button.primary,
-.empty-state button.secondary {
-  appearance: none;
-  font: inherit;
-  font-weight: 500;
-  font-size: 0.875rem;
-  padding: 0.5rem 1rem;
-  border-radius: var(--skrive-radius-md);
-  cursor: pointer;
-  transition:
-    opacity var(--skrive-duration-quick) var(--skrive-easing),
-    background-color var(--skrive-duration-quick) var(--skrive-easing),
-    color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.empty-state button.primary {
-  background: var(--skrive-fg);
-  color: var(--skrive-bg);
-  border: none;
-}
-
-.empty-state button.primary:hover {
-  opacity: 0.85;
-}
-
-.empty-state button.secondary {
-  background: transparent;
-  color: var(--skrive-fg);
-  border: 1px solid var(--skrive-rule);
-}
-
-.empty-state button.secondary:hover {
-  border-color: var(--skrive-fg);
-}
+/* Empty-state actions are ui/Button (SKR-210). */
 
 .empty-recent {
   margin-top: 1.5rem;
@@ -3976,29 +3891,8 @@ body {
     color-mix(in srgb, var(--skrive-focus-ring) 35%, transparent);
 }
 
-.settings-secondary-button {
-  appearance: none;
-  padding: 0.5rem 0.875rem;
-  border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-radius-md);
-  background: var(--skrive-bg);
-  color: var(--skrive-fg);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  transition:
-    border-color var(--skrive-duration-quick) var(--skrive-easing),
-    color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.settings-secondary-button:hover:not(:disabled) {
-  border-color: var(--skrive-muted);
-}
-
-.settings-secondary-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
+/* Settings action buttons are ui/Button (SKR-210); the accent-filled
+   settings primary retired with them — the fg/bg swap is the one primary. */
 
 .settings-updater-status {
   margin: 0 0 0.625rem;
@@ -4131,30 +4025,6 @@ body {
 /* Accent-filled primary action for the updater's Download / Restart CTAs.
    Text color flips with the theme so it stays legible on the accent fill
    (dark accent in light mode, light accent in dark mode). */
-.settings-primary-button {
-  appearance: none;
-  padding: 0.5rem 0.875rem;
-  border: 1px solid transparent;
-  border-radius: var(--skrive-radius-md);
-  background: var(--skrive-accent);
-  color: light-dark(#ffffff, #15171a);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 550;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: filter var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.settings-primary-button:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
-
-.settings-primary-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 /* ---- Personal dictionary ---- */
 .settings-dict-input {
   display: flex;
@@ -4518,10 +4388,6 @@ body {
   min-width: 0;
 }
 
-.np-location-row .modal-button {
-  padding: 0.4rem 0.75rem;
-  font-size: 0.75rem;
-}
 
 /* ===================== Report modal (SKR-130) =====================
    The in-app bug/feedback reporter. A larger instance of the sheet — the
@@ -4560,7 +4426,8 @@ body {
   font-size: 0.875rem;
 }
 
-.report-modal .modal-button {
+/* The send button scales up with this larger sheet (see .report-modal). */
+.report-modal .report-send {
   padding: 0.625rem 1.375rem;
   font-size: 0.875rem;
 }
