@@ -9,6 +9,7 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { DialogShell } from '../ui/Dialog';
+import { Button } from '../ui/Button';
 import { useEffect, useRef, useState } from 'react';
 import { notify } from '../../lib/notify';
 import {
@@ -220,14 +221,14 @@ export function ReportDialog({ open, kind, onClose }: Props) {
           {error && <p className="modal-error">{error}</p>}
 
           <div className="modal-actions">
-            <button
-              type="button"
-              className="modal-button primary"
+            <Button
+              className="report-send"
+              variant="primary"
               onClick={() => void handleSend()}
               disabled={!canSend}
             >
               {busy ? copy.submitting : copy.submit}
-            </button>
+            </Button>
           </div>
     </DialogShell>
   );

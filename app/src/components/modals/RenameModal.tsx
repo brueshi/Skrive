@@ -15,6 +15,7 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { DialogShell } from '../ui/Dialog';
+import { Button } from '../ui/Button';
 import { useEffect, useRef, useState } from 'react';
 import type { Reference, RenamePreview } from '@skrive/shared';
 import { logProjectError, useProjectStore } from '../../stores/project';
@@ -282,22 +283,19 @@ export function RenameModal() {
             )}
 
           <div className="modal-actions">
-            <button
-              type="button"
-              className="modal-button secondary"
+            <Button
               onClick={close}
               disabled={committing}
             >
               Cancel
-            </button>
-            <button
-              type="button"
-              className="modal-button primary"
+            </Button>
+            <Button
+              variant="primary"
               onClick={() => void handleCommit()}
               disabled={!canRename}
             >
               {committing ? 'Renaming…' : 'Rename'}
-            </button>
+            </Button>
           </div>
     </DialogShell>
   );

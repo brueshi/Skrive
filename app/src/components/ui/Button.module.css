@@ -15,6 +15,7 @@
     border: 1px solid var(--button-border);
     background: var(--button-bg);
     color: var(--button-fg);
+    white-space: nowrap;
     cursor: pointer;
     transition:
       background-color var(--skrive-duration-quick) var(--skrive-easing),

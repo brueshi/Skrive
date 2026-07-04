@@ -11,6 +11,7 @@
 // interface/display font trio from the mock are intentionally omitted.
 
 import { useEffect, useState } from 'react';
+import { Button } from '../ui/Button';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import type { UpdaterStatus } from '@skrive/shared';
 import { usePreferencesStore } from '../../stores/preferences';
@@ -424,14 +425,12 @@ function DictionarySection() {
             }}
             aria-label="Add a word to the personal dictionary"
           />
-          <button
-            type="button"
-            className="settings-secondary-button"
+          <Button
             onClick={commit}
             disabled={pending.trim().length === 0}
           >
             Add
-          </button>
+          </Button>
         </div>
         {sorted.length === 0 ? (
           <p className="settings-empty">
@@ -661,13 +660,11 @@ function NativeUpdatesPane({ appVersion }: { appVersion: string }) {
             version is ready. Updates are signed and verified before they
             install.
           </p>
-          <button
-            type="button"
-            className="settings-secondary-button"
+          <Button
             onClick={checkNow}
           >
             Check for updates…
-          </button>
+          </Button>
         </div>
       </SettingsSection>
     </>
@@ -793,9 +790,9 @@ function renderUpdaterBody(
       return (
         <div className="updater-card-row">
           <span className="updater-card-title">Check for updates</span>
-          <button type="button" className="settings-secondary-button" onClick={onCheck}>
+          <Button onClick={onCheck}>
             Check now
-          </button>
+          </Button>
         </div>
       );
     case 'checking':
@@ -820,9 +817,9 @@ function renderUpdaterBody(
               })}
             </span>
           </span>
-          <button type="button" className="settings-secondary-button" onClick={onCheck}>
+          <Button onClick={onCheck}>
             Check again
-          </button>
+          </Button>
         </div>
       );
     case 'available':
@@ -833,9 +830,9 @@ function renderUpdaterBody(
               Update available
               <span className="updater-card-version">Skrive {status.version}</span>
             </span>
-            <button type="button" className="settings-primary-button" onClick={onAction}>
+            <Button variant="primary" onClick={onAction}>
               Download
-            </button>
+            </Button>
           </div>
           {status.releaseNotes ? (
             <div className="updater-card-notes">{status.releaseNotes}</div>
@@ -872,9 +869,9 @@ function renderUpdaterBody(
             Ready to install
             <span className="updater-card-version">Skrive {status.version}</span>
           </span>
-          <button type="button" className="settings-primary-button" onClick={onAction}>
+          <Button variant="primary" onClick={onAction}>
             Restart to install
-          </button>
+          </Button>
         </div>
       );
     case 'error':
@@ -882,9 +879,9 @@ function renderUpdaterBody(
         <div className="updater-card-stack">
           <span className="updater-card-title">Update failed</span>
           <p className="updater-card-error">{status.message}</p>
-          <button type="button" className="settings-secondary-button" onClick={onCheck}>
+          <Button onClick={onCheck}>
             Try again
-          </button>
+          </Button>
         </div>
       );
   }
@@ -928,13 +925,11 @@ function AboutPane({
           control={<span className="settings-value-text">{APP_LICENSE_LABEL}</span>}
         />
         <div className="settings-card-pad">
-          <button
-            type="button"
-            className="settings-secondary-button"
+          <Button
             onClick={() => void reveal()}
           >
             Reveal preferences in Finder
-          </button>
+          </Button>
         </div>
       </SettingsSection>
       <SettingsSection cap="Diagnostics">
@@ -942,13 +937,11 @@ function AboutPane({
           label="Crash & error logs"
           desc="Local only — nothing is ever uploaded. If Skrive misbehaves, reveal the folder and send us the files."
           control={
-            <button
-              type="button"
-              className="settings-secondary-button"
+            <Button
               onClick={() => void revealDiagnostics()}
             >
               Reveal diagnostics
-            </button>
+            </Button>
           }
         />
       </SettingsSection>
@@ -957,39 +950,33 @@ function AboutPane({
           label="Report a bug"
           desc="Something broken? Send a report straight to our tracker — only what you write is sent, never your documents."
           control={
-            <button
-              type="button"
-              className="settings-secondary-button"
+            <Button
               onClick={onReportBug}
             >
               Report a bug
-            </button>
+            </Button>
           }
         />
         <SettingRow
           label="Send feedback"
           desc="Ideas, requests, or what could be better — sent straight to our tracker, in the app."
           control={
-            <button
-              type="button"
-              className="settings-secondary-button"
+            <Button
               onClick={onSendFeedback}
             >
               Send feedback
-            </button>
+            </Button>
           }
         />
         <SettingRow
           label="Share feedback"
           desc="Tell us what's working and what isn't. Opens a short form in your browser."
           control={
-            <button
-              type="button"
-              className="settings-secondary-button"
+            <Button
               onClick={() => openFeedbackForm()}
             >
               Open form
-            </button>
+            </Button>
           }
         />
       </SettingsSection>

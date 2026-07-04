@@ -10,6 +10,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { useState } from 'react';
 import { usePreferencesStore } from '../../stores/preferences';
 import { DialogShell } from '../ui/Dialog';
+import { Button } from '../ui/Button';
 
 type Props = {
   open: boolean;
@@ -84,22 +85,20 @@ export function DeleteConfirmModal({
       </label>
 
       <div className="modal-actions">
-        <button
-          type="button"
-          className="modal-button secondary"
+        <Button
           onClick={onClose}
           disabled={busy}
         >
           Cancel
-        </button>
-        <button
-          type="button"
-          className="modal-button primary destructive"
+        </Button>
+        <Button
+          variant="primary"
+          tone="danger"
           onClick={() => void handleConfirm()}
           disabled={busy}
         >
           {busy ? 'Moving…' : 'Move to trash'}
-        </button>
+        </Button>
       </div>
     </DialogShell>
   );

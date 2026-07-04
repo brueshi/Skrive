@@ -4,6 +4,7 @@
 // modal land in Sidebar. Phase 9 wires per-project persistence.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Button } from './components/ui/Button';
 import { Toaster } from 'sonner';
 import { BlockEditor } from './components/editor/block/BlockEditor';
 import { MarkdownView } from './components/editor/markdown/MarkdownView';
@@ -549,9 +550,8 @@ export function App() {
             <h1>Skrive</h1>
             <p>A writing app for notes, drafts, and documents. Open a project to begin.</p>
             <div className="empty-actions">
-              <button
-                type="button"
-                className="primary"
+              <Button
+                variant="primary"
                 onClick={() => {
                   void openProjectFromDialog().catch((err) =>
                     logProjectError('openProjectFromDialog', err)
@@ -559,14 +559,10 @@ export function App() {
                 }}
               >
                 Open project…
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => setNewProjectOpen(true)}
-              >
+              </Button>
+              <Button onClick={() => setNewProjectOpen(true)}>
                 New project…
-              </button>
+              </Button>
             </div>
             <p className="hint">
               Or press <kbd>{platformShortcut('⌘O')}</kbd>.
