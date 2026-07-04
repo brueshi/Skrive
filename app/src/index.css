@@ -144,6 +144,14 @@
   --skrive-z-modal-content: 151;
   --skrive-z-context-menu: 200;
 
+  /* Illustrated-icon accent tints (SKR-207 icon family). The block icons are
+     duotone illustrations: structural ink rides currentColor (so menu rows
+     drive state), the accent parts read these — full accent plus two tints
+     derived from it, so the family retunes with the accent token and stays
+     legible in both themes. */
+  --skrive-icon-accent-mid: color-mix(in srgb, var(--skrive-accent) 55%, var(--skrive-bg));
+  --skrive-icon-accent-faint: color-mix(in srgb, var(--skrive-accent) 22%, var(--skrive-bg));
+
   /* Elevation. One shadow per overlay tier, so surfaces stop hand-tuning
      rgba stacks: modal = the heavy bordered-dialog lift (legacy frame,
      retired when SKR-211 lands); sheet = the layered soft-card lift (the
@@ -681,14 +689,15 @@ body {
 }
 
 /* Fixed-width leading icon slot so labels rag left together on rows that
-   carry a glyph (mirrors .rich-slash-icon). */
+   carry a glyph (mirrors .rich-slash-icon; 22px for the 18px illustrated
+   block icons). */
 .ctx-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--skrive-muted);
-  flex: 0 0 20px;
-  width: 20px;
+  flex: 0 0 22px;
+  width: 22px;
 }
 
 /* Full-bleed group hairline: negative margins cancel the menu's inner

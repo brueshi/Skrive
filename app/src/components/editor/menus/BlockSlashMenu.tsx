@@ -138,7 +138,7 @@ export function BlockSlashMenu({ surface }: { surface: BlockSurface }) {
                   }}
                 >
                   <span className="rich-slash-icon">
-                    <item.Icon size={16} />
+                    <item.Icon size={18} />
                   </span>
                   <span className="rich-slash-title">{item.title}</span>
                   {item.shortcut && (

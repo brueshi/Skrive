@@ -224,15 +224,16 @@
   background: color-mix(in srgb, var(--skrive-fg) 7%, transparent);
 }
 
-/* Fixed slot: glyphs are 16px but optically uneven; a 20px centered column
-   keeps every label starting on the same x. */
+/* Fixed slot: a centered 22px column keeps every label starting on the same
+   x. Glyphs render at 18 — the illustrated block icons need the extra size
+   over the 16px marks to stay legible. */
 .rich-slash-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--skrive-muted);
-  flex: 0 0 20px;
-  width: 20px;
+  flex: 0 0 22px;
+  width: 22px;
 }
 
 .rich-slash-title {
