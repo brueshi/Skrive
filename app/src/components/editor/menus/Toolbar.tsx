@@ -12,11 +12,11 @@ import { BlockTypeDropdown } from './BlockTypeDropdown';
 import {
   IconBold,
   IconItalic,
-  IconCode,
   IconLink,
   IconQuote,
   IconBulletList,
   IconOrderedList,
+  IconCodeBlock,
   IconDivider,
   IconTable
 } from './toolbar-icons';
@@ -68,9 +68,6 @@ export function Toolbar({ controller }: { controller: MenuController }) {
         <ToolbarButton label="Italic" active={s.em} onRun={() => controller.toggleMark('em')}>
           <IconItalic />
         </ToolbarButton>
-        <ToolbarButton label="Inline code" active={s.code} onRun={() => controller.toggleMark('code')}>
-          <IconCode />
-        </ToolbarButton>
         <ToolbarButton
           label="Link"
           active={s.link}
@@ -90,6 +87,17 @@ export function Toolbar({ controller }: { controller: MenuController }) {
         </ToolbarButton>
         <ToolbarButton label="Quote" active={s.inBlockquote} onRun={() => controller.toggleBlockquote()}>
           <IconQuote />
+        </ToolbarButton>
+        <ToolbarButton
+          label="Code block"
+          active={s.blockType === 'code_block'}
+          onRun={() =>
+            s.blockType === 'code_block'
+              ? controller.setParagraph()
+              : controller.setCodeBlock()
+          }
+        >
+          <IconCodeBlock />
         </ToolbarButton>
 
         <span className="rich-toolbar-sep" aria-hidden="true" />

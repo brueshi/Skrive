@@ -13,7 +13,7 @@ import type { MenuController } from './controller';
 import { platformShortcut } from '../../../lib/commands/shortcut-display';
 import { useAnchoredRect } from './useAnchoredRect';
 import { BlockTypeDropdown } from './BlockTypeDropdown';
-import { IconBold, IconItalic, IconCode, IconLink } from './toolbar-icons';
+import { IconBold, IconItalic, IconCodeBlock, IconLink } from './toolbar-icons';
 import './menus.css';
 
 function BubbleButton({
@@ -78,7 +78,7 @@ export function SelectionBubble({ controller }: { controller: MenuController }) 
             <IconItalic />
           </BubbleButton>
           <BubbleButton label="Inline code" shortcut="⌘E" active={s.code} onRun={() => controller.toggleMark('code')}>
-            <IconCode />
+            <IconCodeBlock />
           </BubbleButton>
           <BubbleButton label="Link" active={s.link} onRun={() => controller.openLinkEditor()}>
             <IconLink />
