@@ -34,6 +34,15 @@
   --input-focus-border: var(--skrive-focus-ring);
   --input-focus-glow: color-mix(in srgb, var(--skrive-focus-ring) 35%, transparent);
 
+  /* Segmented / Toggle / Stepper (SKR-212) — promoted from the settings
+   * kit. The sunken-track and off-state greys hoist here from the
+   * settings-card-scoped --settings-sunk/-off/-hair vars so the controls
+   * work on any surface; Select's focus ring reuses the --input-* pair. */
+  --segmented-track: color-mix(in srgb, var(--skrive-fg) 8%, var(--skrive-rule));
+  --toggle-track-off: color-mix(in srgb, var(--skrive-fg) 14%, var(--skrive-rule));
+  --toggle-track-on: var(--skrive-accent);
+  --stepper-divider: color-mix(in srgb, var(--skrive-rule) 55%, var(--skrive-bg));
+
   /* IconButton (SKR-210) — transparent glyph square. Hover fill is the soft
    * neutral (the SKR-211 menu language), not the rule colour as a fill. */
   --icon-button-size: 26px;

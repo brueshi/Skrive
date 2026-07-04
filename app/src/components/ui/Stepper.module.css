@@ -1,0 +1,47 @@
+/* Stepper (SKR-212). Consumes --stepper-divider from tokens.css. */
+@layer components {
+  .stepper {
+    display: inline-flex;
+    align-items: stretch;
+    height: 36px;
+    background: var(--skrive-bg);
+    border: 1px solid var(--skrive-rule);
+    border-radius: var(--skrive-radius-md);
+    overflow: hidden;
+  }
+
+  .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    border: none;
+    background: transparent;
+    color: var(--skrive-muted);
+    cursor: pointer;
+    transition: color var(--skrive-duration-quick) var(--skrive-easing);
+  }
+
+  .button:hover:not(:disabled) {
+    color: var(--skrive-fg);
+  }
+
+  .button:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+
+  .value {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 64px;
+    padding: 0 8px;
+    border-left: 1px solid var(--stepper-divider);
+    border-right: 1px solid var(--stepper-divider);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--skrive-fg);
+    font-variant-numeric: tabular-nums;
+  }
+}

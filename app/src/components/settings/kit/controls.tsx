@@ -1,235 +1,13 @@
-// The Settings control kit — the small, reusable input primitives the
-// 1.0 Settings panes are built from. Each maps one pref to one control
-// and is purely presentational: it takes a value + onChange, owns no
-// store wiring, and styles itself entirely through the .settings-* /
-// control classes in index.css (Overcast tokens, no inline color).
-//
-// Visual spec traced from the paper.design "Skrive v2.0 — Settings"
-// mock: segmented sunken track with a raised active pill, 40x23 toggle
-// on the slate-indigo accent, bordered stepper with a centered value
-// cell, native select under a custom chevron, and mono field chips.
+// The Settings control kit — what remains settings-scoped after the SKR-212
+// promotion. Segmented / Toggle / Stepper / Select moved to components/ui as
+// app-wide primitives (re-exported from the kit barrel so settings imports
+// read the same); this file keeps the controls whose shape is genuinely
+// settings-specific: the theme tiles and the frontmatter field chips, plus
+// the thin MonoInput wrapper over ui/Input. Each maps one pref to one
+// control and is purely presentational: value + onChange, no store wiring.
 
 import { useId, useRef, useState } from 'react';
-import { motion, useReducedMotion } from 'framer-motion';
-
-type Option<T extends string> = { id: T; label: string };
-
-/** Segmented control — a sunken track of mutually exclusive options with
- *  one raised active pill. For 2-3 short choices (surface, line measure).
- *  The pill is a single shared element (layoutId) that slides between
- *  segments on switch rather than cross-fading per option. */
-export function Segmented<T extends string>({
-  value,
-  onChange,
-  options,
-  ariaLabel
-}: {
-  value: T;
-  onChange: (value: T) => void;
-  options: Option<T>[];
-  ariaLabel: string;
-}) {
-  // Unique per instance so multiple segmented controls on a pane don't
-  // share one thumb and animate into each other.
-  const thumbId = useId();
-  const reduced = useReducedMotion();
-  return (
-    <div className="seg" role="radiogroup" aria-label={ariaLabel}>
-      {options.map((opt) => {
-        const active = value === opt.id;
-        return (
-          <button
-            key={opt.id}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            className={`seg-option${active ? ' active' : ''}`}
-            onClick={() => onChange(opt.id)}
-          >
-            {active && (
-              <motion.span
-                layoutId={thumbId}
-                className="seg-thumb"
-                aria-hidden
-                transition={
-                  reduced
-                    ? { duration: 0 }
-                    : { type: 'spring', stiffness: 520, damping: 38 }
-                }
-              />
-            )}
-            <span className="seg-label">{opt.label}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-/** On/off switch. The knob slides to the accent-filled right on. */
-export function Toggle({
-  checked,
-  onChange,
-  ariaLabel
-}: {
-  checked: boolean;
-  onChange: (value: boolean) => void;
-  ariaLabel: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={ariaLabel}
-      className={`tgl${checked ? ' on' : ''}`}
-      onClick={() => onChange(!checked)}
-    >
-      <span className="tgl-knob" />
-    </button>
-  );
-}
-
-/** Numeric stepper — minus / value / plus. `format` renders the value
- *  with its unit; bounds disable the relevant button at the edges.
- *
- *  Two modes: a uniform range (min/max/step) for continuous values like
- *  the autosave delay, or a discrete `values` list for non-uniform preset
- *  scales (font size, line height) where stepping moves by list index. */
-export function Stepper({
-  value,
-  onChange,
-  min,
-  max,
-  step,
-  values,
-  format,
-  ariaLabel
-}: {
-  value: number;
-  onChange: (value: number) => void;
-  min?: number;
-  max?: number;
-  step?: number;
-  values?: readonly number[];
-  format: (value: number) => string;
-  ariaLabel: string;
-}) {
-  let prev: number | null;
-  let next: number | null;
-  if (values && values.length > 0) {
-    // Nearest index to the current value, then walk the list.
-    let i = values.indexOf(value);
-    if (i === -1) {
-      i = values.reduce(
-        (best, v, idx) =>
-          Math.abs(v - value) < Math.abs((values[best] ?? value) - value)
-            ? idx
-            : best,
-        0
-      );
-    }
-    prev = i > 0 ? values[i - 1] ?? null : null;
-    next = i < values.length - 1 ? values[i + 1] ?? null : null;
-  } else {
-    const lo = min ?? -Infinity;
-    const hi = max ?? Infinity;
-    const by = step ?? 1;
-    prev = value > lo ? Math.max(lo, value - by) : null;
-    next = value < hi ? Math.min(hi, value + by) : null;
-  }
-  const atMin = prev === null;
-  const atMax = next === null;
-  return (
-    <div className="stepper" role="group" aria-label={ariaLabel}>
-      <button
-        type="button"
-        className="stepper-btn"
-        aria-label="Decrease"
-        disabled={atMin}
-        onClick={() => prev !== null && onChange(prev)}
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
-          <line
-            x1="2.5"
-            y1="6"
-            x2="9.5"
-            y2="6"
-            stroke="currentColor"
-            strokeWidth="1.4"
-            strokeLinecap="round"
-          />
-        </svg>
-      </button>
-      <span className="stepper-value">{format(value)}</span>
-      <button
-        type="button"
-        className="stepper-btn"
-        aria-label="Increase"
-        disabled={atMax}
-        onClick={() => next !== null && onChange(next)}
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
-          <line x1="6" y1="2.5" x2="6" y2="9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-          <line x1="2.5" y1="6" x2="9.5" y2="6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-        </svg>
-      </button>
-    </div>
-  );
-}
-
-/** Dropdown over a native <select> for keyboard + a11y, with the chrome
- *  hidden behind our chevron. Used for the multi-option prefs. `disabled`
- *  makes the control inert (not focusable, can't change) for prefs that
- *  don't apply in the current context — pair it with SettingRow's
- *  `dimmed` for the visual cue. */
-export function Select<T extends string>({
-  value,
-  onChange,
-  options,
-  ariaLabel,
-  disabled = false
-}: {
-  value: T;
-  onChange: (value: T) => void;
-  options: Option<T>[];
-  ariaLabel: string;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="sel">
-      <select
-        className="sel-native"
-        aria-label={ariaLabel}
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value as T)}
-      >
-        {options.map((opt) => (
-          <option key={opt.id} value={opt.id}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-      <svg
-        className="sel-caret"
-        width="11"
-        height="11"
-        viewBox="0 0 12 12"
-        fill="none"
-        aria-hidden
-      >
-        <path
-          d="M3 4.5L6 7.5L9 4.5"
-          stroke="currentColor"
-          strokeWidth="1.3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </div>
-  );
-}
+import { Input } from '../../ui/Input';
 
 /** The three color-theme tiles, each a miniature page preview over a
  *  radio. Light / Dark render a static preview; System splits the two. */
@@ -349,7 +127,8 @@ export function FieldChips({
   );
 }
 
-/** A small monospace text input for short token strings (date format). */
+/** A small monospace text input for short token strings (date format).
+ *  ui/Input under a settings-mono typography class. */
 export function MonoInput({
   value,
   onChange,
@@ -362,7 +141,7 @@ export function MonoInput({
   width?: number;
 }) {
   return (
-    <input
+    <Input
       type="text"
       className="settings-mono-input"
       aria-label={ariaLabel}

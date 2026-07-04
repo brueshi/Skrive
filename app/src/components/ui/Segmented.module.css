@@ -1,0 +1,51 @@
+/* Segmented (SKR-212). Consumes --segmented-track from tokens.css. */
+@layer components {
+  .root {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    height: 30px;
+    padding: 2px;
+    background: var(--segmented-track);
+    border-radius: var(--skrive-radius-md);
+  }
+
+  .option {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 26px;
+    padding: 0 13px;
+    border: none;
+    background: transparent;
+    border-radius: var(--skrive-radius-sm);
+    color: var(--skrive-muted);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color var(--skrive-duration-quick) var(--skrive-easing);
+  }
+
+  /* The raised pill — a single shared element that slides between options
+     (see Segmented). Fills its active option; the label rides above it. */
+  .thumb {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background: var(--skrive-bg);
+    border-radius: var(--skrive-radius-sm);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--skrive-fg) 9%, transparent);
+  }
+
+  .label {
+    position: relative;
+    z-index: 1;
+  }
+
+  .option.active {
+    color: var(--skrive-fg);
+    font-weight: 600;
+  }
+}
