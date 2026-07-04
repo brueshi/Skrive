@@ -119,14 +119,20 @@
   /* Radius. Existing convention preserved: xs for embedded chrome
      (inline code, close-button hover); sm for small icon buttons,
      chips, inputs; md for prominent controls (modal buttons, mode
-     toggle, panel containers, tab tops). The 999px pill on Settings
-     dictionary chips stays a literal — pill is a category, not a
-     scale step. */
+     toggle, panel containers, tab tops). */
   --skrive-radius-xs: 4px;
   --skrive-radius-sm: 6px;
   --skrive-radius-md: 8px;
   /* lg: settings group cards (Stage 1) and other large soft containers. */
   --skrive-radius-lg: 12px;
+  /* xl: scrimmed overlay surfaces — sheet dialogs, palettes, toasts
+     (SKR-207 tiered convergence: xl for scrimmed surfaces, md for
+     anchored floaters). */
+  --skrive-radius-xl: 16px;
+  /* Pill is a category, not a scale step, but the capsule shapes
+     (segmented toggles, chips, the toggle knob) should share one
+     value rather than re-declaring 999px. */
+  --skrive-radius-pill: 999px;
 
   /* Z-index scale. Higher = closer to the viewer. Context menus sit
      above modals so right-clicking inside a modal still surfaces a
@@ -137,6 +143,23 @@
   --skrive-z-modal-backdrop: 150;
   --skrive-z-modal-content: 151;
   --skrive-z-context-menu: 200;
+
+  /* Elevation. One shadow per overlay tier, so surfaces stop hand-tuning
+     rgba stacks: modal = the heavy bordered-dialog lift (legacy frame,
+     retired when SKR-211 lands); sheet = the layered soft-card lift (the
+     canonical scrimmed surface); dropdown = anchored Radix menus and
+     suggestion lists; float = the editor's floating menus, which need
+     light-dark() because they sit over prose in both themes. Scrim is
+     the one dialog backdrop wash. */
+  --skrive-shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.22);
+  --skrive-shadow-sheet:
+    0 18px 48px rgba(0, 0, 0, 0.18),
+    0 4px 12px rgba(0, 0, 0, 0.08);
+  --skrive-shadow-dropdown: 0 8px 28px rgba(0, 0, 0, 0.16);
+  --skrive-shadow-float:
+    0 6px 16px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.4)),
+    0 1px 3px light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.3));
+  --skrive-overlay-scrim: rgba(0, 0, 0, 0.35);
 
   /* Motion. Quick = chrome state changes; standard = modal entrance/
      exit; slow = sidebar collapse (the heaviest weight that animates).
@@ -571,82 +594,6 @@ body {
   }
 }
 
-.mode-toggle {
-  display: inline-flex;
-  border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-radius-md);
-  overflow: hidden;
-}
-
-.mode-button {
-  background: transparent;
-  border: none;
-  color: var(--skrive-muted);
-  cursor: pointer;
-  width: 28px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  transition:
-    color var(--skrive-duration-quick) var(--skrive-easing),
-    background-color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.mode-button + .mode-button {
-  border-left: 1px solid var(--skrive-rule);
-}
-
-.mode-button:hover {
-  color: var(--skrive-fg);
-}
-
-.mode-button.active {
-  color: var(--skrive-fg);
-  background: var(--skrive-rule);
-}
-
-/* Bordered text segmented — the topbar surface toggle and the Text
-   toolbar's marker pill share this. Mirrors .mode-toggle's bordered
-   group (active = rule fill) but sizes to text rather than icon slots. */
-.chip-segmented {
-  display: inline-flex;
-  align-items: stretch;
-  height: 26px;
-  border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-radius-md);
-  overflow: hidden;
-}
-
-.chip-segmented-option {
-  display: inline-flex;
-  align-items: center;
-  padding: 0 0.6rem;
-  background: transparent;
-  border: none;
-  color: var(--skrive-muted);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  transition:
-    color var(--skrive-duration-quick) var(--skrive-easing),
-    background-color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.chip-segmented-option + .chip-segmented-option {
-  border-left: 1px solid var(--skrive-rule);
-}
-
-.chip-segmented-option:hover {
-  color: var(--skrive-fg);
-}
-
-.chip-segmented-option.active {
-  color: var(--skrive-fg);
-  background: var(--skrive-rule);
-}
-
 /* Save-status microcopy. Autosave is silent, so this is ephemeral confirmation,
    not persistent chrome: a quiet "Saved" fades in when an autosave lands, then
    fades away. Nothing in the steady state. Lives in the bar's left gutter; its
@@ -693,7 +640,7 @@ body {
   background: var(--skrive-bg);
   border: 1px solid var(--skrive-rule);
   border-radius: var(--skrive-radius-md);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+  box-shadow: var(--skrive-shadow-dropdown);
   padding: 0.25rem;
   font-family: var(--skrive-ui-font);
   font-size: 13px;
@@ -874,7 +821,7 @@ body {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--skrive-overlay-scrim);
   z-index: var(--skrive-z-modal-backdrop);
 }
 
@@ -886,7 +833,7 @@ body {
   background: var(--skrive-bg);
   border: 1px solid var(--skrive-rule);
   border-radius: var(--skrive-card-radius);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--skrive-shadow-modal);
   padding: 1.5rem 1.75rem;
   width: 26rem;
   max-width: calc(100vw - 2rem);
@@ -1003,10 +950,8 @@ body {
    .modal-sheet so the older modals keep their styling until each is migrated. */
 .modal-sheet {
   border: none;
-  border-radius: 16px;
-  box-shadow:
-    0 18px 48px rgba(0, 0, 0, 0.18),
-    0 4px 12px rgba(0, 0, 0, 0.08);
+  border-radius: var(--skrive-radius-xl);
+  box-shadow: var(--skrive-shadow-sheet);
   padding: 1.25rem 1.3125rem;
 }
 
@@ -3331,7 +3276,7 @@ body {
   background: var(--skrive-bg);
   border: 1px solid var(--skrive-rule);
   border-radius: var(--skrive-radius-md);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+  box-shadow: var(--skrive-shadow-dropdown);
   z-index: var(--skrive-z-dropdown);
   max-height: 12rem;
   overflow-y: auto;
@@ -3810,7 +3755,7 @@ body {
   height: 23px;
   padding: 2px;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--skrive-radius-pill);
   background: var(--settings-off);
   /* Sunken track: a faint inset rim + top shadow. fg-based so it reads as
      a quiet edge in every theme rather than a hard line. */
@@ -3843,8 +3788,8 @@ body {
 .tgl-knob {
   width: 19px;
   height: 19px;
-  /* 999px (not 50%) so the knob stays a clean capsule when it stretches. */
-  border-radius: 999px;
+  /* Pill radius (not 50%) so the knob stays a clean capsule when it stretches. */
+  border-radius: var(--skrive-radius-pill);
   background: #fff;
   box-shadow:
     0 0 0 0.5px rgba(0, 0, 0, 0.04),
@@ -4265,7 +4210,7 @@ body {
 
 .updater-progress {
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--skrive-radius-pill);
   background: color-mix(in srgb, var(--skrive-accent) 16%, transparent);
   overflow: hidden;
 }
@@ -4413,7 +4358,7 @@ body {
 .search-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--skrive-overlay-scrim);
   z-index: var(--skrive-z-modal-backdrop);
 }
 
@@ -4429,7 +4374,7 @@ body {
   background: var(--skrive-bg);
   border: 1px solid var(--skrive-rule);
   border-radius: var(--skrive-card-radius);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--skrive-shadow-modal);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -4843,7 +4788,7 @@ body {
   background: var(--skrive-bg);
   border: 1px solid var(--skrive-rule);
   border-radius: var(--skrive-card-radius);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--skrive-shadow-modal);
   padding: 1.25rem 1.5rem 1rem;
   width: 36rem;
   max-width: calc(100vw - 2rem);
@@ -5014,7 +4959,7 @@ body {
 .cmdk-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--skrive-overlay-scrim);
   z-index: var(--skrive-z-modal-backdrop);
 }
 
@@ -5029,7 +4974,7 @@ body {
   background: var(--skrive-bg);
   border: 1px solid var(--skrive-rule);
   border-radius: var(--skrive-card-radius);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--skrive-shadow-modal);
   overflow: hidden;
   display: flex;
   flex-direction: column;
