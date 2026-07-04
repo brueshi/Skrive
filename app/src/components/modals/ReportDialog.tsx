@@ -1,13 +1,14 @@
 // In-app reporter (SKR-130). One dialog, two kinds: a bug report or customer
 // feedback. `kind` drives the copy; the relay routes by the `type` we send
-// (label + priority + assignee). Same Radix-dialog shell as the new-project /
-// rename modals, styled with the shared `.modal-sheet` toast language.
+// (label + priority + assignee). Same DialogShell sheet as the new-project /
+// rename modals, scaled up via the .report-modal content class.
 //
 // Privacy: nothing is sent until the writer hits the button, and the optional
 // diagnostics are off by default and shown in full before they're attached —
 // never document content. See lib/report.ts and Linear SKR-130.
 
 import * as Dialog from '@radix-ui/react-dialog';
+import { DialogShell } from '../ui/Dialog';
 import { useEffect, useRef, useState } from 'react';
 import { notify } from '../../lib/notify';
 import {
@@ -146,19 +147,15 @@ export function ReportDialog({ open, kind, onClose }: Props) {
   }
 
   return (
-    <Dialog.Root
+    <DialogShell
       open={open}
       onOpenChange={(o) => {
         if (!o && !busy) onClose();
       }}
+      className="report-modal"
+      aria-label={copy.title}
+      onKeyDown={handleKeyDown}
     >
-      <Dialog.Portal>
-        <Dialog.Overlay className="modal-backdrop" />
-        <Dialog.Content
-          className="modal-dialog modal-sheet report-modal"
-          aria-label={copy.title}
-          onKeyDown={handleKeyDown}
-        >
           <button
             type="button"
             className="modal-dismiss"
@@ -232,8 +229,6 @@ export function ReportDialog({ open, kind, onClose }: Props) {
               {busy ? copy.submitting : copy.submit}
             </button>
           </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    </DialogShell>
   );
 }

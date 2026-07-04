@@ -42,7 +42,7 @@ import { platformShortcut } from '../../lib/commands/shortcut-display';
 import { notify } from '../../lib/notify';
 import * as ContextMenu from '@radix-ui/react-context-menu';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { DeleteConfirmModal } from '../DeleteConfirmModal';
+import { DeleteConfirmModal } from '../modals/DeleteConfirmModal';
 import { DocIcon } from '../icons/DocIcon';
 import { IconClock } from '../icons/IconClock';
 import { IconFolder } from '../icons/IconFolder';

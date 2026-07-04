@@ -14,6 +14,7 @@
 // and the backend rewrites inbound references to the new path.
 
 import * as Dialog from '@radix-ui/react-dialog';
+import { DialogShell } from '../ui/Dialog';
 import { useEffect, useRef, useState } from 'react';
 import type { Reference, RenamePreview } from '@skrive/shared';
 import { logProjectError, useProjectStore } from '../../stores/project';
@@ -190,18 +191,14 @@ export function RenameModal() {
   const showsMoves = basename.includes('/') && validation === null;
 
   return (
-    <Dialog.Root
+    <DialogShell
       open={open}
       onOpenChange={(o) => {
         if (!o && !committing) close();
       }}
+      className="rename-modal"
+      aria-label="Rename file"
     >
-      <Dialog.Portal>
-        <Dialog.Overlay className="modal-backdrop" />
-        <Dialog.Content
-          className="rename-modal"
-          aria-label="Rename file"
-        >
           <Dialog.Title className="rename-title">Rename</Dialog.Title>
           <p className="rename-old" title={oldPath}>
             {oldPath}
@@ -302,8 +299,6 @@ export function RenameModal() {
               {committing ? 'Renaming…' : 'Rename'}
             </button>
           </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    </DialogShell>
   );
 }

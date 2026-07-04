@@ -19,4 +19,13 @@
   --button-primary-bg: var(--skrive-fg);
   --button-danger-fg: var(--skrive-danger);
   --button-danger-bg-hover: var(--skrive-danger-fill);
+
+  /* Dialog shell (SKR-211) — the sheet surface: borderless soft card on the
+   * shared scrim, xl radius, layered lift. */
+  --dialog-scrim: var(--skrive-overlay-scrim);
+  --dialog-bg: var(--skrive-bg);
+  --dialog-radius: var(--skrive-radius-xl);
+  --dialog-shadow: var(--skrive-shadow-sheet);
+  --dialog-z-scrim: var(--skrive-z-modal-backdrop);
+  --dialog-z-panel: var(--skrive-z-modal-content);
 }

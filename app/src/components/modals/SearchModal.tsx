@@ -14,6 +14,7 @@
 // placement come from the primitive.
 
 import * as Dialog from '@radix-ui/react-dialog';
+import { DialogShell } from '../ui/Dialog';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SearchHit } from '@skrive/shared';
 import { logProjectError, useProjectStore } from '../../stores/project';
@@ -251,15 +252,15 @@ export function SearchModal({ open, onClose }: Props) {
   }
 
   return (
-    <Dialog.Root
+    <DialogShell
       open={open}
       onOpenChange={(o) => {
         if (!o) onClose();
       }}
+      variant="palette"
+      className="search-palette"
+      aria-label="Search project"
     >
-      <Dialog.Portal>
-        <Dialog.Overlay className="search-backdrop" />
-        <Dialog.Content className="search-palette" aria-label="Search project">
           <Dialog.Title className="visually-hidden">Search project</Dialog.Title>
           <div className="search-query-row">
             <input
@@ -398,8 +399,6 @@ export function SearchModal({ open, onClose }: Props) {
               )}
             </div>
           </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    </DialogShell>
   );
 }

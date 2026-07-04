@@ -152,9 +152,13 @@
      light-dark() because they sit over prose in both themes. Scrim is
      the one dialog backdrop wash. */
   --skrive-shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.22);
+  /* The sheet lift is the shipped toast-card's shadow — the toast is the
+     reference surface for the popup family, and dialogs sit on a scrim that
+     already does the separating, so they take the toast's soft lift rather
+     than a heavier one of their own. */
   --skrive-shadow-sheet:
-    0 18px 48px rgba(0, 0, 0, 0.18),
-    0 4px 12px rgba(0, 0, 0, 0.08);
+    0 14px 34px rgba(0, 0, 0, 0.14),
+    0 3px 10px rgba(0, 0, 0, 0.07);
   --skrive-shadow-dropdown: 0 8px 28px rgba(0, 0, 0, 0.16);
   --skrive-shadow-float:
     0 6px 16px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.4)),
@@ -726,155 +730,22 @@ body {
   }
 }
 
-/* ===================== Modal (Radix Dialog) ===================== */
-
-@keyframes skrive-modal-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes skrive-modal-fade-out {
-  from { opacity: 1; }
-  to { opacity: 0; }
-}
-
-@keyframes skrive-modal-content-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, calc(-50% + 8px));
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, -50%);
-  }
-}
-
-@keyframes skrive-modal-content-out {
-  from {
-    opacity: 1;
-    transform: translate(-50%, -50%);
-  }
-  to {
-    opacity: 0;
-    transform: translate(-50%, calc(-50% + 4px));
-  }
-}
-
-@keyframes skrive-cmdk-content-in {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-  }
-}
-
-@keyframes skrive-cmdk-content-out {
-  from {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateX(-50%) translateY(4px);
-  }
-}
-
-/* Backdrop fade. Drives both the dimmed overlay behind .modal-dialog
-   and the cmdk / search palette overlays — they all share the same
-   data-state contract from Radix Dialog.
-   140ms is a deliberate literal: 20ms shorter than the standard
-   content-in (160ms) so the backdrop gets a head start and the dialog
-   feels like it lifts onto an already-dimmed stage. */
-.modal-backdrop,
-.cmdk-backdrop,
-.search-backdrop {
-  /* easing-out on entrance — backdrop reaches near-full opacity early
-     so the dialog lifts onto an already-dimmed stage rather than both
-     fading at the same rate. */
-  animation: skrive-modal-fade-in 130ms var(--skrive-easing-out);
-}
-
-.modal-backdrop[data-state='closed'],
-.cmdk-backdrop[data-state='closed'],
-.search-backdrop[data-state='closed'] {
-  animation: skrive-modal-fade-out var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.modal-dialog,
-.rename-modal {
-  animation: skrive-modal-content-in var(--skrive-duration-standard) var(--skrive-easing-out);
-}
-
-.modal-dialog[data-state='closed'],
-.rename-modal[data-state='closed'] {
-  animation: skrive-modal-content-out var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.cmdk-palette,
-.search-palette {
-  animation: skrive-cmdk-content-in var(--skrive-duration-standard) var(--skrive-easing-out);
-}
-
-.cmdk-palette[data-state='closed'],
-.search-palette[data-state='closed'] {
-  animation: skrive-cmdk-content-out var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .modal-backdrop,
-  .cmdk-backdrop,
-  .search-backdrop,
-  .modal-dialog,
-  .rename-modal,
-  .cmdk-palette,
-  .search-palette,
-  .modal-backdrop[data-state='closed'],
-  .cmdk-backdrop[data-state='closed'],
-  .search-backdrop[data-state='closed'],
-  .modal-dialog[data-state='closed'],
-  .rename-modal[data-state='closed'],
-  .cmdk-palette[data-state='closed'],
-  .search-palette[data-state='closed'] {
-    animation: none;
-  }
-}
-
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: var(--skrive-overlay-scrim);
-  z-index: var(--skrive-z-modal-backdrop);
-}
-
-.modal-dialog {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: var(--skrive-bg);
-  border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-card-radius);
-  box-shadow: var(--skrive-shadow-modal);
-  padding: 1.5rem 1.75rem;
-  width: 26rem;
-  max-width: calc(100vw - 2rem);
-  font-family: var(--skrive-ui-font);
-  z-index: var(--skrive-z-modal-content);
-}
+/* ===================== Modal (Radix Dialog) =====================
+   Scrim, panel frame, and entrance motion live in the DialogShell primitive
+   (components/ui/Dialog). This section is shared content anatomy only. */
 
 .modal-title {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
+  margin: 0 0 0.4375rem;
+  padding-right: 1.5rem;
+  font-size: 1.0625rem;
   font-weight: 600;
   letter-spacing: -0.01em;
+  line-height: 1.3;
   color: var(--skrive-fg);
 }
 
 .modal-desc {
-  margin: 0 0 1rem;
+  margin: 0 0 1.125rem;
   font-size: 0.8125rem;
   color: var(--skrive-muted);
   line-height: 1.5;
@@ -916,8 +787,10 @@ body {
 }
 
 .modal-button {
-  padding: 0.5rem 1rem;
-  border-radius: var(--skrive-radius-md);
+  /* 9px pairs with the sheet frame's 16px radius (an off-scale value Stage 4
+     revisits when these buttons migrate onto ui/Button). */
+  padding: 0.5rem 1.1rem;
+  border-radius: 9px;
   font: inherit;
   font-size: 0.8125rem;
   cursor: pointer;
@@ -967,19 +840,12 @@ body {
   color: #fff;
 }
 
-/* ===================== Modern modal "sheet" (toast language) =====================
-   Opt-in modifier that brings a dialog into the unified toast-card look: a soft
-   rounded surface lifted by a layered shadow (no hard border), an eyebrow over a
-   title, and a quiet in-card dismiss in the corner. Scoped entirely under
-   .modal-sheet so the older modals keep their styling until each is migrated. */
-.modal-sheet {
-  border: none;
-  border-radius: var(--skrive-radius-xl);
-  box-shadow: var(--skrive-shadow-sheet);
-  padding: 1.25rem 1.3125rem;
-}
+/* ===================== Sheet content anatomy =====================
+   The sheet surface is the DialogShell default (SKR-211), so its content
+   anatomy is unscoped: an eyebrow over the title, a quiet in-card dismiss in
+   the corner (mirrored from .toast-card-dismiss). */
 
-.modal-sheet .modal-eyebrow {
+.modal-eyebrow {
   margin: 0 0 0.3125rem;
   padding-right: 1.5rem;
   font-size: 12px;
@@ -988,21 +854,7 @@ body {
   color: var(--skrive-muted);
 }
 
-.modal-sheet .modal-title {
-  margin: 0 0 0.4375rem;
-  padding-right: 1.5rem;
-  font-size: 1.0625rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.3;
-}
-
-.modal-sheet .modal-desc {
-  margin: 0 0 1.125rem;
-}
-
-/* In-card dismiss, mirrored from .toast-card-dismiss. */
-.modal-sheet .modal-dismiss {
+.modal-dismiss {
   position: absolute;
   top: 0.75rem;
   right: 0.75rem;
@@ -1025,20 +877,14 @@ body {
     background var(--skrive-duration-quick) var(--skrive-easing);
 }
 
-.modal-sheet .modal-dismiss:hover:not(:disabled) {
+.modal-dismiss:hover:not(:disabled) {
   opacity: 1;
   background: color-mix(in srgb, var(--skrive-muted) 16%, transparent);
 }
 
-.modal-sheet .modal-dismiss:disabled {
+.modal-dismiss:disabled {
   opacity: 0.3;
   cursor: default;
-}
-
-/* Rounder buttons inside the sheet, to match the soft card. */
-.modal-sheet .modal-button {
-  border-radius: 9px;
-  padding: 0.5rem 1.1rem;
 }
 
 .app-body {
@@ -4379,31 +4225,11 @@ body {
   border: 0;
 }
 
-.search-backdrop {
-  position: fixed;
-  inset: 0;
-  background: var(--skrive-overlay-scrim);
-  z-index: var(--skrive-z-modal-backdrop);
-}
-
+/* Content sizing over the DialogShell palette frame. */
 .search-palette {
-  position: fixed;
-  top: 10vh;
-  left: 50%;
-  transform: translateX(-50%);
   width: 54rem;
-  max-width: calc(100vw - 2rem);
   height: 64vh;
   max-height: 64vh;
-  background: var(--skrive-bg);
-  border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-card-radius);
-  box-shadow: var(--skrive-shadow-modal);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  font-family: var(--skrive-ui-font);
-  z-index: var(--skrive-z-modal-content);
 }
 
 /* Two panes below the query row: grouped results on the left, the
@@ -4698,11 +4524,10 @@ body {
 }
 
 /* ===================== Report modal (SKR-130) =====================
-   The in-app bug/feedback reporter. A larger instance of the shared
-   .modal-sheet language — the per-element bumps below scale this dialog up
-   while leaving the .modal-sheet baseline (toast scale) calm for other
-   adopters. */
-.modal-sheet.report-modal {
+   The in-app bug/feedback reporter. A larger instance of the sheet — the
+   per-element bumps below scale this dialog up while leaving the sheet
+   baseline (toast scale) calm for other adopters. */
+.report-modal {
   width: 34rem;
   padding: 1.875rem 2rem;
 }
@@ -4804,23 +4629,13 @@ body {
 
 /* ===================== Rename modal (Phase 11) ===================== */
 
+/* Content layout over the DialogShell sheet frame. */
 .rename-modal {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: var(--skrive-bg);
-  border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-card-radius);
-  box-shadow: var(--skrive-shadow-modal);
-  padding: 1.25rem 1.5rem 1rem;
   width: 36rem;
-  max-width: calc(100vw - 2rem);
+  padding: 1.25rem 1.5rem 1rem;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  font-family: var(--skrive-ui-font);
-  z-index: var(--skrive-z-modal-content);
 }
 
 .rename-modal .rename-title {
@@ -4980,30 +4795,10 @@ body {
 
 /* ===================== Cmdk palette + switcher (Phase 11) ===================== */
 
-.cmdk-backdrop {
-  position: fixed;
-  inset: 0;
-  background: var(--skrive-overlay-scrim);
-  z-index: var(--skrive-z-modal-backdrop);
-}
-
+/* Content sizing over the DialogShell palette frame. */
 .cmdk-palette {
-  position: fixed;
-  top: 10vh;
-  left: 50%;
-  transform: translateX(-50%);
   width: 36rem;
-  max-width: calc(100vw - 2rem);
   max-height: 70vh;
-  background: var(--skrive-bg);
-  border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-card-radius);
-  box-shadow: var(--skrive-shadow-modal);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  font-family: var(--skrive-ui-font);
-  z-index: var(--skrive-z-modal-content);
 }
 
 .cmdk-palette [cmdk-root] {
@@ -5281,10 +5076,10 @@ body {
 
 /* ============================ Cheat sheet (⌘/) ============================
  *
- * Reuses the .modal-dialog frame so the chrome harmonizes with Rename /
- * Delete / NewProject dialogs. Wider than the default 26rem because the
- * shortcut grid wants two columns of breathing room, and capped at the
- * viewport so it stays usable on narrow windows.
+ * Rides the DialogShell sheet frame like Rename / Delete / NewProject.
+ * Wider than the default 26rem because the shortcut grid wants two columns
+ * of breathing room, and capped at the viewport so it stays usable on
+ * narrow windows.
  */
 
 .cheatsheet-modal {
@@ -5394,10 +5189,10 @@ body {
   box-sizing: border-box;
   padding: 0.9375rem 1.0625rem;
   background: var(--skrive-bg);
-  border-radius: 15px;
-  box-shadow:
-    0 14px 34px rgba(0, 0, 0, 0.14),
-    0 3px 10px rgba(0, 0, 0, 0.07);
+  /* Same soft-card numbers as the dialog sheet (SKR-211) so toasts and
+     dialogs read as one surface family. */
+  border-radius: var(--skrive-radius-xl);
+  box-shadow: var(--skrive-shadow-sheet);
   font-family: var(--skrive-ui-font);
 }
 
