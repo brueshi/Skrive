@@ -37,12 +37,15 @@ export const MARKDOWN_EXT = /\.(md|markdown)$/i;
 export const FOLIO_EXT = /\.folio$/i;
 /** Plain-text files (SKR-204). Like `.folio`, openable non-Markdown files that
  *  earn a manifest entry so they surface in the sidebar and open in plain-text
- *  mode — no body parse, no links, no lint. (HTML/RTF join this set with their
- *  viewers in SKR-205/206.) */
+ *  mode — no body parse, no links, no lint. */
 export const TEXT_EXT = /\.(txt|text)$/i;
+/** HTML files (SKR-205). Openable non-Markdown files that surface in the sidebar
+ *  and open in a read-only rendered viewer — no body parse, no links, no lint.
+ *  Editing an `.html` is out of scope; the path is Convert to Skrive document. */
+export const HTML_EXT = /\.(html|htm)$/i;
 /** Non-Markdown formats that are nonetheless openable, and so carry a manifest
  *  entry. Markdown is classified separately (it also carries a body + links). */
-const OPENABLE_NONMARKDOWN_EXT = [FOLIO_EXT, TEXT_EXT];
+const OPENABLE_NONMARKDOWN_EXT = [FOLIO_EXT, TEXT_EXT, HTML_EXT];
 function isOpenableNonMarkdown(relPath: string): boolean {
   return OPENABLE_NONMARKDOWN_EXT.some((re) => re.test(relPath));
 }
@@ -244,9 +247,9 @@ export class ProjectModel {
           outgoingLinks: []
         });
       } else if (isOpenableNonMarkdown(file.path)) {
-        // An openable non-Markdown file (`.folio`, `.txt`): a manifest entry (no
-        // Markdown body/links), plus tracked as a linkable file so a Markdown
-        // link to it resolves.
+        // An openable non-Markdown file (`.folio`, `.txt`, `.html`): a manifest
+        // entry (no Markdown body/links), plus tracked as a linkable file so a
+        // Markdown link to it resolves.
         this.nonMarkdown.add(file.path);
         this.entries.push(
           openableEntry(file.path, file.sizeBytes ?? 0, file.modifiedMs ?? 0)
@@ -321,7 +324,7 @@ export class ProjectModel {
   }
 
   /** Add or refresh an openable non-Markdown file's manifest entry (`.folio`,
-   *  `.txt`). A new file bumps the version (it appears in the sidebar); a re-save
+   *  `.txt`, `.html`). A new file bumps the version (it appears in the sidebar); a re-save
    *  of an existing one is a no-op — these carry no frontmatter to change, so
    *  their content edits never churn the manifest (mirrors the Markdown
    *  content-only-save behavior). */

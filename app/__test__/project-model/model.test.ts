@@ -131,6 +131,36 @@ describe('manifest derivation', () => {
     expect(model.manifest().files.map((f) => f.path)).toEqual(['a.md']);
   });
 
+  it('lists HTML files in the manifest (so they open in the viewer + show)', () => {
+    // SKR-205: `.html` / `.htm` are openable non-Markdown files — they surface in
+    // the sidebar like a `.folio` and open in the read-only viewer, but a true
+    // asset stays out. No Markdown frontmatter is invented.
+    const model = makeModel([
+      file('notes.md', '# Notes'),
+      file('page.html', '<h1>Hi</h1>'),
+      file('legacy.htm', '<p>Old</p>'),
+      file('logo.png', null)
+    ]);
+    const files = model.manifest().files.map((f) => f.path);
+    expect(files).toContain('page.html');
+    expect(files).toContain('legacy.htm');
+    expect(files).not.toContain('logo.png');
+    expect(model.manifest().files.find((f) => f.path === 'page.html')!.frontmatter).toEqual({});
+  });
+
+  it('adds a new .html on upsert (bumps) and does not churn on re-save', () => {
+    const model = makeModel([file('a.md', 'x')]);
+    expect(model.upsert('page.html', '<h1>a</h1>')).toBe(true); // new -> shows up
+    expect(model.currentVersion()).toBe(2);
+    expect(model.manifest().files.map((f) => f.path)).toEqual(['a.md', 'page.html']);
+    // A content re-save carries no manifest-relevant change (no frontmatter).
+    expect(model.upsert('page.html', '<h1>b</h1>')).toBe(false);
+    expect(model.currentVersion()).toBe(2);
+    expect(model.remove('page.html')).toBe(true);
+    expect(model.currentVersion()).toBe(3);
+    expect(model.manifest().files.map((f) => f.path)).toEqual(['a.md']);
+  });
+
   it('treats .skrive.toml changes as structure-relevant', () => {
     const model = makeModel([file('a.md', 'x')]);
     expect(model.upsert('.skrive.toml', '[project]\nname = "Renamed"\n')).toBe(

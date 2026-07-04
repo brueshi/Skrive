@@ -47,8 +47,15 @@ export function CopyPageButton() {
     };
   }, []);
 
-  // Hidden when there's no document, or it's empty (nothing to copy).
-  if (!activeTab || stripLeadingFrontmatter(activeTab.body).trim() === '') {
+  // Hidden when there's no document, it's empty (nothing to copy), or it's a
+  // read-only viewer (`view`, SKR-205) — its body is raw HTML, and copying that
+  // through the Markdown clipboard path would emit garbage. Its own EditorBar is
+  // skipped too, so this is a belt-and-suspenders guard against other mount sites.
+  if (
+    !activeTab ||
+    activeTab.mode === 'view' ||
+    stripLeadingFrontmatter(activeTab.body).trim() === ''
+  ) {
     return null;
   }
 

@@ -1055,10 +1055,12 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         docId: folio.docId,
         docMeta: folio.docMeta
       };
-    } else if (mode === 'text') {
-      // Plain text (SKR-204): the whole file is the editable body — no
-      // frontmatter parse (a `.txt`'s leading `---` is content, not metadata) and
-      // no block model.
+    } else if (mode === 'text' || mode === 'view') {
+      // Plain text (`.txt`, SKR-204) and the read-only HTML viewer (`.html`,
+      // SKR-205): the whole file is the body verbatim — no frontmatter parse (a
+      // `.txt`'s leading `---` is content, not metadata; an `.html`'s bytes are
+      // rendered as-is) and no block model. A view tab's body is never edited or
+      // saved; it only feeds the viewer.
       contentFields = { body: content.body, frontmatter: {} };
     } else {
       const parsed = parseFrontmatter(content.body);

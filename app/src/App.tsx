@@ -8,6 +8,7 @@ import { Toaster } from 'sonner';
 import { BlockEditor } from './components/editor/block/BlockEditor';
 import { MarkdownView } from './components/editor/markdown/MarkdownView';
 import { RawSourceView } from './components/editor/raw/RawSourceView';
+import { HtmlView } from './components/editor/html/HtmlView';
 import { EditorBar } from './components/editor/EditorBar';
 import { flushActiveEditor } from './components/editor/active-editor';
 import { installPasteCapture } from './lib/clipboard/capturePaste';
@@ -483,14 +484,19 @@ export function App() {
                   onClose={closeDiff}
                 />
               ) : activeTab ? (
-                // Both editors share the persistent toolbar band (EditorBar,
-                // SKR-123); the surface below it switches on the tab's mode
-                // (rich `.folio` vs Markdown). Diff is a separate takeover with
-                // its own chrome, so it sits outside the band (handled above).
+                // The editing modes share the persistent toolbar band (EditorBar,
+                // SKR-123); the surface below it switches on the tab's mode. The
+                // read-only HTML viewer (`view`, SKR-205) and Diff are takeovers
+                // with no editing chrome, so they render without the band.
                 <>
-                  <EditorBar />
+                  {activeTab.mode !== 'view' && <EditorBar />}
                   <div className="workspace-surface">
-                    {activeTab.mode === 'rich' && activeTab.model ? (
+                    {activeTab.mode === 'view' ? (
+                      // Read-only rendered viewer (`.html`, SKR-205): the file is
+                      // rendered faithfully inside a sandboxed iframe. No editing,
+                      // no save path. Keyed per file.
+                      <HtmlView key={activeTab.path} body={activeTab.body} />
+                    ) : activeTab.mode === 'rich' && activeTab.model ? (
                       // Rich (`.folio`) mode: the block model is canonical. The
                       // surface edits it directly and saves the native format —
                       // no Markdown serializer on this path (SKR-196).

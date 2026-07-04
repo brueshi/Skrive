@@ -33,6 +33,12 @@ export type SaveTab = MarkdownSaveTab & {
  * tab's frontmatter/body via absorption (callers pass a clone).
  */
 export function buildSavePayload(tab: SaveTab): string {
+  if (tab.mode === 'view') {
+    // Read-only viewer (`.html`, SKR-205). Its surface never emits an edit, so a
+    // view tab never goes dirty and this is unreachable in practice; the throw is
+    // a defensive invariant guaranteeing no save path can persist a viewed file.
+    throw new Error('Cannot save a read-only (view) tab.');
+  }
   if (tab.mode === 'rich') {
     // A rich tab always carries these once opened (openTab sets them); the guard
     // is a defensive invariant, not an expected branch.
