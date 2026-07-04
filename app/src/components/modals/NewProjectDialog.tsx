@@ -11,6 +11,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { DialogShell } from '../ui/Dialog';
 import { Button } from '../ui/Button';
+import { Input } from '../ui/Input';
 import { useEffect, useRef, useState } from 'react';
 import { logProjectError, useProjectStore } from '../../stores/project';
 import { notify } from '../../lib/notify';
@@ -113,7 +114,7 @@ export function NewProjectDialog({ open, onClose }: Props) {
 
           <div className="np-field">
             <label htmlFor="np-name">Name</label>
-            <input
+            <Input
               ref={nameRef}
               id="np-name"
               type="text"
@@ -128,7 +129,7 @@ export function NewProjectDialog({ open, onClose }: Props) {
           <div className="np-field">
             <label htmlFor="np-location">Location</label>
             <div className="np-location-row">
-              <input
+              <Input
                 id="np-location"
                 type="text"
                 readOnly

@@ -27,6 +27,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { IconButton } from '../ui/IconButton';
+import { Input } from '../ui/Input';
 import {
   selectActiveTab,
   useProjectStore
@@ -386,7 +387,8 @@ export function FrontmatterPanel() {
             return (
               <div key={row.id} className="fm-row" data-row-id={row.id}>
                 <div className="input-with-suggestions">
-                  <input
+                  <Input
+                    variant="quiet"
                     className="key-input"
                     type="text"
                     defaultValue={row.key}
@@ -449,7 +451,8 @@ export function FrontmatterPanel() {
                     </span>
                   ) : (
                     <div className="input-with-suggestions">
-                      <input
+                      <Input
+                        variant="quiet"
                         className="value-input"
                         type="text"
                         // The defaultValue + onBlur commit pattern matches

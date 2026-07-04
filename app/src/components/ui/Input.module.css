@@ -1,0 +1,61 @@
+/* Input (SKR-212). Consumes --input-* component tokens. */
+@layer components {
+  .input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: var(--input-pad-y) var(--input-pad-x);
+    border: 1px solid var(--input-border);
+    border-radius: var(--input-radius);
+    background: var(--input-bg);
+    color: var(--input-fg);
+    font: inherit;
+    font-size: var(--input-font-size);
+    transition:
+      border-color var(--skrive-duration-quick) var(--skrive-easing),
+      box-shadow var(--skrive-duration-quick) var(--skrive-easing),
+      background-color var(--skrive-duration-quick) var(--skrive-easing);
+  }
+
+  .input::placeholder {
+    color: color-mix(in srgb, var(--skrive-muted) 70%, transparent);
+  }
+
+  .input:focus-visible {
+    outline: none;
+    border-color: var(--input-focus-border);
+    box-shadow: 0 0 0 2px var(--input-focus-glow);
+  }
+
+  .input:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .input[readonly] {
+    color: var(--skrive-muted);
+    cursor: default;
+  }
+
+  textarea.input {
+    resize: vertical;
+    line-height: 1.55;
+  }
+
+  /* Quiet: invisible until engaged — for inline-edit rows where persistent
+     field chrome would read busy. Hover shows the hairline, focus a fg
+     border; no glow (the row context is already focused attention). */
+  .quiet {
+    --input-bg: transparent;
+    --input-border: transparent;
+    border-radius: var(--skrive-radius-sm);
+  }
+
+  .quiet:hover:not(:focus-visible) {
+    border-color: var(--skrive-rule);
+  }
+
+  .quiet:focus-visible {
+    border-color: var(--skrive-fg);
+    box-shadow: none;
+  }
+}
