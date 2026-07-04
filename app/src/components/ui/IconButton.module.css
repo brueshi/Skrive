@@ -1,0 +1,48 @@
+/* IconButton (SKR-210). Consumes --icon-button-* component tokens. Sizes are
+ * the three squares the hand-rolled originals used: 22 (dense panel rows),
+ * 26 (panel headers / close), 28 (window header). */
+@layer components {
+  .iconButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--icon-button-size);
+    height: var(--icon-button-size);
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--icon-button-fg);
+    border-radius: var(--icon-button-radius);
+    /* Text glyphs ("×") center like SVGs do. */
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    /* Anchor for badges/dots a consumer overlays on the glyph. */
+    position: relative;
+    transition:
+      color var(--skrive-duration-quick) var(--skrive-easing),
+      background-color var(--skrive-duration-quick) var(--skrive-easing);
+  }
+
+  .iconButton:hover:not(:disabled) {
+    color: var(--icon-button-fg-hover);
+    background: var(--icon-button-bg-hover);
+  }
+
+  .iconButton:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .iconButton[aria-pressed='true'] {
+    color: var(--icon-button-fg-hover);
+  }
+
+  .sm {
+    --icon-button-size: 22px;
+  }
+
+  .lg {
+    --icon-button-size: 28px;
+  }
+}

@@ -7,6 +7,7 @@
 // frequency and stays inline next to this trigger.
 
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { IconButton } from '../ui/IconButton';
 import { selectActiveTab, useProjectStore } from '../../stores/project';
 import { IconPanels } from '../icons/IconPanels';
 import { platformShortcut } from '../../lib/commands/shortcut-display';
@@ -38,9 +39,9 @@ export function PanelMenu() {
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
-          className="header-icon-button panel-menu-trigger"
+        <IconButton
+          size="lg"
+          className="panel-menu-trigger"
           aria-label="Toggle panels"
           aria-pressed={openCount > 0}
           title="Panels"
@@ -49,7 +50,7 @@ export function PanelMenu() {
           {openCount > 0 && (
             <span className="panel-menu-dot" aria-hidden="true" />
           )}
-        </button>
+        </IconButton>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content

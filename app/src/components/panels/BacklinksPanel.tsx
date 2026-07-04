@@ -13,6 +13,7 @@
 // (or, for a dead / wiki target, jumps to the link in this document).
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { IconButton } from '../ui/IconButton';
 import { selectActiveTab, useProjectStore } from '../../stores/project';
 import type { Backlink, OutgoingLink } from '@skrive/shared';
 import { PanelShell } from './PanelShell';
@@ -202,9 +203,7 @@ export function BacklinksPanel() {
           <span className="bl-title">Backlinks</span>
           <span className="bl-count-badge">{inbound.length}</span>
         </div>
-        <button
-          type="button"
-          className="bl-close"
+        <IconButton
           aria-label="Close backlinks"
           onClick={() => setOpen(false)}
         >
@@ -216,7 +215,7 @@ export function BacklinksPanel() {
               strokeLinecap="round"
             />
           </svg>
-        </button>
+        </IconButton>
       </header>
 
       <div className="bl-panel-body">

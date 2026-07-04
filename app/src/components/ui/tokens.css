@@ -22,6 +22,14 @@
   --button-danger-fg: var(--skrive-danger);
   --button-danger-bg-hover: var(--skrive-danger-fill);
 
+  /* IconButton (SKR-210) — transparent glyph square. Hover fill is the soft
+   * neutral (the SKR-211 menu language), not the rule colour as a fill. */
+  --icon-button-size: 26px;
+  --icon-button-radius: var(--skrive-radius-sm);
+  --icon-button-fg: var(--skrive-muted);
+  --icon-button-fg-hover: var(--skrive-fg);
+  --icon-button-bg-hover: color-mix(in srgb, var(--skrive-fg) 7%, transparent);
+
   /* Dialog shell (SKR-211) — the sheet surface: borderless soft card on the
    * shared scrim, xl radius, layered lift. */
   --dialog-scrim: var(--skrive-overlay-scrim);

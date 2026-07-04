@@ -15,6 +15,7 @@ import {
   useRef,
   useState
 } from 'react';
+import { IconButton } from '../ui/IconButton';
 import { renderMarkdown } from '../../lib/preview/markdown';
 import {
   paneSegment,
@@ -514,15 +515,13 @@ export function DiffView({
                 <IconLayoutPreview size={16} />
               </button>
             </div>
-            <button
-              type="button"
-              className="diff-close"
+            <IconButton
               aria-label="Exit diff mode"
               title="Exit diff  Esc"
               onClick={onClose}
             >
               <IconX size={16} />
-            </button>
+            </IconButton>
           </div>
         </div>
       </header>
