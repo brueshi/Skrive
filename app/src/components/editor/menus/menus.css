@@ -183,14 +183,16 @@
   color: var(--skrive-danger, #c0392b);
 }
 
-/* The slash insert menu, dropped below the `/` trigger. */
+/* The slash insert menu, dropped below the `/` trigger. Row anatomy follows the
+   SKR-211 menu language: a fixed-width icon column so labels rag left together,
+   a trailing shortcut-hint column, and full-bleed hairlines between groups. */
 .rich-slash-menu {
   position: fixed;
   z-index: calc(var(--skrive-z-context-menu) + 1);
-  min-width: 12rem;
+  min-width: 15rem;
   max-height: 18rem;
   overflow-y: auto;
-  padding: 0.25rem;
+  padding: 0.3rem;
   background: var(--skrive-bg);
   border: 1px solid var(--skrive-rule);
   border-radius: var(--skrive-radius-md, 8px);
@@ -209,19 +211,51 @@
   color: var(--skrive-fg);
   font: inherit;
   font-size: 0.9em;
-  padding: 0.4rem 0.5rem;
+  padding: 0.45rem 0.55rem;
   border-radius: var(--skrive-radius-sm, 4px);
 }
 
+/* Soft neutral fill (the toolbar's hover language) rather than the rule colour
+   as a fill — the active row should read as a surface, not a hairline swatch.
+   Hover and keyboard-active share one style because hovering moves the active
+   index; two styles would paint two selected rows. */
 .rich-slash-item:hover,
 .rich-slash-item.active {
-  background: var(--skrive-rule);
+  background: color-mix(in srgb, var(--skrive-fg) 7%, transparent);
 }
 
+/* Fixed slot: glyphs are 16px but optically uneven; a 20px centered column
+   keeps every label starting on the same x. */
 .rich-slash-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--skrive-muted);
+  flex: 0 0 20px;
+  width: 20px;
+}
+
+.rich-slash-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Trailing hint column; rows without a bound shortcut simply leave it empty. */
+.rich-slash-shortcut {
   flex: 0 0 auto;
+  margin-left: 0.75rem;
+  color: var(--skrive-muted);
+  font-size: 0.85em;
+  letter-spacing: 0.02em;
+}
+
+/* Full-bleed group hairline: negative margins cancel the menu's inner padding
+   so the line runs edge to edge, Linear-menu style. */
+.rich-slash-sep {
+  height: 1px;
+  margin: 0.3rem -0.3rem;
+  background: var(--skrive-rule);
 }
