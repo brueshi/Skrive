@@ -669,9 +669,12 @@ body {
   user-select: none;
 }
 
+/* Soft neutral fill (the SKR-211 menu language, shared with the slash menu)
+   rather than the rule colour as a fill — the highlighted row reads as a
+   surface, not a hairline swatch. */
 .ctx-item[data-highlighted],
 .ctx-item:hover:not([data-disabled]) {
-  background: var(--skrive-rule);
+  background: color-mix(in srgb, var(--skrive-fg) 7%, transparent);
 }
 
 .ctx-item[data-disabled] {
@@ -683,10 +686,12 @@ body {
   color: var(--skrive-danger);
 }
 
+/* Trailing shortcut hint — UI font like the slash menu's hint column (mono
+   rendered the ⌘⇧ glyphs in fallback faces and read as a different voice). */
 .ctx-shortcut {
   color: var(--skrive-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: 0.85em;
+  letter-spacing: 0.02em;
 }
 
 .ctx-label {
@@ -694,6 +699,25 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Fixed-width leading icon slot so labels rag left together on rows that
+   carry a glyph (mirrors .rich-slash-icon). */
+.ctx-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--skrive-muted);
+  flex: 0 0 20px;
+  width: 20px;
+}
+
+/* Full-bleed group hairline: negative margins cancel the menu's inner
+   padding so the line runs edge to edge. */
+.ctx-sep {
+  height: 1px;
+  margin: 0.25rem -0.25rem;
+  background: var(--skrive-rule);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -5049,7 +5073,7 @@ body {
 }
 
 .cmdk-item[data-selected='true'] {
-  background: var(--skrive-rule);
+  background: color-mix(in srgb, var(--skrive-fg) 7%, transparent);
 }
 
 .cmdk-item-label {
@@ -5059,11 +5083,13 @@ body {
   white-space: nowrap;
 }
 
+/* UI font like every other shortcut hint (SKR-211); the mono voice stays
+   reserved for file paths (.cmdk-file-row below). */
 .cmdk-item-shortcut {
   flex-shrink: 0;
   color: var(--skrive-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.75rem;
+  letter-spacing: 0.02em;
 }
 
 /* File-row variant: leaf name on the left, dimmed dir on the right. */
