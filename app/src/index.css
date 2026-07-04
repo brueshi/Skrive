@@ -414,32 +414,7 @@ body {
   letter-spacing: 0;
 }
 
-.header-icon-button {
-  background: transparent;
-  border: none;
-  color: var(--skrive-muted);
-  cursor: pointer;
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--skrive-radius-sm);
-  padding: 0;
-  position: relative;
-  transition:
-    color var(--skrive-duration-quick) var(--skrive-easing),
-    background-color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.header-icon-button:hover {
-  color: var(--skrive-fg);
-  background: var(--skrive-rule);
-}
-
-.header-icon-button[aria-pressed='true'] {
-  color: var(--skrive-fg);
-}
+/* Header glyph buttons are ui/IconButton size=lg (SKR-210). */
 
 /* The toggle is a peer of the traffic lights — same cluster, on their
    centerline, its panel matched to their top/bottom. The glyph has ~3px
@@ -1151,32 +1126,9 @@ body {
   gap: 0.25rem;
 }
 
-.sidebar .icon-button {
-  background: transparent;
-  border: none;
-  color: var(--skrive-muted);
-  cursor: pointer;
-  width: 22px;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border-radius: var(--skrive-radius-sm);
-  transition:
-    background-color var(--skrive-duration-quick) var(--skrive-easing),
-    color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.sidebar .icon-button:hover:not(:disabled) {
-  color: var(--skrive-fg);
-  background: var(--skrive-rule);
-}
-
-.sidebar .icon-button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
+/* Sidebar glyph buttons are ui/IconButton size=sm (SKR-210); they keep the
+   icon-button class only as the hook for the sidebar-all-header placement
+   tweak further down. */
 
 .new-file-row {
   padding: 0.25rem 1rem 0.5rem;
@@ -2121,27 +2073,7 @@ body {
     background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
-.diff-close {
-  background: transparent;
-  border: none;
-  color: var(--skrive-muted);
-  cursor: pointer;
-  width: 26px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--skrive-radius-sm);
-  padding: 0;
-  transition:
-    color var(--skrive-duration-quick) var(--skrive-easing),
-    background-color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.diff-close:hover {
-  color: var(--skrive-fg);
-  background: var(--skrive-rule);
-}
+/* The diff close button is ui/IconButton (SKR-210). */
 
 .diff-panes {
   display: flex;
@@ -2530,26 +2462,7 @@ body {
   color: var(--skrive-muted);
 }
 
-.bl-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: none;
-  background: transparent;
-  border-radius: var(--skrive-radius-sm);
-  color: var(--skrive-muted);
-  cursor: pointer;
-  transition:
-    color var(--skrive-duration-quick) var(--skrive-easing),
-    background-color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.bl-close:hover {
-  color: var(--skrive-fg);
-  background: var(--skrive-rule);
-}
+/* The backlinks close button is ui/IconButton (SKR-210). */
 
 .bl-panel-body {
   flex: 1;
@@ -2900,29 +2813,7 @@ body {
   font-style: italic;
 }
 
-.fm-panel .remove-button {
-  background: transparent;
-  border: none;
-  color: var(--skrive-muted);
-  cursor: pointer;
-  width: 22px;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  font-size: 14px;
-  line-height: 1;
-  border-radius: var(--skrive-radius-sm);
-  transition:
-    color var(--skrive-duration-quick) var(--skrive-easing),
-    background-color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.fm-panel .remove-button:hover {
-  color: var(--skrive-fg);
-  background: var(--skrive-rule);
-}
+/* The field remove button is ui/IconButton size=sm (SKR-210). */
 
 .fm-panel .add-button {
   background: transparent;

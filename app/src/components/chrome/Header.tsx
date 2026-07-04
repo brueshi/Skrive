@@ -12,6 +12,7 @@
 // The project menu lives in the sidebar's section header — not here.
 
 import { type CSSProperties } from 'react';
+import { IconButton } from '../ui/IconButton';
 import {
   selectActiveTab,
   useProjectStore
@@ -83,16 +84,16 @@ export function Header() {
   return (
     <header className={headerClass} style={dragStyle}>
       <div className="header-left" style={noDragStyle}>
-        <button
-          type="button"
-          className="header-icon-button sidebar-toggle"
+        <IconButton
+          size="lg"
+          className="sidebar-toggle"
           aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
           aria-pressed={sidebarVisible}
           title={platformShortcut('Toggle sidebar  ⌘[')}
           onClick={() => toggleSidebar()}
         >
           <IconSidebarToggle size={16} shown={sidebarVisible} />
-        </button>
+        </IconButton>
       </div>
 
       <span className="header-sep" aria-hidden="true" />

@@ -26,6 +26,7 @@ import {
   type PointerEvent,
   type ReactNode
 } from 'react';
+import { IconButton } from '../ui/IconButton';
 import type { FileEntry, SidebarSortKey } from '@skrive/shared';
 import {
   SIDEBAR_MAX_WIDTH,
@@ -501,14 +502,14 @@ function SortMenu({
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
+        <IconButton
+          size="sm"
           className="icon-button"
           aria-label="Sort files"
           title={`Sort: ${SORT_LABELS[sortKey]}`}
         >
           <IconSort size={16} />
-        </button>
+        </IconButton>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content className="ctx-menu" align="end" sideOffset={4}>
@@ -944,15 +945,15 @@ export function Sidebar() {
           <div className="section-header__actions">
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
-                <button
-                  type="button"
+                <IconButton
+                  size="sm"
                   className="icon-button"
                   aria-label="New file or folder"
                   title="New file or folder"
                   disabled={creating !== null || !manifest}
                 >
                   <IconPlus size={16} />
-                </button>
+                </IconButton>
               </DropdownMenu.Trigger>
               <DropdownMenu.Portal>
                 <DropdownMenu.Content

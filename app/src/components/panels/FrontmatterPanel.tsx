@@ -26,6 +26,7 @@
 // the UI with no modal needed.
 
 import { useEffect, useRef, useState } from 'react';
+import { IconButton } from '../ui/IconButton';
 import {
   selectActiveTab,
   useProjectStore
@@ -502,15 +503,14 @@ export function FrontmatterPanel() {
                   )}
                 </div>
 
-                <button
-                  type="button"
-                  className="remove-button"
+                <IconButton
+                  size="sm"
                   aria-label={`Remove ${row.key}`}
                   title="Remove field"
                   onClick={() => discardRow(row)}
                 >
                   ×
-                </button>
+                </IconButton>
               </div>
             );
           })}
