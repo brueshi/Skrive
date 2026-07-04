@@ -12,6 +12,7 @@
 
 import { useEffect, useState } from 'react';
 import { Button } from '../ui/Button';
+import { Input } from '../ui/Input';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import type { UpdaterStatus } from '@skrive/shared';
 import { usePreferencesStore } from '../../stores/preferences';
@@ -411,9 +412,8 @@ function DictionarySection() {
           words live in .skrive.toml under [dictionary].project_words.
         </p>
         <div className="settings-dict-input">
-          <input
+          <Input
             type="text"
-            className="settings-input"
             placeholder="Add a word…"
             value={pending}
             onChange={(e) => setPending(e.target.value)}

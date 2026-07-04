@@ -22,6 +22,18 @@
   --button-danger-fg: var(--skrive-danger);
   --button-danger-bg-hover: var(--skrive-danger-fill);
 
+  /* Input (SKR-212) — the boxed text field: rule border, accent glow on
+   * focus. The one ring: --skrive-focus-ring at 35%, 2px. */
+  --input-radius: var(--skrive-radius-md);
+  --input-font-size: 13px;
+  --input-pad-y: 0.5rem;
+  --input-pad-x: 0.625rem;
+  --input-bg: var(--skrive-bg);
+  --input-fg: var(--skrive-fg);
+  --input-border: var(--skrive-rule);
+  --input-focus-border: var(--skrive-focus-ring);
+  --input-focus-glow: color-mix(in srgb, var(--skrive-focus-ring) 35%, transparent);
+
   /* IconButton (SKR-210) — transparent glyph square. Hover fill is the soft
    * neutral (the SKR-211 menu language), not the rule colour as a fill. */
   --icon-button-size: 26px;

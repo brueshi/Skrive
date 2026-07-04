@@ -10,6 +10,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { DialogShell } from '../ui/Dialog';
 import { Button } from '../ui/Button';
+import { Input, Textarea } from '../ui/Input';
 import { useEffect, useRef, useState } from 'react';
 import { notify } from '../../lib/notify';
 import {
@@ -172,7 +173,7 @@ export function ReportDialog({ open, kind, onClose }: Props) {
 
           <div className="report-field">
             <label htmlFor="report-subject">Subject</label>
-            <input
+            <Input
               ref={subjectRef}
               id="report-subject"
               type="text"
@@ -188,7 +189,7 @@ export function ReportDialog({ open, kind, onClose }: Props) {
 
           <div className="report-field">
             <label htmlFor="report-body">{copy.bodyLabel}</label>
-            <textarea
+            <Textarea
               id="report-body"
               value={body}
               maxLength={BODY_MAX}

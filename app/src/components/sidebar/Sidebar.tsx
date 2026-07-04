@@ -27,6 +27,7 @@ import {
   type ReactNode
 } from 'react';
 import { IconButton } from '../ui/IconButton';
+import { Input } from '../ui/Input';
 import type { FileEntry, SidebarSortKey } from '@skrive/shared';
 import {
   SIDEBAR_MAX_WIDTH,
@@ -993,7 +994,7 @@ export function Sidebar() {
 
         {creating !== null && (
           <div className="new-file-row">
-            <input
+            <Input
               type="text"
               autoFocus
               value={newName}
