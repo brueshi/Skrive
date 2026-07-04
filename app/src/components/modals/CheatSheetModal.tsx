@@ -10,6 +10,7 @@
 // the modal). Radix Dialog handles focus trap + Escape dismissal.
 
 import * as Dialog from '@radix-ui/react-dialog';
+import { DialogShell } from '../ui/Dialog';
 import {
   COMMAND_GROUP_ORDER,
   type Binding,
@@ -32,18 +33,14 @@ export function CheatSheetModal({ open, onClose, bindings }: Props) {
   for (const b of bindings) grouped.get(b.group)?.push(b);
 
   return (
-    <Dialog.Root
+    <DialogShell
       open={open}
       onOpenChange={(o) => {
         if (!o) onClose();
       }}
+      className="cheatsheet-modal"
+      aria-label="Keyboard shortcuts"
     >
-      <Dialog.Portal>
-        <Dialog.Overlay className="modal-backdrop" />
-        <Dialog.Content
-          className="modal-dialog cheatsheet-modal"
-          aria-label="Keyboard shortcuts"
-        >
           <Dialog.Title className="modal-title">
             Keyboard shortcuts
           </Dialog.Title>
@@ -80,8 +77,6 @@ export function CheatSheetModal({ open, onClose, bindings }: Props) {
             Press <kbd>Esc</kbd> to close, or{' '}
             <kbd>{platformShortcut('⌘/')}</kbd> to toggle.
           </p>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    </DialogShell>
   );
 }

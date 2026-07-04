@@ -9,6 +9,7 @@
 // history mode.
 
 import * as Dialog from '@radix-ui/react-dialog';
+import { DialogShell } from '../ui/Dialog';
 import { useEffect, useRef, useState } from 'react';
 import { logProjectError, useProjectStore } from '../../stores/project';
 import { notify } from '../../lib/notify';
@@ -92,19 +93,15 @@ export function NewProjectDialog({ open, onClose }: Props) {
   }
 
   return (
-    <Dialog.Root
+    <DialogShell
       open={open}
       onOpenChange={(o) => {
         if (!o && !busy) onClose();
       }}
+      className="new-project-modal"
+      aria-label="Create new project"
+      onKeyDown={handleKeyDown}
     >
-      <Dialog.Portal>
-        <Dialog.Overlay className="modal-backdrop" />
-        <Dialog.Content
-          className="modal-dialog new-project-modal"
-          aria-label="Create new project"
-          onKeyDown={handleKeyDown}
-        >
           <Dialog.Title className="modal-title">
             Create new project
           </Dialog.Title>
@@ -183,8 +180,6 @@ export function NewProjectDialog({ open, onClose }: Props) {
               {busy ? 'Creating…' : 'Create'}
             </button>
           </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    </DialogShell>
   );
 }

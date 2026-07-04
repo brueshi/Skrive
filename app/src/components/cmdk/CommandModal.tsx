@@ -6,6 +6,7 @@
 // rows for the palette; flat file rows for the switcher).
 
 import * as Dialog from '@radix-ui/react-dialog';
+import { DialogShell } from '../ui/Dialog';
 import { Command as Cmd } from 'cmdk';
 import type { ReactNode } from 'react';
 
@@ -37,15 +38,15 @@ export function CommandModal({
   filter
 }: Props) {
   return (
-    <Dialog.Root
+    <DialogShell
       open={open}
       onOpenChange={(o) => {
         if (!o) onClose();
       }}
+      variant="palette"
+      className="cmdk-palette"
+      aria-label={ariaLabel}
     >
-      <Dialog.Portal>
-        <Dialog.Overlay className="cmdk-backdrop" />
-        <Dialog.Content className="cmdk-palette" aria-label={ariaLabel}>
           <Dialog.Title className="visually-hidden">{ariaLabel}</Dialog.Title>
           <Cmd label={ariaLabel} shouldFilter={filter !== undefined ? false : true} filter={filter}>
             <Cmd.Input
@@ -62,8 +63,6 @@ export function CommandModal({
               {children}
             </Cmd.List>
           </Cmd>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    </DialogShell>
   );
 }

@@ -1,0 +1,123 @@
+/* DialogShell frame (SKR-211). Consumes --dialog-* component tokens
+   (tokens.css); motion reads the semantic scale directly, like the entrance
+   feel it relocates from index.css. */
+
+@layer components {
+  @keyframes scrim-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes scrim-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
+
+  @keyframes sheet-in {
+    from {
+      opacity: 0;
+      transform: translate(-50%, calc(-50% + 8px));
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, -50%);
+    }
+  }
+
+  @keyframes sheet-out {
+    from {
+      opacity: 1;
+      transform: translate(-50%, -50%);
+    }
+    to {
+      opacity: 0;
+      transform: translate(-50%, calc(-50% + 4px));
+    }
+  }
+
+  @keyframes palette-in {
+    from {
+      opacity: 0;
+      transform: translateX(-50%) translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  }
+
+  @keyframes palette-out {
+    from {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateX(-50%) translateY(4px);
+    }
+  }
+
+  .scrim {
+    position: fixed;
+    inset: 0;
+    background: var(--dialog-scrim);
+    z-index: var(--dialog-z-scrim);
+    /* 130ms is deliberately shorter than the panel's standard entrance so the
+       backdrop reaches near-full opacity early and the panel lifts onto an
+       already-dimmed stage rather than both fading at the same rate. */
+    animation: scrim-in 130ms var(--skrive-easing-out);
+  }
+
+  .scrim[data-state='closed'] {
+    animation: scrim-out var(--skrive-duration-quick) var(--skrive-easing);
+  }
+
+  .panel {
+    position: fixed;
+    background: var(--dialog-bg);
+    border: none;
+    border-radius: var(--dialog-radius);
+    box-shadow: var(--dialog-shadow);
+    max-width: calc(100vw - 2rem);
+    font-family: var(--skrive-ui-font);
+    z-index: var(--dialog-z-panel);
+  }
+
+  .sheet {
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 26rem;
+    padding: 1.25rem 1.3125rem;
+    animation: sheet-in var(--skrive-duration-standard) var(--skrive-easing-out);
+  }
+
+  .sheet[data-state='closed'] {
+    animation: sheet-out var(--skrive-duration-quick) var(--skrive-easing);
+  }
+
+  .palette {
+    top: 10vh;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 36rem;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    animation: palette-in var(--skrive-duration-standard) var(--skrive-easing-out);
+  }
+
+  .palette[data-state='closed'] {
+    animation: palette-out var(--skrive-duration-quick) var(--skrive-easing);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .scrim,
+    .scrim[data-state='closed'],
+    .panel,
+    .panel[data-state='closed'] {
+      animation: none;
+    }
+  }
+}
