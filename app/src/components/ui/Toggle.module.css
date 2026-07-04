@@ -1,0 +1,90 @@
+/* Toggle (SKR-212). Consumes --toggle-track-off/-on from tokens.css.
+ *
+ * Geometry is fixed: a 40x23 track with 2px padding (36x19 inner) holds a
+ * 19px knob with 17px of travel. The press-stretch values below are tied
+ * to these constants, so adjust them together.
+ *
+ * Feel: an ease-out glide (not the symmetric curve) so the knob leads with
+ * motion, a fast press-stretch where the knob elongates toward its leading
+ * edge for tactile give, and hover/sunken-track cues for depth. The knob's
+ * #fff and rgba shadows are deliberate physical-light literals, not theme
+ * colors — a white knob under a cast shadow in both themes. */
+@layer components {
+  .toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 40px;
+    height: 23px;
+    padding: 2px;
+    border: none;
+    border-radius: var(--skrive-radius-pill);
+    background: var(--toggle-track-off);
+    /* Sunken track: a faint inset rim + top shadow. fg-based so it reads as
+       a quiet edge in every theme rather than a hard line. */
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--skrive-fg) 6%, transparent),
+      inset 0 1px 1.5px color-mix(in srgb, var(--skrive-fg) 7%, transparent);
+    cursor: pointer;
+    transition:
+      background-color var(--skrive-duration-quick) var(--skrive-easing),
+      box-shadow var(--skrive-duration-quick) var(--skrive-easing);
+  }
+
+  .toggle:hover:not(.on) {
+    background: color-mix(in srgb, var(--skrive-fg) 8%, var(--toggle-track-off));
+  }
+
+  .on {
+    background: var(--toggle-track-on);
+    /* On the filled track the rim flips to a soft top highlight so the
+       accent reads as raised, not sunken. */
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, #000 7%, transparent),
+      inset 0 1px 1px color-mix(in srgb, #fff 20%, transparent);
+  }
+
+  .on:hover {
+    background: color-mix(in srgb, var(--toggle-track-on) 90%, #000);
+  }
+
+  .knob {
+    width: 19px;
+    height: 19px;
+    /* Pill radius (not 50%) so the knob stays a clean capsule when it
+       stretches. */
+    border-radius: var(--skrive-radius-pill);
+    background: #fff;
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.04),
+      0 1px 1px rgba(0, 0, 0, 0.1),
+      0 2px 5px rgba(0, 0, 0, 0.12);
+    transition:
+      transform var(--skrive-duration-slow) var(--skrive-easing-out),
+      width var(--skrive-duration-quick) var(--skrive-easing-out);
+  }
+
+  .on .knob {
+    transform: translateX(17px);
+  }
+
+  /* Press-stretch. The knob widens toward its leading edge while held: off
+     grows rightward (left edge pinned at the 2px pad); on grows leftward
+     (right edge pinned at the inner edge, so translateX drops by the 3px of
+     extra width). Releasing settles it back via the same transitions. */
+  .toggle:active:not(.on) .knob {
+    width: 22px;
+  }
+
+  .on:active .knob {
+    width: 22px;
+    transform: translateX(14px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .toggle,
+    .knob {
+      transition: none;
+    }
+  }
+}

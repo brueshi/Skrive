@@ -1,0 +1,44 @@
+/* Select (SKR-212). Focus ring shares the --input-* pair — one field-focus
+ * language across inputs and selects. */
+@layer components {
+  .root {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .native {
+    appearance: none;
+    -webkit-appearance: none;
+    height: 36px;
+    min-width: 130px;
+    padding: 0 30px 0 12px;
+    border: 1px solid var(--skrive-rule);
+    border-radius: var(--skrive-radius-md);
+    background: var(--skrive-bg);
+    color: var(--skrive-fg);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .native:focus-visible {
+    outline: none;
+    border-color: var(--input-focus-border);
+    box-shadow: 0 0 0 2px var(--input-focus-glow);
+  }
+
+  /* Disabled: inert control for a pref that doesn't apply in context. The
+     row's is-dimmed opacity carries the fade; here we just drop the pointer
+     affordance so it doesn't read as clickable. */
+  .native:disabled {
+    cursor: default;
+  }
+
+  .caret {
+    position: absolute;
+    right: 10px;
+    color: var(--skrive-muted);
+    pointer-events: none;
+  }
+}

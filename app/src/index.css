@@ -3014,18 +3014,16 @@ body {
  * here UI rides --skrive-ui-font and titles ride the serif editor font,
  * per the 1.0 fonts-unchanged decision.
  *
- * Two derived greys keep the kit token-driven without new root tokens:
+ * Two derived greys keep the kit token-driven without new root tokens
+ * (the control-track greys hoisted to component tokens with the SKR-212
+ * promotion — see ui/tokens.css):
  *   --settings-cap   — the lightened uppercase label grey
  *   --settings-hair  — the hairline between rows (lighter than --skrive-rule)
- *   --settings-sunk  — the sunken segmented-track fill
- *   --settings-off   — the off-state toggle track
  */
 .app-root .settings-nav-card,
 .app-root .settings-content-card {
   --settings-cap: color-mix(in srgb, var(--skrive-muted) 70%, var(--skrive-bg));
   --settings-hair: color-mix(in srgb, var(--skrive-rule) 55%, var(--skrive-bg));
-  --settings-sunk: color-mix(in srgb, var(--skrive-fg) 8%, var(--skrive-rule));
-  --settings-off: color-mix(in srgb, var(--skrive-fg) 14%, var(--skrive-rule));
   font-family: var(--skrive-ui-font);
 }
 
@@ -3344,231 +3342,7 @@ body {
   color: var(--skrive-muted);
 }
 
-/* ---- Segmented ---- */
-.seg {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  height: 30px;
-  padding: 2px;
-  background: var(--settings-sunk);
-  border-radius: var(--skrive-radius-md);
-}
-
-.seg-option {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 26px;
-  padding: 0 13px;
-  border: none;
-  background: transparent;
-  border-radius: var(--skrive-radius-sm);
-  color: var(--skrive-muted);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-/* The raised pill, now a single shared element that slides between
-   options (see Segmented). Fills its active option; the label rides
-   above it. */
-.seg-thumb {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background: var(--skrive-bg);
-  border-radius: var(--skrive-radius-sm);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--skrive-fg) 9%, transparent);
-}
-
-.seg-label {
-  position: relative;
-  z-index: 1;
-}
-
-.seg-option.active {
-  color: var(--skrive-fg);
-  font-weight: 600;
-}
-
-/* ---- Toggle ----
- *
- * Geometry is fixed: a 40x23 track with 2px padding (36x19 inner) holds a
- * 19px knob with 17px of travel. The press-stretch values below are tied
- * to these constants, so adjust them together.
- *
- * Feel: an ease-out glide (not the symmetric curve) so the knob leads with
- * motion, a fast press-stretch where the knob elongates toward its leading
- * edge for tactile give, and hover/sunken-track cues for depth. */
-.tgl {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  width: 40px;
-  height: 23px;
-  padding: 2px;
-  border: none;
-  border-radius: var(--skrive-radius-pill);
-  background: var(--settings-off);
-  /* Sunken track: a faint inset rim + top shadow. fg-based so it reads as
-     a quiet edge in every theme rather than a hard line. */
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--skrive-fg) 6%, transparent),
-    inset 0 1px 1.5px color-mix(in srgb, var(--skrive-fg) 7%, transparent);
-  cursor: pointer;
-  transition:
-    background-color var(--skrive-duration-quick) var(--skrive-easing),
-    box-shadow var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.tgl:hover:not(.on) {
-  background: color-mix(in srgb, var(--skrive-fg) 8%, var(--settings-off));
-}
-
-.tgl.on {
-  background: var(--skrive-accent);
-  /* On the filled track the rim flips to a soft top highlight so the
-     accent reads as raised, not sunken. */
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, #000 7%, transparent),
-    inset 0 1px 1px color-mix(in srgb, #fff 20%, transparent);
-}
-
-.tgl.on:hover {
-  background: color-mix(in srgb, var(--skrive-accent) 90%, #000);
-}
-
-.tgl-knob {
-  width: 19px;
-  height: 19px;
-  /* Pill radius (not 50%) so the knob stays a clean capsule when it stretches. */
-  border-radius: var(--skrive-radius-pill);
-  background: #fff;
-  box-shadow:
-    0 0 0 0.5px rgba(0, 0, 0, 0.04),
-    0 1px 1px rgba(0, 0, 0, 0.1),
-    0 2px 5px rgba(0, 0, 0, 0.12);
-  transition:
-    transform var(--skrive-duration-slow) var(--skrive-easing-out),
-    width var(--skrive-duration-quick) var(--skrive-easing-out);
-}
-
-.tgl.on .tgl-knob {
-  transform: translateX(17px);
-}
-
-/* Press-stretch. The knob widens toward its leading edge while held: off
-   grows rightward (left edge pinned at the 2px pad); on grows leftward
-   (right edge pinned at the inner edge, so translateX drops by the 3px of
-   extra width). Releasing settles it back via the same transitions. */
-.tgl:active:not(.on) .tgl-knob {
-  width: 22px;
-}
-
-.tgl.on:active .tgl-knob {
-  width: 22px;
-  transform: translateX(14px);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tgl,
-  .tgl-knob {
-    transition: none;
-  }
-}
-
-/* ---- Stepper ---- */
-.stepper {
-  display: inline-flex;
-  align-items: stretch;
-  height: 36px;
-  background: var(--skrive-bg);
-  border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-radius-md);
-  overflow: hidden;
-}
-
-.stepper-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  border: none;
-  background: transparent;
-  color: var(--skrive-muted);
-  cursor: pointer;
-  transition: color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.stepper-btn:hover:not(:disabled) {
-  color: var(--skrive-fg);
-}
-
-.stepper-btn:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.stepper-value {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 64px;
-  padding: 0 8px;
-  border-left: 1px solid var(--settings-hair);
-  border-right: 1px solid var(--settings-hair);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--skrive-fg);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ---- Select ---- */
-.sel {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-
-.sel-native {
-  appearance: none;
-  -webkit-appearance: none;
-  height: 36px;
-  min-width: 130px;
-  padding: 0 30px 0 12px;
-  border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-radius-md);
-  background: var(--skrive-bg);
-  color: var(--skrive-fg);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.sel-native:focus-visible {
-  outline: none;
-  border-color: var(--skrive-focus-ring);
-  box-shadow: 0 0 0 2px
-    color-mix(in srgb, var(--skrive-focus-ring) 35%, transparent);
-}
-
-/* Disabled: inert control for a pref that doesn't apply in context. The
-   row's is-dimmed opacity carries the fade; here we just drop the pointer
-   affordance so it doesn't read as clickable. */
-.sel-native:disabled {
-  cursor: default;
-}
-
-.sel-caret {
-  position: absolute;
-  right: 10px;
-  color: var(--skrive-muted);
-  pointer-events: none;
-}
+/* Segmented / Toggle / Stepper / Select moved to components/ui (SKR-212). */
 
 /* ---- Theme tiles ---- */
 .settings-theme-block {
@@ -3725,23 +3499,14 @@ body {
 }
 
 /* ---- Shared field inputs / buttons (carried from the modal era) ---- */
+/* MonoInput rides ui/Input (SKR-212); only the mono typography and the
+   compact height live here. */
 .settings-mono-input {
   height: 36px;
+  width: auto;
   padding: 0 12px;
-  border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-radius-md);
-  background: var(--skrive-bg);
-  color: var(--skrive-fg);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
-  box-sizing: border-box;
-}
-
-.settings-mono-input:focus-visible {
-  outline: none;
-  border-color: var(--skrive-focus-ring);
-  box-shadow: 0 0 0 2px
-    color-mix(in srgb, var(--skrive-focus-ring) 35%, transparent);
 }
 
 /* The dictionary field is ui/Input (SKR-212) — its look became the
