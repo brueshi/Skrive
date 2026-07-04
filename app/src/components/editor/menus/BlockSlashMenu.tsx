@@ -11,14 +11,17 @@
 // preventDefault AND stopPropagation — so the surface's own keydown (Enter = split)
 // never also fires.
 
-import { useEffect, useMemo, useState, type ComponentType, type MouseEvent } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ComponentType, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import type { BlockSurface, BlockTypeSpec, SlashMenuState } from '../../../lib/blocksurface';
+import { platformShortcut } from '../../../lib/commands/shortcut-display';
 import { useAnchoredRect } from './useAnchoredRect';
 import {
   IconParagraph,
-  IconHeading,
+  IconHeading1,
+  IconHeading2,
+  IconHeading3,
   IconQuote,
   IconBulletList,
   IconOrderedList,
@@ -29,19 +32,29 @@ import {
 import './menus.css';
 
 type IconC = ComponentType<{ size?: number; className?: string }>;
-type Item = { title: string; keywords: string; spec: BlockTypeSpec; Icon: IconC };
+type Item = {
+  title: string;
+  keywords: string;
+  spec: BlockTypeSpec;
+  Icon: IconC;
+  /** Visual group; a hairline separates consecutive groups in the menu. */
+  group: 'text' | 'list' | 'block';
+  /** macOS-symbol shortcut hint, rendered via platformShortcut. Only present
+   *  where the surface actually binds one — an aspirational hint would lie. */
+  shortcut?: string;
+};
 
 const ITEMS: Item[] = [
-  { title: 'Text', keywords: 'text paragraph body plain', spec: { kind: 'paragraph' }, Icon: IconParagraph },
-  { title: 'Heading 1', keywords: 'h1 heading title', spec: { kind: 'heading', level: 1 }, Icon: IconHeading },
-  { title: 'Heading 2', keywords: 'h2 heading subtitle', spec: { kind: 'heading', level: 2 }, Icon: IconHeading },
-  { title: 'Heading 3', keywords: 'h3 heading', spec: { kind: 'heading', level: 3 }, Icon: IconHeading },
-  { title: 'Quote', keywords: 'quote blockquote', spec: { kind: 'blockquote' }, Icon: IconQuote },
-  { title: 'Bullet list', keywords: 'bullet list unordered ul', spec: { kind: 'bullet_list' }, Icon: IconBulletList },
-  { title: 'Numbered list', keywords: 'numbered ordered list ol', spec: { kind: 'ordered_list' }, Icon: IconOrderedList },
-  { title: 'Code', keywords: 'code monospace pre fenced', spec: { kind: 'code' }, Icon: IconCodeBlock },
-  { title: 'Table', keywords: 'table grid rows columns', spec: { kind: 'table' }, Icon: IconTable },
-  { title: 'Divider', keywords: 'divider rule separator hr line', spec: { kind: 'divider' }, Icon: IconDivider }
+  { title: 'Text', keywords: 'text paragraph body plain', spec: { kind: 'paragraph' }, Icon: IconParagraph, group: 'text' },
+  { title: 'Heading 1', keywords: 'h1 heading title', spec: { kind: 'heading', level: 1 }, Icon: IconHeading1, group: 'text' },
+  { title: 'Heading 2', keywords: 'h2 heading subtitle', spec: { kind: 'heading', level: 2 }, Icon: IconHeading2, group: 'text' },
+  { title: 'Heading 3', keywords: 'h3 heading', spec: { kind: 'heading', level: 3 }, Icon: IconHeading3, group: 'text' },
+  { title: 'Bullet list', keywords: 'bullet list unordered ul', spec: { kind: 'bullet_list' }, Icon: IconBulletList, group: 'list', shortcut: '⌘⇧8' },
+  { title: 'Numbered list', keywords: 'numbered ordered list ol', spec: { kind: 'ordered_list' }, Icon: IconOrderedList, group: 'list', shortcut: '⌘⇧7' },
+  { title: 'Quote', keywords: 'quote blockquote', spec: { kind: 'blockquote' }, Icon: IconQuote, group: 'block' },
+  { title: 'Code', keywords: 'code monospace pre fenced', spec: { kind: 'code' }, Icon: IconCodeBlock, group: 'block' },
+  { title: 'Table', keywords: 'table grid rows columns', spec: { kind: 'table' }, Icon: IconTable, group: 'block' },
+  { title: 'Divider', keywords: 'divider rule separator hr line', spec: { kind: 'divider' }, Icon: IconDivider, group: 'block' }
 ];
 
 function filterItems(query: string): Item[] {
@@ -107,24 +120,34 @@ export function BlockSlashMenu({ surface }: { surface: BlockSurface }) {
         >
           {items.map((item, i) => {
             const isActive = i === active;
+            const prev = items[i - 1];
             return (
-              <button
-                key={item.title}
-                type="button"
-                role="option"
-                aria-selected={isActive}
-                className={`rich-slash-item${isActive ? ' active' : ''}`}
-                onMouseEnter={() => setActive(i)}
-                onMouseDown={(e: MouseEvent) => {
-                  e.preventDefault();
-                  surface.applySlashCommand(item.spec);
-                }}
-              >
-                <span className="rich-slash-icon">
-                  <item.Icon size={16} />
-                </span>
-                <span className="rich-slash-title">{item.title}</span>
-              </button>
+              <Fragment key={item.title}>
+                {prev && prev.group !== item.group && (
+                  <div className="rich-slash-sep" aria-hidden="true" />
+                )}
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={isActive}
+                  className={`rich-slash-item${isActive ? ' active' : ''}`}
+                  onMouseEnter={() => setActive(i)}
+                  onMouseDown={(e: MouseEvent) => {
+                    e.preventDefault();
+                    surface.applySlashCommand(item.spec);
+                  }}
+                >
+                  <span className="rich-slash-icon">
+                    <item.Icon size={16} />
+                  </span>
+                  <span className="rich-slash-title">{item.title}</span>
+                  {item.shortcut && (
+                    <span className="rich-slash-shortcut" aria-hidden="true">
+                      {platformShortcut(item.shortcut)}
+                    </span>
+                  )}
+                </button>
+              </Fragment>
             );
           })}
         </motion.div>

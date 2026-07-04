@@ -178,11 +178,55 @@ export function IconCodeBlock(p: IconProps) {
   );
 }
 
-export function IconHeading(p: IconProps) {
-  // A solid "H".
+// (The generic solid-H IconHeading this set replaces lives in git history.)
+//
+// The heading tiles: an H + level numeral on a rounded card, one icon per
+// level, derived from a single three-card source artwork (each icon's viewBox
+// is its card's window; path data keeps the source coordinates). Colors are
+// reconciled to the house rule above: the source's grey frame / grey H / blue
+// numeral collapse to currentColor — the card ring survives as the chrome
+// opacity tier, the letterforms take full ink. The frame is a true evenodd
+// knockout (outer rect + inner face as one path), not a white face, so the
+// icon composes over any row fill.
+
+export function IconHeading1(p: IconProps) {
   return (
-    <Glyph {...p} viewBox="62.85 120.15 36 36">
-      <path d="m91.4 125.7h-2.9c-0.9 0-1.4 0.5-1.4 1.4v8.6h-12.7v-8.7c0-0.7-0.5-1.3-1.2-1.3h-3.1c-0.9 0-1.3 0.6-1.3 1.3v22c0 0.8 0.6 1.6 1.3 1.6h3c0.9 0 1.4-0.6 1.4-1.3v-8.1h12.5l0.1 8c0 0.7 0.5 1.4 1.2 1.4h3.3c0.8 0 1.3-0.6 1.3-1.4v-22.2c0-0.9-0.7-1.3-1.5-1.3z" />
+    <Glyph {...p} viewBox="6.5 2.05 41.4 41.4">
+      <path
+        fillRule="evenodd"
+        fillOpacity={0.45}
+        d="m43.6 43.1h-33.1c-2.2 0-4-1.8-4-4.2v-32c0-2.3 1.8-4.5 4.1-4.5h33.3c2.3 0 4 1.9 4 4.5v32.1c0 2.3-1.8 4.1-4.3 4.1z M43.6 4.5h-33.2c-1.2 0-2 1.1-2 2.4v31.9c0 1.3 0.9 2.4 2.1 2.4h33.1c1.3 0 2.4-1 2.4-2.3l-0.1-32c0-1.4-1-2.4-2.3-2.4z"
+      />
+      <path d="m29.6 31.6h-4v-7.2h-6.9v7.2h-4.2v-17.1h4.2v6.7h6.8v-6.7h4.1v17.1z" />
+      <path d="m39.6 31.6h-3.6v-13l-4.1 1.3v-2.9l7.3-2.5h0.4v17.1z" />
+    </Glyph>
+  );
+}
+
+export function IconHeading2(p: IconProps) {
+  return (
+    <Glyph {...p} viewBox="57.45 2.05 41.4 41.4">
+      <path
+        fillRule="evenodd"
+        fillOpacity={0.45}
+        d="m94.1 43.1h-32.2c-2.3 0-4.4-1.7-4.4-4.2v-32c0-2.3 1.8-4.5 4.3-4.5h32.4c2.5 0 4.2 1.9 4.1 4.5v32c0.2 2.4-1.6 4.2-4.2 4.2z M94.2 4.5h-32.3c-1.2 0-2.4 1-2.4 2.3v32.1c0 1.3 1 2.3 2.2 2.3h32.5c1.3 0 2.3-1 2.3-2.3v-32c0-1.4-1-2.4-2.3-2.4z"
+      />
+      <path d="m78.1 31.6h-4v-7.2h-6.5v7.2h-4v-17.1h4v6.7h6.4v-6.7h4v17.1h0.1z" />
+      <path d="m92.4 31.6h-12v-2.5l5.5-5.7c1.4-1.4 2.1-2.7 2.1-3.9s-0.6-2.3-2.2-2.3-2.3 1.2-2.3 2.7h-3.5c0-3 2.1-5.6 5.8-5.6 3.8 0 5.8 2 5.8 4.9 0 2.6-1.7 4.2-3.3 5.9l-3.4 3.5h7.5v3z" />
+    </Glyph>
+  );
+}
+
+export function IconHeading3(p: IconProps) {
+  return (
+    <Glyph {...p} viewBox="107.9 2.15 41.5 41.5">
+      <path
+        fillRule="evenodd"
+        fillOpacity={0.45}
+        d="m145.2 2.5c-0.3-0.1-0.6-0.1 0-0.1h-32.9c-2.2 0-4.4 1.8-4.4 4.3v32.2c0 2.4 1.8 4.2 4.3 4.2h33.1c2.3 0 4.1-1.8 4.1-4.2v-32.1c0-2.3-1.7-4.3-4.2-4.3z M145.1 4.6c-0.2-0.1-0.2-0.1 0-0.1h-32.8c-1.1 0-2.5 0.9-2.5 2.3v32.1c0 1.3 1 2.3 2.3 2.3h33c1.2 0 2.3-1 2.3-2.3l-0.1-32.1c0-1.2-0.9-2.2-2.2-2.2z"
+      />
+      <path d="m129 31.6h-4.2v-7.2h-6.5v7.2h-4.1v-17.1h4.1v6.7h6.5v-6.7h4.2v17.1z" />
+      <path d="m135.4 21.6h1.9c1.2-0.2 2.2-0.9 2.1-2.3 0-1.2-0.9-2.1-2.2-2.1-1.4-0.1-2.1 0.8-2.2 1.9h-3.6c0.1-2.6 2-4.8 5.7-4.8s5.8 1.8 5.8 4.7c0.1 1.7-0.8 3.1-2.3 3.9 1.7 0.6 2.8 2.1 2.8 4 0 3.3-2.7 5-6.1 5-3.6 0-6.2-1.9-6.3-5.1h3.7c0.1 1.2 1 2.2 2.6 2.2s2.5-0.8 2.4-2.3c0-1.6-1.2-2.4-2.7-2.4h-1.6v-2.7z" />
     </Glyph>
   );
 }

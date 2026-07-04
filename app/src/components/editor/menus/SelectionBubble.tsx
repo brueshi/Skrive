@@ -10,6 +10,7 @@ import { createPortal } from 'react-dom';
 import { useSyncExternalStore } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import type { MenuController } from './controller';
+import { platformShortcut } from '../../../lib/commands/shortcut-display';
 import { useAnchoredRect } from './useAnchoredRect';
 import { BlockTypeDropdown } from './BlockTypeDropdown';
 import { IconBold, IconItalic, IconCode, IconLink } from './toolbar-icons';
@@ -17,11 +18,15 @@ import './menus.css';
 
 function BubbleButton({
   label,
+  shortcut,
   active = false,
   onRun,
   children
 }: {
   label: string;
+  /** macOS-symbol shortcut hint, shown in the tooltip so the bubble teaches
+   *  the keyboard path at the moment of use. Omitted where none is bound. */
+  shortcut?: string;
   active?: boolean;
   onRun: () => void;
   children: React.ReactNode;
@@ -32,7 +37,7 @@ function BubbleButton({
       className={`rich-toolbar-button${active ? ' active' : ''}`}
       aria-pressed={active}
       aria-label={label}
-      title={label}
+      title={shortcut ? `${label} (${platformShortcut(shortcut)})` : label}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onRun}
     >
@@ -66,13 +71,13 @@ export function SelectionBubble({ controller }: { controller: MenuController }) 
         >
           <BlockTypeDropdown controller={controller} blockType={s.blockType} headingLevel={s.headingLevel} />
           <span className="rich-toolbar-sep" aria-hidden="true" />
-          <BubbleButton label="Bold" active={s.strong} onRun={() => controller.toggleMark('strong')}>
+          <BubbleButton label="Bold" shortcut="⌘B" active={s.strong} onRun={() => controller.toggleMark('strong')}>
             <IconBold />
           </BubbleButton>
-          <BubbleButton label="Italic" active={s.em} onRun={() => controller.toggleMark('em')}>
+          <BubbleButton label="Italic" shortcut="⌘I" active={s.em} onRun={() => controller.toggleMark('em')}>
             <IconItalic />
           </BubbleButton>
-          <BubbleButton label="Inline code" active={s.code} onRun={() => controller.toggleMark('code')}>
+          <BubbleButton label="Inline code" shortcut="⌘E" active={s.code} onRun={() => controller.toggleMark('code')}>
             <IconCode />
           </BubbleButton>
           <BubbleButton label="Link" active={s.link} onRun={() => controller.openLinkEditor()}>
