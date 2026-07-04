@@ -288,6 +288,7 @@ function FileRow({
                 <span className="ctx-label">Convert to Skrive document</span>
               </ContextMenu.Item>
             )}
+            <ContextMenu.Separator className="ctx-sep" />
             <ContextMenu.Item
               className="ctx-item destructive"
               onSelect={() => onDelete(file)}

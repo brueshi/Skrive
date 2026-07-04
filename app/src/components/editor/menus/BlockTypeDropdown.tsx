@@ -6,7 +6,20 @@
 
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import type { MenuController, MenuBlockType } from './controller';
-import { IconChevronDown } from './toolbar-icons';
+import {
+  IconChevronDown,
+  IconParagraph,
+  IconHeading1,
+  IconHeading2,
+  IconHeading3,
+  IconCodeBlock
+} from './toolbar-icons';
+
+const HEADING_LEVELS = [
+  [1, IconHeading1],
+  [2, IconHeading2],
+  [3, IconHeading3]
+] as const;
 
 export function blockTypeLabel(blockType: MenuBlockType, headingLevel: number | null): string {
   if (blockType === 'heading') return `Heading ${headingLevel ?? 1}`;
@@ -37,14 +50,23 @@ export function BlockTypeDropdown({ controller, blockType, headingLevel }: Props
       <DropdownMenu.Portal>
         <DropdownMenu.Content className="ctx-menu rich-blocktype-menu" align="start" sideOffset={4}>
           <DropdownMenu.Item className="ctx-item" onSelect={() => controller.setParagraph()}>
+            <span className="ctx-icon">
+              <IconParagraph size={16} />
+            </span>
             <span className="ctx-label">Text</span>
           </DropdownMenu.Item>
-          {[1, 2, 3].map((level) => (
+          {HEADING_LEVELS.map(([level, HeadingIcon]) => (
             <DropdownMenu.Item key={level} className="ctx-item" onSelect={() => controller.setHeading(level)}>
+              <span className="ctx-icon">
+                <HeadingIcon size={16} />
+              </span>
               <span className="ctx-label">Heading {level}</span>
             </DropdownMenu.Item>
           ))}
           <DropdownMenu.Item className="ctx-item" onSelect={() => controller.setCodeBlock()}>
+            <span className="ctx-icon">
+              <IconCodeBlock size={16} />
+            </span>
             <span className="ctx-label">Code block</span>
           </DropdownMenu.Item>
         </DropdownMenu.Content>
