@@ -115,7 +115,7 @@
    scroll/clip context. */
 .rich-bubble {
   position: fixed;
-  z-index: 1000;
+  z-index: var(--skrive-z-context-menu);
   display: flex;
   align-items: center;
   gap: 0.15rem;
@@ -123,21 +123,18 @@
   background: var(--skrive-bg);
   border: 1px solid var(--skrive-rule);
   border-radius: var(--skrive-radius-md, 8px);
-  box-shadow:
-    0 6px 16px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.4)),
-    0 1px 3px light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.3));
+  box-shadow: var(--skrive-shadow-float);
 }
 
-/* The transient link input, floated below the selection. */
+/* The transient link input, floated below the selection. One step above the
+   bubble tier so it layers over a still-mounted selection bubble. */
 .rich-link-editor {
   position: fixed;
-  z-index: 1001;
+  z-index: calc(var(--skrive-z-context-menu) + 1);
   background: var(--skrive-bg);
   border: 1px solid var(--skrive-rule);
   border-radius: var(--skrive-radius-md, 8px);
-  box-shadow:
-    0 6px 16px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.4)),
-    0 1px 3px light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.3));
+  box-shadow: var(--skrive-shadow-float);
 }
 
 .rich-link-editor form {
@@ -189,7 +186,7 @@
 /* The slash insert menu, dropped below the `/` trigger. */
 .rich-slash-menu {
   position: fixed;
-  z-index: 1001;
+  z-index: calc(var(--skrive-z-context-menu) + 1);
   min-width: 12rem;
   max-height: 18rem;
   overflow-y: auto;
@@ -197,9 +194,7 @@
   background: var(--skrive-bg);
   border: 1px solid var(--skrive-rule);
   border-radius: var(--skrive-radius-md, 8px);
-  box-shadow:
-    0 6px 16px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.4)),
-    0 1px 3px light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.3));
+  box-shadow: var(--skrive-shadow-float);
 }
 
 .rich-slash-item {
