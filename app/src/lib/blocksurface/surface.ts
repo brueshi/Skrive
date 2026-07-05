@@ -568,13 +568,27 @@ export class BlockSurface {
 
   // --- block types + the insert (slash) menu -------------------------------
 
-  /** Convert the current block's type, or insert a divider. Keeps the inline
-   *  content (and the block id) across a paragraph<->heading change. */
+  /** Convert the current block's type, or insert a divider/table. Keeps the
+   *  inline content (and the block id) across a paragraph<->heading change.
+   *
+   *  Divider and table are insertions, not conversions (SKR-170 / F66): a block
+   *  with text has content that a "replace" would destroy, so an empty current
+   *  block still gets the old replace-in-place behavior (this is the only way
+   *  the slash menu reaches here, since it requires an empty block to open), but
+   *  a non-empty block is left untouched and the divider/table is spliced in
+   *  after it. The branch lives here so every caller (toolbar, palette, slash)
+   *  gets it for free. */
   setBlockType(spec: BlockTypeSpec): void {
     const cur = this.currentConvertibleBlock();
     if (!cur) return;
+    const empty = inlineLength(cur.inline) === 0;
     if (spec.kind === 'divider') {
-      this.replaceWithDivider(cur);
+      if (empty) this.replaceWithDivider(cur);
+      else this.insertDividerAfter(cur);
+      return;
+    }
+    if (spec.kind === 'table' && !empty) {
+      this.insertTableAfter(cur);
       return;
     }
     // A type change invalidates the captured src (it would re-serialize as the old
@@ -660,6 +674,55 @@ export class BlockSurface {
     hrEl.after(paraEl);
     this.registry.set(para.id, paraEl);
     setCaret(paraEl, 0);
+    this.scheduleSerialize();
+  }
+
+  /** Insert a divider after a non-empty current block (SKR-170 / F66), leaving its
+   *  text untouched. A divider has no caret home of its own, so the caret needs a
+   *  landing spot after it: the existing next block when it's inline text, or a
+   *  freshly seeded paragraph otherwise (including when the divider would be the
+   *  last block) — the same "never a trap" seeding exitBarrier uses for arrow-key
+   *  exits out of a barrier. */
+  private insertDividerAfter(cur: { index: number }): void {
+    const hr: BlockNode = { type: 'horizontal_rule', id: generateBlockId(), durable: false, src: null, gapBefore: null, dirty: true };
+    const blocks = this.doc.blocks.slice();
+    const next = blocks[cur.index + 1];
+    let landing: BlockNode;
+    if (next && (next.type === 'paragraph' || next.type === 'heading')) {
+      landing = next;
+      blocks.splice(cur.index + 1, 0, hr);
+    } else {
+      landing = this.newInlineBlock('paragraph', [], 1);
+      blocks.splice(cur.index + 1, 0, hr, landing);
+    }
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    const el = this.leafElementById(landing.id);
+    if (el) setCaret(el, 0);
+    this.scheduleSerialize();
+  }
+
+  /** Insert a starter 2x2 table after a non-empty current block (SKR-170 / F66),
+   *  leaving its text untouched. The caret always lands in the first cell, same as
+   *  the empty-block (replace-in-place) table path. */
+  private insertTableAfter(cur: { index: number }): void {
+    const table: BlockNode = {
+      type: 'table',
+      id: generateBlockId(),
+      durable: false,
+      src: null,
+      gapBefore: null,
+      dirty: true,
+      align: [null, null],
+      rows: [[[], []], [[], []]]
+    };
+    const blocks = this.doc.blocks.slice();
+    blocks.splice(cur.index + 1, 0, table);
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    const tableEl = this.leafElementById(table.id);
+    const firstCell = tableEl?.querySelector('[data-cell-row="0"][data-cell-col="0"]') as HTMLElement | null;
+    if (firstCell) setCaret(firstCell, 0);
     this.scheduleSerialize();
   }
 
