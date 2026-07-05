@@ -77,6 +77,12 @@ export type SelectionInfo = {
 
 const SERIALIZE_DEBOUNCE_MS = 400;
 
+// Marks the block element selected as a unit (SKR-203). Data-attribute scoped so
+// the ring in BlockEditor.css is unaffected by the surface's :focus-visible
+// suppression. Every block element carries BLOCK_ID_ATTR; this rides on the same
+// element.
+const BLOCK_SELECTED_ATTR = 'data-block-selected';
+
 export type BlockSurfaceOptions = {
   container: HTMLElement;
   doc: Document;
@@ -137,6 +143,14 @@ export class BlockSurface {
   // The block object each top-level element was last rendered from, so the
   // incremental reconciler re-renders only the top-level blocks that changed.
   private readonly renderedFrom = new Map<string, BlockNode>();
+  // Block selection (SKR-203): the block id(s) selected as a UNIT — a code block
+  // or table acted on as an object (select it, delete it, type over it), parallel
+  // to the SKR-118 text-range model. Authoritative surface state, deliberately NOT
+  // derived from the live DOM selection (WKWebView collapses a blurred selection
+  // and drops it): while it is active the DOM selection is cleared but focus stays
+  // on the surface, so keydown still routes here. Plural-ready (it feeds
+  // removeBlocks) though today's gestures only ever select a single block.
+  private blockSel: string[] = [];
 
   constructor(opts: BlockSurfaceOptions) {
     this.container = opts.container;
@@ -187,6 +201,9 @@ export class BlockSurface {
   /** Undo the last edit (Cmd/Ctrl+Z). Restores the prior document and selection,
    *  bypassing the setter so the restore isn't itself recorded. */
   undo(): void {
+    // Any block selection is transient surface state, not in history; drop it so a
+    // restored doc never carries a stale ring (SKR-203).
+    this.clearBlockSelectionState();
     const restored = this.history.undo({ doc: this._doc, sel: readSelection(this.container) });
     if (!restored) return;
     this._doc = restored.doc;
@@ -197,6 +214,7 @@ export class BlockSurface {
 
   /** Redo the last undone edit (Cmd/Ctrl+Shift+Z / Cmd+Y). */
   redo(): void {
+    this.clearBlockSelectionState();
     const restored = this.history.redo({ doc: this._doc, sel: readSelection(this.container) });
     if (!restored) return;
     this._doc = restored.doc;
@@ -226,6 +244,12 @@ export class BlockSurface {
    *  controller priming its snapshot). Null when focus is outside the surface. */
   getSelectionInfo(): SelectionInfo | null {
     return this.selectionSummary();
+  }
+
+  /** The block ids currently selected as a unit (empty when none). A read-only view
+   *  for consumers (the SKR-124 chrome, tests); the surface owns the state. */
+  getSelectedBlockIds(): readonly string[] {
+    return this.blockSel;
   }
 
   /** Return focus to the editing surface (after a menu action that moved focus). */
@@ -268,6 +292,9 @@ export class BlockSurface {
 
   private onKeyDown = (event: Event): void => {
     const e = event as KeyboardEvent;
+    // A block is selected as a unit (SKR-203): its keys (delete / type-over /
+    // dissolve / ⌘A-to-document) are owned here, ahead of every prose handler.
+    if (this.blockSel.length > 0 && this.handleBlockSelectionKey(e)) return;
     // Cmd/Ctrl+Shift+V = paste literally (escape hatch for prose with incidental
     // * - # that would otherwise be read as Markdown). The native shell doesn't
     // issue a paste event for this chord, so we read the clipboard ourselves and
@@ -328,7 +355,27 @@ export class BlockSurface {
       if (this.handleTableArrow(e) || this.handleCodeArrow(e)) e.preventDefault();
       return;
     }
+    // Escape with the caret inside a code block / table selects it as a unit
+    // (SKR-203). Only when no overlay owns Escape: the slash menu's own capture
+    // listener stops propagation before this fires, and the link editor holds
+    // focus off the surface; the guard is belt-and-suspenders for its saved
+    // selection. Escape in prose keeps its (currently inert) native behaviour.
+    if (e.key === 'Escape') {
+      if (this.slash || this.savedLink) return;
+      const id = this.currentBarrierBlockId();
+      if (id) {
+        e.preventDefault();
+        this.selectBlock(id);
+      }
+      return;
+    }
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+    // Cmd/Ctrl+A inside a barrier escalates Notion/Docs-style: leaf text -> whole
+    // block -> document. Outside a barrier it is left to the browser's select-all.
+    if (e.key.toLowerCase() === 'a' && !e.shiftKey) {
+      if (this.handleSelectAll()) e.preventDefault();
+      return;
+    }
     // Cmd/Ctrl+Shift+8 / +7 toggle bullet / ordered list (Google-Docs parity).
     // Keyed on e.code so it is layout-independent (Shift+8 is '*' on a US layout).
     if (e.shiftKey && (e.code === 'Digit8' || e.code === 'Digit7')) {
@@ -742,9 +789,25 @@ export class BlockSurface {
     this.selScheduled = true;
     requestAnimationFrame(() => {
       this.selScheduled = false;
+      this.dissolveOnUserSelection();
       this.emitSelection();
     });
   };
+
+  /** Dissolve an active block selection when a real DOM selection appears inside
+   *  the surface — a click (or an arrow the browser resolved) placed a caret, so
+   *  the block-as-object gesture is over and the caret wins. Our own removeAllRanges
+   *  leaves rangeCount 0, so ESTABLISHING a block selection never trips this — the
+   *  self-inflicted-dissolution guard. Lives in the observer, not scattered
+   *  handlers, so every user-driven selection change routes through one place. */
+  private dissolveOnUserSelection(): void {
+    if (this.blockSel.length === 0) return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    if (!this.container.contains(range.startContainer)) return;
+    this.clearBlockSelectionState();
+  }
 
   private emitSelection(): void {
     const cb = this.selectionCb;
@@ -865,6 +928,12 @@ export class BlockSurface {
 
   private onBeforeInput = (event: Event): void => {
     if (this.composing) return; // IME composes natively; reconcile on end
+    // A block selection owns input in keydown (SKR-203); swallow any native input
+    // event that still slips through while it is active so nothing edits behind it.
+    if (this.blockSel.length > 0) {
+      (event as InputEvent).preventDefault();
+      return;
+    }
     const e = event as InputEvent;
     const type = e.inputType;
     if (type === 'historyUndo' || type === 'historyRedo') {
@@ -1687,6 +1756,182 @@ export class BlockSurface {
     const table = findBlockById(this.doc.blocks, sel.tableId);
     if (table && table.type === 'table') this.focusCell(table, sel.minRow, sel.minCol, text.length);
     this.scheduleSerialize();
+  }
+
+  // --- block selection: a code block / table as a unit (SKR-203) ------------
+
+  /** The barrier block (code block / table) the caret sits in, by id, or null when
+   *  the caret is in prose. The unit Escape and the ⌘A block-step select. */
+  private currentBarrierBlockId(): string | null {
+    const cell = this.cellTarget();
+    if (cell) return cell.tableId;
+    const t = this.leafTarget();
+    if (t && !t.spansBlocks && t.leaf.type === 'code_block') return t.leaf.id;
+    return null;
+  }
+
+  /** Select a whole block as a unit. Stores the id as authoritative state, paints
+   *  the ring, then clears the DOM selection while KEEPING focus on the surface —
+   *  so keydown still routes here and the state never depends on a live
+   *  (WKWebView-collapsible) selection. */
+  private selectBlock(id: string): void {
+    this.blockSel = [id];
+    this.renderBlockSelection();
+    window.getSelection()?.removeAllRanges();
+    this.container.focus();
+    this.emitSelection();
+  }
+
+  /** Paint the ring: clear any stale marks, then mark the current selection's
+   *  elements. Idempotent, so re-render after a reconcile is safe. */
+  private renderBlockSelection(): void {
+    for (const el of this.container.querySelectorAll(`[${BLOCK_SELECTED_ATTR}]`)) {
+      el.removeAttribute(BLOCK_SELECTED_ATTR);
+    }
+    for (const id of this.blockSel) this.leafElementById(id)?.setAttribute(BLOCK_SELECTED_ATTR, '');
+  }
+
+  /** Clear the block-selection state and its ring, without moving the caret. */
+  private clearBlockSelectionState(): void {
+    if (this.blockSel.length === 0) return;
+    this.blockSel = [];
+    for (const el of this.container.querySelectorAll(`[${BLOCK_SELECTED_ATTR}]`)) {
+      el.removeAttribute(BLOCK_SELECTED_ATTR);
+    }
+  }
+
+  /** Keys owned while a block is selected. Returns true when consumed. Undo/redo
+   *  and other chords fall through (return false) to the normal handler. */
+  private handleBlockSelectionKey(e: KeyboardEvent): boolean {
+    if (e.isComposing) return false;
+    const key = e.key;
+    // ⌘A's third step: select the whole document.
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && key.toLowerCase() === 'a' && !e.shiftKey) {
+      e.preventDefault();
+      this.selectDocument();
+      return true;
+    }
+    // Let undo/redo (and any other chord) run through the normal handler.
+    if (e.metaKey || e.ctrlKey || e.altKey) return false;
+    if (key === 'Backspace' || key === 'Delete') {
+      e.preventDefault();
+      this.deleteSelectedBlocks();
+      return true;
+    }
+    if (key === 'Escape' || key === 'ArrowUp' || key === 'ArrowLeft') {
+      e.preventDefault();
+      this.dissolveBlockSelectionToCaret('before');
+      return true;
+    }
+    if (key === 'ArrowDown' || key === 'ArrowRight') {
+      e.preventDefault();
+      this.dissolveBlockSelectionToCaret('after');
+      return true;
+    }
+    // A printable character replaces the block with a paragraph of that character.
+    if (key.length === 1) {
+      e.preventDefault();
+      this.replaceSelectedBlockWithText(key);
+      return true;
+    }
+    return false;
+  }
+
+  /** ⌘A inside a barrier, escalating leaf text -> whole block. Returns false when
+   *  the caret is not in a barrier, so the browser's own select-all runs. The
+   *  block -> document step is handled while a block is already selected. */
+  private handleSelectAll(): boolean {
+    const cell = this.cellTarget();
+    if (cell) {
+      const len = inlineLength(cell.inline);
+      const full = len === 0 || (!cell.spansCells && cell.start === 0 && cell.end === len);
+      if (full) this.selectBlock(cell.tableId);
+      else setSelectionRange(cell.cellEl, 0, len);
+      return true;
+    }
+    const t = this.leafTarget();
+    if (t && !t.spansBlocks && t.leaf.type === 'code_block') {
+      const len = t.leaf.text.length;
+      const full = len === 0 || (!t.collapsed && t.start === 0 && t.end === len);
+      if (full) this.selectBlock(t.leaf.id);
+      else setSelectionRange(t.blockEl, 0, len);
+      return true;
+    }
+    return false;
+  }
+
+  /** ⌘A's third step: dissolve the ring and select the whole document. A ranged
+   *  selection (not a post-rebuild caret), so a plain range is safe here. */
+  private selectDocument(): void {
+    this.clearBlockSelectionState();
+    const sel = window.getSelection();
+    if (!sel) return;
+    sel.removeAllRanges();
+    const range = document.createRange();
+    range.selectNodeContents(this.container);
+    sel.addRange(range);
+    this.emitSelection();
+  }
+
+  /** Delete the selected block(s) as one undo step. deleteBlock repositions the
+   *  caret onto an inline neighbour and seeds a paragraph when the doc empties. */
+  private deleteSelectedBlocks(): void {
+    const ids = this.blockSel.slice();
+    if (ids.length === 0) return;
+    this.clearBlockSelectionState();
+    // Single block is the only shape today's gestures produce.
+    if (ids.length === 1) {
+      const r = deleteBlock(this.doc.blocks, ids[0]!);
+      if (r) this.applyStructural(r);
+    } else {
+      // Plural-ready: fold the rest into the same removeBlocks so it stays one
+      // undo step, landing the caret beside the first removed block.
+      const first = deleteBlock(this.doc.blocks, ids[0]!);
+      if (first) {
+        const blocks = removeBlocks(first.blocks, new Set(ids.slice(1)));
+        this.applyStructural({ blocks, caret: first.caret });
+      }
+    }
+    this.closeSlash();
+  }
+
+  /** Typing over a selected block: replace it with a paragraph holding the typed
+   *  character, reusing the block's id + seam. One doc assignment => one undo step,
+   *  so a single undo restores the original block. */
+  private replaceSelectedBlockWithText(text: string): void {
+    const id = this.blockSel[0];
+    if (!id) return;
+    this.clearBlockSelectionState();
+    const orig = findBlockById(this.doc.blocks, id);
+    if (!orig) return;
+    const para: BlockNode = {
+      type: 'paragraph',
+      id,
+      durable: false,
+      src: null,
+      gapBefore: orig.gapBefore,
+      dirty: true,
+      inline: text ? [{ kind: 'text', text, marks: {} }] : []
+    };
+    this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, id, () => para) };
+    this.reconcile();
+    writeSelection(this.container, collapsedRange({ leaf: { kind: 'block', id }, offset: text.length }), 'structural');
+    this.scheduleSerialize();
+  }
+
+  /** Dissolve the block selection back to a text caret. 'before' lands at the end
+   *  of the previous inline leaf (or just before the block); 'after' at the start
+   *  of the next. Reuses exitBarrier, which seeds a paragraph when there is no
+   *  inline neighbour and places the caret through the robust path. */
+  private dissolveBlockSelectionToCaret(side: 'before' | 'after'): void {
+    const id = this.blockSel[0];
+    this.clearBlockSelectionState();
+    if (!id) return;
+    if (this.exitBarrier(id, side)) return;
+    // Fallback for a nested barrier exitBarrier cannot step out of: caret at the
+    // block's own start (still via sel.collapse, never a bare addRange).
+    const el = this.leafElementById(id);
+    if (el) setCaret(el, 0);
   }
 
   private newInlineBlock(type: 'paragraph' | 'heading', inline: InlineNode[], level: number): BlockNode {
