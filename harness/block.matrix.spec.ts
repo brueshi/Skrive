@@ -797,6 +797,86 @@ test('Stage 4: selecting across a divider and deleting removes it', async ({ pag
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
+// --- SKR-173: command-time resolution survives a blurred (WKWebView-collapsed)
+// selection. WKWebView collapses a blurred contenteditable's selection the moment
+// a menu takes focus; Chromium preserves it, so the gate can't reproduce the blur,
+// but it CAN simulate its effect: place/record the selection, clear the live DOM
+// selection, then drive the same command path the menu uses and assert the doc
+// changed via the saved-selection fallback. (Absorbs closed PR #52 / SKR-151.)
+
+test('SKR-173: block restyle survives selection loss (WKWebView blur simulation)', async ({ page }) => {
+  await open(page, 5);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.waitForTimeout(80); // let the rAF selection observer record the caret
+
+  await page.evaluate(() => {
+    window.getSelection()?.removeAllRanges();
+    window.__skriveBlockSurface!.setBlockType({ kind: 'heading', level: 2 });
+  });
+  await page.waitForTimeout(80);
+
+  const md = await serialized(page);
+  // The converted block re-serializes canonically, escaping the marker's underscores.
+  expect(md, 'the caret block converted despite the lost selection').toContain('## SKRIVE\\_FIRST\\_BLOCK');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('SKR-173: palette list toggle survives selection loss', async ({ page }) => {
+  await open(page, 5);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.waitForTimeout(80);
+
+  await page.evaluate(() => {
+    window.getSelection()?.removeAllRanges();
+    window.__skriveBlockSurface!.toggleList('bullet_list');
+  });
+  await page.waitForTimeout(80);
+
+  const md = await serialized(page);
+  expect(md, 'the caret block became a bullet item despite the lost selection').toContain('- SKRIVE\\_FIRST\\_BLOCK');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('SKR-173: palette link begin+commit survives selection loss', async ({ page }) => {
+  await open(page, 5);
+  await selectSentinel(page, 'LINKME'); // selects LINKME in the first block
+  await page.waitForTimeout(80); // record the range before it is lost
+
+  const applied = await page.evaluate(() => {
+    const began = window.__skriveBlockSurface!.beginLink(); // captures savedLink from the saved range
+    window.getSelection()?.removeAllRanges(); // the URL input took focus, collapsing the selection
+    window.__skriveBlockSurface!.commitLink('https://skrive.md');
+    return began;
+  });
+  await page.waitForTimeout(80);
+
+  expect(applied, 'beginLink resolved the saved range').toBe(true);
+  const md = await serialized(page);
+  expect(md, 'link applied over the saved range').toContain('[LINKME](https://skrive.md)');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('SKR-173: link cancel restores the saved selection', async ({ page }) => {
+  await open(page, 5);
+  await selectSentinel(page, 'KEEPME');
+  await page.waitForTimeout(80);
+
+  const restored = await page.evaluate(() => {
+    window.__skriveBlockSurface!.beginLink();
+    window.getSelection()?.removeAllRanges(); // the URL input collapsed the selection
+    window.__skriveBlockSurface!.cancelLink(); // Escape / click-out: must re-select the range
+    return window.getSelection()?.toString() ?? '';
+  });
+  await page.waitForTimeout(40);
+
+  expect(restored, 'the range is live again after cancel').toBe('KEEPME');
+  const md = await serialized(page);
+  // The corpus already contains links, so scope the check to the cancelled range:
+  // KEEPME stays plain text, never wrapped in a link.
+  expect(md, 'KEEPME survives as plain text').toContain('KEEPME');
+  expect(md, 'cancel never links the range').not.toContain('[KEEPME]');
+});
+
 test('Stage 3a: IME composition lands in the model', async ({ page, context }) => {
   await open(page, 200);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');

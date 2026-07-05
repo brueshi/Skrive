@@ -189,6 +189,36 @@ export function setCaret(blockEl: HTMLElement, flatOffset: number): void {
   }
 }
 
+/** Place a ranged selection from two DOM points.
+ *
+ *  Uses `setBaseAndExtent` (falling back to `collapse` + `extend`) rather than
+ *  `removeAllRanges()` + `addRange()`, for the same reason `setCaret` does: these
+ *  run right after a re-render replaced the nodes the old selection sat in, and in
+ *  WKWebView `addRange` onto a fresh node in that state can fail to COMMIT — the
+ *  highlight looks placed but `getSelection()` still reports the old, now-detached
+ *  range, so the next command resolves nothing. `setBaseAndExtent` / `extend` share
+ *  the commit path the typing hot path uses (the WKWebView caret blindspot). */
+function applyRangePoints(sel: Selection, aNode: Node, aOffset: number, bNode: Node, bOffset: number): void {
+  try {
+    sel.setBaseAndExtent(aNode, aOffset, bNode, bOffset);
+  } catch {
+    try {
+      sel.collapse(aNode, aOffset);
+      sel.extend(bNode, bOffset);
+    } catch {
+      const range = document.createRange();
+      range.setStart(aNode, aOffset);
+      try {
+        range.setEnd(bNode, bOffset);
+      } catch {
+        range.collapse(true);
+      }
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  }
+}
+
 /** Select the flat range [start, end) within a block. Used after a mark command
  *  re-renders the block, so the user keeps their selection (and the bubble stays). */
 export function setSelectionRange(blockEl: HTMLElement, start: number, end: number): void {
@@ -196,11 +226,7 @@ export function setSelectionRange(blockEl: HTMLElement, start: number, end: numb
   if (!sel) return;
   const a = domPointFromFlatOffset(blockEl, start);
   const b = domPointFromFlatOffset(blockEl, end);
-  const range = document.createRange();
-  range.setStart(a.node, a.offset);
-  range.setEnd(b.node, b.offset);
-  sel.removeAllRanges();
-  sel.addRange(range);
+  applyRangePoints(sel, a.node, a.offset, b.node, b.offset);
 }
 
 /** Select a range that starts in one block and ends in another — the restore
@@ -216,11 +242,7 @@ export function setCrossBlockSelection(
   if (!sel) return;
   const a = domPointFromFlatOffset(startEl, startOffset);
   const b = domPointFromFlatOffset(endEl, endOffset);
-  const range = document.createRange();
-  range.setStart(a.node, a.offset);
-  range.setEnd(b.node, b.offset);
-  sel.removeAllRanges();
-  sel.addRange(range);
+  applyRangePoints(sel, a.node, a.offset, b.node, b.offset);
 }
 
 export type CaretContext = {
@@ -447,6 +469,35 @@ function placeCaretRobust(node: Node, offset: number, label: string): void {
   });
 }
 
+/** Place a ranged selection robustly after a structural rebuild, mirroring
+ *  `placeCaretRobust`: the sync placement is re-asserted once on the next frame,
+ *  because WKWebView can leave a range set right after the surrounding DOM was
+ *  replaced UNCOMMITTED (the highlight looks placed but the selection still reports
+ *  the old, now-detached nodes). The re-assert is skipped when the selection
+ *  already sits on the target range, or when the user moved it to a live selection
+ *  of their own — it never fights a deliberate move. */
+function placeRangeRobust(aNode: Node, aOffset: number, bNode: Node, bOffset: number, label: string): void {
+  const sel = window.getSelection();
+  if (!sel) return;
+  applyRangePoints(sel, aNode, aOffset, bNode, bOffset);
+  caretLog(label, 'sync', aNode, aOffset);
+  if (typeof requestAnimationFrame !== 'function') return;
+  requestAnimationFrame(() => {
+    const s = window.getSelection();
+    if (!s) return;
+    if (s.anchorNode === aNode && s.focusNode === bNode) {
+      caretLog(label, 'committed', aNode, aOffset);
+      return;
+    }
+    if (s.anchorNode && s.anchorNode.isConnected && !s.isCollapsed) {
+      caretLog(label, 'user-moved', s.anchorNode, s.anchorOffset);
+      return; // a live range of the user's own = a deliberate move; don't fight it
+    }
+    applyRangePoints(s, aNode, aOffset, bNode, bOffset); // old range was detached / never committed
+    caretLog(label, 're-assert', aNode, aOffset);
+  });
+}
+
 /** Place the browser selection from a DocRange (the write half of the map). Used
  *  after a structural transform + reconcile, so it goes through the robust caret
  *  placement. `label` tags the instrumentation. */
@@ -465,7 +516,5 @@ export function writeSelection(container: HTMLElement, range: DocRange, label = 
     return;
   }
   const b = domPointFromFlatOffset(focusEl, range.focus.offset);
-  const sel = window.getSelection();
-  if (!sel) return;
-  sel.setBaseAndExtent(a.node, a.offset, b.node, b.offset);
+  placeRangeRobust(a.node, a.offset, b.node, b.offset, label);
 }
