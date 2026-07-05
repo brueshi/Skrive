@@ -36,6 +36,7 @@ import {
   splitInline,
   toggleMarkInInline
 } from './inline-ops';
+import { lineBoundaryRange, wordBoundaryRange } from './word-boundary';
 import { DocHistory, type EditKind } from './history';
 
 /** A block type the insert menu / commands can apply to the current block. */
@@ -96,6 +97,13 @@ function isInlineText(block: BlockNode): block is InlineTextBlock {
   return block.type === 'paragraph' || block.type === 'heading';
 }
 
+// A run-delete scan (SKR-165): given a leaf's text, the caret offset in it,
+// whether the leaf is a code block, and the direction, return the [from, to)
+// slice to remove. Word vs line delete differ only in this function.
+type RunScan = (text: string, caret: number, isCode: boolean, direction: 'backward' | 'forward') => [number, number];
+const wordScan: RunScan = (text, caret, _isCode, direction) => wordBoundaryRange(text, caret, direction);
+const lineScan: RunScan = (text, caret, isCode, direction) => lineBoundaryRange(text, caret, direction, isCode);
+
 /** An in-table cross-cell selection: the rectangle of covered cells to clear. */
 type CrossCellSelection = {
   kind: 'cells';
@@ -151,6 +159,11 @@ export class BlockSurface {
   // on the surface, so keydown still routes here. Plural-ready (it feeds
   // removeBlocks) though today's gestures only ever select a single block.
   private blockSel: string[] = [];
+  // A drag that started from inside this surface (a selection being dragged),
+  // as opposed to content dragged in from another app (SKR-165). Internal moves
+  // are refused honestly (dropEffect 'none') rather than silently mishandled —
+  // see onDragOver / onDrop. Set on dragstart, cleared on dragend.
+  private internalDrag = false;
 
   constructor(opts: BlockSurfaceOptions) {
     this.container = opts.container;
@@ -177,6 +190,10 @@ export class BlockSurface {
     this.container.addEventListener('compositionend', this.onCompositionEnd, true);
     this.container.addEventListener('keydown', this.onKeyDown, true);
     this.container.addEventListener('click', this.onClick);
+    this.container.addEventListener('dragstart', this.onDragStart, true);
+    this.container.addEventListener('dragover', this.onDragOver, true);
+    this.container.addEventListener('drop', this.onDrop, true);
+    this.container.addEventListener('dragend', this.onDragEnd, true);
     document.addEventListener('selectionchange', this.onDocSelectionChange);
   }
 
@@ -280,6 +297,10 @@ export class BlockSurface {
     this.container.removeEventListener('compositionend', this.onCompositionEnd, true);
     this.container.removeEventListener('keydown', this.onKeyDown, true);
     this.container.removeEventListener('click', this.onClick);
+    this.container.removeEventListener('dragstart', this.onDragStart, true);
+    this.container.removeEventListener('dragover', this.onDragOver, true);
+    this.container.removeEventListener('drop', this.onDrop, true);
+    this.container.removeEventListener('dragend', this.onDragEnd, true);
     document.removeEventListener('selectionchange', this.onDocSelectionChange);
     // Teardown cancels pending work without emitting — the caller is responsible
     // for flush()ing first if it wants the last edit saved (BlockEditor does).
@@ -955,9 +976,24 @@ export class BlockSurface {
     } else if (type === 'deleteContentForward') {
       e.preventDefault();
       this.applyDeleteForward();
+    } else if (type === 'deleteWordBackward') {
+      e.preventDefault();
+      this.applyRunDelete('backward', wordScan);
+    } else if (type === 'deleteWordForward') {
+      e.preventDefault();
+      this.applyRunDelete('forward', wordScan);
+    } else if (type === 'deleteSoftLineBackward' || type === 'deleteHardLineBackward') {
+      // WebKit emits Hard for Cmd+Backspace, Chromium Soft; both map to the same
+      // pragmatic run delete (to the text-run start — SKR-165), so accept either.
+      e.preventDefault();
+      this.applyRunDelete('backward', lineScan);
+    } else if (type === 'deleteSoftLineForward' || type === 'deleteHardLineForward') {
+      e.preventDefault();
+      this.applyRunDelete('forward', lineScan);
     } else if (type.startsWith('insert') || type.startsWith('delete')) {
-      // Still-unmodeled edits (word/line delete) — block them so the browser
-      // cannot mutate structure behind the model. Mapped to commands later.
+      // Still-unmodeled edits (e.g. insertFromDrop / deleteByDrag, handled by the
+      // drop listener instead) — block them so the browser cannot mutate structure
+      // behind the model. This catch-all is load-bearing; leave it in place.
       e.preventDefault();
     }
   };
@@ -971,25 +1007,115 @@ export class BlockSurface {
     const e = event as ClipboardEvent;
     const data = e.clipboardData;
     if (!data) return;
+    // interpretTransfer claims the gesture (preventDefault) only when the transfer
+    // actually carried something to land — an empty clipboard is left to the
+    // browser, exactly as before. A drop reuses the same body (see onDrop).
+    this.interpretTransfer(data, () => e.preventDefault());
+  };
+
+  // Land a DataTransfer's content at the current caret through the one paste
+  // pipeline (SKR-119 / SKR-165): a code block takes it verbatim, else it is
+  // parsed as Markdown blocks, else it falls back to the plain split-paste, which
+  // also handles nested/list/quote/cell contexts. A ClipboardEvent.clipboardData
+  // and a DragEvent.dataTransfer are both DataTransfer, so paste and drop share
+  // this. `claim` is invoked only when there IS interpretable content, so the
+  // caller can preventDefault conditionally (paste) or unconditionally (drop, which
+  // must always cancel the native DOM mutation). Returns whether content landed.
+  private interpretTransfer(data: DataTransfer, claim: () => void): boolean {
     const plain = data.getData('text/plain');
     const html = data.getData('text/html');
-
     // Rich HTML wins; fall back to interpreting plain text as Markdown.
     const fromHtml = html ? markdownForPaste(html) : null;
     const markdown = fromHtml ?? (plain && plain.length > 0 ? plain : null);
-    if (markdown == null) return;
-    e.preventDefault();
+    if (markdown == null) return false;
+    claim();
+    const literal = plain && plain.length > 0 ? plain : markdown;
     // A code block takes the clipboard verbatim — newlines intact, no Markdown
     // interpretation (Notion / VS Code / Obsidian all paste literally into code).
     // Must run before segmentation, which would flow the newlines to spaces (F24).
-    if (this.pasteIntoCode(plain && plain.length > 0 ? plain : markdown)) return;
+    if (this.pasteIntoCode(literal)) return true;
     // Block insert only lands at a collapsed caret in a top-level inline leaf.
     // Anywhere else (nested list/quote, code, table cell, or a selection) falls
     // back to the plain split-paste for v1 — see SKR-119 scope.
-    if (!this.insertMarkdownBlocks(markdown)) {
-      this.pasteText(plain && plain.length > 0 ? plain : markdown, 'flow');
-    }
+    if (!this.insertMarkdownBlocks(markdown)) this.pasteText(literal, 'flow');
+    return true;
+  }
+
+  // Drag-and-drop (SKR-165). External text dropped from another app lands through
+  // the same interpretation pipeline as paste, at the drop point. An internal drag
+  // (a selection dragged within the doc) is refused honestly — see onDragOver — so
+  // the OS shows the not-allowed cursor rather than the gesture silently doing
+  // nothing; reliable in-doc move needs selection lifetime + source/target
+  // reconciliation across the drag that only the real WKWebView shell can prove.
+  private onDragStart = (): void => {
+    this.internalDrag = true;
   };
+  private onDragEnd = (): void => {
+    this.internalDrag = false;
+  };
+  private onDragOver = (event: Event): void => {
+    const e = event as DragEvent;
+    if (this.internalDrag) {
+      // Refuse the internal move: no preventDefault, so `drop` never fires, and the
+      // OS shows not-allowed. An honest rejection, not silent inertness.
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+      return;
+    }
+    // An external drop is accepted; the browser only fires `drop` when dragover was
+    // preventDefaulted.
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    e.preventDefault();
+  };
+  private onDrop = (event: Event): void => {
+    const e = event as DragEvent;
+    // Never let the browser mutate the DOM directly on a drop.
+    e.preventDefault();
+    if (this.internalDrag) return; // rung: internal moves refused (see onDragOver)
+    const data = e.dataTransfer;
+    if (!data) return;
+    const point = this.resolveCaretPoint(e.clientX, e.clientY);
+    if (!point || !this.placeCaretAtPoint(point)) return; // drop landed off the doc
+    this.clearBlockSelectionState(); // a drop supersedes any block-as-unit selection
+    this.nextEditKind = 'other'; // a drop is one atomic history step
+    this.interpretTransfer(data, () => {});
+  };
+
+  // The single caret-from-point wrapper (SKR-165). caretPositionFromPoint (the
+  // spec / Firefox name) and caretRangeFromPoint (WebKit / Chromium) resolve a
+  // viewport point to a DOM position but differ in name and return shape; wrap
+  // both. Null where the platform offers neither — jsdom implements no caret-from-
+  // point, so this resolution is Playwright / shell only there.
+  private resolveCaretPoint(x: number, y: number): { node: Node; offset: number } | null {
+    // `Document` in this module is the block model's; the DOM document's caret
+    // APIs are non-standard / partial in lib.dom, so reach them structurally.
+    const doc = this.container.ownerDocument as unknown as {
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
+      caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    };
+    if (typeof doc.caretRangeFromPoint === 'function') {
+      const r = doc.caretRangeFromPoint(x, y);
+      return r ? { node: r.startContainer, offset: r.startOffset } : null;
+    }
+    if (typeof doc.caretPositionFromPoint === 'function') {
+      const p = doc.caretPositionFromPoint(x, y);
+      return p ? { node: p.offsetNode, offset: p.offset } : null;
+    }
+    return null;
+  }
+
+  // Place the caret at a resolved DOM point via sel.collapse (not addRange —
+  // WKWebView commits a collapse but can drop an added range; the caret-blindspot
+  // note). Rejects a point outside the surface so a drop onto chrome can't move
+  // the caret out of the document. Returns whether the caret was placed.
+  private placeCaretAtPoint(point: { node: Node; offset: number }): boolean {
+    if (!this.container.contains(point.node)) return false;
+    const sel = window.getSelection();
+    if (!sel) return false;
+    sel.removeAllRanges();
+    sel.collapse(point.node, point.offset);
+    this.container.focus();
+    return true;
+  }
 
   // Paste verbatim into a code block: splice the raw clipboard text — newlines and
   // all — into block.text, replacing any selection within the block. Returns false
@@ -1672,6 +1798,54 @@ export class BlockSurface {
     if (!isInlineText(t.leaf)) return;
     this.commitInline(t.leaf.id, deleteRangeInInline(t.leaf.inline, from, to), t.blockEl, from);
     this.scheduleSerialize();
+  }
+
+  // Word / line delete (SKR-165). Only a COLLAPSED caret mid-run needs the scan:
+  // it deletes the computed [from, to) slice through the same leaf-local path a
+  // plain Backspace uses (commitInline / editCodeText / commitCell), one undo
+  // step. Every other shape is byte-for-byte a plain char delete — a non-collapsed
+  // selection deletes exactly that selection, and a caret at the run edge
+  // (from === to) hands off to the boundary merge / barrier action — so it
+  // delegates to applyDeleteBackward / applyDeleteForward rather than reinventing
+  // those branches. `direction` is 'backward' (⌥⌫ / ⌘⌫) or 'forward' (their fn
+  // mirrors); `scan` is wordScan or lineScan.
+  private applyRunDelete(direction: 'backward' | 'forward', scan: RunScan): void {
+    const cell = this.cellTarget();
+    if (cell && cell.collapsed && !cell.spansCells) {
+      const [from, to] = scan(inlinePlainText(cell.inline), cell.start, false, direction);
+      if (from >= to) return this.plainDelete(direction); // at the cell edge
+      this.nextEditKind = 'other'; // a word / line delete is its own atomic step
+      this.commitCell(cell, deleteRangeInInline(cell.inline, from, to), from);
+      this.scheduleSerialize();
+      return;
+    }
+    const t = this.leafTarget();
+    if (t && t.collapsed && !t.spansBlocks && (t.leaf.type === 'code_block' || isInlineText(t.leaf))) {
+      const leaf = t.leaf;
+      if (leaf.type === 'code_block') {
+        const [from, to] = scan(leaf.text, t.start, true, direction);
+        if (from >= to) return this.plainDelete(direction); // at the code-line / block edge
+        this.nextEditKind = 'other';
+        this.editCodeText(leaf, t.blockEl, leaf.text.slice(0, from) + leaf.text.slice(to), from);
+        this.scheduleSerialize();
+        return;
+      }
+      const [from, to] = scan(inlinePlainText(leaf.inline), t.start, false, direction);
+      if (from >= to) return this.plainDelete(direction); // at the leaf edge
+      this.nextEditKind = 'other';
+      this.commitInline(leaf.id, deleteRangeInInline(leaf.inline, from, to), t.blockEl, from);
+      this.scheduleSerialize();
+      this.refreshSlash(); // an open slash menu tracks the edit, as plain delete does
+      return;
+    }
+    // A selection (delete it), no caret, or a leaf the scan doesn't own: identical
+    // to a plain char delete, which already routes every one of those shapes.
+    this.plainDelete(direction);
+  }
+
+  private plainDelete(direction: 'backward' | 'forward'): void {
+    if (direction === 'backward') this.applyDeleteBackward();
+    else this.applyDeleteForward();
   }
 
   // Backspace-at-start / Delete-at-end next to a barrier that mergeBackward /
