@@ -404,7 +404,11 @@ export class BlockSurface {
       this.toggleList(e.code === 'Digit8' ? 'bullet_list' : 'ordered_list');
       return;
     }
+    // Mark chords are unshifted (⌘B/⌘I/⌘E). ⌘⇧B and ⌘⇧E are separately bound at
+    // the app level (backlinks panel, cycle layout — see registry.ts) and must
+    // reach the window dispatcher untouched, not get eaten here too (SKR-171).
     const key = e.key.toLowerCase();
+    if (e.shiftKey) return;
     if (key === 'b') {
       e.preventDefault();
       this.toggleMark('strong');

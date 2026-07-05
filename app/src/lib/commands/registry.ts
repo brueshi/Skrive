@@ -183,6 +183,11 @@ export function dispatchKey(
   e: KeyboardEvent,
   bindings: readonly Binding[]
 ): boolean {
+  // A handler upstream (e.g. the block surface's own keydown capture) may have
+  // already consumed this chord and called preventDefault — respect that so a
+  // surface-owned shortcut and a window-level binding never both fire on the
+  // same keystroke (SKR-171).
+  if (e.defaultPrevented) return false;
   const b = matchWindowBinding(e, bindings);
   if (!b || !b.run) return false;
   if (b.when && !b.when()) return false;

@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildRegistry,
   chordMatches,
+  dispatchKey,
   matchWindowBinding,
   type CommandDeps
 } from '../src/lib/commands/registry';
@@ -43,14 +44,21 @@ function fakeEvent(opts: {
   ctrl?: boolean;
   shift?: boolean;
   alt?: boolean;
+  defaultPrevented?: boolean;
 }): KeyboardEvent {
+  let prevented = opts.defaultPrevented ?? false;
   return {
     code: opts.code,
     metaKey: opts.meta ?? false,
     ctrlKey: opts.ctrl ?? false,
     shiftKey: opts.shift ?? false,
     altKey: opts.alt ?? false,
-    preventDefault: () => {}
+    get defaultPrevented() {
+      return prevented;
+    },
+    preventDefault: () => {
+      prevented = true;
+    }
   } as unknown as KeyboardEvent;
 }
 
@@ -198,5 +206,31 @@ describe('matchWindowBinding', () => {
   it('returns null for an unbound chord', () => {
     const ev = fakeEvent({ code: 'KeyZ', meta: true, alt: true });
     expect(matchWindowBinding(ev, bindings)).toBeNull();
+  });
+});
+
+// SKR-171: the surface's own mark chord (⌘B) and the app-level ⌘⇧B binding
+// share a key, disambiguated by Shift on the surface side — but a handler
+// upstream of the window listener (the block surface's keydown capture) can
+// still consume a chord and call preventDefault before it reaches here. The
+// dispatcher must defer to that instead of double-firing.
+describe('dispatchKey defers to an upstream preventDefault', () => {
+  const { bindings } = buildRegistry(STUB_DEPS);
+
+  it('skips a chord that arrives already defaultPrevented', () => {
+    useProjectStore.setState({ tabs: [{ path: 'a.md' } as unknown as Tab], activeTabIndex: 0 });
+    const ev = fakeEvent({ code: 'KeyB', meta: true, shift: true, defaultPrevented: true });
+    expect(dispatchKey(ev, bindings)).toBe(false);
+  });
+
+  it('still dispatches a matching chord that was not consumed upstream', () => {
+    useProjectStore.setState({
+      tabs: [{ path: 'a.md' } as unknown as Tab],
+      activeTabIndex: 0,
+      backlinksPanelOpen: false
+    });
+    const ev = fakeEvent({ code: 'KeyB', meta: true, shift: true });
+    expect(dispatchKey(ev, bindings)).toBe(true);
+    expect(useProjectStore.getState().backlinksPanelOpen).toBe(true);
   });
 });
