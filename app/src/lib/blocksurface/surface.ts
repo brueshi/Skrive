@@ -150,6 +150,15 @@ export class BlockSurface {
   private selectionCb: ((info: SelectionInfo | null) => void) | null = null;
   private selScheduled = false;
   private savedLink: { blockId: string; start: number; end: number } | null = null;
+  // The last text selection observed INSIDE the surface, in MODEL coordinates (a
+  // leaf block id + a flat range; a caret is start === end), kept across focus
+  // loss. WKWebView collapses a blurred contenteditable's selection the moment a
+  // menu takes focus (Chromium preserves it, so the gate harness is blind), which
+  // made palette commands no-op because they read no live selection. Command-time
+  // resolution (currentInlineBlock / currentConvertibleBlock / leafTarget) falls
+  // back to this ONLY when the live selection is null — the generalized form of
+  // the savedLink dodge (SKR-173, absorbing SKR-151).
+  private lastSelection: { blockId: string; start: number; end: number } | null = null;
   private slash: { blockId: string; slashOffset: number } | null = null;
   private slashCb: ((state: SlashMenuState | null) => void) | null = null;
   // The block object each top-level element was last rendered from, so the
@@ -534,9 +543,21 @@ export class BlockSurface {
     this.savedLink = null;
   }
 
-  /** Discard the saved selection without touching the document (Escape / click-out). */
+  /** Dismiss the link editor without touching the document (Escape / click-out),
+   *  RESTORING the selection it was applied over. The commit path restores through
+   *  the re-render; cancel has no re-render, so it re-selects the saved range on the
+   *  live element. Focus is taken back first: the caret otherwise lands arbitrarily
+   *  in WKWebView when focus returns from the URL input to a surface with no live
+   *  selection (SKR-173 / F71). The later focusEditor() call is then a no-op. */
   cancelLink(): void {
+    const saved = this.savedLink;
     this.savedLink = null;
+    if (!saved) return;
+    const el = this.leafElementById(saved.blockId);
+    if (!el) return;
+    this.container.focus();
+    setSelectionRange(el, saved.start, saved.end);
+    this.emitSelection();
   }
 
   private applySavedLink(link: { href: string; title: string | null } | null): void {
@@ -1145,10 +1166,24 @@ export class BlockSurface {
 
   private currentInlineBlock(): CurrentInlineBlock | null {
     const ctx = caretContext(this.container, this.registry);
-    if (!ctx) return null;
-    const found = this.findBlock(ctx.blockEl);
-    if (!found || !isInlineText(found.block)) return null;
-    return { block: found.block, index: found.index, blockEl: ctx.blockEl, caret: ctx.start, collapsed: ctx.collapsed };
+    if (ctx) {
+      const found = this.findBlock(ctx.blockEl);
+      if (!found || !isInlineText(found.block)) return null;
+      return { block: found.block, index: found.index, blockEl: ctx.blockEl, caret: ctx.start, collapsed: ctx.collapsed };
+    }
+    // No live selection in the surface — fall back to the last observed range so a
+    // command from a menu that took focus still targets the right block. Only the
+    // null case falls back: a live caret in a non-inline context keeps returning
+    // null, preserving the commands' existing gating.
+    const saved = this.savedTopLevelBlock();
+    if (!saved || !isInlineText(saved.block)) return null;
+    return {
+      block: saved.block,
+      index: saved.index,
+      blockEl: saved.blockEl,
+      caret: Math.min(saved.start, inlineLength(saved.block.inline)),
+      collapsed: saved.start === saved.end
+    };
   }
 
   // The block a Turn-into acts on, with the inline content to carry across the
@@ -1157,19 +1192,54 @@ export class BlockSurface {
   // becomes a single flowed paragraph, newlines flowing to spaces (Joe's call).
   // Other barriers (table / hr / frozen) aren't convertible and return null.
   private currentConvertibleBlock(): { block: BlockNode; index: number; blockEl: HTMLElement; caret: number; inline: InlineNode[] } | null {
+    // Live caret first; on a null selection fall back to the saved top-level block
+    // so block restyle from the palette still converts after a menu took focus and
+    // WKWebView collapsed the selection. Both resolvers yield the same shape.
     const ctx = caretContext(this.container, this.registry);
-    if (!ctx) return null;
-    const found = this.findBlock(ctx.blockEl);
-    if (!found) return null;
-    if (isInlineText(found.block)) {
-      return { block: found.block, index: found.index, blockEl: ctx.blockEl, caret: ctx.start, inline: found.block.inline };
+    let block: BlockNode;
+    let index: number;
+    let blockEl: HTMLElement;
+    let caret: number;
+    if (ctx) {
+      const found = this.findBlock(ctx.blockEl);
+      if (!found) return null;
+      ({ block, index } = found);
+      blockEl = ctx.blockEl;
+      caret = ctx.start;
+    } else {
+      const saved = this.savedTopLevelBlock();
+      if (!saved) return null;
+      ({ block, index, blockEl } = saved);
+      caret = saved.start;
     }
-    if (found.block.type === 'code_block') {
-      const text = found.block.text.replace(/\n/g, ' ');
+    if (isInlineText(block)) {
+      return { block, index, blockEl, caret: Math.min(caret, inlineLength(block.inline)), inline: block.inline };
+    }
+    if (block.type === 'code_block') {
+      const text = block.text.replace(/\n/g, ' ');
       const inline: InlineNode[] = text.length > 0 ? [{ kind: 'text', text, marks: {} }] : [];
-      return { block: found.block, index: found.index, blockEl: ctx.blockEl, caret: 0, inline };
+      return { block, index, blockEl, caret: 0, inline };
     }
     return null;
+  }
+
+  /** The top-level block backing `lastSelection`, or null when the fallback must
+   *  not fire: no saved range, an active SKR-203 block selection (its commands
+   *  route through handleBlockSelectionKey, never here), or the saved block is gone
+   *  from the doc (removed / a file switch remounted the surface). The block-exists
+   *  and offset-clamp checks are the model validation the O(1) observer defers to
+   *  command time. Top-level only (registry membership); a saved caret inside a
+   *  container resolves through leafTarget's own fallback instead. */
+  private savedTopLevelBlock(): { block: BlockNode; index: number; blockEl: HTMLElement; start: number; end: number } | null {
+    if (this.blockSel.length > 0) return null;
+    const saved = this.lastSelection;
+    if (!saved) return null;
+    const index = this.doc.blocks.findIndex((b) => b.id === saved.blockId);
+    if (index < 0) return null;
+    const block = this.doc.blocks[index]!;
+    const blockEl = this.registry.get(block.id);
+    if (!blockEl) return null;
+    return { block, index, blockEl, start: saved.start, end: saved.end };
   }
 
   private handleSlashAfterInsert(text: string): void {
@@ -1239,9 +1309,25 @@ export class BlockSurface {
   }
 
   private emitSelection(): void {
+    this.recordSelection();
     const cb = this.selectionCb;
     if (!cb) return;
     cb(this.selectionSummary());
+  }
+
+  /** Keep lastSelection fresh from the rAF-coalesced selection observer, so a
+   *  command issued after focus moves to a menu (which collapses the selection in
+   *  WKWebView) still knows the range it should act on. A selection outside the
+   *  surface — or an active block selection, whose DOM selection is intentionally
+   *  cleared — records nothing, so the last in-surface range stays. This rides the
+   *  observer (once per frame), never the typing hot path; leaf resolution keeps it
+   *  O(1)-ish and model validation is left to the command-time fallback. */
+  private recordSelection(): void {
+    if (this.blockSel.length > 0) return;
+    const ctx = leafCaretContext(this.container);
+    if (!ctx) return;
+    const blockId = ctx.blockEl.getAttribute(BLOCK_ID_ATTR);
+    if (blockId != null) this.lastSelection = { blockId, start: ctx.start, end: ctx.end };
   }
 
   /** Build the current selection's formatting summary, or null when focus is
@@ -2694,12 +2780,42 @@ export class BlockSurface {
     spansBlocks: boolean;
   } | null {
     const ctx = leafCaretContext(this.container);
-    if (!ctx) return null;
-    const id = ctx.blockEl.getAttribute(BLOCK_ID_ATTR);
-    if (id == null) return null;
-    const leaf = findBlockById(this.doc.blocks, id);
+    if (ctx) {
+      const id = ctx.blockEl.getAttribute(BLOCK_ID_ATTR);
+      if (id == null) return null;
+      const leaf = findBlockById(this.doc.blocks, id);
+      if (!leaf) return null;
+      return { leaf, blockEl: ctx.blockEl, start: ctx.start, end: ctx.end, collapsed: ctx.collapsed, spansBlocks: ctx.spansBlocks };
+    }
+    return this.leafTargetFromSaved();
+  }
+
+  /** The saved-selection fallback for leafTarget: with no live selection (WKWebView
+   *  collapsed it on focus loss), reconstruct the target from the last observed
+   *  range so a palette list / link command still acts on the right leaf. Resolves
+   *  nested leaves too (findBlockById + leafElementById, unlike the top-level-only
+   *  savedTopLevelBlock). Refuses during a block selection and when the saved block
+   *  is gone; clamps the offsets to the leaf's current length. spansBlocks is false
+   *  by construction — a leaf-local saved range can never cross blocks. */
+  private leafTargetFromSaved(): {
+    leaf: BlockNode;
+    blockEl: HTMLElement;
+    start: number;
+    end: number;
+    collapsed: boolean;
+    spansBlocks: boolean;
+  } | null {
+    if (this.blockSel.length > 0) return null;
+    const saved = this.lastSelection;
+    if (!saved) return null;
+    const leaf = findBlockById(this.doc.blocks, saved.blockId);
     if (!leaf) return null;
-    return { leaf, blockEl: ctx.blockEl, start: ctx.start, end: ctx.end, collapsed: ctx.collapsed, spansBlocks: ctx.spansBlocks };
+    const blockEl = this.leafElementById(saved.blockId);
+    if (!blockEl) return null;
+    const len = isInlineText(leaf) ? inlineLength(leaf.inline) : leaf.type === 'code_block' ? leaf.text.length : 0;
+    const start = Math.min(saved.start, len);
+    const end = Math.min(saved.end, len);
+    return { leaf, blockEl, start, end, collapsed: start === end, spansBlocks: false };
   }
 
   // The focused table cell, addressed by (table id, row, col). Cells are inline
