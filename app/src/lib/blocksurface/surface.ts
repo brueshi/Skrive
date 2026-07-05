@@ -17,7 +17,7 @@ import { buildClipboardPayload } from '../clipboard/copyOut';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto, setCodeContent } from './render';
 import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange } from './doc-position';
-import { clearTableCells, deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
+import { barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
 import { findBlockById, updateBlockById } from './tree';
 import { enterInContainer, exitContainer, type StructuralResult } from './structural';
 import { changeListType, findImmediateList, indentItem, liftItemToParagraph, outdentItem } from './list-ops';
@@ -1589,6 +1589,10 @@ export class BlockSurface {
         // quote boundary too (the old merge only joined top-level paragraphs).
         const r = mergeBackward(this.doc.blocks, t.leaf.id);
         if (r) this.applyStructural(r);
+        // A null merge means the previous leaf is a barrier, not that there is
+        // none (SKR-167): a divider gets deleted outright, a code block / table
+        // gets selected instead of eating the gesture.
+        else this.handleBarrierAdjacency(t.leaf.id, 0, 'backward');
       }
       this.closeSlash();
       return;
@@ -1650,6 +1654,10 @@ export class BlockSurface {
         // Pull the next inline leaf up into this one (across a container boundary).
         const r = mergeForward(this.doc.blocks, t.leaf.id);
         if (r) this.applyStructural(r);
+        // A null merge means the next leaf is a barrier, not that there is none
+        // (SKR-167): a divider gets deleted outright, a code block / table gets
+        // selected instead of eating the gesture.
+        else this.handleBarrierAdjacency(t.leaf.id, t.start, 'forward');
       }
       return;
     }
@@ -1664,6 +1672,31 @@ export class BlockSurface {
     if (!isInlineText(t.leaf)) return;
     this.commitInline(t.leaf.id, deleteRangeInInline(t.leaf.inline, from, to), t.blockEl, from);
     this.scheduleSerialize();
+  }
+
+  // Backspace-at-start / Delete-at-end next to a barrier that mergeBackward /
+  // mergeForward refused to merge across (SKR-167): a leading divider was
+  // otherwise undeletable (there's no prose before it to select across) and a
+  // code block / table sat there un-actionable from outside it. A content-free
+  // atom (hr) deletes outright, one gesture and one undo step; a content-bearing
+  // barrier (code block / table) gets selected as a unit instead — Notion's
+  // first-Backspace-selects convention, reusing SKR-203's substrate — so a
+  // second Backspace/Delete (routed through handleBlockSelectionKey) deletes it.
+  // `offset` is the caret's own offset in `leafId`, restored after an hr delete
+  // since that leaf is untouched by removing its distant neighbour.
+  private handleBarrierAdjacency(leafId: string, offset: number, direction: 'backward' | 'forward'): void {
+    const neighbor = barrierNeighbor(this.doc.blocks, leafId, direction);
+    if (!neighbor) return; // no leaf in that direction at all: the boundary stands
+    if (neighbor.type === 'horizontal_rule') {
+      const r = deleteBlock(this.doc.blocks, neighbor.id);
+      if (r) this.applyStructural({ blocks: r.blocks, caret: { id: leafId, offset } });
+      return;
+    }
+    if (neighbor.type === 'code_block' || neighbor.type === 'table') {
+      this.selectBlock(neighbor.id);
+    }
+    // image / frozen barriers fall through unchanged: SKR-203's block-selection
+    // substrate isn't wired for them, so this stays out of scope for SKR-167.
   }
 
   // Enter: in a code block, insert a newline. Otherwise split the block — but in
