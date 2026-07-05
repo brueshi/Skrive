@@ -294,6 +294,53 @@ function addrFromNode(container: HTMLElement, node: Node): LeafAddr | null {
   return null;
 }
 
+/** A DOM element that holds a single editable position — a table cell, or a
+ *  block element with no nested block (paragraph / heading / code / table). A
+ *  list or blockquote wrapper carries a block id but nests others, so it is not a
+ *  leaf. Mirrors the leaf set `documentLeaves` walks in the model. */
+function isLeafElement(el: Element): boolean {
+  if ((el as HTMLElement).dataset?.cellRow != null) return true;
+  if (!el.hasAttribute(BLOCK_ID_ATTR)) return false;
+  return el.querySelector(`[${BLOCK_ID_ATTR}]`) === null;
+}
+
+/** The first (side 'start') or last (side 'end') leaf element within `root` in
+ *  document order, or null when `root` contains none. `root` itself wins when it
+ *  is already a leaf (a table's own element resolves to the table, not a cell). */
+function boundaryLeafElement(root: Element, side: 'start' | 'end'): HTMLElement | null {
+  if (isLeafElement(root)) return root as HTMLElement;
+  const kids = Array.from(root.children);
+  const ordered = side === 'start' ? kids : kids.slice().reverse();
+  for (const child of ordered) {
+    const found = boundaryLeafElement(child, side);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** Resolve a selection boundary that landed ABOVE any leaf — on the container or a
+ *  list / blockquote wrapper, where Cmd+A and some drags leave it — down to the
+ *  concrete leaf it borders (SKR-166): the first leaf for a start boundary, the
+ *  last for an end boundary. Without this, `readSelection` fails to address such an
+ *  endpoint and degrades a full selection to a collapsed caret. */
+function boundaryAddr(container: HTMLElement, node: Node, offset: number, side: 'start' | 'end'): LeafAddr | null {
+  // The subtree the boundary borders: the child at the offset for a point on the
+  // container, else the element itself (a wrapper the point sits directly in).
+  let root: Element | null;
+  if (node === container) {
+    const kids = container.childNodes;
+    if (kids.length === 0) return null;
+    const idx = side === 'start' ? offset : offset - 1;
+    const child = kids[Math.max(0, Math.min(idx, kids.length - 1))];
+    root = child && child.nodeType === Node.ELEMENT_NODE ? (child as Element) : null;
+  } else {
+    root = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+  }
+  if (!root) return null;
+  const leafEl = boundaryLeafElement(root, side);
+  return leafEl ? addrFromNode(container, leafEl) : null;
+}
+
 /** The element for a leaf address: the block element, or the cell within its
  *  table. Null when the leaf is not currently rendered. */
 export function leafElement(container: HTMLElement, addr: LeafAddr): HTMLElement | null {
@@ -304,6 +351,24 @@ export function leafElement(container: HTMLElement, addr: LeafAddr): HTMLElement
   return (table?.querySelector(`[data-cell-row="${addr.row}"][data-cell-col="${addr.col}"]`) as HTMLElement | null) ?? null;
 }
 
+/** Resolve one selection boundary (a DOM node + offset) to a document position.
+ *  Falls back to the bordering leaf when the point sits above any leaf (a
+ *  container / wrapper boundary), so a full selection never fails to address an
+ *  endpoint. `side` picks the first vs last leaf in that fallback. */
+function readEndpoint(container: HTMLElement, node: Node, offset: number, side: 'start' | 'end'): DocPos | null {
+  const addr = addrFromNode(container, node);
+  if (addr) {
+    const el = leafElement(container, addr);
+    if (el) return { leaf: addr, offset: flatOffsetFromDOM(el, node, offset) };
+  }
+  const boundary = boundaryAddr(container, node, offset, side);
+  if (!boundary) return null;
+  const el = leafElement(container, boundary);
+  if (!el) return null;
+  // A start boundary sits at the leaf's head; an end boundary at its full extent.
+  return { leaf: boundary, offset: side === 'start' ? 0 : subtreeWidth(el) };
+}
+
 /** Read the current browser selection as a DocRange, or null when it is outside
  *  the surface. anchor = range start, focus = range end (document order). */
 export function readSelection(container: HTMLElement): DocRange | null {
@@ -311,18 +376,12 @@ export function readSelection(container: HTMLElement): DocRange | null {
   if (!sel || sel.rangeCount === 0) return null;
   const range = sel.getRangeAt(0);
   if (!container.contains(range.startContainer)) return null;
-  const startAddr = addrFromNode(container, range.startContainer);
-  if (!startAddr) return null;
-  const startEl = leafElement(container, startAddr);
-  if (!startEl) return null;
-  const anchor: DocPos = { leaf: startAddr, offset: flatOffsetFromDOM(startEl, range.startContainer, range.startOffset) };
+  const anchor = readEndpoint(container, range.startContainer, range.startOffset, 'start');
+  if (!anchor) return null;
 
   if (range.collapsed) return { anchor, focus: anchor };
-  const endAddr = addrFromNode(container, range.endContainer);
-  const endEl = endAddr ? leafElement(container, endAddr) : null;
-  if (!endAddr || !endEl) return { anchor, focus: anchor };
-  const focus: DocPos = { leaf: endAddr, offset: flatOffsetFromDOM(endEl, range.endContainer, range.endOffset) };
-  return { anchor, focus };
+  const focus = readEndpoint(container, range.endContainer, range.endOffset, 'end');
+  return { anchor, focus: focus ?? anchor };
 }
 
 let caretDebug: boolean | null = null;
