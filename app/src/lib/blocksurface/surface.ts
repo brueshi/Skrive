@@ -20,6 +20,7 @@ import { collapsedRange, isCollapsed, type DocPos, type DocRange } from './doc-p
 import { barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
 import { findBlockById, updateBlockById } from './tree';
 import { enterInContainer, exitContainer, type StructuralResult } from './structural';
+import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
 import { changeListType, findImmediateList, indentItem, liftItemToParagraph, outdentItem } from './list-ops';
 import {
   type BooleanMark,
@@ -135,6 +136,10 @@ export class BlockSurface {
   // and delete set it so consecutive ones coalesce; everything else is its own
   // undo step.
   private nextEditKind: EditKind = 'other';
+  // Set while a compound gesture (a paste that deletes a selection THEN inserts)
+  // is running: the one snapshot is taken up front, so the setter must not record
+  // the intermediate states — the whole gesture is a single undo step (SKR-174).
+  private suppressHistory = false;
   private readonly container: HTMLElement;
   private readonly registry = new BlockViewRegistry();
   private readonly onDocChange?: (doc: Document) => void;
@@ -218,14 +223,30 @@ export class BlockSurface {
     return this._doc;
   }
   private set doc(next: Document) {
-    this.history.record(
-      this._doc,
-      () => readSelection(this.container),
-      this.nextEditKind,
-      performance.now()
-    );
-    this.nextEditKind = 'other';
+    if (!this.suppressHistory) {
+      this.history.record(
+        this._doc,
+        () => readSelection(this.container),
+        this.nextEditKind,
+        performance.now()
+      );
+      this.nextEditKind = 'other';
+    }
     this._doc = next;
+  }
+
+  /** Run a multi-step gesture (delete-then-insert paste) as ONE undo step: record
+   *  a single pre-gesture snapshot up front, then suppress the setter's per-edit
+   *  records for the duration. Selection is read now, before the delete moves it. */
+  private compoundEdit(fn: () => void): void {
+    this.history.record(this._doc, () => readSelection(this.container), 'other', performance.now());
+    this.nextEditKind = 'other';
+    this.suppressHistory = true;
+    try {
+      fn();
+    } finally {
+      this.suppressHistory = false;
+    }
   }
 
   /** Undo the last edit (Cmd/Ctrl+Z). Restores the prior document and selection,
@@ -1867,40 +1888,74 @@ export class BlockSurface {
       : [range.focus, range.anchor];
   }
 
-  // Parse `md` into blocks and insert them at a collapsed caret in a top-level
-  // inline-text block. Returns false (declining) when the caret isn't such a spot,
-  // or the parse yields nothing, so the caller can fall back to a plain paste.
+  // Parse `md` into blocks and land them at the caret, preserving structure and
+  // marks (SKR-119, extended by SKR-174). Returns false (declining) only when the
+  // parse yields nothing or the caret is a spot the plain paste owns (a table cell,
+  // a code block), so the caller falls back to pasteText. Otherwise handles it:
   //
-  // Placement (SKR-119): a lone paragraph merges inline into the caret block,
-  // carrying its marks — seamless, like typing it. Anything structured or
-  // multi-block splits the caret block: head keeps the text before the caret,
-  // the pasted blocks land between, and the tail continues after. An empty caret
-  // block is fully replaced.
+  //   - a SELECTION is deleted first through the shared delete classifier, then the
+  //     pasted blocks land at the resulting collapsed caret — the whole gesture is
+  //     one undo step (delete + insert coalesced), and structure/marks survive
+  //     because the ordinary collapsed insert runs at the join (F25/defect 1);
+  //   - a collapsed caret in a CONTAINER (list item / blockquote) grafts rather
+  //     than flattens (F25/defect 2);
+  //   - a collapsed caret in a top-level inline leaf splits the caret block, keeping
+  //     its identity — a heading never demotes to a paragraph (F25/defect 3).
+  //
+  // Inline HTML in the pasted prose is neutralized to literal text (F27/defect 4)
+  // so a stray `<tag>` doesn't freeze the whole block; block-level HTML still
+  // freezes.
   private insertMarkdownBlocks(md: string): boolean {
-    const parsed = parseDocument(md).blocks;
+    const parsed = parseDocument(md, { inlineHtmlAsText: true }).blocks;
     if (parsed.length === 0) return false;
 
+    // A selection (a range of prose, not a collapsed caret and not a table cell —
+    // cells and same-block code keep their own leaf-local paste). Delete it through
+    // the same classifier Backspace/cut use, then insert at the collapsed join.
+    const sel = this.cellTarget() ? null : this.leafTarget();
+    if (sel && !sel.collapsed && !(sel.leaf.type === 'code_block' && !sel.spansBlocks)) {
+      this.compoundEdit(() => {
+        this.deleteSelectionForPaste(sel);
+        if (!this.placeParsedAtCollapsedCaret(parsed)) this.appendMarkdownBlocks(parsed);
+      });
+      return true;
+    }
+
+    return this.placeParsedAtCollapsedCaret(parsed);
+  }
+
+  // Place already-parsed blocks at the current COLLAPSED caret. Appends when there
+  // is no caret target, grafts when the caret is nested in a container, splits the
+  // caret block when it is a top-level inline leaf, and declines (false) for a
+  // cell / code / non-inline / still-selected caret so the caller can fall back.
+  private placeParsedAtCollapsedCaret(parsed: BlockNode[]): boolean {
     const t = this.leafTarget();
     // No caret in the surface (unfocused, or a selection that doesn't resolve to a
-    // leaf — easy to hit when focus is elsewhere): append at the document end so a
-    // paste never silently vanishes, rather than declining to a fallback that also
-    // needs a caret.
+    // leaf): append at the document end so a paste never silently vanishes.
     if (!t) {
       this.appendMarkdownBlocks(parsed);
       return true;
     }
-    // A caret that isn't a collapsed, top-level inline leaf (nested list/quote,
-    // code, table cell, or a selection) falls back to the plain paste path, which
-    // handles those in place — see SKR-119 scope.
-    if (!t.collapsed || !isInlineText(t.leaf) || !this.isTopLevel(t.blockEl, t.leaf.id)) {
-      return false;
+    if (!t.collapsed) return false;
+
+    // A collapsed caret nested inside a list item / blockquote: graft the pasted
+    // blocks in (SKR-174). A single inline-only paragraph is left to the plain path
+    // so a one-line paste merges as text rather than opening a new list item.
+    if (isInlineText(t.leaf) && !this.isTopLevel(t.blockEl, t.leaf.id)) {
+      if (parsed.length === 1 && parsed[0]!.type === 'paragraph') return false;
+      return this.graftIntoContainerAt(parsed, t.leaf.id, t.start);
     }
+
+    // A caret that isn't a top-level inline leaf (code, table cell) falls back to
+    // the plain paste path, which handles those in place — see SKR-119 scope.
+    if (!isInlineText(t.leaf) || !this.isTopLevel(t.blockEl, t.leaf.id)) return false;
+
     const index = this.doc.blocks.findIndex((b) => b.id === t.leaf.id);
     if (index < 0) return false;
 
     const [head, tail] = splitInline(t.leaf.inline, t.start);
 
-    // Seamless single-paragraph merge.
+    // Seamless single-paragraph merge — like typing the text in at the caret.
     const only = parsed[0]!;
     if (parsed.length === 1 && only.type === 'paragraph') {
       const merged: BlockNode = { ...t.leaf, inline: [...head, ...only.inline, ...tail], dirty: true };
@@ -1912,50 +1967,40 @@ export class BlockSurface {
       return true;
     }
 
-    // Structured / multi-block paste: split the caret block around the insertion.
-    // A leading/trailing pasted PARAGRAPH merges with the split halves — prose
-    // continues at the caret, matching the single-paragraph seamless merge —
-    // while structural blocks (heading, list, code, ...) keep their own block.
-    const headEmpty = inlineLength(head) === 0;
-    const tailEmpty = inlineLength(tail) === 0;
-    const isHeading = t.leaf.type === 'heading';
-    const level = t.leaf.type === 'heading' ? t.leaf.level : 1;
-    // Clean seam before the first pasted block; later blocks keep the parsed gaps.
-    const inserted = parsed.map((b, i) => (i === 0 ? { ...b, gapBefore: null } : b));
-
-    const first = inserted[0]!;
-    const last = inserted[inserted.length - 1]!;
-    const firstPara = !headEmpty && first.type === 'paragraph' ? first : null;
-    const lastPara = !tailEmpty && last !== first && last.type === 'paragraph' ? last : null;
-
-    const out: BlockNode[] = [];
-    if (firstPara) {
-      out.push({ ...t.leaf, inline: [...head, ...firstPara.inline], dirty: true });
-    } else {
-      if (!headEmpty) out.push({ ...t.leaf, inline: head, dirty: true });
-      out.push(first);
-    }
-    out.push(...inserted.slice(1, lastPara ? -1 : undefined));
-
-    let caret: { id: string; offset: number };
-    if (lastPara) {
-      const merged: BlockNode = { ...lastPara, inline: [...lastPara.inline, ...tail], dirty: true };
-      out.push(merged);
-      caret = { id: merged.id, offset: inlineLength(lastPara.inline) };
-    } else if (!tailEmpty) {
-      const tailBlock = this.newInlineBlock(isHeading ? 'heading' : 'paragraph', tail, level);
-      out.push(tailBlock);
-      caret = { id: tailBlock.id, offset: 0 };
-    } else {
-      caret = this.caretAfterInserted(out, inserted);
-    }
-
+    // Structured / multi-block paste: split the caret block around the insertion,
+    // keeping its identity (a heading never demotes) — spliceParsedAtLeaf.
+    const { blocks: out, caret } = spliceParsedAtLeaf(t.leaf, t.start, parsed, generateBlockId);
     const blocks = this.doc.blocks.slice();
     blocks.splice(index, 1, ...out);
     this.doc = { ...this.doc, blocks };
     this.reconcile();
     writeSelection(this.container, collapsedRange({ leaf: { kind: 'block', id: caret.id }, offset: caret.offset }), 'paste');
     this.scheduleSerialize();
+    return true;
+  }
+
+  // Delete the current prose selection ahead of a paste, leaving a collapsed caret
+  // at the join. A cross-block / barrier range goes through the shared classifier
+  // (deleteSelectionRange — clamp/clear semantics unchanged); a within-leaf range
+  // is a leaf-local inline delete. Runs inside compoundEdit, so it records no undo
+  // step of its own.
+  private deleteSelectionForPaste(t: { leaf: BlockNode; blockEl: HTMLElement; start: number; end: number; spansBlocks: boolean }): void {
+    if (t.spansBlocks) {
+      this.deleteSelectionRange();
+      return;
+    }
+    if (!isInlineText(t.leaf)) return;
+    const inline = deleteRangeInInline(t.leaf.inline, t.start, t.end);
+    this.commitInline(t.leaf.id, inline, t.blockEl, t.start);
+  }
+
+  // Graft pasted blocks into the container holding the caret leaf (list / quote),
+  // splitting out any block a container can't hold after the top-level container.
+  // Returns false when the leaf isn't actually nested in a container.
+  private graftIntoContainerAt(parsed: BlockNode[], leafId: string, offset: number): boolean {
+    const result = graftIntoContainer(this.doc.blocks, leafId, offset, parsed, generateBlockId);
+    if (!result) return false;
+    this.applyStructural(result);
     return true;
   }
 

@@ -33,9 +33,15 @@ import type {
 export type ParseOptions = {
   /** Block id generator. Inject a deterministic one for tests. */
   generateId?: () => string;
+  /** Treat raw INLINE HTML (`a <span> b`) as literal text instead of freezing the
+   *  paragraph that holds it. Off by default so file-open / parity keep the safe
+   *  frozen classification; the paste path opts in so prose carrying a stray tag
+   *  stays editable (the tag renders literally) — SKR-174 / F27. Block-level HTML
+   *  is untouched either way: it never reaches inline mapping. */
+  inlineHtmlAsText?: boolean;
 };
 
-type ParseCtx = { md: string; genId: () => string };
+type ParseCtx = { md: string; genId: () => string; inlineHtmlAsText: boolean };
 
 type WithOffsets = { position?: { start: { offset?: number }; end: { offset?: number } } };
 function offsetStart(node: WithOffsets, fallback: number): number {
@@ -68,7 +74,11 @@ function nestedBase(genId: () => string): BlockBaseInit {
 // first construct the model cannot canonically reproduce from the block alone —
 // raw inline HTML and reference-style links/images — telling the caller to freeze
 // the containing block verbatim.
-function inlineToModel(nodes: PhrasingContent[] | undefined, marks: InlineMarks): InlineNode[] | null {
+function inlineToModel(
+  nodes: PhrasingContent[] | undefined,
+  marks: InlineMarks,
+  ctx: ParseCtx
+): InlineNode[] | null {
   if (!nodes) return [];
   const out: InlineNode[] = [];
   for (const n of nodes) {
@@ -80,25 +90,25 @@ function inlineToModel(nodes: PhrasingContent[] | undefined, marks: InlineMarks)
         if (n.value) out.push({ kind: 'text', text: n.value, marks: { ...marks, code: true } });
         break;
       case 'emphasis': {
-        const kids = inlineToModel(n.children, { ...marks, em: true });
+        const kids = inlineToModel(n.children, { ...marks, em: true }, ctx);
         if (!kids) return null;
         out.push(...kids);
         break;
       }
       case 'strong': {
-        const kids = inlineToModel(n.children, { ...marks, strong: true });
+        const kids = inlineToModel(n.children, { ...marks, strong: true }, ctx);
         if (!kids) return null;
         out.push(...kids);
         break;
       }
       case 'delete': {
-        const kids = inlineToModel(n.children, { ...marks, strikethrough: true });
+        const kids = inlineToModel(n.children, { ...marks, strikethrough: true }, ctx);
         if (!kids) return null;
         out.push(...kids);
         break;
       }
       case 'link': {
-        const kids = inlineToModel(n.children, { ...marks, link: { href: n.url ?? '', title: n.title ?? null } });
+        const kids = inlineToModel(n.children, { ...marks, link: { href: n.url ?? '', title: n.title ?? null } }, ctx);
         if (!kids) return null;
         out.push(...kids);
         break;
@@ -109,8 +119,17 @@ function inlineToModel(nodes: PhrasingContent[] | undefined, marks: InlineMarks)
       case 'break':
         out.push({ kind: 'break', marks: { ...marks } });
         break;
+      case 'html':
+        // Raw inline HTML. On the paste path (inlineHtmlAsText) keep it as literal
+        // text so the surrounding prose stays an editable paragraph and the tag
+        // renders verbatim; otherwise freeze the block (SKR-174 / F27).
+        if (ctx.inlineHtmlAsText) {
+          if (n.value) out.push({ kind: 'text', text: n.value, marks: { ...marks } });
+          break;
+        }
+        return null;
       default:
-        // html, linkReference, imageReference — freezing beats lossy plain text.
+        // linkReference, imageReference — freezing beats lossy plain text.
         return null;
     }
   }
@@ -181,7 +200,7 @@ function listToModel(node: List, ctx: ParseCtx, base: BlockBaseInit): BlockNode 
   return { type: 'bullet_list', ...base, marker: bulletMarker(node, ctx.md), spread, items };
 }
 
-function tableToModel(node: Table, base: BlockBaseInit): BlockNode | null {
+function tableToModel(node: Table, base: BlockBaseInit, ctx: ParseCtx): BlockNode | null {
   const rowsM = node.children ?? [];
   if (rowsM.length === 0) return null;
   const colCount = (rowsM[0]?.children ?? []).length;
@@ -196,7 +215,7 @@ function tableToModel(node: Table, base: BlockBaseInit): BlockNode | null {
     const cells: TableCell[] = [];
     for (let c = 0; c < colCount; c++) {
       const cell = row?.children?.[c];
-      const inline = cell ? inlineToModel(cell.children, {}) : [];
+      const inline = cell ? inlineToModel(cell.children, {}, ctx) : [];
       if (!inline) return null; // unmappable cell -> freeze the table
       cells.push(inline);
     }
@@ -212,11 +231,11 @@ function childBlockToModel(node: RootContent, ctx: ParseCtx): BlockNode | null {
   const base = nestedBase(ctx.genId);
   switch (node.type) {
     case 'paragraph': {
-      const inline = inlineToModel(node.children, {});
+      const inline = inlineToModel(node.children, {}, ctx);
       return inline ? { type: 'paragraph', ...base, inline } : null;
     }
     case 'heading': {
-      const inline = inlineToModel(node.children, {});
+      const inline = inlineToModel(node.children, {}, ctx);
       return inline ? { type: 'heading', ...base, level: node.depth, inline } : null;
     }
     case 'code':
@@ -265,11 +284,11 @@ function blockToModel(
   const base = topBase(id, durable, src, gapBefore);
   switch (node.type) {
     case 'heading': {
-      const inline = inlineToModel(node.children, {});
+      const inline = inlineToModel(node.children, {}, ctx);
       return inline ? { type: 'heading', ...base, level: node.depth, inline } : frozen(src, gapBefore, id, durable);
     }
     case 'paragraph': {
-      const inline = inlineToModel(node.children, {});
+      const inline = inlineToModel(node.children, {}, ctx);
       return inline ? { type: 'paragraph', ...base, inline } : frozen(src, gapBefore, id, durable);
     }
     case 'code':
@@ -290,7 +309,7 @@ function blockToModel(
     case 'list':
       return listToModel(node, ctx, base) ?? frozen(src, gapBefore, id, durable);
     case 'table':
-      return tableToModel(node, base) ?? frozen(src, gapBefore, id, durable);
+      return tableToModel(node, base, ctx) ?? frozen(src, gapBefore, id, durable);
     default:
       // HTML, definitions, footnotes, etc.: preserved verbatim, never canonicalized.
       return frozen(src, gapBefore, id, durable);
@@ -304,7 +323,7 @@ function blockToModel(
  */
 export function parseDocument(md: string, options?: ParseOptions): Document {
   const genId = options?.generateId ?? generateBlockId;
-  const ctx: ParseCtx = { md, genId };
+  const ctx: ParseCtx = { md, genId, inlineHtmlAsText: options?.inlineHtmlAsText === true };
   const root = parseMarkdown(md);
   const children = root.children ?? [];
 
