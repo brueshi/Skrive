@@ -10,7 +10,7 @@
 // are no-ops until Stage 3b — never letting the browser mutate structure behind
 // the model's back.
 
-import { generateBlockId, parseDocument, serializeDocument, type BlockNode, type Document, type InlineNode, type TableBlock } from '../blockmodel';
+import { generateBlockId, parseDocument, serializeDocument, type BlockNode, type Document, type InlineNode, type ListItem, type TableBlock } from '../blockmodel';
 import { markdownForPaste } from '../clipboard/htmlToMarkdown';
 import { plainTextParagraphs } from '../clipboard/plainText';
 import { buildClipboardPayload } from '../clipboard/copyOut';
@@ -357,6 +357,16 @@ export class BlockSurface {
         }
         return;
       }
+      // A multi-item list selection indents/outdents every covered item together
+      // (SKR-169 / F50) rather than dead-ending in native focus escape.
+      const listLeafIds = this.selectedLeaves()
+        .filter((l) => findImmediateList(this.doc.blocks, l.leaf.id))
+        .map((l) => l.leaf.id);
+      if (listLeafIds.length > 1) {
+        e.preventDefault();
+        this.applyListIndentRange(listLeafIds, e.shiftKey);
+        return;
+      }
       const t = this.leafTarget();
       if (t && !t.spansBlocks && isInlineText(t.leaf) && findImmediateList(this.doc.blocks, t.leaf.id)) {
         e.preventDefault();
@@ -579,6 +589,27 @@ export class BlockSurface {
    *  after it. The branch lives here so every caller (toolbar, palette, slash)
    *  gets it for free. */
   setBlockType(spec: BlockTypeSpec): void {
+    // Multi-block textblock conversions (Text / Heading / Code) map over every
+    // covered inline-text leaf as one history step, mirroring the mark commands
+    // (SKR-169 / F50). Barriers are skipped for free: selectedLeaves only yields
+    // inline-text leaves. Container wraps (list/quote) and divider/table on a
+    // multi-block selection go through the dedicated toggles / the paths below.
+    if (spec.kind === 'paragraph' || spec.kind === 'heading' || spec.kind === 'code') {
+      const leaves = this.selectedLeaves();
+      if (leaves.length > 1) {
+        this.convertLeavesInPlace(leaves, spec);
+        return;
+      }
+    }
+    // A collapsed caret (or a within-block selection) whose leaf is nested inside a
+    // container: the top-level resolver below lands on the list/quote wrapper and
+    // bails, so the toolbar looks enabled but the conversion no-ops (SKR-169 / F84).
+    // Route these to the container-aware path.
+    const leaf = this.leafTarget();
+    if (leaf && !this.isTopLevel(leaf.blockEl, leaf.leaf.id)) {
+      this.setBlockTypeNested(leaf.leaf.id, leaf.start, spec);
+      return;
+    }
     const cur = this.currentConvertibleBlock();
     if (!cur) return;
     const empty = inlineLength(cur.inline) === 0;
@@ -591,50 +622,8 @@ export class BlockSurface {
       this.insertTableAfter(cur);
       return;
     }
-    // A type change invalidates the captured src (it would re-serialize as the old
-    // construct), so drop it; the seam gap is unchanged.
-    const base = { id: cur.block.id, durable: cur.block.durable, src: null, gapBefore: cur.block.gapBefore, dirty: true };
-    const inline = cur.inline;
 
-    // Container conversions wrap the inline in a fresh nested paragraph (which gets
-    // its own id) so the caret lands in an editable leaf inside the container.
-    let next: BlockNode;
-    let caretLeafId: string | null = null;
-    switch (spec.kind) {
-      case 'heading':
-        next = { type: 'heading', ...base, level: spec.level, inline };
-        break;
-      case 'blockquote': {
-        const inner = this.newInlineBlock('paragraph', inline, 1);
-        caretLeafId = inner.id;
-        next = { type: 'blockquote', ...base, children: [inner] };
-        break;
-      }
-      case 'bullet_list': {
-        const inner = this.newInlineBlock('paragraph', inline, 1);
-        caretLeafId = inner.id;
-        next = { type: 'bullet_list', ...base, marker: '-', spread: false, items: [{ spread: false, children: [inner] }] };
-        break;
-      }
-      case 'ordered_list': {
-        const inner = this.newInlineBlock('paragraph', inline, 1);
-        caretLeafId = inner.id;
-        next = { type: 'ordered_list', ...base, start: spec.start ?? 1, delimiter: spec.delimiter ?? '.', spread: false, items: [{ spread: false, children: [inner] }] };
-        break;
-      }
-      case 'code':
-        next = { type: 'code_block', ...base, lang: '', meta: null, fence: null, text: inlinePlainText(inline) };
-        break;
-      case 'table':
-        // A starter 2x2 table (header row + one body row), empty cells.
-        next = { type: 'table', ...base, align: [null, null], rows: [[[], []], [[], []]] };
-        break;
-      case 'paragraph':
-      default:
-        next = { type: 'paragraph', ...base, inline };
-        break;
-    }
-
+    const { node: next, caretLeafId } = this.convertedBlock(spec, cur.block);
     this.commitBlock(cur.index, next);
     const newEl = renderBlock(next);
     cur.blockEl.replaceWith(newEl);
@@ -648,9 +637,139 @@ export class BlockSurface {
       const caretEl = caretLeafId
         ? ((newEl.querySelector(`[${BLOCK_ID_ATTR}="${caretLeafId}"]`) as HTMLElement | null) ?? newEl)
         : newEl;
-      setCaret(caretEl, Math.min(cur.caret, inlineLength(inline)));
+      setCaret(caretEl, Math.min(cur.caret, inlineLength(this.inlineOf(cur.block))));
     }
     this.scheduleSerialize();
+  }
+
+  /** Mark a block dirty for re-serialization, leaving a frozen block (which has no
+   *  dirty flag and re-emits verbatim) untouched — the guard liftItemToParagraph
+   *  uses, shared by the wrap/unwrap toggles that re-home blocks. */
+  private dirtyBlock(b: BlockNode): BlockNode {
+    return b.type === 'frozen_block' ? b : ({ ...b, dirty: true } as BlockNode);
+  }
+
+  /** The inline content a conversion carries across from a source block: a
+   *  paragraph/heading's own inline, or a code block's text flowed to a single run
+   *  (newlines -> spaces, per SKR-168). Other block kinds carry no inline. */
+  private inlineOf(source: BlockNode): InlineNode[] {
+    if (isInlineText(source)) return source.inline;
+    if (source.type === 'code_block') {
+      const text = source.text.replace(/\n/g, ' ');
+      return text.length > 0 ? [{ kind: 'text', text, marks: {} }] : [];
+    }
+    return [];
+  }
+
+  /** Build the block a type conversion produces from `source`, reusing its id and
+   *  seam. Textblock kinds keep the id and carry the inline across; container kinds
+   *  wrap a fresh nested paragraph (its own id, returned as caretLeafId, so the
+   *  caret lands in an editable leaf). The single source of truth the top-level,
+   *  nested, and multi-block converts all build from, so the three can't drift. A
+   *  type change drops the captured src (it would re-serialize as the old
+   *  construct); the seam gap is unchanged. */
+  private convertedBlock(spec: BlockTypeSpec, source: BlockNode): { node: BlockNode; caretLeafId: string | null } {
+    const base = { id: source.id, durable: source.durable, src: null, gapBefore: source.gapBefore, dirty: true };
+    const inline = this.inlineOf(source);
+    switch (spec.kind) {
+      case 'heading':
+        return { node: { type: 'heading', ...base, level: spec.level, inline }, caretLeafId: null };
+      case 'blockquote': {
+        const inner = this.newInlineBlock('paragraph', inline, 1);
+        return { node: { type: 'blockquote', ...base, children: [inner] }, caretLeafId: inner.id };
+      }
+      case 'bullet_list': {
+        const inner = this.newInlineBlock('paragraph', inline, 1);
+        return { node: { type: 'bullet_list', ...base, marker: '-', spread: false, items: [{ spread: false, children: [inner] }] }, caretLeafId: inner.id };
+      }
+      case 'ordered_list': {
+        const inner = this.newInlineBlock('paragraph', inline, 1);
+        return { node: { type: 'ordered_list', ...base, start: spec.start ?? 1, delimiter: spec.delimiter ?? '.', spread: false, items: [{ spread: false, children: [inner] }] }, caretLeafId: inner.id };
+      }
+      case 'code':
+        return { node: { type: 'code_block', ...base, lang: '', meta: null, fence: null, text: inlinePlainText(inline) }, caretLeafId: null };
+      case 'table':
+        // A starter 2x2 table (header row + one body row), empty cells.
+        return { node: { type: 'table', ...base, align: [null, null], rows: [[[], []], [[], []]] }, caretLeafId: null };
+      case 'divider':
+        return { node: { type: 'horizontal_rule', ...base }, caretLeafId: null };
+      case 'paragraph':
+      default:
+        return { node: { type: 'paragraph', ...base, inline }, caretLeafId: null };
+    }
+  }
+
+  /** Multi-block "Turn into": convert every covered inline-text leaf in place, as
+   *  one history step (one doc assignment). Barriers were already filtered out by
+   *  selectedLeaves. Restores the same highlight the user acted on. */
+  private convertLeavesInPlace(
+    leaves: ReadonlyArray<{ leaf: InlineTextBlock; start: number; end: number }>,
+    spec: BlockTypeSpec
+  ): void {
+    let blocks = this.doc.blocks;
+    for (const l of leaves) {
+      blocks = updateBlockById(blocks, l.leaf.id, (b) => this.convertedBlock(spec, b).node);
+    }
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    const first = leaves[0];
+    const last = leaves[leaves.length - 1];
+    if (first && last) {
+      const firstEl = this.leafElementById(first.leaf.id);
+      const lastEl = this.leafElementById(last.leaf.id);
+      if (firstEl && lastEl) {
+        if (firstEl === lastEl) setSelectionRange(firstEl, first.start, last.end);
+        else setCrossBlockSelection(firstEl, first.start, lastEl, last.end);
+      }
+    }
+    this.scheduleSerialize();
+    this.emitSelection();
+  }
+
+  /** Convert a leaf nested inside a container (SKR-169 / F84). Divider/table insert
+   *  AFTER the enclosing top-level container (never inside the list/quote). A leaf
+   *  inside a LIST item is lifted out of the list first (Notion behavior) by
+   *  composing the existing outdent/lift ops, so headings and paragraphs land at
+   *  top level; a leaf inside a BLOCKQUOTE converts in place (a quote legitimately
+   *  contains headings). Both do exactly one doc assignment => one history step. */
+  private setBlockTypeNested(leafId: string, offset: number, spec: BlockTypeSpec): void {
+    if (spec.kind === 'divider' || spec.kind === 'table') {
+      this.insertBesideContainer(leafId, spec);
+      return;
+    }
+    let blocks = this.doc.blocks;
+    // A list item lifts out of its list before converting: outdent until it is a
+    // top-level item, then lift it to a top-level block. The leaf keeps its id, so
+    // the follow-up type change and the caret restore both still address it.
+    if (findImmediateList(blocks, leafId)) {
+      let out: BlockNode[] | null;
+      while ((out = outdentItem(blocks, leafId, generateBlockId)) !== null) blocks = out;
+      const lifted = liftItemToParagraph(blocks, leafId, generateBlockId);
+      if (lifted) blocks = lifted;
+    }
+    const source = findBlockById(blocks, leafId);
+    if (!source) return;
+    const { node, caretLeafId } = this.convertedBlock(spec, source);
+    const clamped = Math.min(offset, inlineLength(this.inlineOf(source)));
+    blocks = updateBlockById(blocks, leafId, () => node);
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    writeSelection(
+      this.container,
+      collapsedRange({ leaf: { kind: 'block', id: caretLeafId ?? leafId }, offset: clamped }),
+      'structural'
+    );
+    this.scheduleSerialize();
+  }
+
+  /** Insert a divider/table after the top-level block that encloses `leafId`, per
+   *  SKR-170's insert-beside semantics — never inside the list/quote the leaf lives
+   *  in. Reuses the top-level insert-after helpers on the container's index. */
+  private insertBesideContainer(leafId: string, spec: BlockTypeSpec): void {
+    const index = this.doc.blocks.findIndex((b) => findBlockById([b], leafId) !== null);
+    if (index < 0) return;
+    if (spec.kind === 'divider') this.insertDividerAfter({ index });
+    else if (spec.kind === 'table') this.insertTableAfter({ index });
   }
 
   private replaceWithDivider(cur: { block: BlockNode; index: number; blockEl: HTMLElement }): void {
@@ -744,10 +863,40 @@ export class BlockSurface {
     if (blocks) this.applyStructural({ blocks, caret: { id: leafId, offset } });
   }
 
-  /** Toggle the focused block to/from a list of `target` kind (Cmd/Ctrl+Shift+8/7).
-   *  Not in a list -> wrap into one; in a list of the same kind -> outdent/lift off;
-   *  in a list of the other kind -> switch the kind. */
+  /** Apply Tab/Shift+Tab to every selected list item as one history step (SKR-169 /
+   *  F50), so a multi-item selection indents/outdents together instead of falling
+   *  through to native focus escape. Items are processed in document order over the
+   *  evolving tree; ids are preserved by the ops, so the range restore still holds. */
+  private applyListIndentRange(leafIds: string[], outdent: boolean): void {
+    let blocks = this.doc.blocks;
+    for (const id of leafIds) {
+      const next = outdent
+        ? (outdentItem(blocks, id, generateBlockId) ?? liftItemToParagraph(blocks, id, generateBlockId))
+        : indentItem(blocks, id, generateBlockId);
+      if (next) blocks = next;
+    }
+    if (blocks === this.doc.blocks) return; // nothing applied (e.g. all items first-in-list)
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    this.restoreRangeAcross(leafIds[0]!, leafIds[leafIds.length - 1]!);
+    this.scheduleSerialize();
+    this.emitSelection();
+  }
+
+  /** Toggle the focused block(s) to/from a list of `target` kind (Cmd/Ctrl+Shift+8/7,
+   *  toolbar). A multi-block selection wraps the covered top-level blocks into one
+   *  list (or unwraps when they are all already that kind). A single caret: not in a
+   *  list -> wrap into one; in a list of the same kind -> outdent/lift off; in a
+   *  list of the other kind -> switch the kind. */
   toggleList(target: 'bullet_list' | 'ordered_list'): void {
+    const tops = this.selectedTopLevelBlocks();
+    // Multi when the selection spans several top-level blocks OR several leaves of
+    // one container (a multi-item list) — the latter is how a repeat toggle, whose
+    // range now sits inside the single wrapped list, still unwraps every item.
+    if (tops.length > 0 && (tops.length > 1 || this.selectedLeaves().length > 1)) {
+      this.toggleListMulti(tops, target);
+      return;
+    }
     const t = this.leafTarget();
     if (!t || t.spansBlocks || !isInlineText(t.leaf)) return;
     const list = findImmediateList(this.doc.blocks, t.leaf.id);
@@ -761,6 +910,165 @@ export class BlockSurface {
     }
     const blocks = changeListType(this.doc.blocks, t.leaf.id, target);
     if (blocks) this.applyStructural({ blocks, caret: { id: t.leaf.id, offset: t.start } });
+  }
+
+  /** Wrap the selected contiguous top-level blocks into ONE list of `target` kind,
+   *  or unwrap them when every one is already that kind (the toggle-off). An
+   *  existing list among the selection contributes its items (so lists merge rather
+   *  than nest); every other block becomes one item. One doc assignment. */
+  private toggleListMulti(tops: Array<{ id: string; index: number }>, target: 'bullet_list' | 'ordered_list'): void {
+    const blocks = this.doc.blocks;
+    const first = tops[0]!.index;
+    const last = tops[tops.length - 1]!.index;
+    const run = blocks.slice(first, last + 1);
+    const out = blocks.slice();
+
+    if (run.every((b) => b.type === target)) {
+      // Unwrap: drop each list, lifting its items' children to top level in place.
+      const lifted: BlockNode[] = [];
+      for (const b of run) {
+        if (b.type === 'bullet_list' || b.type === 'ordered_list') {
+          for (const item of b.items) for (const child of item.children) lifted.push(this.dirtyBlock(child));
+        } else {
+          lifted.push(b);
+        }
+      }
+      out.splice(first, run.length, ...lifted);
+      this.commitWrapToggle(out, lifted[0] ?? null, lifted[lifted.length - 1] ?? null);
+      return;
+    }
+
+    const items: ListItem[] = [];
+    for (const b of run) {
+      if (b.type === 'bullet_list' || b.type === 'ordered_list') items.push(...b.items);
+      else items.push({ spread: false, children: [this.dirtyBlock(b)] });
+    }
+    const base = { id: generateBlockId(), durable: false, src: null, gapBefore: run[0]!.gapBefore, dirty: true };
+    const list: BlockNode =
+      target === 'ordered_list'
+        ? { type: 'ordered_list', ...base, start: 1, delimiter: '.', spread: false, items }
+        : { type: 'bullet_list', ...base, marker: '-', spread: false, items };
+    out.splice(first, run.length, list);
+    this.commitWrapToggle(out, list, list);
+  }
+
+  /** Toggle the selected top-level blocks into / out of a single blockquote (SKR-169
+   *  / F50). Multi-block wraps the covered blocks into one quote (or unwraps when
+   *  all are quotes). A single caret in a top-level quote unwraps it; elsewhere it
+   *  wraps (delegating to setBlockType, which lifts a list item first). */
+  toggleQuote(): void {
+    const tops = this.selectedTopLevelBlocks();
+    if (tops.length > 0 && (tops.length > 1 || this.selectedLeaves().length > 1)) {
+      this.toggleQuoteMulti(tops);
+      return;
+    }
+    const t = this.leafTarget();
+    if (!t || t.spansBlocks || !isInlineText(t.leaf)) return;
+    const index = this.doc.blocks.findIndex((b) => findBlockById([b], t.leaf.id) !== null);
+    const top = index >= 0 ? this.doc.blocks[index] : null;
+    if (top && top.type === 'blockquote') {
+      // Unwrap: replace the quote with its children, lifted to top level.
+      const out = this.doc.blocks.slice();
+      out.splice(index, 1, ...top.children.map((c) => this.dirtyBlock(c)));
+      this.doc = { ...this.doc, blocks: out };
+      this.reconcile();
+      writeSelection(this.container, collapsedRange({ leaf: { kind: 'block', id: t.leaf.id }, offset: t.start }), 'structural');
+      this.scheduleSerialize();
+      this.emitSelection();
+      return;
+    }
+    this.setBlockType({ kind: 'blockquote' });
+  }
+
+  private toggleQuoteMulti(tops: Array<{ id: string; index: number }>): void {
+    const blocks = this.doc.blocks;
+    const first = tops[0]!.index;
+    const last = tops[tops.length - 1]!.index;
+    const run = blocks.slice(first, last + 1);
+    const out = blocks.slice();
+
+    if (run.every((b) => b.type === 'blockquote')) {
+      const lifted: BlockNode[] = [];
+      for (const b of run) {
+        if (b.type === 'blockquote') for (const child of b.children) lifted.push(this.dirtyBlock(child));
+      }
+      out.splice(first, run.length, ...lifted);
+      this.commitWrapToggle(out, lifted[0] ?? null, lifted[lifted.length - 1] ?? null);
+      return;
+    }
+
+    const children: BlockNode[] = [];
+    for (const b of run) {
+      if (b.type === 'blockquote') for (const child of b.children) children.push(this.dirtyBlock(child));
+      else children.push(this.dirtyBlock(b));
+    }
+    const quote: BlockNode = {
+      type: 'blockquote',
+      id: generateBlockId(),
+      durable: false,
+      src: null,
+      gapBefore: run[0]!.gapBefore,
+      dirty: true,
+      children
+    };
+    out.splice(first, run.length, quote);
+    this.commitWrapToggle(out, quote, quote);
+  }
+
+  /** Assign the wrapped/unwrapped blocks and restore a highlight spanning the
+   *  result's first-to-last leaf, so a repeat toggle sees the same span and can
+   *  reverse it (Docs behaviour). One doc assignment => one history step. */
+  private commitWrapToggle(blocks: BlockNode[], firstBlock: BlockNode | null, lastBlock: BlockNode | null): void {
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    const firstId = firstBlock ? this.firstLeafId(firstBlock) : null;
+    const lastId = lastBlock ? this.lastLeafId(lastBlock) : null;
+    if (firstId && lastId) this.restoreRangeAcross(firstId, lastId);
+    this.scheduleSerialize();
+    this.emitSelection();
+  }
+
+  /** The contiguous run of top-level blocks the current selection intersects, in
+   *  document order. The unit multi-block wrap toggles and Turn-into operate on. */
+  private selectedTopLevelBlocks(): Array<{ id: string; index: number }> {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return [];
+    const range = sel.getRangeAt(0);
+    const out: Array<{ id: string; index: number }> = [];
+    this.doc.blocks.forEach((b, index) => {
+      const el = this.registry.get(b.id);
+      if (el && range.intersectsNode(el)) out.push({ id: b.id, index });
+    });
+    return out;
+  }
+
+  /** The first / last editable leaf id within a block (descending into containers),
+   *  for restoring a selection across a freshly wrapped or unwrapped run. */
+  private firstLeafId(block: BlockNode): string | null {
+    return documentLeaves([block])[0]?.id ?? null;
+  }
+  private lastLeafId(block: BlockNode): string | null {
+    const leaves = documentLeaves([block]);
+    return leaves[leaves.length - 1]?.id ?? null;
+  }
+
+  /** Restore a highlight from the start of one leaf to the end of another (each
+   *  addressed by id, resolved through the post-reconcile DOM). Collapses to a
+   *  single-leaf range when the two coincide. */
+  private restoreRangeAcross(firstLeafId: string, lastLeafId: string): void {
+    const firstEl = this.leafElementById(firstLeafId);
+    const lastEl = this.leafElementById(lastLeafId);
+    if (!firstEl || !lastEl) return;
+    const lastBlock = findBlockById(this.doc.blocks, lastLeafId);
+    const lastLen = lastBlock
+      ? isInlineText(lastBlock)
+        ? inlineLength(lastBlock.inline)
+        : lastBlock.type === 'code_block'
+          ? lastBlock.text.length
+          : 0
+      : 0;
+    if (firstEl === lastEl) setSelectionRange(firstEl, 0, lastLen);
+    else setCrossBlockSelection(firstEl, 0, lastEl, lastLen);
   }
 
   /** Affordance input rule: a typed space after a list marker at the start of a

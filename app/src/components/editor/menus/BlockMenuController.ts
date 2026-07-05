@@ -89,10 +89,7 @@ export class BlockMenuController implements MenuController {
     this.surface.toggleList('ordered_list');
   }
   toggleBlockquote(): void {
-    // The bespoke surface has no quote-toggle yet; wrapping again would nest, so
-    // act only when not already in a quote (the button still shows active state).
-    if (this.selection.inBlockquote) return;
-    this.surface.setBlockType({ kind: 'blockquote' });
+    this.surface.toggleQuote();
   }
   insertDivider(): void {
     this.surface.setBlockType({ kind: 'divider' });
