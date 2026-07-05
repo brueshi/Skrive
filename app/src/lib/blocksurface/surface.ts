@@ -1032,8 +1032,26 @@ export class BlockSurface {
     this.writeSelectionToClipboard(event as ClipboardEvent);
   };
 
+  // Cut (SKR-164): deletability is decided BEFORE anything touches the clipboard,
+  // so a range that can't actually be deleted never silently degrades to a copy.
+  // A block selected as a unit (SKR-203) has no DOM range to read at all — it
+  // gets its own path. A plain collapsed selection is left to the browser
+  // unchanged, same as before this fix.
   private onCut = (event: Event): void => {
-    if (this.writeSelectionToClipboard(event as ClipboardEvent)) this.deleteSelection();
+    const e = event as ClipboardEvent;
+    if (this.blockSel.length > 0) {
+      this.cutBlockSelection(e);
+      return;
+    }
+    const range = readSelection(this.container);
+    if (!range || isCollapsed(range)) return; // nothing selected: leave to the browser
+    const plan = this.planRangeCutDeletion();
+    if (!plan) {
+      e.preventDefault(); // genuinely undeletable: decline rather than degrade to copy
+      return;
+    }
+    if (!this.writeSelectionToClipboard(e)) return; // nothing serializes either: leave to the browser
+    plan();
   };
 
   // Write the current selection to the clipboard as Markdown (text/plain) + its
@@ -1138,19 +1156,79 @@ export class BlockSurface {
     return serializeDocument({ blocks: sliced, trailingGap: '' });
   }
 
-  // Delete the current selection (the cut path). Mirrors a Backspace over a
-  // selection; a discrete undo step.
-  private deleteSelection(): void {
-    const range = readSelection(this.container);
-    if (!range || isCollapsed(range)) return;
-    const norm = this.normalizeSelection(range);
-    if (!norm) return;
-    if (norm.kind === 'cells') {
-      this.clearCrossCells(norm);
+  // Plan the deletion half of a cut over the current window selection, computed
+  // (not applied) before anything touches the clipboard (SKR-164). A same-leaf
+  // range — within one code block, within one table cell — routes through the
+  // leaf-local paths Backspace already uses (editCodeText / commitCell), because
+  // deleteAcross only ever addresses a CROSS-leaf range (its same-id branch is for
+  // plain prose, not a barrier) and clearTableCells would otherwise wipe the whole
+  // cell instead of the selected slice. Cross-cell / barrier-crossing ranges reuse
+  // the SKR-166 classifier via planBarrierCrossingDeletion. Null when there is
+  // genuinely nothing addressable to delete — the caller declines the cut.
+  private planRangeCutDeletion(): (() => void) | null {
+    const cell = this.cellTarget();
+    if (cell) {
+      if (cell.spansCells) return this.planBarrierCrossingDeletion();
+      if (cell.collapsed) return null;
+      return () => this.commitCell(cell, deleteRangeInInline(cell.inline, cell.start, cell.end), cell.start);
+    }
+    const t = this.leafTarget();
+    if (!t) return null;
+    if (t.spansBlocks) return this.planBarrierCrossingDeletion();
+    if (t.collapsed) return null;
+    if (t.leaf.type === 'code_block') {
+      const leaf = t.leaf;
+      const blockEl = t.blockEl;
+      const start = t.start;
+      const end = t.end;
+      return () => this.editCodeText(leaf, blockEl, leaf.text.slice(0, start) + leaf.text.slice(end), start);
+    }
+    if (!isInlineText(t.leaf)) return null;
+    const id = t.leaf.id;
+    const start = t.start;
+    const end = t.end;
+    return () => {
+      const r = deleteAcross(this.doc.blocks, id, start, id, end);
+      if (r) this.applyStructural(r);
+    };
+  }
+
+  // Cut a block selected as a unit (SKR-203 / SKR-164). There is no DOM range to
+  // read here — the selection is authoritative surface state — so the payload is
+  // built directly from the model rather than through writeSelectionToClipboard,
+  // then the block is removed via the substrate's existing deleteSelectedBlocks
+  // (one undo step, same as Backspace on a block selection). Declines outright
+  // (clipboard and model both untouched) when the selection doesn't resolve to
+  // something serializable, never a silent half-cut.
+  private cutBlockSelection(e: ClipboardEvent): void {
+    const ids = this.blockSel.slice();
+    const data = e.clipboardData;
+    const md = data ? this.serializeBlockSelectionMarkdown(ids) : null;
+    if (!data || md == null) {
+      e.preventDefault();
       return;
     }
-    const r = deleteAcross(this.doc.blocks, norm.start.id, norm.start.offset, norm.end.id, norm.end.offset);
-    if (r) this.applyStructural(r);
+    const { text, html } = buildClipboardPayload(md);
+    data.setData('text/plain', text);
+    data.setData('text/html', html);
+    e.preventDefault();
+    this.deleteSelectedBlocks();
+  }
+
+  // Serialize the selected block(s) to Markdown exactly as copy would for a range
+  // fully covering them: the same serializeDocument primitive the whole-heading
+  // copy branch above uses, applied to whichever barriers are selected. Null when
+  // any id isn't a code block / table — a block selection is only ever one of
+  // those (SKR-203), so this is a defensive guard, not a real fallback.
+  private serializeBlockSelectionMarkdown(ids: string[]): string | null {
+    const blocks: BlockNode[] = [];
+    for (const id of ids) {
+      const block = findBlockById(this.doc.blocks, id);
+      if (!block || (block.type !== 'code_block' && block.type !== 'table')) return null;
+      blocks.push({ ...block, gapBefore: null, dirty: true } as BlockNode);
+    }
+    if (blocks.length === 0) return null;
+    return serializeDocument({ blocks, trailingGap: '' });
   }
 
   // Order a selection's endpoints into document order (start before end).
@@ -1598,7 +1676,14 @@ export class BlockSurface {
     // the Markdown floor, so it wouldn't round-trip until .folio.)
     const cell = this.cellTarget();
     if (cell) {
-      if (cell.spansCells) return;
+      // A cross-cell / table-crossing selection was a silent no-op until SKR-164
+      // (166 fixed Backspace/Delete/type-over but left Enter behind): clear/clamp
+      // it first, exactly like those, then re-run Enter at the resulting collapsed
+      // caret so it gets ordinary Enter semantics rather than an invented split.
+      if (cell.spansCells) {
+        this.enterOverSelection();
+        return;
+      }
       const table = findBlockById(this.doc.blocks, cell.tableId);
       if (!table || table.type !== 'table') return;
       if (cell.row < table.rows.length - 1) this.focusCell(table, cell.row + 1, cell.col, cell.start);
@@ -1606,7 +1691,11 @@ export class BlockSurface {
       return;
     }
     const t = this.leafTarget();
-    if (!t || t.spansBlocks) return;
+    if (!t) return;
+    if (t.spansBlocks) {
+      this.enterOverSelection();
+      return;
+    }
     if (t.leaf.type === 'code_block') {
       this.editCodeText(t.leaf, t.blockEl, t.leaf.text.slice(0, t.start) + '\n' + t.leaf.text.slice(t.end), t.start + 1);
       this.scheduleSerialize();
@@ -1656,6 +1745,22 @@ export class BlockSurface {
     this.scheduleSerialize();
   }
 
+  // Enter over a cross-cell or table-crossing selection (SKR-164, the Enter
+  // sibling of SKR-166's Backspace/Delete/type-over fix): clear the covered cells
+  // or clamp to the prose edges — the same classifier deleteSelectionRange uses —
+  // then re-run Enter at the resulting collapsed caret, so the caller gets
+  // whatever Enter already does there (step to the cell below / split the
+  // surviving prose) instead of a split rule invented for the selection shape.
+  // A shape the clamp can't address (no prose survives between two adjacent
+  // barriers) leaves the selection unchanged, so bail rather than loop.
+  private enterOverSelection(): void {
+    this.deleteSelectionRange();
+    this.closeSlash();
+    const after = readSelection(this.container);
+    if (!after || !isCollapsed(after)) return;
+    this.applyEnter();
+  }
+
   // Boundary merges (Backspace at a block start, Delete at a block end) and
   // cross-block selection delete / replace all go through the document range ops
   // (range-ops.ts) and applyStructural — one spine, container-aware, instead of
@@ -1666,17 +1771,24 @@ export class BlockSurface {
   // that crosses a barrier (table / code) is clamped to the prose edges, so the
   // barrier survives and the prose up to it is deleted (SKR-166).
   private deleteSelectionRange(): void {
+    const plan = this.planBarrierCrossingDeletion();
+    if (plan) plan();
+  }
+
+  // Compute (without applying) the deletion for a cross-cell or barrier-crossing
+  // selection, so a caller can know whether it will do anything before committing
+  // to a side effect (cut needs this — SKR-164). Null when the range holds no
+  // prose to delete at all (e.g. two adjacent barriers with nothing between them)
+  // or is a single leaf (the leaf-local path handles that shape instead).
+  private planBarrierCrossingDeletion(): (() => void) | null {
     const range = readSelection(this.container);
-    if (!range || isCollapsed(range)) return;
+    if (!range || isCollapsed(range)) return null;
     const norm = this.normalizeSelection(range);
-    if (!norm) return;
-    if (norm.kind === 'cells') {
-      this.clearCrossCells(norm);
-      return;
-    }
-    if (norm.start.id === norm.end.id) return; // single leaf: the block-local path handles it
-    const r = deleteAcross(this.doc.blocks, norm.start.id, norm.start.offset, norm.end.id, norm.end.offset);
-    if (r) this.applyStructural(r);
+    if (!norm) return null;
+    if (norm.kind === 'cells') return () => this.clearCrossCells(norm);
+    if (norm.start.id === norm.end.id) return null; // single leaf: the block-local path handles it
+    const result = deleteAcross(this.doc.blocks, norm.start.id, norm.start.offset, norm.end.id, norm.end.offset);
+    return result ? () => this.applyStructural(result) : null;
   }
 
   // Replace the current cross-block selection with typed / pasted text. Mirrors
