@@ -260,3 +260,11 @@
   margin: 0.3rem -0.3rem;
   background: var(--skrive-rule);
 }
+
+/* Zero-match state (SKR-172 / F68): same padding rhythm as a row, but quiet —
+   no hover/active surface, since it isn't a target. */
+.rich-slash-empty {
+  padding: 0.45rem 0.55rem;
+  color: var(--skrive-muted);
+  font-size: 0.9em;
+}

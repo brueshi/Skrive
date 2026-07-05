@@ -97,6 +97,10 @@ function isInlineText(block: BlockNode): block is InlineTextBlock {
   return block.type === 'paragraph' || block.type === 'heading';
 }
 
+/** The caret's resolved position, when it sits in an inline-text block (the
+ *  editable target for typing, marks, list rules, and the slash menu). */
+type CurrentInlineBlock = { block: InlineTextBlock; index: number; blockEl: HTMLElement; caret: number; collapsed: boolean };
+
 // A run-delete scan (SKR-165): given a leaf's text, the caret offset in it,
 // whether the leaf is a code block, and the direction, return the [from, to)
 // slice to remove. Word vs line delete differ only in this function.
@@ -729,18 +733,25 @@ export class BlockSurface {
   }
 
   /** Apply an insert-menu choice: strip the `/query` text, then set the block
-   *  type. Called by the menu (which preserves the caret on mousedown). */
+   *  type. Called by the menu (which preserves the caret on mousedown).
+   *
+   *  Belt-and-suspenders (SKR-172): the menu's own selection can go stale — the
+   *  selection observer that would otherwise close the session is rAF-async, so
+   *  a fast click-into-another-block-then-Enter can reach here before it runs.
+   *  Refuse instead of converting whatever block the caret currently sits in. */
   applySlashCommand(spec: BlockTypeSpec): void {
     const slash = this.slash;
     if (!slash) return;
     const cur = this.currentInlineBlock();
-    if (cur && cur.block.id === slash.blockId) {
-      const text = inlinePlainText(cur.block.inline);
-      const inline = deleteRangeInInline(cur.block.inline, slash.slashOffset, text.length);
-      this.commitBlock(cur.index, { ...cur.block, inline, dirty: true });
-      renderInlineInto(cur.blockEl, inline);
-      setCaret(cur.blockEl, slash.slashOffset);
+    if (!this.slashCaretIntact(cur)) {
+      this.closeSlash();
+      return;
     }
+    const text = inlinePlainText(cur.block.inline);
+    const inline = deleteRangeInInline(cur.block.inline, slash.slashOffset, text.length);
+    this.commitBlock(cur.index, { ...cur.block, inline, dirty: true });
+    renderInlineInto(cur.blockEl, inline);
+    setCaret(cur.blockEl, slash.slashOffset);
     this.closeSlash();
     this.setBlockType(spec);
   }
@@ -751,12 +762,22 @@ export class BlockSurface {
     this.slashCb?.(null);
   }
 
-  private currentInlineBlock(): { block: InlineTextBlock; index: number; blockEl: HTMLElement; caret: number } | null {
+  /** True while `cur` is a collapsed caret still inside the active slash
+   *  session's block — the only state in which the session may continue.
+   *  Shared by refreshSlash (after an edit), applySlashCommand (the
+   *  belt-and-suspenders recheck), and the selection observer (a pure caret
+   *  move, with no edit to hang a refresh off of). A type predicate so callers
+   *  get `cur` narrowed to non-null on the true branch. */
+  private slashCaretIntact(cur: CurrentInlineBlock | null): cur is CurrentInlineBlock {
+    return !!cur && !!this.slash && cur.block.id === this.slash.blockId && cur.collapsed;
+  }
+
+  private currentInlineBlock(): CurrentInlineBlock | null {
     const ctx = caretContext(this.container, this.registry);
     if (!ctx) return null;
     const found = this.findBlock(ctx.blockEl);
     if (!found || !isInlineText(found.block)) return null;
-    return { block: found.block, index: found.index, blockEl: ctx.blockEl, caret: ctx.start };
+    return { block: found.block, index: found.index, blockEl: ctx.blockEl, caret: ctx.start, collapsed: ctx.collapsed };
   }
 
   // The block a Turn-into acts on, with the inline content to carry across the
@@ -794,7 +815,7 @@ export class BlockSurface {
   private refreshSlash(): void {
     if (!this.slash) return;
     const cur = this.currentInlineBlock();
-    if (!cur || cur.block.id !== this.slash.blockId) return this.closeSlash();
+    if (!this.slashCaretIntact(cur)) return this.closeSlash();
     const text = inlinePlainText(cur.block.inline);
     if (text[this.slash.slashOffset] !== '/') return this.closeSlash();
     const query = text.slice(this.slash.slashOffset + 1, cur.caret);
@@ -815,6 +836,7 @@ export class BlockSurface {
     requestAnimationFrame(() => {
       this.selScheduled = false;
       this.dissolveOnUserSelection();
+      this.closeSlashOnSelectionMove();
       this.emitSelection();
     });
   };
@@ -832,6 +854,17 @@ export class BlockSurface {
     const range = sel.getRangeAt(0);
     if (!this.container.contains(range.startContainer)) return;
     this.clearBlockSelectionState();
+  }
+
+  /** Close an open slash session when the selection moves out from under it —
+   *  a click into another block, a drag that turns the caret into a range, or
+   *  focus leaving the surface (SKR-172 / F69). refreshSlash already closes on
+   *  a stale block after an EDIT; this covers a pure selection move with no
+   *  edit to hang a refresh off of. Reuses the same intact-caret check so the
+   *  two paths can't drift apart. */
+  private closeSlashOnSelectionMove(): void {
+    if (!this.slash) return;
+    if (!this.slashCaretIntact(this.currentInlineBlock())) this.closeSlash();
   }
 
   private emitSelection(): void {

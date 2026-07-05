@@ -7,9 +7,13 @@
 // drivers buys no visual parity. So this keeps the bespoke driver and shares only
 // the presentation; full unification is deferred to the Stage-6 affordance registry.
 //
-// While open, a capture-phase keydown owns Arrow/Enter/Escape — calling BOTH
-// preventDefault AND stopPropagation — so the surface's own keydown (Enter = split)
-// never also fires.
+// While open, a capture-phase keydown owns Escape unconditionally, and Arrow/
+// Enter only while there is at least one match — calling BOTH preventDefault AND
+// stopPropagation so the surface's own keydown (Enter = split) never also fires.
+// A zero-match query (SKR-172 / F68) renders a quiet "No matches" row instead of
+// nothing, and lets Enter/arrows fall through to normal editing rather than
+// preventDefault-ing into `items[undefined]` no-ops; the session stays open so
+// deleting back to a matching query brings the list back live.
 
 import { Fragment, useEffect, useMemo, useState, type ComponentType, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -67,6 +71,7 @@ export function BlockSlashMenu({ surface }: { surface: BlockSurface }) {
   const [state, setState] = useState<SlashMenuState | null>(null);
   const [active, setActive] = useState(0);
   const reduced = useReducedMotion();
+  const isOpen = state != null;
 
   useEffect(() => {
     surface.onSlashMenu(setState);
@@ -74,7 +79,14 @@ export function BlockSlashMenu({ surface }: { surface: BlockSurface }) {
   }, [surface]);
 
   const items = useMemo(() => filterItems(state?.query ?? ''), [state?.query]);
-  const visible = state != null && items.length > 0;
+  const visible = isOpen;
+
+  // A session opening (not a query narrowing within one that's already open)
+  // always starts the highlight back at the first item (SKR-172 papercut) — a
+  // reopen must not carry over where the previous session left off.
+  useEffect(() => {
+    if (isOpen) setActive(0);
+  }, [isOpen]);
 
   // Keep the active index in range as the filter narrows.
   useEffect(() => {
@@ -84,7 +96,21 @@ export function BlockSlashMenu({ surface }: { surface: BlockSurface }) {
   useEffect(() => {
     if (!state) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(e.key)) return;
+      // Escape always closes, even with zero matches — it is the guaranteed way
+      // out of the session regardless of what the query narrowed to.
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        surface.closeSlash();
+        return;
+      }
+      // Zero matches (SKR-172 / F68): nothing renders to navigate, so Arrow/
+      // Enter are left alone to fall through to normal editing (Enter splits
+      // the block; refreshSlash then closes the session once the `/` run is
+      // gone or the caret left the block). The session itself stays open so
+      // deleting back to a matching query re-shows the list live.
+      if (items.length === 0) return;
+      if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) return;
       // Own these keys fully while open: stopPropagation so the surface's own
       // capture-phase keydown (Enter = split) never also fires on this event.
       e.preventDefault();
@@ -94,7 +120,7 @@ export function BlockSlashMenu({ surface }: { surface: BlockSurface }) {
       else if (e.key === 'Enter') {
         const item = items[active];
         if (item) surface.applySlashCommand(item.spec);
-      } else if (e.key === 'Escape') surface.closeSlash();
+      }
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
@@ -118,6 +144,7 @@ export function BlockSlashMenu({ surface }: { surface: BlockSurface }) {
           transition={{ duration: 0.12 }}
           onMouseDown={(e) => e.preventDefault()}
         >
+          {items.length === 0 && <div className="rich-slash-empty">No matches</div>}
           {items.map((item, i) => {
             const isActive = i === active;
             const prev = items[i - 1];
