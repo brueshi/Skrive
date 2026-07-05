@@ -16,8 +16,8 @@ import { plainTextParagraphs } from '../clipboard/plainText';
 import { buildClipboardPayload } from '../clipboard/copyOut';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto, setCodeContent } from './render';
 import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
-import { collapsedRange, isCollapsed, sameLeaf, type DocPos, type DocRange } from './doc-position';
-import { deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
+import { collapsedRange, isCollapsed, type DocPos, type DocRange } from './doc-position';
+import { clearTableCells, deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
 import { findBlockById, updateBlockById } from './tree';
 import { enterInContainer, exitContainer, type StructuralResult } from './structural';
 import { changeListType, findImmediateList, indentItem, liftItemToParagraph, outdentItem } from './list-ops';
@@ -89,6 +89,24 @@ type InlineTextBlock = Extract<BlockNode, { type: 'paragraph' | 'heading' }>;
 function isInlineText(block: BlockNode): block is InlineTextBlock {
   return block.type === 'paragraph' || block.type === 'heading';
 }
+
+/** An in-table cross-cell selection: the rectangle of covered cells to clear. */
+type CrossCellSelection = {
+  kind: 'cells';
+  tableId: string;
+  minRow: number;
+  maxRow: number;
+  minCol: number;
+  maxCol: number;
+};
+
+/** A cross-block selection reduced to two block-leaf endpoints in document order,
+ *  with any table-cell endpoint mapped to the table's barrier position. */
+type NormalizedBlockRange = {
+  kind: 'blocks';
+  start: { id: string; offset: number };
+  end: { id: string; offset: number };
+};
 
 export class BlockSurface {
   // Authoritative document. Assigned through the `doc` setter everywhere except
@@ -1056,9 +1074,13 @@ export class BlockSurface {
   private deleteSelection(): void {
     const range = readSelection(this.container);
     if (!range || isCollapsed(range)) return;
-    const [start, end] = this.orderRange(range);
-    if (start.leaf.kind !== 'block' || end.leaf.kind !== 'block') return;
-    const r = deleteAcross(this.doc.blocks, start.leaf.id, start.offset, end.leaf.id, end.offset);
+    const norm = this.normalizeSelection(range);
+    if (!norm) return;
+    if (norm.kind === 'cells') {
+      this.clearCrossCells(norm);
+      return;
+    }
+    const r = deleteAcross(this.doc.blocks, norm.start.id, norm.start.offset, norm.end.id, norm.end.offset);
     if (r) this.applyStructural(r);
   }
 
@@ -1316,7 +1338,12 @@ export class BlockSurface {
     this.nextEditKind = 'type'; // consecutive keystrokes coalesce into one undo
     const cell = this.cellTarget();
     if (cell) {
-      if (cell.spansCells) return;
+      // Typing over a cross-cell / table-crossing selection replaces it rather
+      // than eating the keystroke (SKR-166); replaceSelectionRange classifies.
+      if (cell.spansCells) {
+        this.replaceSelectionRange(text);
+        return;
+      }
       if (cell.collapsed && this.surgicalInsert(text)) {
         this.updateCellModel(cell, insertTextInInline(cell.inline, cell.start, text));
       } else {
@@ -1365,10 +1392,12 @@ export class BlockSurface {
     this.nextEditKind = 'delete'; // consecutive deletes coalesce into one undo
     const cell = this.cellTarget();
     if (cell) {
-      // A selection dragged across cells means "delete the whole table" (the
-      // select-it-and-hit-Delete gesture); a barrier can't be partial-cut.
+      // A selection dragged across cells (or out of the table) is barrier-aware:
+      // clear the covered cells, or clamp a table-crossing range to the prose edges
+      // — the table survives either way (SKR-166). deleteSelectionRange classifies.
       if (cell.spansCells) {
-        this.removeTable(cell.tableId);
+        this.deleteSelectionRange();
+        this.closeSlash();
         return;
       }
       if (cell.collapsed && cell.start === 0) return; // start of cell: no merge back
@@ -1391,7 +1420,7 @@ export class BlockSurface {
       return;
     }
 
-    // Backspace on an EMPTY code block deletes it (mirror of removeTable); a
+    // Backspace on an EMPTY code block deletes it (via deleteBlock); a
     // non-empty block keeps its no-op boundary (SKR-152). Checked independent of
     // the reported offset: an empty <code> carries a placeholder <br>, whose
     // range.toString() length is 0 in Chromium but can read as 1 in WKWebView —
@@ -1443,9 +1472,10 @@ export class BlockSurface {
     this.nextEditKind = 'delete'; // consecutive deletes coalesce into one undo
     const cell = this.cellTarget();
     if (cell) {
-      // Cross-cell selection: delete the whole table (mirror of Backspace).
+      // Cross-cell / table-crossing selection: same barrier-aware handling as
+      // Backspace (clear covered cells, or clamp to the prose edges).
       if (cell.spansCells) {
-        this.removeTable(cell.tableId);
+        this.deleteSelectionRange();
         return;
       }
       const cellLen = inlineLength(cell.inline);
@@ -1562,26 +1592,101 @@ export class BlockSurface {
   // (range-ops.ts) and applyStructural — one spine, container-aware, instead of
   // the old top-level-only splices.
 
-  // Delete the current cross-block selection as a single range op. Clamps (no-op)
-  // when an endpoint is a table cell, or a barrier (table / code) lies in the
-  // range — a text range never corrupts one.
+  // Delete the current cross-block selection as a single range op. An in-table
+  // cross-cell selection clears the covered cells (table survives); a selection
+  // that crosses a barrier (table / code) is clamped to the prose edges, so the
+  // barrier survives and the prose up to it is deleted (SKR-166).
   private deleteSelectionRange(): void {
     const range = readSelection(this.container);
     if (!range || isCollapsed(range)) return;
-    if (range.anchor.leaf.kind !== 'block' || range.focus.leaf.kind !== 'block') return;
-    if (sameLeaf(range.anchor.leaf, range.focus.leaf)) return; // single leaf: normal path
-    const r = deleteAcross(this.doc.blocks, range.anchor.leaf.id, range.anchor.offset, range.focus.leaf.id, range.focus.offset);
+    const norm = this.normalizeSelection(range);
+    if (!norm) return;
+    if (norm.kind === 'cells') {
+      this.clearCrossCells(norm);
+      return;
+    }
+    if (norm.start.id === norm.end.id) return; // single leaf: the block-local path handles it
+    const r = deleteAcross(this.doc.blocks, norm.start.id, norm.start.offset, norm.end.id, norm.end.offset);
     if (r) this.applyStructural(r);
   }
 
-  // Replace the current cross-block selection with typed / pasted text.
+  // Replace the current cross-block selection with typed / pasted text. Mirrors
+  // deleteSelectionRange's classification: cross-cell clears the covered cells and
+  // types into the first, a barrier-crossing range clamps to the prose edges.
   private replaceSelectionRange(text: string): void {
     const range = readSelection(this.container);
     if (!range || isCollapsed(range)) return;
-    if (range.anchor.leaf.kind !== 'block' || range.focus.leaf.kind !== 'block') return;
-    if (sameLeaf(range.anchor.leaf, range.focus.leaf)) return;
-    const r = replaceAcross(this.doc.blocks, range.anchor.leaf.id, range.anchor.offset, range.focus.leaf.id, range.focus.offset, text);
+    const norm = this.normalizeSelection(range);
+    if (!norm) return;
+    if (norm.kind === 'cells') {
+      this.replaceCrossCells(norm, text);
+      return;
+    }
+    if (norm.start.id === norm.end.id) return;
+    const r = replaceAcross(this.doc.blocks, norm.start.id, norm.start.offset, norm.end.id, norm.end.offset, text);
     if (r) this.applyStructural(r);
+  }
+
+  // Classify a cross-endpoint selection into the two barrier-aware shapes
+  // (SKR-166 / F55): an in-table cross-cell selection (both endpoints cells of the
+  // same table) that clears the covered cells, versus a block range whose cell
+  // endpoints are mapped to their table's barrier position so deleteAcross snaps
+  // them inward. Endpoints are returned in document order. Null when unaddressable.
+  private normalizeSelection(range: DocRange): CrossCellSelection | NormalizedBlockRange | null {
+    const a = range.anchor.leaf;
+    const f = range.focus.leaf;
+    if (a.kind === 'cell' && f.kind === 'cell' && a.tableId === f.tableId) {
+      return {
+        kind: 'cells',
+        tableId: a.tableId,
+        minRow: Math.min(a.row, f.row),
+        maxRow: Math.max(a.row, f.row),
+        minCol: Math.min(a.col, f.col),
+        maxCol: Math.max(a.col, f.col)
+      };
+    }
+    // Map a cell endpoint to its table's barrier position (offset is irrelevant —
+    // deleteAcross snaps a barrier endpoint away). A prose endpoint keeps its offset.
+    const anchor = a.kind === 'cell' ? { id: a.tableId, offset: 0 } : { id: a.id, offset: range.anchor.offset };
+    const focus = f.kind === 'cell' ? { id: f.tableId, offset: 0 } : { id: f.id, offset: range.focus.offset };
+    const leaves = documentLeaves(this.doc.blocks);
+    const ai = leaves.findIndex((l) => l.id === anchor.id);
+    const fi = leaves.findIndex((l) => l.id === focus.id);
+    if (ai < 0 || fi < 0) return null;
+    const [start, end] = ai < fi || (ai === fi && anchor.offset <= focus.offset) ? [anchor, focus] : [focus, anchor];
+    return { kind: 'blocks', start, end };
+  }
+
+  // Empty every cell the selection covers, then land the caret at the top-left of
+  // the cleared block. The table and its shape survive (the Docs cross-cell delete).
+  private clearCrossCells(sel: CrossCellSelection): void {
+    const blocks = clearTableCells(this.doc.blocks, sel.tableId, sel.minRow, sel.minCol, sel.maxRow, sel.maxCol);
+    if (!blocks) return;
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    const table = findBlockById(this.doc.blocks, sel.tableId);
+    if (table && table.type === 'table') this.focusCell(table, sel.minRow, sel.minCol, 0);
+    this.scheduleSerialize();
+    this.closeSlash();
+  }
+
+  // Clear the covered cells, then type `text` into the top-left one — the cross-cell
+  // equivalent of replacing a prose selection.
+  private replaceCrossCells(sel: CrossCellSelection, text: string): void {
+    const cleared = clearTableCells(this.doc.blocks, sel.tableId, sel.minRow, sel.minCol, sel.maxRow, sel.maxCol);
+    if (!cleared) return;
+    const blocks = updateBlockById(cleared, sel.tableId, (b) => {
+      if (b.type !== 'table') return b;
+      const rows = b.rows.map((row, r) =>
+        r === sel.minRow ? row.map((cell, c) => (c === sel.minCol ? insertTextInInline([], 0, text) : cell)) : row
+      );
+      return { ...b, rows, dirty: true } as BlockNode;
+    });
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    const table = findBlockById(this.doc.blocks, sel.tableId);
+    if (table && table.type === 'table') this.focusCell(table, sel.minRow, sel.minCol, text.length);
+    this.scheduleSerialize();
   }
 
   private newInlineBlock(type: 'paragraph' | 'heading', inline: InlineNode[], level: number): BlockNode {
@@ -1831,14 +1936,6 @@ export class BlockSurface {
     writeSelection(this.container, collapsedRange({ leaf: { kind: 'block', id: para.id }, offset: 0 }), 'structural');
     this.scheduleSerialize();
     return true;
-  }
-
-  // Delete a whole table (the select-across-cells gesture). Removes the block and
-  // lands the caret on the nearest inline neighbour (see range-ops.deleteBlock).
-  private removeTable(tableId: string): void {
-    const r = deleteBlock(this.doc.blocks, tableId);
-    if (r) this.applyStructural(r);
-    this.closeSlash();
   }
 
   private leafElementById(id: string): HTMLElement | null {

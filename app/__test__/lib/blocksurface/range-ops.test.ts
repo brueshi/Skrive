@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  clearTableCells,
   deleteAcross,
   deleteBlock,
   mergeBackward,
@@ -108,12 +109,39 @@ describe('deleteAcross', () => {
     expect(ser(r!.blocks, d)).toBe('ab\n');
   });
 
-  it('clamps when an endpoint is inside a code block (no partial cut)', () => {
+  it('shrinks a range ending inside a code block to the prose edge (SKR-166)', () => {
     const d = doc('abc\n\n```\ncode\n```\n');
-    // The code block has no inline leaf; a range ending in it cannot be addressed
-    // as an inline endpoint, so deleteAcross declines.
+    // The end lands in the code block (a barrier). Rather than eat the gesture,
+    // the end snaps back to the end of "abc": its tail is deleted, the code block
+    // survives untouched.
     const codeId = d.blocks.find((b) => b.type === 'code_block')!.id;
-    expect(deleteAcross(d.blocks, leafId(d.blocks, 'abc'), 1, codeId, 0)).toBeNull();
+    const r = deleteAcross(d.blocks, leafId(d.blocks, 'abc'), 1, codeId, 0);
+    expect(r, 'shrunk, not clamped').not.toBeNull();
+    expect(ser(r!.blocks, d)).toBe('a\n\n```\ncode\n```\n');
+    expect(r!.caret).toEqual({ id: leafId(d.blocks, 'abc'), offset: 1 });
+  });
+
+  it('shrinks a range starting inside a code block to the prose edge (SKR-166)', () => {
+    const d = doc('```\ncode\n```\n\ndef\n');
+    // The start lands in the code block; it snaps forward to the start of "def".
+    const codeId = d.blocks.find((b) => b.type === 'code_block')!.id;
+    const r = deleteAcross(d.blocks, codeId, 0, leafId(d.blocks, 'def'), 2);
+    expect(r, 'shrunk, not clamped').not.toBeNull();
+    expect(ser(r!.blocks, d)).toBe('```\ncode\n```\n\nf\n');
+    expect(r!.caret).toEqual({ id: leafId(d.blocks, 'def'), offset: 0 });
+  });
+
+  it('keeps a trailing table when the range runs into it (select-all shape, SKR-166)', () => {
+    const d = doc(`hello\n\n${TABLE}\n`);
+    // A full-document range (prose head, table tail) deletes the prose and keeps
+    // the table — the shape ⌘A + Backspace produces on a doc ending in a barrier.
+    const helloId = leafId(d.blocks, 'hello');
+    const r = deleteAcross(d.blocks, helloId, 0, tableId(d.blocks), 0);
+    expect(r, 'shrunk, not clamped').not.toBeNull();
+    expect(r!.blocks.some((b) => b.type === 'table'), 'table survives').toBe(true);
+    const para = r!.blocks.find((b) => b.id === helloId);
+    expect(para && (para.type === 'paragraph' || para.type === 'heading') ? plain(para.inline) : null).toBe('');
+    expect(r!.caret).toEqual({ id: helloId, offset: 0 });
   });
 
   it('within one leaf delegates to inline delete', () => {
@@ -141,6 +169,35 @@ describe('replaceAcross', () => {
     const r = replaceAcross(d.blocks, leafId(d.blocks, 'abc'), 1, leafId(d.blocks, 'def'), 2, 'X');
     expect(ser(r!.blocks, d)).toBe('aXf\n');
     expect(r!.caret.offset).toBe(2);
+  });
+
+  it('types into the surviving prose when the range ends in a code block (SKR-166)', () => {
+    const d = doc('abc\n\n```\ncode\n```\n');
+    // The end snaps back to "abc"; the typed text lands there, not in the barrier.
+    const codeId = d.blocks.find((b) => b.type === 'code_block')!.id;
+    const r = replaceAcross(d.blocks, leafId(d.blocks, 'abc'), 1, codeId, 0, 'X');
+    expect(r, 'replaced, not clamped').not.toBeNull();
+    expect(ser(r!.blocks, d)).toBe('aX\n\n```\ncode\n```\n');
+    expect(r!.caret).toEqual({ id: leafId(d.blocks, 'abc'), offset: 2 });
+  });
+});
+
+describe('clearTableCells', () => {
+  it('empties the covered cells and keeps the table shape (SKR-166 / F55)', () => {
+    const d = doc('| a | b |\n| - | - |\n| 1 | 2 |\n');
+    // Clear the two body cells (row 1, cols 0-1); the header row is untouched.
+    const blocks = clearTableCells(d.blocks, tableId(d.blocks), 1, 0, 1, 1);
+    expect(blocks, 'cleared').not.toBeNull();
+    const table = blocks!.find((b) => b.type === 'table') as Extract<BlockNode, { type: 'table' }>;
+    expect(table, 'table survives').toBeTruthy();
+    expect(table.rows[1]!.map(plain)).toEqual(['', '']); // body emptied
+    expect(table.rows[0]!.map(plain)).toEqual(['a', 'b']); // header intact
+    expect(table.rows.length).toBe(2); // shape unchanged
+  });
+
+  it('returns null when the id is not a table', () => {
+    const d = doc('a\n');
+    expect(clearTableCells(d.blocks, leafId(d.blocks, 'a'), 0, 0, 0, 0)).toBeNull();
   });
 });
 

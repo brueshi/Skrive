@@ -77,14 +77,31 @@ const headOf = (inline: InlineNode[], offset: number): InlineNode[] =>
   deleteRangeInInline(inline, offset, inlineLength(inline));
 const tailOf = (inline: InlineNode[], offset: number): InlineNode[] => deleteRangeInInline(inline, 0, offset);
 
+/** First inline-leaf index in [from, to], or -1 when the span holds only barriers. */
+function firstInlineIndex(leaves: LeafEntry[], from: number, to: number): number {
+  for (let i = from; i <= to; i++) if (leaves[i]!.kind === 'inline') return i;
+  return -1;
+}
+/** Last inline-leaf index in [from, to], or -1 when the span holds only barriers. */
+function lastInlineIndex(leaves: LeafEntry[], from: number, to: number): number {
+  for (let i = to; i >= from; i--) if (leaves[i]!.kind === 'inline') return i;
+  return -1;
+}
+
 /**
  * Delete the content between two positions in document order. The start leaf
  * keeps its id + type and receives `head(start) + tail(end)`; every block strictly
  * between is removed — including a fully-covered barrier (a divider / code block /
  * table caught entirely inside the selection) — and emptied containers pruned.
- * Both ENDPOINTS must be inline leaves: a range that starts or ends inside a code
- * block / table returns null (clamp), so a text edit never partial-cuts one. Caret
- * lands at the join (`start`).
+ *
+ * A code block / table can never be partial-cut, so an ENDPOINT that lands inside
+ * one is snapped inward to the prose it bounds rather than eating the gesture
+ * (SKR-166): an end inside a barrier retreats to the end of the last inline leaf
+ * before it, a start inside a barrier advances to the start of the first inline
+ * leaf after it. The barrier block itself survives; the prose up to its edge is
+ * deleted — Google Docs behaviour. Null only when the range holds no prose to
+ * delete at all (e.g. an endpoint pair with only barriers between them). Caret
+ * lands at the join (the snapped start).
  */
 export function deleteAcross(
   blocks: BlockNode[],
@@ -104,23 +121,52 @@ export function deleteAcross(
   }
 
   const leaves = documentLeaves(blocks);
-  const si = leaves.findIndex((l) => l.id === startId);
-  const ei = leaves.findIndex((l) => l.id === endId);
-  if (si < 0 || ei < 0 || si >= ei) return null;
+  const si0 = leaves.findIndex((l) => l.id === startId);
+  const ei0 = leaves.findIndex((l) => l.id === endId);
+  if (si0 < 0 || ei0 < 0 || si0 >= ei0) return null;
 
-  // Endpoints must be text leaves; a range bounded by a code block / table cell
-  // clamps (don't partial-cut one). Barriers fully BETWEEN the ends are removed.
-  const startLeaf = inlineLeaf(blocks, startId);
-  const endLeaf = inlineLeaf(blocks, endId);
+  // Shrink barrier endpoints inward so the barrier survives while its surrounding
+  // prose is deleted; barriers fully BETWEEN the (snapped) ends are still removed.
+  let si = si0;
+  let ei = ei0;
+  let sOff = startOffset;
+  let eOff = endOffset;
+  if (leaves[si]!.kind === 'barrier') {
+    const ni = firstInlineIndex(leaves, si + 1, ei);
+    if (ni < 0) return null; // nothing but barriers ahead of the start
+    si = ni;
+    sOff = 0;
+  }
+  if (leaves[ei]!.kind === 'barrier') {
+    const pi = lastInlineIndex(leaves, si, ei - 1);
+    if (pi < 0) return null; // nothing but barriers behind the end
+    const pl = inlineLeaf(blocks, leaves[pi]!.id);
+    if (!pl) return null;
+    ei = pi;
+    eOff = inlineLength(pl.inline);
+  }
+
+  const startLeaf = inlineLeaf(blocks, leaves[si]!.id);
+  const endLeaf = inlineLeaf(blocks, leaves[ei]!.id);
   if (!startLeaf || !endLeaf) return null;
 
-  const merged = [...headOf(startLeaf.inline, startOffset), ...tailOf(endLeaf.inline, endOffset)];
+  // Both endpoints snapped onto the same inline leaf (a barrier-bounded prose run):
+  // a within-leaf delete.
+  if (si === ei) {
+    const inline = deleteRangeInInline(startLeaf.inline, sOff, eOff);
+    return {
+      blocks: updateBlockById(blocks, startLeaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode),
+      caret: { id: startLeaf.id, offset: sOff }
+    };
+  }
+
+  const merged = [...headOf(startLeaf.inline, sOff), ...tailOf(endLeaf.inline, eOff)];
   const removeIds = new Set<string>();
   for (let i = si + 1; i <= ei; i++) removeIds.add(leaves[i]!.id);
 
-  let next = updateBlockById(blocks, startId, (b) => ({ ...b, inline: merged, dirty: true }) as BlockNode);
+  let next = updateBlockById(blocks, startLeaf.id, (b) => ({ ...b, inline: merged, dirty: true }) as BlockNode);
   next = removeBlocks(next, removeIds);
-  return { blocks: next, caret: { id: startId, offset: startOffset } };
+  return { blocks: next, caret: { id: startLeaf.id, offset: sOff } };
 }
 
 /**
@@ -199,7 +245,9 @@ export function mergeForward(blocks: BlockNode[], leafId: string): RangeResult |
 }
 
 /** Replace a cross-block range with typed/pasted text: delete the range, then
- *  insert `text` at the join. Null when the range clamps (see deleteAcross). */
+ *  insert `text` at the join. The insertion follows the deleted range's caret, so
+ *  a barrier-snapped delete (see deleteAcross) types into the surviving prose leaf,
+ *  not the original — possibly-barrier — endpoint. Null when nothing deletes. */
 export function replaceAcross(
   blocks: BlockNode[],
   startId: string,
@@ -211,11 +259,41 @@ export function replaceAcross(
   const deleted = deleteAcross(blocks, startId, startOffset, endId, endOffset);
   if (!deleted) return null;
   if (text.length === 0) return deleted;
-  const inline = insertTextInInline(inlineLeaf(deleted.blocks, startId)!.inline, startOffset, text);
+  const { id, offset } = deleted.caret;
+  const leaf = inlineLeaf(deleted.blocks, id);
+  if (!leaf) return deleted; // caret not on an inline leaf: leave the delete as-is
+  const inline = insertTextInInline(leaf.inline, offset, text);
   return {
-    blocks: updateBlockById(deleted.blocks, startId, (b) => ({ ...b, inline, dirty: true }) as BlockNode),
-    caret: { id: startId, offset: startOffset + text.length }
+    blocks: updateBlockById(deleted.blocks, id, (b) => ({ ...b, inline, dirty: true }) as BlockNode),
+    caret: { id, offset: offset + text.length }
   };
+}
+
+/**
+ * Clear the text of every cell in the rectangle [minRow..maxRow] x [minCol..maxCol]
+ * of a table, leaving the table and its shape intact. This is the in-table
+ * cross-cell delete (SKR-166 / F55): dragging a selection across cells and hitting
+ * Backspace empties the covered cells — Google Docs behaviour — rather than
+ * deleting the whole table (which a barrier range would otherwise do). Null when
+ * `tableId` is not a table.
+ */
+export function clearTableCells(
+  blocks: BlockNode[],
+  tableId: string,
+  minRow: number,
+  minCol: number,
+  maxRow: number,
+  maxCol: number
+): BlockNode[] | null {
+  const table = findBlockById(blocks, tableId);
+  if (!table || table.type !== 'table') return null;
+  return updateBlockById(blocks, tableId, (b) => {
+    if (b.type !== 'table') return b;
+    const rows = b.rows.map((row, r) =>
+      r < minRow || r > maxRow ? row : row.map((cell, c) => (c < minCol || c > maxCol ? cell : []))
+    );
+    return { ...b, rows, dirty: true } as BlockNode;
+  });
 }
 
 // Re-export so callers that need a fresh id for any future split path have it.
