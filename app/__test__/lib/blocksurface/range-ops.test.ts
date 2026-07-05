@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  barrierNeighbor,
   clearTableCells,
   deleteAcross,
   deleteBlock,
@@ -237,5 +238,45 @@ describe('deleteBlock (whole-table delete)', () => {
   it('returns null for an unknown id', () => {
     const d = doc('a\n');
     expect(deleteBlock(d.blocks, 'nope')).toBeNull();
+  });
+
+  it('removes a lone divider; seeds an empty paragraph for the caret (SKR-167)', () => {
+    const d = doc('---\n');
+    const hrId = d.blocks.find((b) => b.type === 'horizontal_rule')!.id;
+    const r = deleteBlock(d.blocks, hrId);
+    expect(r, 'delete happened').not.toBeNull();
+    expect(r!.blocks).toHaveLength(1);
+    expect(r!.blocks[0]!.type).toBe('paragraph');
+    expect(r!.caret).toEqual({ id: r!.blocks[0]!.id, offset: 0 });
+  });
+});
+
+describe('barrierNeighbor (SKR-167)', () => {
+  it('returns the previous block when it is a divider', () => {
+    const d = doc('a\n\n---\n\nb\n');
+    const hr = barrierNeighbor(d.blocks, leafId(d.blocks, 'b'), 'backward');
+    expect(hr?.type).toBe('horizontal_rule');
+  });
+
+  it('returns the next block when it is a code block', () => {
+    const d = doc('a\n\n```\ncode\n```\n');
+    const next = barrierNeighbor(d.blocks, leafId(d.blocks, 'a'), 'forward');
+    expect(next?.type).toBe('code_block');
+  });
+
+  it('returns null when the neighbor is inline (mergeBackward/mergeForward would have succeeded)', () => {
+    const d = doc('a\n\nb\n');
+    expect(barrierNeighbor(d.blocks, leafId(d.blocks, 'b'), 'backward')).toBeNull();
+  });
+
+  it('returns null at the first leaf (no leaf backward at all)', () => {
+    const d = doc('---\n\nb\n');
+    expect(barrierNeighbor(d.blocks, leafId(d.blocks, 'b'), 'backward')?.type).toBe('horizontal_rule');
+    expect(barrierNeighbor(d.blocks, leafId(d.blocks, 'b'), 'forward')).toBeNull();
+  });
+
+  it('returns null for an unknown leaf id', () => {
+    const d = doc('a\n');
+    expect(barrierNeighbor(d.blocks, 'nope', 'backward')).toBeNull();
   });
 });

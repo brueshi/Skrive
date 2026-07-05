@@ -244,6 +244,28 @@ export function mergeForward(blocks: BlockNode[], leafId: string): RangeResult |
   return deleteAcross(blocks, leafId, inlineLength(cur.inline), next.id, 0);
 }
 
+/**
+ * The block adjacent to `leafId` in `direction`, when that neighbor is the
+ * reason mergeBackward/mergeForward returned null (i.e. it's a barrier —
+ * code_block / table / hr / image / frozen — rather than there being no leaf
+ * at all in that direction). Callers use this to decide what a merge-null
+ * Backspace/Delete should do instead of silently no-opping (SKR-167): delete a
+ * content-free atom like an hr outright, or select a content-bearing barrier
+ * like a code block / table as a unit. Null when there is no leaf in that
+ * direction, or the neighbor is inline (mergeBackward/mergeForward would have
+ * succeeded instead of returning null).
+ */
+export function barrierNeighbor(blocks: BlockNode[], leafId: string, direction: 'backward' | 'forward'): BlockNode | null {
+  const leaves = documentLeaves(blocks);
+  const i = leaves.findIndex((l) => l.id === leafId);
+  if (i < 0) return null;
+  const j = direction === 'backward' ? i - 1 : i + 1;
+  if (j < 0 || j >= leaves.length) return null;
+  const neighbor = leaves[j]!;
+  if (neighbor.kind !== 'barrier') return null;
+  return findBlockById(blocks, neighbor.id);
+}
+
 /** Replace a cross-block range with typed/pasted text: delete the range, then
  *  insert `text` at the join. The insertion follows the deleted range's caret, so
  *  a barrier-snapped delete (see deleteAcross) types into the surviving prose leaf,
