@@ -69,7 +69,12 @@ export function SelectionBubble({ controller }: { controller: MenuController }) 
           transition={{ duration: 0.12 }}
           onMouseDown={(e) => e.preventDefault()}
         >
-          <BlockTypeDropdown controller={controller} blockType={s.blockType} headingLevel={s.headingLevel} />
+          <BlockTypeDropdown
+            controller={controller}
+            blockType={s.blockType}
+            headingLevel={s.headingLevel}
+            disabled={s.inTable}
+          />
           <span className="rich-toolbar-sep" aria-hidden="true" />
           <BubbleButton label="Bold" shortcut="⌘B" active={s.strong} onRun={() => controller.toggleMark('strong')}>
             <IconBold />

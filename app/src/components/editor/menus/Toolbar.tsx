@@ -58,7 +58,12 @@ export function Toolbar({ controller }: { controller: MenuController }) {
   return (
     <div className="rich-toolbar">
       <div className="rich-toolbar-inner" role="toolbar" aria-label="Formatting">
-        <BlockTypeDropdown controller={controller} blockType={s.blockType} headingLevel={s.headingLevel} />
+        <BlockTypeDropdown
+          controller={controller}
+          blockType={s.blockType}
+          headingLevel={s.headingLevel}
+          disabled={s.inTable}
+        />
 
         <span className="rich-toolbar-sep" aria-hidden="true" />
 
@@ -79,18 +84,33 @@ export function Toolbar({ controller }: { controller: MenuController }) {
 
         <span className="rich-toolbar-sep" aria-hidden="true" />
 
-        <ToolbarButton label="Bulleted list" active={s.inBulletList} onRun={() => controller.toggleBulletList()}>
+        {/* Bulleted/Numbered/Quote/Code/Divider/Table are all block-type
+            conversions, same as "Turn into" above: a table cell is
+            coordinate-addressed, not a leaf block, so none of them have anything
+            to act on there (SKR-219). Disabled together for the same reason. */}
+        <ToolbarButton
+          label="Bulleted list"
+          active={s.inBulletList}
+          disabled={s.inTable}
+          onRun={() => controller.toggleBulletList()}
+        >
           <IconBulletList />
         </ToolbarButton>
-        <ToolbarButton label="Numbered list" active={s.inOrderedList} onRun={() => controller.toggleOrderedList()}>
+        <ToolbarButton
+          label="Numbered list"
+          active={s.inOrderedList}
+          disabled={s.inTable}
+          onRun={() => controller.toggleOrderedList()}
+        >
           <IconOrderedList />
         </ToolbarButton>
-        <ToolbarButton label="Quote" active={s.inBlockquote} onRun={() => controller.toggleBlockquote()}>
+        <ToolbarButton label="Quote" active={s.inBlockquote} disabled={s.inTable} onRun={() => controller.toggleBlockquote()}>
           <IconQuote />
         </ToolbarButton>
         <ToolbarButton
           label="Code block"
           active={s.blockType === 'code_block'}
+          disabled={s.inTable}
           onRun={() =>
             s.blockType === 'code_block'
               ? controller.setParagraph()
@@ -102,10 +122,10 @@ export function Toolbar({ controller }: { controller: MenuController }) {
 
         <span className="rich-toolbar-sep" aria-hidden="true" />
 
-        <ToolbarButton label="Divider" onRun={() => controller.insertDivider()}>
+        <ToolbarButton label="Divider" disabled={s.inTable} onRun={() => controller.insertDivider()}>
           <IconDivider />
         </ToolbarButton>
-        <ToolbarButton label="Table" onRun={() => controller.insertTable()}>
+        <ToolbarButton label="Table" disabled={s.inTable} onRun={() => controller.insertTable()}>
           <IconTable />
         </ToolbarButton>
       </div>

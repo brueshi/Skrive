@@ -42,9 +42,14 @@ type Props = {
   controller: MenuController;
   blockType: MenuBlockType;
   headingLevel: number | null;
+  /** True in a table-cell context: cells are coordinate-addressed, not leaf
+   *  blocks, so "Turn into" has nothing meaningful to convert (SKR-219). Disables
+   *  the trigger rather than graying out each item — there is no applicable
+   *  conversion to offer, so opening the menu would only show dead options. */
+  disabled?: boolean;
 };
 
-export function BlockTypeDropdown({ controller, blockType, headingLevel }: Props) {
+export function BlockTypeDropdown({ controller, blockType, headingLevel, disabled = false }: Props) {
   const StateIcon = blockTypeIcon(blockType, headingLevel);
   return (
     <DropdownMenu.Root>
@@ -53,6 +58,7 @@ export function BlockTypeDropdown({ controller, blockType, headingLevel }: Props
           type="button"
           className="rich-toolbar-blocktype"
           title="Turn into"
+          disabled={disabled}
           onMouseDown={(e) => e.preventDefault()}
         >
           <StateIcon size={16} />
