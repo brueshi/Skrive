@@ -139,7 +139,7 @@ describe('internal drag is refused honestly (rung 3)', () => {
   it('dragover over an internal drag sets dropEffect none and does not accept the drop', () => {
     const surface = new BlockSurface({ container, doc: parseDocument('hello\n') });
     priv(surface).onDragStart();
-    const dt = { dropEffect: '' } as DataTransfer;
+    const dt = { dropEffect: '' } as unknown as DataTransfer;
     const e = { dataTransfer: dt, defaulted: false, preventDefault() { (e as { defaulted: boolean }).defaulted = true; } };
     priv(surface).onDragOver(e as unknown as Event);
     expect(dt.dropEffect).toBe('none');
@@ -161,7 +161,7 @@ describe('internal drag is refused honestly (rung 3)', () => {
     const surface = new BlockSurface({ container, doc: parseDocument('hello\n') });
     priv(surface).onDragStart();
     priv(surface).onDragEnd();
-    const dt = { dropEffect: '' } as DataTransfer;
+    const dt = { dropEffect: '' } as unknown as DataTransfer;
     const e = { dataTransfer: dt, defaulted: false, preventDefault() { (e as { defaulted: boolean }).defaulted = true; } };
     priv(surface).onDragOver(e as unknown as Event);
     expect(dt.dropEffect).toBe('copy');

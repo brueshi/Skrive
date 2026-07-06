@@ -43,6 +43,7 @@ describe('updateBlockById', () => {
       b.type === 'paragraph' ? { ...b, inline: [{ kind: 'text', text: 'EDITED', marks: {} }], dirty: true } : b
     );
     const quote = next.find((b) => b.id === 'q')!;
+    if (quote.type === 'frozen_block') throw new Error('unexpected frozen block');
     expect(quote.dirty, 'container dirtied').toBe(true);
     const child = quote.type === 'blockquote' ? quote.children[0]! : null;
     expect(child && child.type === 'paragraph' && child.inline[0]?.kind === 'text' && child.inline[0].text).toBe('EDITED');
@@ -51,6 +52,7 @@ describe('updateBlockById', () => {
   it('updates a block inside a list item and dirties the list', () => {
     const next = updateBlockById(fixture(), 'lp', (b) => ({ ...b, dirty: true }));
     const list = next.find((b) => b.id === 'l')!;
+    if (list.type === 'frozen_block') throw new Error('unexpected frozen block');
     expect(list.dirty).toBe(true);
   });
 

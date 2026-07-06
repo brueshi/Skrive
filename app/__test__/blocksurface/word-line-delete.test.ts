@@ -37,7 +37,7 @@ function caretIn(node: Node, offset: number): void {
   range.collapse(true);
   sel.addRange(range);
 }
-function selectRange(sn: Node, so: number, en: number, eo: number): void {
+function selectRange(sn: Node, so: number, en: Node, eo: number): void {
   const sel = window.getSelection()!;
   sel.removeAllRanges();
   const range = document.createRange();

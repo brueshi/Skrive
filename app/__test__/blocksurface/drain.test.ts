@@ -13,7 +13,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BlockSurface } from '../../src/lib/blocksurface';
-import { parseDocument } from '../../src/lib/blockmodel';
+import { parseDocument, type Document } from '../../src/lib/blockmodel';
 
 type Drivable = { scheduleSerialize(): void };
 
@@ -51,7 +51,7 @@ describe('BlockSurface snapshot drain', () => {
     return new BlockSurface({
       container,
       doc: parseDocument('hello world'),
-      onDocChange: onDocChange as (doc: never) => void
+      onDocChange: onDocChange as (doc: Document) => void
     });
   }
 
