@@ -13,7 +13,7 @@
 // bespoke structure held and the finding routes to the ProseMirror fallback.
 
 import { test, expect, type Page } from '@playwright/test';
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { constantTimeRatio, type LatencySummary } from '../app/src/lib/instrumentation/stats';
 
@@ -237,10 +237,20 @@ test('keystroke spike: constant-time + IME across both contenteditable structure
     results[variant] = { scenarios, ratios, constantTime, ime, crossBlockSelection };
   }
 
+  // This spike's own numbers (note/tolerance/variants) are the file's original
+  // content and always get rewritten. Other top-level sections — e.g.
+  // stage3aConstantTime, the Stage 3a absolute-ceiling baseline the block
+  // matrix reads (SKR-215) — are a *different* gate's committed baseline living
+  // in the same file (per the ticket, one baseline mechanism, not two); preserve
+  // them across a spike rerun instead of clobbering them wholesale.
+  const existing: Record<string, unknown> = existsSync(OUT_PATH)
+    ? (JSON.parse(readFileSync(OUT_PATH, 'utf8')) as Record<string, unknown>)
+    : {};
   writeFileSync(
     OUT_PATH,
     JSON.stringify(
       {
+        ...existing,
         note: 'Keystroke spike (SKR-109). Surrogate engine: Chromium. Constant-time tolerance: block-10k p99 <= ' + TOL + 'x block-1.',
         tolerance: TOL,
         variants: results
