@@ -17,6 +17,23 @@ export const BLOCK_ID_ATTR = 'data-block-id';
 // the model). Only real breaks carry a cell in the offset space (SKR-155).
 export const HARD_BREAK_ATTR = 'data-hard-break';
 
+/**
+ * Maps a Markdown image URL (as it lives in the model, e.g. the document-relative
+ * `assets/foo.png` an image paste splices in — SKR-175) to a URL the webview can
+ * actually load. This is a VIEW concern only: the model keeps the raw relative
+ * path and serialization is untouched, so `.folio`/`.md` round-trips are byte-
+ * identical. The real shell can't fetch a raw relative src against the app's
+ * custom-scheme document origin, so it stays invisible (SKR-223); the registered
+ * resolver rewrites it onto the asset origin the shell serves project files from
+ * (`skrive-asset://…` — AssetSchemeHandler.swift / asset-protocol.ts). Absolute
+ * and external URLs pass through untouched. The default is identity, so tests,
+ * the latency harness, and any consumer that never registers one keep today's
+ * literal behavior.
+ */
+export type AssetResolver = (rawUrl: string) => string;
+
+const identityAssetResolver: AssetResolver = (url) => url;
+
 // Wrap a node in an element, returning the wrapper. Innermost-first composition.
 function wrap(tag: string, child: Node): HTMLElement {
   const el = document.createElement(tag);
@@ -28,13 +45,13 @@ function wrap(tag: string, child: Node): HTMLElement {
 // outermost — a stable nesting so the caret walk and incremental re-render see a
 // consistent shape. Marks are presentation; they never change the flat character
 // offset the selection model counts in.
-function renderInlineNode(node: InlineNode): Node {
+function renderInlineNode(node: InlineNode, resolveAsset: AssetResolver): Node {
   let dom: Node;
   if (node.kind === 'text') {
     dom = document.createTextNode(node.text);
   } else if (node.kind === 'image') {
     const img = document.createElement('img');
-    img.src = node.url;
+    img.src = resolveAsset(node.url);
     img.alt = node.alt;
     if (node.title != null) img.title = node.title;
     dom = img;
@@ -70,23 +87,27 @@ export function setCodeContent(code: HTMLElement, text: string): void {
 
 // Render a block's inline content. An empty inline run still needs a <br> so the
 // block has height and an addressable caret position.
-function renderInline(nodes: InlineNode[], host: HTMLElement): void {
+function renderInline(nodes: InlineNode[], host: HTMLElement, resolveAsset: AssetResolver): void {
   if (nodes.length === 0) {
     host.appendChild(document.createElement('br'));
     return;
   }
-  for (const node of nodes) host.appendChild(renderInlineNode(node));
+  for (const node of nodes) host.appendChild(renderInlineNode(node, resolveAsset));
 }
 
-function renderChildren(blocks: BlockNode[], host: HTMLElement): void {
-  for (const block of blocks) host.appendChild(renderBlock(block));
+function renderChildren(blocks: BlockNode[], host: HTMLElement, resolveAsset: AssetResolver): void {
+  for (const block of blocks) host.appendChild(renderBlock(block, resolveAsset));
 }
 
 /** Replace a block element's inline content from the model. The block-local hot
  *  path calls this after an edit: the model is authoritative, the DOM is derived. */
-export function renderInlineInto(host: HTMLElement, nodes: InlineNode[]): void {
+export function renderInlineInto(
+  host: HTMLElement,
+  nodes: InlineNode[],
+  resolveAsset: AssetResolver = identityAssetResolver
+): void {
   host.textContent = '';
-  renderInline(nodes, host);
+  renderInline(nodes, host, resolveAsset);
 }
 
 /**
@@ -94,16 +115,19 @@ export function renderInlineInto(host: HTMLElement, nodes: InlineNode[]): void {
  * tagged with its block id. Pure: reads the model, allocates DOM, no side effects
  * beyond the returned tree.
  */
-export function renderBlock(block: BlockNode): HTMLElement {
+export function renderBlock(
+  block: BlockNode,
+  resolveAsset: AssetResolver = identityAssetResolver
+): HTMLElement {
   let el: HTMLElement;
   switch (block.type) {
     case 'heading':
       el = document.createElement(`h${Math.min(6, Math.max(1, block.level))}`);
-      renderInline(block.inline, el);
+      renderInline(block.inline, el, resolveAsset);
       break;
     case 'paragraph':
       el = document.createElement('p');
-      renderInline(block.inline, el);
+      renderInline(block.inline, el, resolveAsset);
       break;
     case 'code_block': {
       el = document.createElement('pre');
@@ -114,7 +138,7 @@ export function renderBlock(block: BlockNode): HTMLElement {
     }
     case 'blockquote':
       el = document.createElement('blockquote');
-      renderChildren(block.children, el);
+      renderChildren(block.children, el, resolveAsset);
       break;
     case 'bullet_list':
     case 'ordered_list': {
@@ -127,7 +151,7 @@ export function renderBlock(block: BlockNode): HTMLElement {
       }
       for (const item of block.items) {
         const li = document.createElement('li');
-        renderChildren(item.children, li);
+        renderChildren(item.children, li, resolveAsset);
         el.appendChild(li);
       }
       break;
@@ -146,7 +170,7 @@ export function renderBlock(block: BlockNode): HTMLElement {
           // id); the surface edits a cell by (table id, row, col).
           cellEl.dataset.cellRow = String(r);
           cellEl.dataset.cellCol = String(c);
-          renderInline(cell, cellEl);
+          renderInline(cell, cellEl, resolveAsset);
           tr.appendChild(cellEl);
         });
         tbody.appendChild(tr);
@@ -205,12 +229,13 @@ export class BlockViewRegistry {
 export function renderDocument(
   container: HTMLElement,
   blocks: BlockNode[],
-  registry: BlockViewRegistry
+  registry: BlockViewRegistry,
+  resolveAsset: AssetResolver = identityAssetResolver
 ): void {
   container.textContent = '';
   registry.clear();
   for (const block of blocks) {
-    const el = renderBlock(block);
+    const el = renderBlock(block, resolveAsset);
     registry.set(block.id, el);
     container.appendChild(el);
   }

@@ -12,6 +12,7 @@ export {
   type ImagePasteDelegate
 } from './surface';
 export { renderDocument, renderBlock, renderInlineInto, BlockViewRegistry, BLOCK_ID_ATTR } from './render';
+export type { AssetResolver } from './render';
 export {
   caretContext,
   focusedBlockElement,
