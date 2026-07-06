@@ -1564,15 +1564,29 @@ export class BlockSurface {
   // --- the hot path --------------------------------------------------------
 
   private onBeforeInput = (event: Event): void => {
+    const e = event as InputEvent;
+    const type = e.inputType;
+    // Enter is owned by keydown everywhere in this surface (see onKeyDown), so any
+    // insertParagraph/insertLineBreak that still reaches beforeinput is by
+    // definition a native duplicate — including one WKWebView synthesizes inside a
+    // phantom composition around a code-block Enter. Consume it in ALL contexts,
+    // AHEAD of the composition and block-selection early-returns below, so it can
+    // never sneak to the DOM through either bypass (the plain `if (this.composing)
+    // return` would otherwise let a composition-wrapped line break through).
+    // WKWebView may still perform the native insert despite this preventDefault —
+    // the documented blindspot — which is why the compositionend readback carries
+    // its own guard as the real backstop (SKR-224).
+    if (type === 'insertParagraph' || type === 'insertLineBreak') {
+      e.preventDefault();
+      return;
+    }
     if (this.composing) return; // IME composes natively; reconcile on end
     // A block selection owns input in keydown (SKR-203); swallow any native input
     // event that still slips through while it is active so nothing edits behind it.
     if (this.blockSel.length > 0) {
-      (event as InputEvent).preventDefault();
+      e.preventDefault();
       return;
     }
-    const e = event as InputEvent;
-    const type = e.inputType;
     if (type === 'historyUndo' || type === 'historyRedo') {
       // Backstop for any native undo path (the Edit menu, trackpad gestures):
       // drive our own history so the DOM never diverges from the model.
@@ -1582,10 +1596,6 @@ export class BlockSurface {
     } else if (type === 'insertText' && typeof e.data === 'string') {
       e.preventDefault();
       this.applyInsertText(e.data);
-    } else if (type === 'insertParagraph' || type === 'insertLineBreak') {
-      // Enter is handled in keydown; swallow any native paragraph so it can't
-      // produce a second line break.
-      e.preventDefault();
     } else if (type === 'deleteContentBackward') {
       e.preventDefault();
       this.applyDeleteBackward();
@@ -2308,8 +2318,33 @@ export class BlockSurface {
     // the text straight from the DOM into the model — not via editCodeText, which
     // re-renders and would move the caret the IME just committed.
     if (leaf.type === 'code_block') {
-      const text = (blockEl.querySelector('code') ?? blockEl).textContent ?? '';
-      this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, id, (b) => (b.type === 'code_block' ? ({ ...b, text, dirty: true } as BlockNode) : b)) };
+      const codeEl = (blockEl.querySelector('code') ?? blockEl) as HTMLElement;
+      const domText = codeEl.textContent ?? '';
+      const modelText = leaf.text;
+      // Guard against laundering a native line-insert into the model (SKR-224).
+      // IME composition in a code block only ever inserts composed characters
+      // (CJK, and the like) — it never produces a bare newline. So if the DOM has
+      // diverged from the model ONLY by added newline(s) (identical once every
+      // newline is stripped, but longer), this is not composed input: it is a
+      // native WKWebView line insert that slipped past keydown's Enter handling
+      // and the beforeinput belt (the blindspot — preventDefault does not suppress
+      // it in WKWebView). Adopting it would double-insert the newline into the
+      // model and the saved file. Reject it: the model is already authoritative
+      // (keydown's applyEnter committed the single, correct newline), so restore
+      // the DOM to the model text and leave the model untouched. The caret is
+      // pulled back by the count of phantom newlines the native insert added.
+      if (domText !== modelText && domText.length > modelText.length && domText.replace(/\n/g, '') === modelText.replace(/\n/g, '')) {
+        const sel = window.getSelection();
+        const domCaret =
+          sel && sel.rangeCount > 0 && blockEl.contains(sel.getRangeAt(0).startContainer)
+            ? flatOffsetFromDOM(blockEl, sel.getRangeAt(0).startContainer, sel.getRangeAt(0).startOffset)
+            : domText.length;
+        const caret = Math.max(0, Math.min(domCaret - (domText.length - modelText.length), modelText.length));
+        setCodeContent(codeEl, modelText);
+        setCaret(blockEl, caret);
+        return;
+      }
+      this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, id, (b) => (b.type === 'code_block' ? ({ ...b, text: domText, dirty: true } as BlockNode) : b)) };
       this.scheduleSerialize();
       return;
     }
