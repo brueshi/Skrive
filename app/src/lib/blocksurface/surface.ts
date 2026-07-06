@@ -146,6 +146,17 @@ type NormalizedBlockRange = {
   end: { id: string; offset: number };
 };
 
+/** lastSelection's shape: a leaf block id + flat range, or — when the caret sat
+ *  in a table cell — the cell's (table id, row, col) + a flat range local to the
+ *  cell (cells are addressed by coordinates, not a block id, same as cellTarget's
+ *  live resolution). No explicit discriminant tag: the two arms are told apart
+ *  structurally (`tableId` present or not), so the pre-existing leaf literal
+ *  `{blockId, start, end}` — saved-selection.test.ts pokes this shape directly —
+ *  stays exactly what it was before cell coverage (SKR-220). */
+type SavedSelection =
+  | { blockId: string; start: number; end: number }
+  | { tableId: string; row: number; col: number; start: number; end: number };
+
 export class BlockSurface {
   // Authoritative document. Assigned through the `doc` setter everywhere except
   // the constructor and undo/redo, so every edit funnels one history snapshot.
@@ -175,14 +186,16 @@ export class BlockSurface {
   private selScheduled = false;
   private savedLink: { blockId: string; start: number; end: number } | null = null;
   // The last text selection observed INSIDE the surface, in MODEL coordinates (a
-  // leaf block id + a flat range; a caret is start === end), kept across focus
-  // loss. WKWebView collapses a blurred contenteditable's selection the moment a
-  // menu takes focus (Chromium preserves it, so the gate harness is blind), which
-  // made palette commands no-op because they read no live selection. Command-time
-  // resolution (currentInlineBlock / currentConvertibleBlock / leafTarget) falls
-  // back to this ONLY when the live selection is null — the generalized form of
-  // the savedLink dodge (SKR-173, absorbing SKR-151).
-  private lastSelection: { blockId: string; start: number; end: number } | null = null;
+  // leaf block id + a flat range, OR a table cell's (table id, row, col) + a flat
+  // range local to the cell; a caret is start === end), kept across focus loss.
+  // WKWebView collapses a blurred contenteditable's selection the moment a menu
+  // takes focus (Chromium preserves it, so the gate harness is blind), which made
+  // palette commands no-op because they read no live selection. Command-time
+  // resolution (currentInlineBlock / currentConvertibleBlock / leafTarget /
+  // cellTarget) falls back to this ONLY when the live selection is null — the
+  // generalized form of the savedLink dodge (SKR-173, absorbing SKR-151; cell
+  // coverage SKR-220).
+  private lastSelection: SavedSelection | null = null;
   private slash: { blockId: string; slashOffset: number } | null = null;
   private slashCb: ((state: SlashMenuState | null) => void) | null = null;
   // The registered paste-image write delegate (SKR-175); see ImagePasteDelegate.
@@ -620,6 +633,11 @@ export class BlockSurface {
     this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, saved.blockId, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
     const el = this.leafElementById(saved.blockId);
     if (el) {
+      // Focus back first, same as cancelLink (SKR-173 / F71 / SKR-220): the caret
+      // otherwise lands arbitrarily in WKWebView when focus returns from the URL
+      // input to a surface with no live selection. Commit re-renders (cancel
+      // doesn't), but the focus-before-select ordering matters either way.
+      this.container.focus();
       renderInlineInto(el, inline);
       setSelectionRange(el, saved.start, saved.end);
     }
@@ -1321,7 +1339,7 @@ export class BlockSurface {
   private savedTopLevelBlock(): { block: BlockNode; index: number; blockEl: HTMLElement; start: number; end: number } | null {
     if (this.blockSel.length > 0) return null;
     const saved = this.lastSelection;
-    if (!saved) return null;
+    if (!saved || 'tableId' in saved) return null; // a saved cell resolves through cellTarget instead
     const index = this.doc.blocks.findIndex((b) => b.id === saved.blockId);
     if (index < 0) return null;
     const block = this.doc.blocks[index]!;
@@ -1414,9 +1432,20 @@ export class BlockSurface {
    *  surface — or an active block selection, whose DOM selection is intentionally
    *  cleared — records nothing, so the last in-surface range stays. This rides the
    *  observer (once per frame), never the typing hot path; leaf resolution keeps it
-   *  O(1)-ish and model validation is left to the command-time fallback. */
+   *  O(1)-ish and model validation is left to the command-time fallback.
+   *
+   *  The cell case is checked FIRST: a table cell carries no block id of its own
+   *  (only the enclosing table does), so leafCaretContext's generic "walk up to
+   *  the nearest id" would otherwise resolve a cell caret to the table's whole-
+   *  barrier id and nonsense offsets (SKR-220) — which is exactly the "table's
+   *  block id" degenerate case the ticket called out. */
   private recordSelection(): void {
     if (this.blockSel.length > 0) return;
+    const cell = this.liveCellContext();
+    if (cell) {
+      this.lastSelection = { tableId: cell.tableId, row: cell.row, col: cell.col, start: cell.start, end: cell.end };
+      return;
+    }
     const ctx = leafCaretContext(this.container);
     if (!ctx) return;
     const blockId = ctx.blockEl.getAttribute(BLOCK_ID_ATTR);
@@ -3001,7 +3030,7 @@ export class BlockSurface {
   } | null {
     if (this.blockSel.length > 0) return null;
     const saved = this.lastSelection;
-    if (!saved) return null;
+    if (!saved || 'tableId' in saved) return null; // a saved cell resolves through cellTarget instead
     const leaf = findBlockById(this.doc.blocks, saved.blockId);
     if (!leaf) return null;
     const blockEl = this.leafElementById(saved.blockId);
@@ -3014,12 +3043,54 @@ export class BlockSurface {
 
   // The focused table cell, addressed by (table id, row, col). Cells are inline
   // regions, not blocks, so they get their own target type parallel to leafTarget.
+  //
+  // Live DOM resolution first; on a null live context (no selection at all, or a
+  // selection that isn't inside any cell) fall back to the last observed cell so a
+  // palette mark command still lands on the right cell after a menu took focus and
+  // WKWebView collapsed the selection (SKR-220, cell flavor of SKR-173's
+  // leafTarget). Mirrors leafTarget/leafTargetFromSaved's split exactly: only the
+  // null case falls back — a live cell context that fails a later check (the table
+  // block missing, or no longer a table) keeps returning null as it always did.
   private cellTarget(): {
     tableId: string;
     row: number;
     col: number;
     cellEl: HTMLElement;
     inline: InlineNode[];
+    start: number;
+    end: number;
+    collapsed: boolean;
+    spansCells: boolean;
+  } | null {
+    const ctx = this.liveCellContext();
+    if (!ctx) return this.cellTargetFromSaved();
+    const table = findBlockById(this.doc.blocks, ctx.tableId);
+    if (!table || table.type !== 'table') return null;
+    const inline = table.rows[ctx.row]?.[ctx.col] ?? [];
+    return {
+      tableId: ctx.tableId,
+      row: ctx.row,
+      col: ctx.col,
+      cellEl: ctx.cellEl,
+      inline,
+      start: ctx.start,
+      end: ctx.end,
+      collapsed: ctx.collapsed,
+      spansCells: ctx.spansCells
+    };
+  }
+
+  /** DOM resolution of the live selection's table cell — table id + row/col +
+   *  flat offsets local to the cell — or null when the selection isn't inside
+   *  any cell. Shared by cellTarget's live path and recordSelection so the two
+   *  agree on what counts as "in a cell": a cell element carries no block id of
+   *  its own (only the enclosing table does), so this walk must be tried BEFORE
+   *  the generic leaf walk resolves the caret to the table instead (SKR-220). */
+  private liveCellContext(): {
+    tableId: string;
+    row: number;
+    col: number;
+    cellEl: HTMLElement;
     start: number;
     end: number;
     collapsed: boolean;
@@ -3040,17 +3111,51 @@ export class BlockSurface {
     const tableEl = cellEl.closest(`[${BLOCK_ID_ATTR}]`) as HTMLElement | null;
     const tableId = tableEl?.getAttribute(BLOCK_ID_ATTR);
     if (!tableId) return null;
-    const table = findBlockById(this.doc.blocks, tableId);
-    if (!table || table.type !== 'table') return null;
     const row = Number(cellEl.dataset.cellRow);
     const col = Number(cellEl.dataset.cellCol);
-    const inline = table.rows[row]?.[col] ?? [];
     const range = sel.getRangeAt(0);
     const start = flatOffsetFromDOM(cellEl, range.startContainer, range.startOffset);
     const collapsed = range.collapsed;
     const endInCell = cellEl.contains(range.endContainer);
     const end = collapsed || !endInCell ? start : flatOffsetFromDOM(cellEl, range.endContainer, range.endOffset);
-    return { tableId, row, col, cellEl, inline, start, end, collapsed, spansCells: !endInCell };
+    return { tableId, row, col, cellEl, start, end, collapsed, spansCells: !endInCell };
+  }
+
+  /** The saved-selection fallback for cellTarget: cell flavor of SKR-173's
+   *  leafTargetFromSaved. With no live cell selection (WKWebView collapsed it on
+   *  focus loss), reconstruct the target from the last observed cell coordinates
+   *  so a palette mark command still lands on the right cell. Refuses during a
+   *  block selection, when the saved table is gone or no longer a table, and when
+   *  the row/col fall outside the CURRENT table shape — tables can be edited
+   *  between save and use, so a structural mismatch is refused outright, unlike a
+   *  text-offset drift, which is just clamped (same policy as leafTargetFromSaved). */
+  private cellTargetFromSaved(): {
+    tableId: string;
+    row: number;
+    col: number;
+    cellEl: HTMLElement;
+    inline: InlineNode[];
+    start: number;
+    end: number;
+    collapsed: boolean;
+    spansCells: boolean;
+  } | null {
+    if (this.blockSel.length > 0) return null;
+    const saved = this.lastSelection;
+    if (!saved || !('tableId' in saved)) return null; // a saved leaf resolves through leafTarget instead
+    const table = findBlockById(this.doc.blocks, saved.tableId);
+    if (!table || table.type !== 'table') return null;
+    const row = table.rows[saved.row];
+    if (!row || saved.col < 0 || saved.col >= row.length) return null;
+    const cellEl = this.leafElementById(saved.tableId)?.querySelector(
+      `[data-cell-row="${saved.row}"][data-cell-col="${saved.col}"]`
+    ) as HTMLElement | null;
+    if (!cellEl) return null;
+    const inline = row[saved.col] ?? [];
+    const len = inlineLength(inline);
+    const start = Math.min(saved.start, len);
+    const end = Math.min(saved.end, len);
+    return { tableId: saved.tableId, row: saved.row, col: saved.col, cellEl, inline, start, end, collapsed: start === end, spansCells: false };
   }
 
   private updateCellModel(c: { tableId: string; row: number; col: number }, inline: InlineNode[]): void {

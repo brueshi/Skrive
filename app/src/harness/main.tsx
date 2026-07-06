@@ -145,9 +145,11 @@ declare global {
       serialize(): string;
       blockCount(): number;
       // The command paths a menu drives, callable after the matrix clears the live
-      // selection — the WKWebView blurred-selection simulation (SKR-173 / SKR-151).
+      // selection — the WKWebView blurred-selection simulation (SKR-173 / SKR-151;
+      // toggleMark added for the cell flavor, SKR-220).
       setBlockType(spec: { kind: 'paragraph' } | { kind: 'heading'; level: number }): void;
       toggleList(target: 'bullet_list' | 'ordered_list'): void;
+      toggleMark(mark: 'strong' | 'em' | 'code'): void;
       beginLink(): boolean;
       commitLink(href: string): void;
       cancelLink(): void;
@@ -168,6 +170,7 @@ function BlockSurfaceMount({ body }: { body: string }) {
       blockCount: () => s.getDocument().blocks.length,
       setBlockType: (spec) => s.setBlockType(spec),
       toggleList: (target) => s.toggleList(target),
+      toggleMark: (mark) => s.toggleMark(mark),
       beginLink: () => s.beginLink(),
       commitLink: (href) => s.commitLink(href),
       cancelLink: () => s.cancelLink()

@@ -954,6 +954,39 @@ test('SKR-173: link cancel restores the saved selection', async ({ page }) => {
   expect(md, 'cancel never links the range').not.toContain('[KEEPME]');
 });
 
+// --- SKR-220: cell flavor of SKR-173's blur simulation. A caret in a table cell
+// carries no block id of its own (only the enclosing table does), so cellTarget's
+// live-only resolution had no useful saved state to fall back to — a palette mark
+// command over a cell would degrade to the leaf path or refuse. The adversarial
+// corpus carries no table, so this inserts one via the public setBlockType (the
+// same command the Insert-block menu drives) and drives the same mark-command
+// path a toolbar/palette button uses.
+
+test('SKR-220: palette mark command survives selection loss in a table cell', async ({ page }) => {
+  await open(page, 5);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.evaluate(() => window.__skriveBlockSurface!.setBlockType({ kind: 'table' }));
+  await page.waitForTimeout(60); // reconcile + caret lands in the new table's first cell
+
+  await page.keyboard.type('CELLTEXT', { delay: 8 });
+  // Shift+ArrowLeft, character by character (not Home/Shift+End): End's native
+  // "line end" movement doesn't respect a table cell's boundary in a real
+  // browser and drags the selection out into the next block entirely, same as
+  // "Stage 3g: marks work inside a table cell" already works around above.
+  for (let i = 0; i < 'CELLTEXT'.length; i++) await page.keyboard.press('Shift+ArrowLeft');
+  await page.waitForTimeout(80); // let the rAF selection observer record the cell range
+
+  await page.evaluate(() => {
+    window.getSelection()?.removeAllRanges(); // the palette/menu took focus, collapsing it
+    window.__skriveBlockSurface!.toggleMark('strong');
+  });
+  await page.waitForTimeout(80);
+
+  const md = await serialized(page);
+  expect(md, 'the cell content bolded despite the lost selection').toContain('**CELLTEXT**');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
 test('Stage 3a: IME composition lands in the model', async ({ page, context }) => {
   await open(page, 200);
   await caretAt(page, 'SKRIVE_FIRST_BLOCK');
