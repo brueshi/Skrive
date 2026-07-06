@@ -47,6 +47,23 @@ function paragraph(text: string): BlockNode {
 function docOf(...texts: string[]): Document {
   return { blocks: texts.map(paragraph), trailingGap: '\n' };
 }
+// A single top-level bullet list, one item per text (an empty string yields an
+// empty item paragraph) — the container shape the SKR-218 tests below open a
+// slash session inside.
+function bulletListDoc(...texts: string[]): Document {
+  const list: BlockNode = {
+    type: 'bullet_list',
+    id: generateBlockId(),
+    durable: false,
+    src: null,
+    gapBefore: null,
+    dirty: false,
+    marker: '-',
+    spread: false,
+    items: texts.map((t) => ({ spread: false, children: [paragraph(t)] }))
+  } as BlockNode;
+  return { blocks: [list], trailingGap: '\n' };
+}
 // One applyInsertText call per character — handleSlashAfterInsert only opens a
 // session when the inserted text is exactly '/', so a batched string would
 // never trigger it.
@@ -80,6 +97,9 @@ function emptyRow(): HTMLElement | null {
 }
 function slashOf(surface: BlockSurface): unknown {
   return (surface as unknown as { slash: unknown }).slash;
+}
+function closeSlashOnSelectionMove(surface: BlockSurface): void {
+  (surface as unknown as { closeSlashOnSelectionMove: () => void }).closeSlashOnSelectionMove();
 }
 
 beforeEach(() => {
@@ -211,6 +231,57 @@ describe('a normal slash flow end to end', () => {
     key('Enter');
 
     expect(surface.getDocument().blocks[0]!.type).toBe('horizontal_rule');
+    expect(slashOf(surface)).toBeNull();
+  });
+});
+
+// The opener resolves a nested leaf (a list-item paragraph) the same way it
+// resolves a top-level one; the menu itself has no idea the leaf is nested —
+// it only reads the slash state's rect/query (SKR-218).
+describe('opening and filtering inside a list item (SKR-218)', () => {
+  it('opens on an empty list item and filters the query the same as at top level', () => {
+    const surface = new BlockSurface({ container: host, doc: bulletListDoc('alpha', '') });
+    mount(surface);
+    const listItems = host.querySelectorAll<HTMLElement>('li p');
+    setCaret(listItems[1]!, 0);
+
+    type(surface, '/');
+    expect(items().length).toBeGreaterThan(1);
+
+    type(surface, 'divi');
+    expect(items().map((el) => el.querySelector('.rich-slash-title')?.textContent)).toEqual(['Divider']);
+
+    key('Enter');
+
+    const blocks = surface.getDocument().blocks;
+    // Divider inserts AFTER the enclosing list (SKR-169); the item that hosted
+    // the session stays in the list, query stripped.
+    expect(blocks.map((b) => b.type)).toEqual(['bullet_list', 'horizontal_rule', 'paragraph']);
+    expect(slashOf(surface)).toBeNull();
+  });
+});
+
+describe('zero-match query inside a container (SKR-218)', () => {
+  it('lets Enter fall through to a normal item split instead of no-oping', () => {
+    const surface = new BlockSurface({ container: host, doc: bulletListDoc('') });
+    mount(surface);
+    const listItems = host.querySelectorAll<HTMLElement>('li p');
+    setCaret(listItems[0]!, 0);
+    type(surface, '/xq');
+
+    expect(items().length).toBe(0);
+    expect(emptyRow()?.textContent).toBe('No matches');
+
+    key('Enter');
+
+    const list = surface.getDocument().blocks[0] as unknown as { items: unknown[] };
+    expect(list.items).toHaveLength(2); // the item really split, not swallowed
+
+    // The observer (rAF-scheduled off the real selectionchange event in
+    // production) is what notices the caret landed on the new item's leaf,
+    // not the stale slash block — exercised directly here, as the surface-level
+    // suite does, rather than round-tripping a timing-dependent DOM event.
+    closeSlashOnSelectionMove(surface);
     expect(slashOf(surface)).toBeNull();
   });
 });

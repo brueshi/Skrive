@@ -47,6 +47,37 @@ function paragraph(text: string): BlockNode {
 function docOf(...texts: string[]): Document {
   return { blocks: texts.map(paragraph), trailingGap: '\n' };
 }
+// A single top-level bullet list, one item per text (an empty string yields an
+// empty item paragraph — the shape the container-opener tests below need to
+// place an empty leaf without going through the Markdown parser, which drops
+// an item with no content).
+function bulletListDoc(...texts: string[]): Document {
+  const list: BlockNode = {
+    type: 'bullet_list',
+    id: generateBlockId(),
+    durable: false,
+    src: null,
+    gapBefore: null,
+    dirty: false,
+    marker: '-',
+    spread: false,
+    items: texts.map((t) => ({ spread: false, children: [paragraph(t)] }))
+  } as BlockNode;
+  return { blocks: [list], trailingGap: '\n' };
+}
+// A single top-level blockquote with one paragraph child.
+function blockquoteDoc(text: string): Document {
+  const quote: BlockNode = {
+    type: 'blockquote',
+    id: generateBlockId(),
+    durable: false,
+    src: null,
+    gapBefore: null,
+    dirty: false,
+    children: [paragraph(text)]
+  } as BlockNode;
+  return { blocks: [quote], trailingGap: '\n' };
+}
 // Types one character at a time via the private hot path, mirroring real
 // keystrokes — handleSlashAfterInsert only opens a session when the INSERTED
 // text is exactly '/', so a single call with a multi-char string would never
@@ -253,5 +284,130 @@ describe('regression: refreshSlash keeps closing on the existing edit-driven pat
 
     backspace(surface); // deletes the '/' itself
     expect(slashOf(surface)).toBeNull();
+  });
+});
+
+// The opener was top-level-only (currentInlineBlock resolves through the
+// registry, which only holds top-level elements): `/` typed into an empty list
+// item or blockquote child never started a session. SKR-169 already made the
+// SINK (applySlashCommand -> setBlockType) container-aware; this section pins
+// the OPENER and the session plumbing (leaf-aware caret-intact checks, query
+// stripping via updateBlockById, and the rect anchoring to the leaf) that let a
+// session opened inside a container behave exactly like one at top level
+// (SKR-218).
+describe('slash session inside containers (SKR-218)', () => {
+  it('opens on an empty list item, tracks the query, and Heading lifts the item out with the query stripped', () => {
+    const surface = new BlockSurface({ container, doc: bulletListDoc('alpha', '') });
+    const items = container.querySelectorAll<HTMLElement>('li p');
+    setCaret(items[1]!, 0);
+
+    const box: { state: SlashMenuState | null } = { state: null };
+    surface.onSlashMenu((s) => {
+      box.state = s;
+    });
+
+    type(surface, '/');
+    expect(slashOf(surface)).not.toBeNull();
+    expect(box.state?.query).toBe('');
+
+    type(surface, 'h1');
+    expect(box.state?.query).toBe('h1');
+
+    surface.applySlashCommand({ kind: 'heading', level: 1 });
+
+    const blocks = blocksOf(surface);
+    // The item lifts out of the list (SKR-169 semantics): the list survives
+    // with just the first item, and the lifted item becomes a top-level heading.
+    expect(blocks.map((b) => b.type)).toEqual(['bullet_list', 'heading']);
+    expect(textOf(blocks[1]!)).toBe(''); // the /query text was stripped, not left behind
+    expect(slashOf(surface)).toBeNull();
+  });
+
+  it('opens on an empty blockquote child and converts it in place, staying inside the quote', () => {
+    const surface = new BlockSurface({ container, doc: blockquoteDoc('') });
+    const child = container.querySelector<HTMLElement>('blockquote p')!;
+    setCaret(child, 0);
+
+    type(surface, '/');
+    expect(slashOf(surface)).not.toBeNull();
+    type(surface, 'h2');
+
+    surface.applySlashCommand({ kind: 'heading', level: 2 });
+
+    const blocks = blocksOf(surface);
+    expect(blocks.map((b) => b.type)).toEqual(['blockquote']);
+    const quoteChild = (blocks[0] as unknown as { children: BlockNode[] }).children[0]!;
+    expect(quoteChild.type).toBe('heading');
+    expect(textOf(quoteChild)).toBe(''); // stripped, not carried into the heading
+    expect(slashOf(surface)).toBeNull();
+  });
+
+  it('inserts a divider after the enclosing list, leaving the item intact and query-stripped', () => {
+    const surface = new BlockSurface({ container, doc: bulletListDoc('alpha', '') });
+    const items = container.querySelectorAll<HTMLElement>('li p');
+    setCaret(items[1]!, 0);
+
+    type(surface, '/');
+    type(surface, 'div');
+    surface.applySlashCommand({ kind: 'divider' });
+
+    const blocks = blocksOf(surface);
+    // No next block for the caret to land in, so a fresh paragraph is seeded
+    // after the divider (SKR-170's "never a trap" rule — same as the top-level
+    // insert-after-content path).
+    expect(blocks.map((b) => b.type)).toEqual(['bullet_list', 'horizontal_rule', 'paragraph']);
+    const list = blocks[0] as unknown as { items: Array<{ children: BlockNode[] }> };
+    expect(list.items).toHaveLength(2); // the item stays IN the list, not lifted
+    expect(textOf(list.items[0]!.children[0]!)).toBe('alpha');
+    expect(textOf(list.items[1]!.children[0]!)).toBe(''); // query stripped
+    expect(slashOf(surface)).toBeNull();
+  });
+
+  it('does not open when / is typed mid-text in a list item (parity with the top-level rule)', () => {
+    const surface = new BlockSurface({ container, doc: bulletListDoc('abc') });
+    const [item] = container.querySelectorAll<HTMLElement>('li p');
+    setCaret(item!, 2); // caret between 'ab' and 'c'
+
+    type(surface, '/');
+
+    expect(slashOf(surface)).toBeNull();
+    const list = blocksOf(surface)[0] as unknown as { items: Array<{ children: BlockNode[] }> };
+    expect(textOf(list.items[0]!.children[0]!)).toBe('ab/c'); // the / just typed in as text
+  });
+
+  it('closes when the caret moves to a different leaf in the same container', () => {
+    const surface = new BlockSurface({ container, doc: bulletListDoc('alpha', '') });
+    const items = container.querySelectorAll<HTMLElement>('li p');
+    setCaret(items[1]!, 0);
+    type(surface, '/');
+    type(surface, 'query');
+    expect(slashOf(surface)).not.toBeNull();
+
+    setCaret(items[0]!, 0);
+    closeSlashOnSelectionMove(surface);
+
+    expect(slashOf(surface)).toBeNull();
+  });
+
+  it('refuses to apply when the caret moved to a different leaf before the command runs', () => {
+    const surface = new BlockSurface({ container, doc: bulletListDoc('alpha', '') });
+    const items = container.querySelectorAll<HTMLElement>('li p');
+    setCaret(items[1]!, 0);
+    type(surface, '/');
+    type(surface, 'query');
+    expect(slashOf(surface)).not.toBeNull();
+
+    // A click into the other item: the caret moves without an edit, so nothing
+    // has re-run refreshSlash yet, mirroring the top-level mismatch case.
+    setCaret(items[0]!, 0);
+
+    surface.applySlashCommand({ kind: 'heading', level: 1 });
+
+    const blocks = blocksOf(surface);
+    expect(blocks.map((b) => b.type)).toEqual(['bullet_list']); // NOT converted
+    const list = blocks[0] as unknown as { items: Array<{ children: BlockNode[] }> };
+    expect(textOf(list.items[0]!.children[0]!)).toBe('alpha');
+    expect(textOf(list.items[1]!.children[0]!)).toBe('/query'); // residue left alone
+    expect(slashOf(surface)).toBeNull(); // refused, and the stale session is closed
   });
 });
