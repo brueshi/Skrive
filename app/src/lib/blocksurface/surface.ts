@@ -110,8 +110,16 @@ function isInlineText(block: BlockNode): block is InlineTextBlock {
 }
 
 /** The caret's resolved position, when it sits in an inline-text block (the
- *  editable target for typing, marks, list rules, and the slash menu). */
+ *  editable target for typing, marks, and list rules). Top-level only — see
+ *  currentInlineBlock's own resolution (caretContext / registry membership). */
 type CurrentInlineBlock = { block: InlineTextBlock; index: number; blockEl: HTMLElement; caret: number; collapsed: boolean };
+
+/** The caret's resolved position for the slash session, when it sits in an
+ *  inline-text leaf — top-level OR nested (a list-item paragraph, a blockquote
+ *  child). No top-level array index: a slash commit addresses the leaf by id
+ *  through updateBlockById, which finds a block anywhere in the tree, so there
+ *  is nothing here for an index to do (SKR-218). */
+type SlashLeaf = { block: InlineTextBlock; blockEl: HTMLElement; caret: number; collapsed: boolean };
 
 // A run-delete scan (SKR-165): given a leaf's text, the caret offset in it,
 // whether the leaf is a code block, and the direction, return the [from, to)
@@ -1177,14 +1185,14 @@ export class BlockSurface {
   applySlashCommand(spec: BlockTypeSpec): void {
     const slash = this.slash;
     if (!slash) return;
-    const cur = this.currentInlineBlock();
+    const cur = this.currentInlineLeaf();
     if (!this.slashCaretIntact(cur)) {
       this.closeSlash();
       return;
     }
     const text = inlinePlainText(cur.block.inline);
     const inline = deleteRangeInInline(cur.block.inline, slash.slashOffset, text.length);
-    this.commitBlock(cur.index, { ...cur.block, inline, dirty: true });
+    this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, cur.block.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
     renderInlineInto(cur.blockEl, inline);
     setCaret(cur.blockEl, slash.slashOffset);
     this.closeSlash();
@@ -1198,13 +1206,26 @@ export class BlockSurface {
   }
 
   /** True while `cur` is a collapsed caret still inside the active slash
-   *  session's block — the only state in which the session may continue.
+   *  session's leaf — the only state in which the session may continue.
    *  Shared by refreshSlash (after an edit), applySlashCommand (the
    *  belt-and-suspenders recheck), and the selection observer (a pure caret
    *  move, with no edit to hang a refresh off of). A type predicate so callers
    *  get `cur` narrowed to non-null on the true branch. */
-  private slashCaretIntact(cur: CurrentInlineBlock | null): cur is CurrentInlineBlock {
+  private slashCaretIntact(cur: SlashLeaf | null): cur is SlashLeaf {
     return !!cur && !!this.slash && cur.block.id === this.slash.blockId && cur.collapsed;
+  }
+
+  /** The inline-text leaf backing an open (or opening) slash session — top-level
+   *  OR nested, resolved the same way SKR-169's conversion paths resolve their
+   *  target (leafTarget), so a session can open and continue inside a list item
+   *  or blockquote exactly as it does at top level (SKR-218). Unlike
+   *  currentInlineBlock this carries no top-level array index: a slash commit
+   *  addresses the leaf by id via updateBlockById, which finds a block anywhere
+   *  in the tree. */
+  private currentInlineLeaf(): SlashLeaf | null {
+    const t = this.leafTarget();
+    if (!t || !isInlineText(t.leaf)) return null;
+    return { block: t.leaf, blockEl: t.blockEl, caret: t.start, collapsed: t.collapsed };
   }
 
   private currentInlineBlock(): CurrentInlineBlock | null {
@@ -1287,7 +1308,12 @@ export class BlockSurface {
 
   private handleSlashAfterInsert(text: string): void {
     if (!this.slash && text === '/') {
-      const cur = this.currentInlineBlock();
+      // Leaf-aware (SKR-218): resolves a top-level block exactly as before, but
+      // also an empty NESTED leaf (a list-item paragraph, a blockquote child),
+      // so the same deliberate "/ is the whole line" gesture opens a session
+      // there too — the SKR-169 sink already converts a nested leaf correctly,
+      // this only decides whether to open.
+      const cur = this.currentInlineLeaf();
       // Open only when the `/` is the entire block (a deliberate, empty-line gesture).
       if (cur && inlinePlainText(cur.block.inline) === '/') {
         this.slash = { blockId: cur.block.id, slashOffset: cur.caret - 1 };
@@ -1298,7 +1324,7 @@ export class BlockSurface {
 
   private refreshSlash(): void {
     if (!this.slash) return;
-    const cur = this.currentInlineBlock();
+    const cur = this.currentInlineLeaf();
     if (!this.slashCaretIntact(cur)) return this.closeSlash();
     const text = inlinePlainText(cur.block.inline);
     if (text[this.slash.slashOffset] !== '/') return this.closeSlash();
@@ -1348,7 +1374,7 @@ export class BlockSurface {
    *  two paths can't drift apart. */
   private closeSlashOnSelectionMove(): void {
     if (!this.slash) return;
-    if (!this.slashCaretIntact(this.currentInlineBlock())) this.closeSlash();
+    if (!this.slashCaretIntact(this.currentInlineLeaf())) this.closeSlash();
   }
 
   private emitSelection(): void {
