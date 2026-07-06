@@ -1,8 +1,9 @@
 // Project-aware image resolver shared by the preview and the editor's inline
 // image widget. Markdown image URLs are relative to the source document; this
 // rewrites a local one to a `skrive-asset://asset/<project-relative-path>` URL
-// that the main-process custom protocol serves from the project root (see
-// shell/src/main/asset-protocol.ts).
+// that the shell's custom scheme serves from the project root (see
+// shell-zig/macos/Sources/SkriveShell/AssetScheme.swift). Consumed by the
+// Markdown preview and, since SKR-223, the block surface's image rendering.
 //
 // External and already-absolute URLs (http, https, data, mailto, the
 // skrive-asset scheme itself, protocol-relative `//host`) pass through

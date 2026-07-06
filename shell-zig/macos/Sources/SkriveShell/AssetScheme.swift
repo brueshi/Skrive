@@ -2,8 +2,8 @@ import Foundation
 import WebKit
 
 // Serves project image assets over `skrive-asset://asset/<rel-path>`,
-// matching the renderer's imageResolver (app/src/lib/preview/imageResolver.ts)
-// and the Electron asset protocol (shell/src/main/asset-protocol.ts). This is
+// matching the renderer's imageResolver (app/src/lib/preview/imageResolver.ts),
+// which both the Markdown preview and the block surface consume. This is
 // a SEPARATE origin from the app scheme: the 1.2 checklist's no-mixed-content
 // row is exactly whether a skrive-app:// page can load images from this
 // skrive-asset:// origin.
