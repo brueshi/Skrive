@@ -1,9 +1,11 @@
-// Pure paste-image helpers: extension mapping, asset placement, filename, and
-// link construction. The clipboard picking, IPC write, and editor insertion in
-// components/editor/clipboard.ts are DOM/IO-coupled and tested by hand.
+// Pure paste-image helpers: extension mapping, asset placement, filename,
+// link construction, and base64 encoding. The clipboard picking (surface.ts)
+// and the IPC write (stores/project.ts, `pasteImageAsset`) are DOM/IO-coupled
+// and covered by the blocksurface paste-image suite + hand verification.
 
 import { describe, expect, it } from 'vitest';
 import {
+  bytesToBase64,
   imageExtension,
   imageMarkdownLink,
   imagePasteTarget,
@@ -65,5 +67,22 @@ describe('imageMarkdownLink', () => {
     expect(imageMarkdownLink('assets/pasted-image-42.png')).toBe(
       '![](assets/pasted-image-42.png)'
     );
+  });
+});
+
+describe('bytesToBase64', () => {
+  it('encodes bytes the same way btoa would for a short buffer', () => {
+    const bytes = new Uint8Array([0x68, 0x69]); // "hi"
+    expect(bytesToBase64(bytes)).toBe(btoa('hi'));
+  });
+
+  it('handles an empty buffer', () => {
+    expect(bytesToBase64(new Uint8Array(0))).toBe('');
+  });
+
+  it('round-trips a buffer larger than the chunk size', () => {
+    const bytes = new Uint8Array(0x8000 + 10).map((_, i) => i % 256);
+    const decoded = Uint8Array.from(atob(bytesToBase64(bytes)), (c) => c.charCodeAt(0));
+    expect(decoded).toEqual(bytes);
   });
 });

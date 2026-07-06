@@ -14,6 +14,8 @@ import { generateBlockId, parseDocument, serializeDocument, type BlockNode, type
 import { markdownForPaste } from '../clipboard/htmlToMarkdown';
 import { plainTextParagraphs } from '../clipboard/plainText';
 import { buildClipboardPayload } from '../clipboard/copyOut';
+import { imageExtension, imageMarkdownLink, pastedImageFilename } from '../clipboard/pasteImage';
+import { notify } from '../notify';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto, setCodeContent } from './render';
 import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange } from './doc-position';
@@ -54,6 +56,15 @@ export type BlockTypeSpec =
 /** What the insert (slash) menu needs: where to anchor, and the query typed after
  *  the `/`. Null when the menu is closed. */
 export type SlashMenuState = { rect: DOMRect; query: string };
+
+/** The paste-image write seam (SKR-175). The surface can pull an image off the
+ *  clipboard/drop and read its bytes, but knows neither the active document's
+ *  path nor the shell bridge — the registered delegate (the editor component,
+ *  which owns both via the stores) performs the actual write. Resolves with
+ *  the Markdown link path (relative to the document) to splice at the caret;
+ *  rejects when the write can't happen (no bridge capability, I/O failure) —
+ *  the surface toasts and leaves the document untouched. */
+export type ImagePasteDelegate = (bytes: Uint8Array, mimeType: string, filename: string) => Promise<string>;
 
 /** The current selection's formatting context, emitted on every selection change
  *  (rAF-coalesced, never per keystroke). Drives both the fixed toolbar (always
@@ -166,6 +177,11 @@ export class BlockSurface {
   private lastSelection: { blockId: string; start: number; end: number } | null = null;
   private slash: { blockId: string; slashOffset: number } | null = null;
   private slashCb: ((state: SlashMenuState | null) => void) | null = null;
+  // The registered paste-image write delegate (SKR-175); see ImagePasteDelegate.
+  // Null until the editor component registers one, and on the harness/tests that
+  // never do — an image paste with no delegate toasts and declines rather than
+  // silently losing the gesture.
+  private imagePasteCb: ImagePasteDelegate | null = null;
   // The block object each top-level element was last rendered from, so the
   // incremental reconciler re-renders only the top-level blocks that changed.
   private readonly renderedFrom = new Map<string, BlockNode>();
@@ -284,6 +300,12 @@ export class BlockSurface {
    *  the menu on an empty block, as its query changes, and when it closes (null). */
   onSlashMenu(cb: ((state: SlashMenuState | null) => void) | null): void {
     this.slashCb = cb;
+  }
+
+  /** Register (or clear) the paste-image write delegate (SKR-175). See
+   *  ImagePasteDelegate for the contract. */
+  onImagePaste(cb: ImagePasteDelegate | null): void {
+    this.imagePasteCb = cb;
   }
 
   /** The current authoritative document. The consumer serializes this. */
@@ -1537,6 +1559,17 @@ export class BlockSurface {
   // caller can preventDefault conditionally (paste) or unconditionally (drop, which
   // must always cancel the native DOM mutation). Returns whether content landed.
   private interpretTransfer(data: DataTransfer, claim: () => void): boolean {
+    // Images claim the gesture ahead of everything else (SKR-175 / F26): a macOS
+    // screenshot copy carries an image flavor alongside incidental text/HTML
+    // flavors, and the image is what the user meant to paste. An unrecognized
+    // image MIME (e.g. image/tiff — imageExtension doesn't know it) falls
+    // through to the text branch below, same as a non-image transfer.
+    const image = this.findImageItem(data);
+    if (image) {
+      claim();
+      void this.handleImagePaste(image);
+      return true;
+    }
     const plain = data.getData('text/plain');
     const html = data.getData('text/html');
     // Rich HTML wins; fall back to interpreting plain text as Markdown.
@@ -1554,6 +1587,53 @@ export class BlockSurface {
     // back to the plain split-paste for v1 — see SKR-119 scope.
     if (!this.insertMarkdownBlocks(markdown)) this.pasteText(literal, 'flow');
     return true;
+  }
+
+  // The first clipboard/drop item recognized as a pasteable image (SKR-175):
+  // a file item whose MIME type imageExtension knows. Null when there is no
+  // `items` list (older/minimal DataTransfer shapes, and every existing
+  // text-only test fixture) or nothing qualifies, so the caller falls through
+  // to the ordinary text interpretation untouched.
+  private findImageItem(data: DataTransfer): { file: File; mimeType: string } | null {
+    const items = data.items;
+    if (!items) return null;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]!;
+      if (item.kind !== 'file' || !imageExtension(item.type)) continue;
+      const file = item.getAsFile();
+      if (file) return { file, mimeType: item.type };
+    }
+    return null;
+  }
+
+  // Land a pasted/dropped image (SKR-175): read its bytes and hand them to the
+  // registered write delegate — the surface knows neither the active
+  // document's path nor the shell bridge, so it can't perform the write
+  // itself (see ImagePasteDelegate). On resolve, splice the Markdown image
+  // link the delegate hands back at the caret through the normal insert
+  // pipeline (one history step, same as any other block paste). No delegate
+  // registered, or the delegate rejects (unsupported bridge, I/O failure):
+  // toast and leave the document untouched. Either way the gesture was
+  // already claimed by the caller, so the browser never gets a shot at it.
+  private async handleImagePaste(image: { file: File; mimeType: string }): Promise<void> {
+    if (!this.imagePasteCb) {
+      notify.error("Can't paste images in this version of Skrive");
+      return;
+    }
+    const ext = imageExtension(image.mimeType);
+    if (!ext) return; // findImageItem already filtered; defensive only
+    const filename = pastedImageFilename(ext);
+    try {
+      const bytes = new Uint8Array(await image.file.arrayBuffer());
+      const linkPath = await this.imagePasteCb(bytes, image.mimeType, filename);
+      const markdown = imageMarkdownLink(linkPath);
+      // Same fallback chain as the text pipeline: a caret in a code block or
+      // table cell can't hold a structural insert, so the link lands as
+      // literal text there instead of the gesture silently vanishing.
+      if (!this.insertMarkdownBlocks(markdown)) this.pasteText(markdown, 'flow');
+    } catch (err) {
+      notify.error("Couldn't paste image", err);
+    }
   }
 
   // Drag-and-drop (SKR-165). External text dropped from another app lands through
