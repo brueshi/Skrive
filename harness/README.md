@@ -33,7 +33,8 @@ onto the hot path.
   cold path — exactly the hot path the gate measures. Dev-served by Vite at
   `/harness.html?surface=rich&blocks=10000&anchors=50`.
 - **Matrix runner** — `harness/playwright.config.ts` + `harness/latency.matrix.spec.ts`.
-- **Baseline** — `harness/baseline.latency.json` (committed; the number to beat).
+- **Baseline** — `harness/bespoke.latency.json` (committed; the numbers to beat,
+  including the Stage 3a absolute p99 ceiling added by SKR-215).
 
 ## Running
 
