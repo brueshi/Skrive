@@ -747,7 +747,13 @@ export class BlockSurface {
       case 'heading':
         return { node: { type: 'heading', ...base, level: spec.level, inline }, caretLeafId: null };
       case 'blockquote': {
-        const inner = this.newInlineBlock('paragraph', inline, 1);
+        // Quoting a heading keeps the heading (level intact) as the quote's child,
+        // rather than always flowing the inline into a fresh paragraph — a quote
+        // legitimately contains a heading, and SKR-169's multi-block wrap already
+        // preserves the source kind this way (SKR-219). Every other source
+        // (paragraph, code) still yields a plain paragraph child.
+        const inner =
+          source.type === 'heading' ? this.newInlineBlock('heading', inline, source.level) : this.newInlineBlock('paragraph', inline, 1);
         return { node: { type: 'blockquote', ...base, children: [inner] }, caretLeafId: inner.id };
       }
       case 'bullet_list': {
@@ -808,6 +814,24 @@ export class BlockSurface {
     if (spec.kind === 'divider' || spec.kind === 'table') {
       this.insertBesideContainer(leafId, spec);
       return;
+    }
+    // Turning a list item into a list (Bullet/Numbered from the slash menu) is a
+    // KIND CHANGE on the item's enclosing list, not a lift-out: unlike converting
+    // to a heading/paragraph/code (which genuinely leaves the list), Bullet <->
+    // Numbered stays a list either way. Same kind is therefore a no-op (Notion:
+    // choosing "Bullet list" while already in one does nothing); the other kind
+    // changes the WHOLE enclosing list in place, mirroring toggleList's single-caret
+    // branches so the toolbar and the slash menu agree (SKR-219). Falls through to
+    // the lift-out path below only when the leaf isn't in a list at all (e.g. a
+    // blockquote child), where wrapping a fresh list is the only sensible move.
+    if (spec.kind === 'bullet_list' || spec.kind === 'ordered_list') {
+      const list = findImmediateList(this.doc.blocks, leafId);
+      if (list) {
+        if (list.type === spec.kind) return; // already this kind: no-op, zero history steps
+        const blocks = changeListType(this.doc.blocks, leafId, spec.kind);
+        if (blocks) this.applyStructural({ blocks, caret: { id: leafId, offset } });
+        return;
+      }
     }
     let blocks = this.doc.blocks;
     // A list item lifts out of its list before converting: outdent until it is a
@@ -958,8 +982,11 @@ export class BlockSurface {
   /** Toggle the focused block(s) to/from a list of `target` kind (Cmd/Ctrl+Shift+8/7,
    *  toolbar). A multi-block selection wraps the covered top-level blocks into one
    *  list (or unwraps when they are all already that kind). A single caret: not in a
-   *  list -> wrap into one; in a list of the same kind -> outdent/lift off; in a
-   *  list of the other kind -> switch the kind. */
+   *  list -> wrap into one; in a list of the same kind -> no-op (Notion: choosing
+   *  Bullet list while already in one does nothing — Shift+Tab, not this gesture,
+   *  is how an item leaves its list); in a list of the other kind -> switch the
+   *  WHOLE enclosing list's kind in place (SKR-219; previously the same-kind branch
+   *  outdented the single focused item, splitting the list around it). */
   toggleList(target: 'bullet_list' | 'ordered_list'): void {
     const tops = this.selectedTopLevelBlocks();
     // Multi when the selection spans several top-level blocks OR several leaves of
@@ -976,10 +1003,7 @@ export class BlockSurface {
       this.setBlockType({ kind: target });
       return;
     }
-    if (list.type === target) {
-      this.applyOutdent(t.leaf.id, t.start);
-      return;
-    }
+    if (list.type === target) return; // already this kind: no-op, zero history steps
     const blocks = changeListType(this.doc.blocks, t.leaf.id, target);
     if (blocks) this.applyStructural({ blocks, caret: { id: t.leaf.id, offset: t.start } });
   }

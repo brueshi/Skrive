@@ -581,11 +581,13 @@ test('Stage 4: keyboard shortcuts toggle and switch list kind', async ({ page })
   expect(md, 'switched to ordered').toMatch(/(^|\n)1\. shopping/);
   expect(md).not.toContain('- shopping');
 
-  await page.keyboard.press('ControlOrMeta+Shift+Digit7'); // toggle off -> paragraph
+  // Same-kind again is a no-op (SKR-219): Notion parity — choosing the kind the
+  // item already is does nothing, rather than unwrapping it. Shift+Tab (tested
+  // separately) is the "leave the list" gesture, not this shortcut.
+  await page.keyboard.press('ControlOrMeta+Shift+Digit7');
   await page.waitForTimeout(80);
   md = await serialized(page);
-  expect(md, 'list formatting removed').not.toMatch(/(^|\n)(- |1\. )shopping/);
-  expect(md).toContain('shopping');
+  expect(md, 'same-kind toggle is a no-op, still ordered').toMatch(/(^|\n)1\. shopping/);
   expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
