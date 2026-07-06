@@ -65,13 +65,12 @@ describe('sourceToModel — html', () => {
     expect(title).toBeNull();
     expect(model.blocks[0]).toMatchObject({ type: 'heading', level: 1 });
     const para = model.blocks[1];
-    expect(para.type).toBe('paragraph');
-    if (para.type === 'paragraph') {
-      const strong = para.inline.find((n) => n.kind === 'text' && n.marks.strong);
-      expect(strong).toBeDefined();
-      const link = para.inline.find((n) => n.kind === 'text' && n.marks.link);
-      expect(link && link.kind === 'text' && link.marks.link?.href).toBe('https://skrive.md');
-    }
+    expect(para?.type).toBe('paragraph');
+    if (!para || para.type !== 'paragraph') throw new Error('no paragraph');
+    const strong = para.inline.find((n) => n.kind === 'text' && n.marks.strong);
+    expect(strong).toBeDefined();
+    const link = para.inline.find((n) => n.kind === 'text' && n.marks.link);
+    expect(link && link.kind === 'text' && link.marks.link?.href).toBe('https://skrive.md');
   });
 });
 

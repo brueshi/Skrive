@@ -21,7 +21,9 @@ const STUB_DEPS: CommandDeps = {
   toggleSearch: noop,
   toggleCheatSheet: noop,
   openRename: noop,
-  openNewProject: noop
+  openNewProject: noop,
+  openBugReport: noop,
+  openFeedback: noop
 };
 
 function chordKey(c: {
