@@ -16,6 +16,14 @@ export type LatencySummary = {
   mean: number;
   p50: number;
   p90: number;
+  /**
+   * The 95th percentile. One rank looser than p99, so a single slow outlier
+   * (a GC pause, a stray layout) can't dominate it the way it can p99 on a
+   * modest sample count — the metric of choice for a *ratio* comparison,
+   * where both sides need to be stable relative to each other, not just each
+   * individually low-variance.
+   */
+  p95: number;
   p99: number;
   max: number;
 };
@@ -27,6 +35,7 @@ export const EMPTY_SUMMARY: LatencySummary = {
   mean: 0,
   p50: 0,
   p90: 0,
+  p95: 0,
   p99: 0,
   max: 0
 };
@@ -65,18 +74,28 @@ export function summarize(samples: readonly number[]): LatencySummary {
     mean: sum / samples.length,
     p50: percentile(samples, 0.5),
     p90: percentile(samples, 0.9),
+    p95: percentile(samples, 0.95),
     p99: percentile(samples, 0.99),
     max: Math.max(...samples)
   };
 }
 
+/** The tail percentiles a ratio comparison can be keyed on. */
+export type RatioMetric = 'p50' | 'p90' | 'p95' | 'p99';
+
 /**
  * Constant-time verdict. The gate's real test is that latency does not grow with
  * document size or position, so we compare a candidate scenario's tail against a
- * baseline scenario's tail as a ratio. `ratio = candidate.p99 / baseline.p99`;
+ * baseline scenario's tail as a ratio. `ratio = candidate[metric] / baseline[metric]`;
  * 1.0 is identical, >1 means the candidate is slower. A scenario that scales
  * with the document (something document-sized leaked onto the hot path) shows up
  * here as a ratio that climbs with block count.
+ *
+ * `metric` defaults to p99 (the historical gate metric). Callers whose baseline
+ * scenario has a low sample count — where p99 quantises to close to the single
+ * slowest keystroke and swings run to run — should pass `'p95'` instead: one
+ * rank looser, so an outlier on either side can't single-handedly move the
+ * ratio across the tolerance line.
  *
  * Returns the ratio plus a `withinTolerance` flag against a multiplier (e.g.
  * 1.5 = "the 10k-block doc may be at most 50% slower than block 1"). Guards the
@@ -88,14 +107,15 @@ export function constantTimeRatio(
   baseline: LatencySummary,
   candidate: LatencySummary,
   tolerance: number,
-  floorMs = 1
+  floorMs = 1,
+  metric: RatioMetric = 'p99'
 ): { ratio: number; withinTolerance: boolean } {
-  if (baseline.p99 < floorMs && candidate.p99 < floorMs) {
+  if (baseline[metric] < floorMs && candidate[metric] < floorMs) {
     return { ratio: 1, withinTolerance: true };
   }
   // Avoid divide-by-zero when only the baseline is sub-floor: anchor the
   // denominator at the floor so the ratio stays finite and meaningful.
-  const denom = Math.max(baseline.p99, floorMs);
-  const ratio = candidate.p99 / denom;
+  const denom = Math.max(baseline[metric], floorMs);
+  const ratio = candidate[metric] / denom;
   return { ratio, withinTolerance: ratio <= tolerance };
 }

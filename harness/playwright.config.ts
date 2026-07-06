@@ -25,7 +25,7 @@ export default defineConfig({
   timeout: 120_000,
   reporter: [['list']],
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://localhost:5199',
     headless: true,
     // A fixed viewport so layout/paint cost is comparable run to run.
     viewport: { width: 1280, height: 900 }
@@ -37,8 +37,11 @@ export default defineConfig({
     }
   ],
   webServer: {
-    command: 'bun run dev',
-    url: 'http://localhost:5173/harness.html',
+    // A dedicated port, distinct from the app's dev port (5173, strictPort'd for
+    // the native shells): the matrix boots its own Vite instance and must never
+    // collide with a shell dev session running on the same machine.
+    command: 'bun run dev -- --port 5199',
+    url: 'http://localhost:5199/harness.html',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000
   }

@@ -53,6 +53,7 @@ describe('summarize', () => {
     expect(s.max).toBe(10);
     expect(s.mean).toBeCloseTo(5.5, 10);
     expect(s.p50).toBeCloseTo(5.5, 10);
+    expect(s.p95).toBeCloseTo(9.55, 10);
     expect(s.p99).toBeCloseTo(9.91, 10);
   });
 });
@@ -87,5 +88,18 @@ describe('constantTimeRatio', () => {
     const v = constantTimeRatio(a, b, 1.5, 1);
     expect(v.ratio).toBeCloseTo(3, 6); // 3 / floor(1), not 3 / 0.5
     expect(v.withinTolerance).toBe(false);
+  });
+
+  it('supports comparing on a metric other than p99 (SKR-215)', () => {
+    // A single outlier sample inflates p99 far more than p95 on a small
+    // sample count — exactly the small-sample tail-noise problem the block
+    // matrix's Stage 3a gate hit. Comparing on p95 instead is less sensitive
+    // to that one outlier.
+    const baseline = summarize([2, 2, 2, 2, 20]); // one JIT-compile-style spike
+    const candidate = summarize([4, 4, 4, 4, 4]);
+    const byP99 = constantTimeRatio(baseline, candidate, 1.5, 1, 'p99');
+    const byP95 = constantTimeRatio(baseline, candidate, 1.5, 1, 'p95');
+    expect(byP99.ratio).toBeLessThan(byP95.ratio);
+    expect(byP95.ratio).toBeCloseTo(candidate.p95 / baseline.p95, 6);
   });
 });
