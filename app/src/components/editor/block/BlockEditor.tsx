@@ -22,6 +22,7 @@ import { SelectionBubble } from '../menus/SelectionBubble';
 import { LinkEditor } from '../menus/LinkEditor';
 import { BlockSlashMenu } from '../menus/BlockSlashMenu';
 import { useProjectStore } from '../../../stores/project';
+import { skriveAssetResolver } from '../../../lib/preview/imageResolver';
 import './BlockEditor.css';
 
 // Model-in / model-out (SKR-196). The surface edits the canonical block model
@@ -33,8 +34,9 @@ type Props = {
   /** Initial block-model document. Read once on mount; uncontrolled thereafter. */
   doc: Document;
   /** The document's project-relative path. Read once on mount (App remounts this
-   *  component per file via `key`) — used only to resolve where a pasted image's
-   *  sibling `assets/` folder lands (SKR-175); the surface itself never sees it. */
+   *  component per file via `key`). Resolves where a pasted image's sibling
+   *  `assets/` folder lands (SKR-175) and anchors the surface's asset-URL resolver
+   *  so image srcs load in the shell (SKR-223). */
   docPath: string;
   /** Receives the edited document on the surface's debounced snapshot. */
   onChange: (next: Document) => void;
@@ -56,7 +58,15 @@ export function BlockEditor({ doc, docPath, onChange }: Props): React.ReactEleme
     const surface = new BlockSurface({
       container: host,
       doc,
-      onDocChange: (next) => onChangeRef.current(next)
+      onDocChange: (next) => onChangeRef.current(next),
+      // Resolve model image srcs onto the shell's asset origin at render time
+      // (SKR-223). The same helper the Markdown preview uses (one resolver, two
+      // consumers), bound to this document's path so a relative `assets/…` src —
+      // which the webview can't load against the app's document origin — becomes a
+      // loadable `skrive-asset://…` URL. Passed at construction so images already
+      // in the doc resolve on the first paint, not just ones pasted afterward. The
+      // raw relative path stays in the model; this is view-only.
+      resolveAsset: (rawUrl) => skriveAssetResolver(rawUrl, { projectRoot: '', filePath: docPath })
     });
     const caret = attachCustomCaret({ surface: host, scroller, caret: caretEl });
     const controller = new BlockMenuController(surface);

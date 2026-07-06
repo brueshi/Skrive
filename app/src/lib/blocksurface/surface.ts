@@ -17,6 +17,7 @@ import { buildClipboardPayload } from '../clipboard/copyOut';
 import { imageExtension, imageMarkdownLink, pastedImageFilename } from '../clipboard/pasteImage';
 import { notify } from '../notify';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto, setCodeContent } from './render';
+import type { AssetResolver } from './render';
 import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange } from './doc-position';
 import { barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
@@ -102,6 +103,13 @@ export type BlockSurfaceOptions = {
   /** Called debounced after edits with the current document, for the cold path
    *  (serialize / persist). Never called on the synchronous keystroke path. */
   onDocChange?: (doc: Document) => void;
+  /** Maps a model image URL (document-relative `assets/…`) to a URL the webview
+   *  can actually load — see AssetResolver (SKR-223). Passed at construction (not
+   *  registered post-mount like onImagePaste) so the very first paint already
+   *  resolves images: a file that opens with images in it must show them, and the
+   *  constructor's initial renderDocument runs before any registration call would.
+   *  Omitted in tests/harness -> identity (the raw path, today's behavior). */
+  resolveAsset?: AssetResolver;
 };
 
 type InlineTextBlock = Extract<BlockNode, { type: 'paragraph' | 'heading' }>;
@@ -203,6 +211,12 @@ export class BlockSurface {
   // never do — an image paste with no delegate toasts and declines rather than
   // silently losing the gesture.
   private imagePasteCb: ImagePasteDelegate | null = null;
+  // Maps a model image URL onto a loadable one at render time (SKR-223). Every
+  // render.ts call funnels through this so a pasted image resolves the instant its
+  // block re-renders and a doc opened with images resolves on first paint. Pure
+  // and view-only: the model keeps the raw relative path, serialization untouched.
+  // Defaults to identity when no shell resolver is supplied (tests/harness).
+  private readonly resolveAsset: AssetResolver;
   // The block object each top-level element was last rendered from, so the
   // incremental reconciler re-renders only the top-level blocks that changed.
   private readonly renderedFrom = new Map<string, BlockNode>();
@@ -224,6 +238,7 @@ export class BlockSurface {
     this.container = opts.container;
     this._doc = opts.doc; // bypass the setter: initial load is not an undoable edit
     this.onDocChange = opts.onDocChange;
+    this.resolveAsset = opts.resolveAsset ?? ((url) => url);
 
     this.container.contentEditable = 'true';
     this.container.spellcheck = false;
@@ -234,7 +249,7 @@ export class BlockSurface {
     this.container.setAttribute('autocorrect', 'off');
     this.container.setAttribute('autocapitalize', 'off');
     this.container.setAttribute('autocomplete', 'off');
-    renderDocument(this.container, this.doc.blocks, this.registry);
+    renderDocument(this.container, this.doc.blocks, this.registry, this.resolveAsset);
     for (const block of this.doc.blocks) this.renderedFrom.set(block.id, block);
 
     this.container.addEventListener('beforeinput', this.onBeforeInput, { capture: true });
@@ -543,7 +558,7 @@ export class BlockSurface {
     for (const l of leaves) {
       const el = this.leafElementById(l.leaf.id);
       const updated = findBlockById(this.doc.blocks, l.leaf.id);
-      if (el && updated && isInlineText(updated)) renderInlineInto(el, updated.inline);
+      if (el && updated && isInlineText(updated)) renderInlineInto(el, updated.inline, this.resolveAsset);
     }
     const first = leaves[0];
     const last = leaves[leaves.length - 1];
@@ -638,7 +653,7 @@ export class BlockSurface {
       // input to a surface with no live selection. Commit re-renders (cancel
       // doesn't), but the focus-before-select ordering matters either way.
       this.container.focus();
-      renderInlineInto(el, inline);
+      renderInlineInto(el, inline, this.resolveAsset);
       setSelectionRange(el, saved.start, saved.end);
     }
     this.scheduleSerialize();
@@ -660,7 +675,7 @@ export class BlockSurface {
     if (!t || t.collapsed || t.spansBlocks || !isInlineText(t.leaf)) return;
     const inline = transform(t.leaf.inline, t.start, t.end);
     this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, t.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
-    renderInlineInto(t.blockEl, inline);
+    renderInlineInto(t.blockEl, inline, this.resolveAsset);
     setSelectionRange(t.blockEl, t.start, t.end);
     this.scheduleSerialize();
     this.emitSelection(); // refresh the bubble's active state
@@ -715,7 +730,7 @@ export class BlockSurface {
 
     const { node: next, caretLeafId } = this.convertedBlock(spec, cur.block);
     this.commitBlock(cur.index, next);
-    const newEl = renderBlock(next);
+    const newEl = renderBlock(next, this.resolveAsset);
     cur.blockEl.replaceWith(newEl);
     this.registry.set(cur.block.id, newEl);
     this.renderedFrom.set(cur.block.id, next);
@@ -900,10 +915,10 @@ export class BlockSurface {
     blocks.splice(cur.index, 1, hr, para);
     this.doc = { ...this.doc, blocks };
 
-    const hrEl = renderBlock(hr);
+    const hrEl = renderBlock(hr, this.resolveAsset);
     cur.blockEl.replaceWith(hrEl);
     this.registry.set(hr.id, hrEl);
-    const paraEl = renderBlock(para);
+    const paraEl = renderBlock(para, this.resolveAsset);
     hrEl.after(paraEl);
     this.registry.set(para.id, paraEl);
     setCaret(paraEl, 0);
@@ -1211,7 +1226,7 @@ export class BlockSurface {
     // Consume the marker text, then convert the (now marker-less) paragraph.
     const inline = deleteRangeInInline(cur.block.inline, 0, markerLen);
     this.commitBlock(cur.index, { ...cur.block, inline, dirty: true });
-    renderInlineInto(cur.blockEl, inline);
+    renderInlineInto(cur.blockEl, inline, this.resolveAsset);
     setCaret(cur.blockEl, 0);
     this.setBlockType(spec);
     return true;
@@ -1235,7 +1250,7 @@ export class BlockSurface {
     const text = inlinePlainText(cur.block.inline);
     const inline = deleteRangeInInline(cur.block.inline, slash.slashOffset, text.length);
     this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, cur.block.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
-    renderInlineInto(cur.blockEl, inline);
+    renderInlineInto(cur.blockEl, inline, this.resolveAsset);
     setCaret(cur.blockEl, slash.slashOffset);
     this.closeSlash();
     this.setBlockType(spec);
@@ -2661,8 +2676,8 @@ export class BlockSurface {
     blocks.splice(index, 1, leftBlock, rightBlock);
     this.doc = { ...this.doc, blocks };
 
-    renderInlineInto(t.blockEl, left);
-    const rightEl = renderBlock(rightBlock);
+    renderInlineInto(t.blockEl, left, this.resolveAsset);
+    const rightEl = renderBlock(rightBlock, this.resolveAsset);
     t.blockEl.after(rightEl);
     this.registry.set(rightBlock.id, rightEl);
     setCaret(rightEl, 0);
@@ -3192,7 +3207,7 @@ export class BlockSurface {
 
   private commitCell(c: { tableId: string; row: number; col: number; cellEl: HTMLElement }, inline: InlineNode[], caret: number): void {
     this.updateCellModel(c, inline);
-    renderInlineInto(c.cellEl, inline);
+    renderInlineInto(c.cellEl, inline, this.resolveAsset);
     setCaret(c.cellEl, caret);
   }
 
@@ -3358,7 +3373,7 @@ export class BlockSurface {
   // and place the caret. updateBlockById marks the block and its ancestors dirty.
   private commitInline(id: string, inline: InlineNode[], blockEl: HTMLElement, caret: number): void {
     this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
-    renderInlineInto(blockEl, inline);
+    renderInlineInto(blockEl, inline, this.resolveAsset);
     setCaret(blockEl, caret);
   }
 
@@ -3399,7 +3414,7 @@ export class BlockSurface {
     for (const block of this.doc.blocks) {
       let el = have.get(block.id);
       if (!el || this.renderedFrom.get(block.id) !== block) {
-        const fresh = renderBlock(block);
+        const fresh = renderBlock(block, this.resolveAsset);
         this.registry.set(block.id, fresh);
         if (el) el.replaceWith(fresh);
         el = fresh;

@@ -115,6 +115,16 @@
   text-decoration: underline;
 }
 
+/* Inline images (SKR-175 paste/drop; SKR-223 shell resolution). Constrained to
+   the measure and never overflowing it, matching the preview's `.preview-inner
+   img`. `height: auto` keeps the aspect ratio; the alt text stays legible if the
+   asset fails to load, so a broken src reads as a labeled gap, not an invisible
+   one. */
+.block-editor-surface img {
+  max-width: 100%;
+  height: auto;
+}
+
 /* Block selection (SKR-203): a code block / table selected as a unit wears a calm
    accent ring — distinct from the text-selection highlight, and quiet enough to
    read as "this object is selected" without a heavy glow. Data-attribute scoped so
