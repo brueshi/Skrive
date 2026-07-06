@@ -50,6 +50,7 @@ import {
   type ExportFormatId
 } from '../lib/export';
 import { stripFolioExtension } from '../lib/title';
+import { bytesToBase64, imagePasteTarget } from '../lib/clipboard/pasteImage';
 import { runProjectLint } from '../lib/lint';
 import type { LintWorkerResponse } from '../lib/lint/lint-worker-protocol';
 import { flushActiveEditor } from '../components/editor/active-editor';
@@ -270,6 +271,13 @@ type Actions = {
    *  lossy-where-the-target-can't export — not a fidelity contract. Never clobbers
    *  an existing file (see `exportTargetPath`). */
   exportDocument(path: string, format: ExportFormatId): Promise<void>;
+  /** The bespoke surface's paste-image write delegate (SKR-175): writes `bytes`
+   *  to a sibling `assets/` folder next to `docPath` under `filename`, and
+   *  resolves with the Markdown link path (relative to `docPath`) to splice at
+   *  the caret. Rejects (no manifest, or the IPC write fails) rather than
+   *  swallowing the error — the surface's catch is what toasts, so the failure
+   *  isn't reported twice. */
+  pasteImageAsset(docPath: string, filename: string, bytes: Uint8Array): Promise<string>;
   /** Convert an open-format source file (Markdown / HTML / plain text) into a
    *  new native `.folio` document and open it. The explicit "Make this a Skrive
    *  document" upgrade: it mints a fresh docId, writes a *new* `.folio`, and
@@ -1408,6 +1416,14 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       return;
     }
     notify.success(`Exported ${target.split('/').pop()}`);
+  },
+
+  async pasteImageAsset(docPath: string, filename: string, bytes: Uint8Array) {
+    const { manifest } = get();
+    if (!manifest) throw new Error('pasteImageAsset: no active project');
+    const target = imagePasteTarget(docPath, filename);
+    await window.skrive.fs.writeBinaryFile(manifest.root, target.writePath, bytesToBase64(bytes));
+    return target.linkPath;
   },
 
   async convertToFolio(path: string) {

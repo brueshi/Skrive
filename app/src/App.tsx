@@ -504,6 +504,7 @@ export function App() {
                       <BlockEditor
                         key={activeTab.path}
                         doc={activeTab.model}
+                        docPath={activeTab.path}
                         onChange={(doc) => setTabModel(activeTabIndex, doc)}
                       />
                     ) : activeTab.mode === 'text' ? (

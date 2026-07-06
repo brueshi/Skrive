@@ -1,6 +1,9 @@
-// Pure helpers for pasting a binary image into the project. Path, name, and
-// link logic only — picking the image off the clipboard, the IPC write, and
-// the editor insertion live in the paste handler (components/editor/clipboard).
+// Pure helpers for pasting a binary image into the project (SKR-175). Path,
+// name, link, and encoding logic only — picking the image off the clipboard
+// lives in the bespoke surface (lib/blocksurface/surface.ts), and the IPC
+// write + editor insertion are split across the surface's registered paste
+// delegate (components/editor/block/BlockEditor.tsx) and the project store
+// (stores/project.ts, `pasteImageAsset`).
 //
 // A pasted image is written to a sibling `assets/` folder next to the active
 // document, and the inserted Markdown link is relative to that document.
@@ -63,4 +66,19 @@ export function pastedImageFilename(ext: string, now: number = Date.now()): stri
 /** The Markdown image link inserted for a pasted image. */
 export function imageMarkdownLink(linkPath: string): string {
   return `![](${linkPath})`;
+}
+
+// Bytes are read off the clipboard/drop as a plain array; the shell's binary
+// write IPC (`fs:writeBinaryFile`) takes base64, so the store's write delegate
+// needs an encoder. Chunked so a multi-megabyte screenshot doesn't blow the
+// call stack the way `String.fromCharCode(...bytes)` would as one spread call.
+const BASE64_CHUNK = 0x8000;
+
+/** Encode raw bytes as base64, for the binary-file write IPC. */
+export function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += BASE64_CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + BASE64_CHUNK));
+  }
+  return btoa(binary);
 }

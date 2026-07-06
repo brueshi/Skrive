@@ -21,6 +21,7 @@ import { BlockMenuController } from '../menus/BlockMenuController';
 import { SelectionBubble } from '../menus/SelectionBubble';
 import { LinkEditor } from '../menus/LinkEditor';
 import { BlockSlashMenu } from '../menus/BlockSlashMenu';
+import { useProjectStore } from '../../../stores/project';
 import './BlockEditor.css';
 
 // Model-in / model-out (SKR-196). The surface edits the canonical block model
@@ -31,11 +32,15 @@ import './BlockEditor.css';
 type Props = {
   /** Initial block-model document. Read once on mount; uncontrolled thereafter. */
   doc: Document;
+  /** The document's project-relative path. Read once on mount (App remounts this
+   *  component per file via `key`) — used only to resolve where a pasted image's
+   *  sibling `assets/` folder lands (SKR-175); the surface itself never sees it. */
+  docPath: string;
   /** Receives the edited document on the surface's debounced snapshot. */
   onChange: (next: Document) => void;
 };
 
-export function BlockEditor({ doc, onChange }: Props): React.ReactElement {
+export function BlockEditor({ doc, docPath, onChange }: Props): React.ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const caretRef = useRef<HTMLDivElement>(null);
@@ -55,6 +60,13 @@ export function BlockEditor({ doc, onChange }: Props): React.ReactElement {
     });
     const caret = attachCustomCaret({ surface: host, scroller, caret: caretEl });
     const controller = new BlockMenuController(surface);
+    // The write seam (SKR-175): the surface can read a pasted image's bytes but
+    // owns neither docPath nor the shell bridge, so it hands both to the store
+    // action that does. A rejection here is what the surface's own catch turns
+    // into a toast — this delegate deliberately doesn't swallow the error.
+    surface.onImagePaste((bytes, _mimeType, filename) =>
+      useProjectStore.getState().pasteImageAsset(docPath, filename, bytes)
+    );
     setCtx({ surface, controller });
     setActiveEditorFlush(() => surface.flush());
     setActiveBlockMenu(controller);

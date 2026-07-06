@@ -8,7 +8,8 @@ export {
   type BlockSurfaceOptions,
   type SelectionInfo,
   type BlockTypeSpec,
-  type SlashMenuState
+  type SlashMenuState,
+  type ImagePasteDelegate
 } from './surface';
 export { renderDocument, renderBlock, renderInlineInto, BlockViewRegistry, BLOCK_ID_ATTR } from './render';
 export {
