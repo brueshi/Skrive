@@ -4,10 +4,12 @@
 // type/paste-over-selection (delete then insert). Pure over the block tree.
 //
 // Scope today: inline-text leaves (paragraph / heading) at any depth, including
-// inside lists and blockquotes — the prose cases. code_block / table / image /
-// hr / frozen are BARRIERS: a merge across one is refused and a cross-block range
+// inside lists and blockquotes — the prose cases. code_block / table / hr /
+// frozen_block are BARRIERS: a merge across one is refused and a cross-block range
 // that includes one is clamped (returns null), so a text edit can never corrupt a
-// table or a code block. Those become first-class in a later sub-stage.
+// table or a code block. Those become first-class in a later sub-stage. (There is
+// no image *block* — an image is an InlineNode embedded in a paragraph, not a
+// barrier in its own right.)
 
 import { generateBlockId, type BlockNode, type InlineNode } from '../blockmodel';
 import { deleteRangeInInline, inlineLength, insertTextInInline } from './inline-ops';
@@ -29,7 +31,7 @@ export function documentLeaves(blocks: BlockNode[]): LeafEntry[] {
       else if (b.type === 'blockquote') walk(b.children);
       else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
         for (const item of b.items) walk(item.children);
-      } else out.push({ id: b.id, kind: 'barrier' }); // code_block / table / hr / image / frozen
+      } else out.push({ id: b.id, kind: 'barrier' }); // code_block / table / hr / frozen_block
     }
   };
   walk(blocks);
@@ -247,13 +249,13 @@ export function mergeForward(blocks: BlockNode[], leafId: string): RangeResult |
 /**
  * The block adjacent to `leafId` in `direction`, when that neighbor is the
  * reason mergeBackward/mergeForward returned null (i.e. it's a barrier —
- * code_block / table / hr / image / frozen — rather than there being no leaf
+ * code_block / table / hr / frozen_block — rather than there being no leaf
  * at all in that direction). Callers use this to decide what a merge-null
- * Backspace/Delete should do instead of silently no-opping (SKR-167): delete a
- * content-free atom like an hr outright, or select a content-bearing barrier
- * like a code block / table as a unit. Null when there is no leaf in that
- * direction, or the neighbor is inline (mergeBackward/mergeForward would have
- * succeeded instead of returning null).
+ * Backspace/Delete should do instead of silently no-opping (SKR-167, extended to
+ * frozen blocks by SKR-216): delete a content-free atom like an hr outright, or
+ * select a content-bearing barrier like a code block / table / frozen block as a
+ * unit. Null when there is no leaf in that direction, or the neighbor is inline
+ * (mergeBackward/mergeForward would have succeeded instead of returning null).
  */
 export function barrierNeighbor(blocks: BlockNode[], leafId: string, direction: 'backward' | 'forward'): BlockNode | null {
   const leaves = documentLeaves(blocks);

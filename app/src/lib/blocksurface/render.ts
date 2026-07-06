@@ -155,8 +155,17 @@ export function renderBlock(block: BlockNode): HTMLElement {
       break;
     }
     case 'frozen_block':
+      // Never editable in place (it can't be canonicalized, so there is nothing
+      // to dirty-track): without this a plain div inherits the container's
+      // contenteditable and the browser happily plants a native caret inside it
+      // and lets you type — the model then silently ignores the keystrokes
+      // (onBeforeInput no-ops on a non-inline leaf), leaving a dead caret sitting
+      // in a block that looks editable but isn't (SKR-216). contentEditable=false
+      // makes it a real atom: click-to-select (surface.ts's onClick) is the only
+      // way in, matching code_block / table / hr's barrier status.
       el = document.createElement('div');
       el.dataset.frozen = '';
+      el.contentEditable = 'false';
       el.textContent = block.src;
       break;
   }
