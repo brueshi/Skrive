@@ -22,6 +22,10 @@ afterEach(() => container.remove());
 
 const CODE = '```\ncode\n```';
 const TABLE = '| a | b |\n| - | - |\n| 1 | 2 |';
+// A raw HTML block is the frozen_block case (SKR-216): there is no image *block*
+// in the model (an image is an InlineNode inside a paragraph), so frozen_block is
+// the only other content-bearing barrier this substrate needed wiring for.
+const FROZEN = '<div>raw</div>';
 const plain = (inline: InlineNode[]): string => inline.map((n) => (n.kind === 'text' ? n.text : '')).join('');
 
 function caretIn(node: Node, offset: number): void {
@@ -263,6 +267,52 @@ describe('Dissolving a block selection', () => {
     // A real caret placed by the user (a click) dissolves it, caret left in place.
     caretIn(container.querySelector('p')!.firstChild!, 3);
     (surface as unknown as { dissolveOnUserSelection: () => void }).dissolveOnUserSelection();
+    expect(selectedIds(surface)).toEqual([]);
+    expect(container.querySelector('[data-block-selected]')).toBeNull();
+  });
+});
+
+// Frozen blocks (SKR-216): rendered contentEditable=false (see render.ts), so
+// there is no caret to place inside one — Escape / ⌘A escalation (which key off
+// a caret already being inside the barrier) don't apply. Click is the only entry
+// point besides the Backspace/Delete adjacency gesture covered in
+// barrier-adjacency.test.ts.
+describe('Click on a frozen block selects it as a unit (SKR-216)', () => {
+  function click(target: Element): void {
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  }
+
+  it('selects the frozen block and paints the ring', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`hello\n\n${FROZEN}\n`) });
+    const frozenEl = container.querySelector('[data-frozen]')!;
+    // Never editable in place: the browser can't plant a caret inside it.
+    expect((frozenEl as HTMLElement).contentEditable).toBe('false');
+
+    click(frozenEl);
+
+    expect(selectedIds(surface)).toEqual([idOf(surface, 'frozen_block')]);
+    expect(frozenEl.hasAttribute('data-block-selected')).toBe(true);
+  });
+
+  it('clicking a child of the frozen block still selects the whole block', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`hello\n\n${FROZEN}\n`) });
+    const frozenEl = container.querySelector('[data-frozen]')!;
+
+    click(frozenEl.firstChild as unknown as Element);
+
+    expect(selectedIds(surface)).toEqual([idOf(surface, 'frozen_block')]);
+  });
+
+  it('a subsequent click into prose dissolves the selection', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`hello\n\n${FROZEN}\n`) });
+    click(container.querySelector('[data-frozen]')!);
+    expect(selectedIds(surface)).not.toEqual([]);
+
+    // A real caret landing in prose (what a click there resolves to) dissolves
+    // the ring via the same observer as every other block selection.
+    caretIn(container.querySelector('p')!.firstChild!, 2);
+    (surface as unknown as { dissolveOnUserSelection: () => void }).dissolveOnUserSelection();
+
     expect(selectedIds(surface)).toEqual([]);
     expect(container.querySelector('[data-block-selected]')).toBeNull();
   });

@@ -2157,13 +2157,27 @@ export class BlockSurface {
     this.scheduleSerialize();
   }
 
+  // Click on a frozen block selects it as a unit (SKR-216): a frozen block is
+  // rendered non-editable (see render.ts), so there is no caret to place inside
+  // it — without this a click there was a dead gesture. Checked ahead of the
+  // below-last-block placement below since a frozen block can itself be last.
+  // Bound to `click` (not pointerup — WKWebView drops it on a motionless press).
+  //
   // Click below the last block: give it a caret home. Native placement lands
   // inside a trailing barrier's fence/cell or nowhere (F57), so a click in the
   // empty area under the document places the caret at the end of a trailing inline
   // block, or seeds a fresh paragraph after a trailing barrier so the document is
-  // never un-appendable. Bound to `click` (not pointerup — WKWebView drops it on a
-  // motionless press).
+  // never un-appendable.
   private onClick = (event: Event): void => {
+    const target = event.target;
+    const targetEl = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+    const frozenEl = targetEl?.closest<HTMLElement>(`[${BLOCK_ID_ATTR}]`) ?? null;
+    const frozenId = frozenEl?.getAttribute(BLOCK_ID_ATTR) ?? null;
+    const frozenBlock = frozenId ? findBlockById(this.doc.blocks, frozenId) : null;
+    if (frozenBlock && frozenBlock.type === 'frozen_block') {
+      this.selectBlock(frozenBlock.id);
+      return;
+    }
     const last = this.doc.blocks[this.doc.blocks.length - 1];
     if (!last) return;
     const lastEl = this.registry.get(last.id);
@@ -2468,15 +2482,22 @@ export class BlockSurface {
   }
 
   // Backspace-at-start / Delete-at-end next to a barrier that mergeBackward /
-  // mergeForward refused to merge across (SKR-167): a leading divider was
-  // otherwise undeletable (there's no prose before it to select across) and a
-  // code block / table sat there un-actionable from outside it. A content-free
-  // atom (hr) deletes outright, one gesture and one undo step; a content-bearing
-  // barrier (code block / table) gets selected as a unit instead — Notion's
+  // mergeForward refused to merge across (SKR-167, extended to frozen blocks by
+  // SKR-216): a leading divider was otherwise undeletable (there's no prose
+  // before it to select across) and a code block / table / frozen block sat
+  // there un-actionable from outside it. A content-free atom (hr) deletes
+  // outright, one gesture and one undo step; a content-bearing barrier (code
+  // block / table / frozen block) gets selected as a unit instead — Notion's
   // first-Backspace-selects convention, reusing SKR-203's substrate — so a
   // second Backspace/Delete (routed through handleBlockSelectionKey) deletes it.
   // `offset` is the caret's own offset in `leafId`, restored after an hr delete
   // since that leaf is untouched by removing its distant neighbour.
+  //
+  // Note: there is no image *block* in the model (blockmodel/types.ts's
+  // BlockNode union is paragraph/heading/code_block/bullet_list/ordered_list/
+  // blockquote/horizontal_rule/table/frozen_block) — an image is an InlineNode
+  // embedded in a paragraph, not a barrier. SKR-167's "image barrier" was a
+  // misnomer; frozen_block is the only real content-bearing atom left uncovered.
   private handleBarrierAdjacency(leafId: string, offset: number, direction: 'backward' | 'forward'): void {
     const neighbor = barrierNeighbor(this.doc.blocks, leafId, direction);
     if (!neighbor) return; // no leaf in that direction at all: the boundary stands
@@ -2485,11 +2506,9 @@ export class BlockSurface {
       if (r) this.applyStructural({ blocks: r.blocks, caret: { id: leafId, offset } });
       return;
     }
-    if (neighbor.type === 'code_block' || neighbor.type === 'table') {
+    if (neighbor.type === 'code_block' || neighbor.type === 'table' || neighbor.type === 'frozen_block') {
       this.selectBlock(neighbor.id);
     }
-    // image / frozen barriers fall through unchanged: SKR-203's block-selection
-    // substrate isn't wired for them, so this stays out of scope for SKR-167.
   }
 
   // Enter: in a code block, insert a newline. Otherwise split the block — but in

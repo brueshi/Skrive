@@ -29,6 +29,11 @@ afterEach(() => container.remove());
 
 const CODE = '```\ncode\n```';
 const TABLE = '| a | b |\n| - | - |\n| 1 | 2 |';
+// A raw HTML block (mdast `html`) is the frozen_block case (SKR-216): the model
+// has no separate "image block" (an image is an InlineNode inside a paragraph,
+// not a block-level barrier), so frozen_block is the only content-bearing
+// barrier this ticket adds coverage for.
+const FROZEN = '<div>raw</div>';
 const plain = (inline: InlineNode[]): string => inline.map((n) => (n.kind === 'text' ? n.text : '')).join('');
 
 function caretIn(node: Node, offset: number): void {
@@ -200,6 +205,71 @@ describe('Backspace/Delete next to a code block or table selects it instead of n
     expect(blocksOf(surface).find((x) => x.type === 'code_block'), 'code block deleted').toBeUndefined();
     expect(selectedIds(surface)).toEqual([]);
     expect(paragraphText(surface, 'b')).toBe('b');
+  });
+});
+
+describe('Backspace/Delete next to a frozen block selects it instead of no-opping (SKR-216)', () => {
+  it('Backspace at the start of a block after a frozen block selects it, leaving it untouched', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`${FROZEN}\n\nb\n`) });
+    const b = container.querySelector('p')!;
+    caretIn(b.firstChild!, 0);
+    const frozenId = idOf(surface, 'frozen_block');
+
+    backspace(surface);
+
+    expect(selectedIds(surface)).toEqual([frozenId]);
+    expect(container.querySelector('[data-frozen]')!.hasAttribute('data-block-selected')).toBe(true);
+    // The model is untouched: the frozen block still holds its source verbatim.
+    const frozen = blocksOf(surface).find((x) => x.id === frozenId);
+    expect(frozen && frozen.type === 'frozen_block' && frozen.src).toBe(FROZEN);
+    expect(paragraphText(surface, 'b')).toBe('b');
+  });
+
+  it('Delete-forward at the end of a block before a frozen block selects it, leaving it untouched', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`a\n\n${FROZEN}\n`) });
+    const a = container.querySelector('p')!;
+    caretIn(a.firstChild!, 1);
+    const frozenId = idOf(surface, 'frozen_block');
+
+    deleteForward(surface);
+
+    expect(selectedIds(surface)).toEqual([frozenId]);
+    expect(container.querySelector('[data-frozen]')!.hasAttribute('data-block-selected')).toBe(true);
+    expect(paragraphText(surface, 'a')).toBe('a');
+  });
+
+  it('a second Backspace after the select deletes the frozen block (the two-step Notion flow), one undo step', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`${FROZEN}\n\nb\n`) });
+    const b = container.querySelector('p')!;
+    caretIn(b.firstChild!, 0);
+
+    backspace(surface); // first Backspace: selects
+    expect(selectedIds(surface)).not.toEqual([]);
+
+    key(surface, { key: 'Backspace' }); // second Backspace: routes through handleBlockSelectionKey
+
+    expect(blocksOf(surface).find((x) => x.type === 'frozen_block'), 'frozen block deleted').toBeUndefined();
+    expect(selectedIds(surface)).toEqual([]);
+    expect(paragraphText(surface, 'b')).toBe('b');
+
+    surface.undo();
+    expect(blocksOf(surface).find((x) => x.type === 'frozen_block'), 'one undo restores it').toBeTruthy();
+  });
+
+  it('typing over a selected frozen block replaces it with a paragraph containing the typed character', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`${FROZEN}\n\nb\n`) });
+    const b = container.querySelector('p')!;
+    caretIn(b.firstChild!, 0);
+    const frozenId = idOf(surface, 'frozen_block');
+
+    backspace(surface); // selects the frozen block
+    key(surface, { key: 'x' });
+
+    const blocks = blocksOf(surface);
+    const replaced = blocks.find((x) => x.id === frozenId);
+    expect(replaced?.type).toBe('paragraph');
+    expect(replaced && replaced.type === 'paragraph' && plain(replaced.inline)).toBe('x');
+    expect(selectedIds(surface)).toEqual([]);
   });
 });
 
