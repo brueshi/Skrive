@@ -2847,6 +2847,27 @@ export class BlockSurface {
       this.selectDocument();
       return true;
     }
+    // Word/line delete (⌥⌫ deleteWordBackward, ⌘⌫ deleteSoftLineBackward /
+    // deleteHardLineBackward, and their forward siblings) act on the selection
+    // exactly like plain Backspace/Delete (SKR-192): native convention is that any
+    // delete chord with an active selection just removes it. These chords are
+    // normally modeled in onBeforeInput off the browser-reported inputType (SKR-165),
+    // but that path never sees them here — selecting a block clears the DOM
+    // selection (SKR-203), and this handler's own preventDefault, below, suppresses
+    // the beforeinput the browser would otherwise still fire for a modified
+    // Backspace/Delete with no selection (verified: Chromium dispatches
+    // deleteWordBackward/deleteSoftLineBackward etc. even at rangeCount 0, but a
+    // keydown preventDefault stops it from firing at all). So this must be owned
+    // here, where plain Backspace/Delete already are, rather than in the
+    // onBeforeInput guard. Which exact variant fired doesn't matter — every one of
+    // them reduces to "delete the selection" — so any Backspace/Delete carrying a
+    // word/line modifier (Option, Cmd, or Ctrl for the Windows word-delete
+    // convention) is treated identically.
+    if ((key === 'Backspace' || key === 'Delete') && !e.shiftKey && (e.altKey || e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      this.deleteSelectedBlocks();
+      return true;
+    }
     // Let undo/redo (and any other chord) run through the normal handler.
     if (e.metaKey || e.ctrlKey || e.altKey) return false;
     if (key === 'Backspace' || key === 'Delete') {

@@ -144,6 +144,57 @@ describe('Backspace / Delete on a selected block', () => {
   });
 });
 
+// SKR-192: word/line delete chords used to be a silent no-op on a selected block —
+// handleBlockSelectionKey let any modified Backspace/Delete fall through to the
+// normal handler, and with the DOM selection cleared (SKR-203) there was nothing
+// left for the browser's native delete to act on. They now act on the selection
+// exactly like plain Backspace/Delete, one history step.
+describe('Word / line delete on a selected block', () => {
+  it('Option+Backspace (deleteWordBackward) deletes the selected code block in one step; undo restores it', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`hello\n\n${CODE}\n`) });
+    caretIn(codeText(container.querySelector('pre')!), 1);
+    key(surface, { key: 'Escape' });
+
+    const e = key(surface, { key: 'Backspace', altKey: true });
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(blockOf(surface, 'code_block'), 'code block removed').toBeUndefined();
+    expect(selectedIds(surface), 'selection cleared').toEqual([]);
+
+    surface.undo();
+    expect(blockOf(surface, 'code_block'), 'one undo restores the block').toBeTruthy();
+  });
+
+  it('Cmd+Backspace (deleteSoftLineBackward/deleteHardLineBackward) deletes the selected table in one step; undo restores it', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`hi\n\n${TABLE}\n`) });
+    caretIn(container.querySelector('[data-cell-row="0"][data-cell-col="0"]')!.firstChild!, 0);
+    key(surface, { key: 'Escape' });
+
+    const e = key(surface, { key: 'Backspace', metaKey: true });
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(blockOf(surface, 'table'), 'table removed').toBeUndefined();
+    expect(selectedIds(surface), 'selection cleared').toEqual([]);
+
+    surface.undo();
+    expect(blockOf(surface, 'table'), 'one undo restores the table').toBeTruthy();
+  });
+
+  it('forward variant (Option/Cmd+Delete) deletes the selected block the same way', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`hello\n\n${CODE}\n`) });
+    caretIn(codeText(container.querySelector('pre')!), 1);
+    key(surface, { key: 'Escape' });
+
+    const e = key(surface, { key: 'Delete', altKey: true });
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(blockOf(surface, 'code_block'), 'code block removed').toBeUndefined();
+
+    surface.undo();
+    expect(blockOf(surface, 'code_block'), 'one undo restores the block').toBeTruthy();
+  });
+});
+
 describe('Typing over a selected block', () => {
   it('replaces it with a paragraph containing the typed character; one undo restores the block', () => {
     const surface = new BlockSurface({ container, doc: parseDocument(`${CODE}\n`) });
