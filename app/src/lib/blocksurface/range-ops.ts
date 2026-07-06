@@ -320,5 +320,24 @@ export function clearTableCells(
   });
 }
 
+/**
+ * Append one empty row (same column count as row 0) to the end of a table.
+ * The minimal Docs/Word muscle-memory slice for table structure editing
+ * (SKR-225 / F-tables): Tab in the last cell used to fall through to
+ * exitBarrier and leave the table entirely — this gives it somewhere to grow
+ * instead. Column ops, row deletion, and a creation-size choice are explicitly
+ * deferred (v1.10). Null when `tableId` is not a table.
+ */
+export function appendTableRow(blocks: BlockNode[], tableId: string): BlockNode[] | null {
+  const table = findBlockById(blocks, tableId);
+  if (!table || table.type !== 'table') return null;
+  const cols = table.rows[0]?.length ?? 0;
+  return updateBlockById(blocks, tableId, (b) => {
+    if (b.type !== 'table') return b;
+    const row: InlineNode[][] = Array.from({ length: cols }, () => []);
+    return { ...b, rows: [...b.rows, row], dirty: true } as BlockNode;
+  });
+}
+
 // Re-export so callers that need a fresh id for any future split path have it.
 export { generateBlockId };

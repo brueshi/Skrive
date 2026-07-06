@@ -20,7 +20,7 @@ import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderIn
 import type { AssetResolver } from './render';
 import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange } from './doc-position';
-import { barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
+import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
 import { findBlockById, updateBlockById } from './tree';
 import { enterInContainer, exitContainer, type StructuralResult } from './structural';
 import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
@@ -438,10 +438,14 @@ export class BlockSurface {
       const cell = this.cellTarget();
       if (cell) {
         e.preventDefault();
-        // Tab steps cell-to-cell; off the last/first cell it exits the table
-        // (instead of dead-ending) so the table is never a one-way trap.
+        // Tab steps cell-to-cell. Shift+Tab off the first cell exits the table
+        // (unchanged — still a one-way trap otherwise). Forward Tab off the
+        // LAST cell instead appends a fresh row and steps into it (Docs/Word
+        // muscle memory, SKR-225): ArrowDown/ArrowRight already own the
+        // exit-the-table gesture (SKR-152), so this doesn't reopen a trap.
         if (!this.moveCell(cell, e.shiftKey ? -1 : 1)) {
-          this.exitBarrier(cell.tableId, e.shiftKey ? 'before' : 'after');
+          if (e.shiftKey) this.exitBarrier(cell.tableId, 'before');
+          else this.appendTableRowAndFocus(cell.tableId);
         }
         return;
       }
@@ -3287,6 +3291,23 @@ export class BlockSurface {
     const nr = Math.floor(flat / cols);
     const nc = flat % cols;
     return this.focusCell(table, nr, nc, 0);
+  }
+
+  // Tab in the table's last cell (SKR-225): append one empty row via the
+  // structural op (a single history step, same as any other doc mutation),
+  // reconcile so the new row's cells exist in the DOM, then focus its first
+  // cell through the robust caret path. Reads the table fresh AFTER the
+  // reconcile — focusCell needs the post-append row count/shape, not the
+  // pre-append `cell` the caller resolved the gesture from.
+  private appendTableRowAndFocus(tableId: string): void {
+    const blocks = appendTableRow(this.doc.blocks, tableId);
+    if (!blocks) return;
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    const table = findBlockById(this.doc.blocks, tableId);
+    if (!table || table.type !== 'table') return;
+    this.focusCell(table, table.rows.length - 1, 0, 0);
+    this.scheduleSerialize();
   }
 
   // Arrow-key navigation inside a table: step cell-to-cell, and at the grid's
