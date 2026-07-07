@@ -1,0 +1,83 @@
+/* The floating document counter (SKR-53). Anchored-floater chrome in the
+   selection bubble's language: page fill, hairline border, float lift, md
+   radius. Compact and quiet — muted ui type, tabular numerals so the live
+   figures tick without the chip changing width per digit. Only the chevron
+   is interactive; the label lets clicks fall through to the prose. */
+.word-count-badge {
+  position: absolute;
+  left: 0.875rem;
+  bottom: 0.625rem;
+  z-index: var(--skrive-z-sticky);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 3px 2px 10px;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-md);
+  box-shadow: var(--skrive-shadow-float);
+  color: var(--skrive-muted);
+  font-family: var(--skrive-ui-font);
+  font-size: 11px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.word-count-label {
+  pointer-events: none;
+}
+
+.word-count-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--skrive-radius-xs);
+  color: var(--skrive-muted);
+  cursor: pointer;
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+/* Radix returns focus to the trigger when the menu closes, which would paint
+   the global focus ring after every mouse interaction. The open-state fill
+   and chevron flip carry the state instead (the sidebar-row opt-out
+   pattern, index.css). */
+.word-count-chevron:focus-visible {
+  outline: none;
+}
+
+.word-count-chevron:hover,
+.word-count-chevron[data-state='open'] {
+  color: var(--skrive-fg);
+  background: color-mix(in srgb, var(--skrive-fg) 7%, transparent);
+}
+
+/* The chevron flips while the menu is open — the state reads from the
+   control itself rather than only from the menu's presence. */
+.word-count-chevron svg {
+  transition: transform 200ms var(--skrive-easing-out);
+}
+
+.word-count-chevron[data-state='open'] svg {
+  transform: rotate(180deg);
+}
+
+/* The metric menu is small; don't stretch it to the shared menu minimum. */
+.word-count-menu {
+  min-width: 8.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .word-count-chevron,
+  .word-count-chevron svg {
+    transition: none;
+  }
+}

@@ -22,6 +22,9 @@ import { SelectionBubble } from '../menus/SelectionBubble';
 import { LinkEditor } from '../menus/LinkEditor';
 import { BlockSlashMenu } from '../menus/BlockSlashMenu';
 import { OutlineRail } from '../OutlineRail';
+import { WordCountBadge } from '../WordCountBadge';
+import { attachLiveCounts, type LiveCounts } from '../../../lib/wordcount/live';
+import { usePreferencesStore } from '../../../stores/preferences';
 import { useProjectStore } from '../../../stores/project';
 import { skriveAssetResolver } from '../../../lib/preview/imageResolver';
 import './BlockEditor.css';
@@ -50,6 +53,21 @@ export function BlockEditor({ doc, docPath, onChange }: Props): React.ReactEleme
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const [ctx, setCtx] = useState<{ surface: BlockSurface; controller: BlockMenuController } | null>(null);
+  const showWordCount = usePreferencesStore((s) => s.showWordCount);
+  const [counts, setCounts] = useState<LiveCounts | null>(null);
+
+  // Live counts off the surface DOM (SKR-53): per-block incremental via
+  // MutationObserver, rAF-coalesced — real-time without touching the
+  // keystroke hot path. Detached entirely while the badge is toggled off.
+  useEffect(() => {
+    if (!showWordCount) {
+      setCounts(null);
+      return;
+    }
+    const host = hostRef.current;
+    if (!host) return;
+    return attachLiveCounts(host, setCounts);
+  }, [showWordCount]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -115,6 +133,9 @@ export function BlockEditor({ doc, docPath, onChange }: Props): React.ReactEleme
         contentRef={hostRef}
         renderKey=""
       />
+      {showWordCount && counts && (
+        <WordCountBadge counts={counts} scopeRef={bodyRef} />
+      )}
       {ctx && <SelectionBubble controller={ctx.controller} />}
       {ctx && <LinkEditor controller={ctx.controller} />}
       {ctx && <BlockSlashMenu surface={ctx.surface} />}

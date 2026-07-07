@@ -107,6 +107,9 @@ export type MarkerMode = 'raw' | 'recessed' | 'concealed';
  *  exact measures are resolved at the editor surface (Stage 2 wiring). */
 export type LineMeasure = 'narrow' | 'normal' | 'wide';
 
+/** The figure the word-count chip displays (SKR-53). */
+export type WordCountMetric = 'words' | 'time' | 'chars';
+
 /** Where the "new file" action drops a document.
  *   - 'activeFolder' — alongside the doc you're in (project root if none open).
  *   - 'projectRoot'  — always the project root. */
@@ -150,6 +153,11 @@ export type AppUiState = {
   theme: ThemeId;
   /** Show the outline rail down the right edge of the preview. */
   showOutlineRail: boolean;
+  /** Show the live word/character/reading-time counter in the editor's
+   *  bottom-left corner (SKR-53). */
+  showWordCount: boolean;
+  /** Which figure the counter chip displays (switched via its chevron). */
+  wordCountMetric: WordCountMetric;
   /** Which editing surface new tabs open in. */
   defaultSurface: SurfaceId;
   /** Whether the writer may switch surfaces (⌘⇧E / the palette command).
@@ -211,6 +219,8 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   autoUpdateOnLaunch: true,
   theme: 'light',
   showOutlineRail: true,
+  showWordCount: true,
+  wordCountMetric: 'words',
   defaultSurface: 'rich',
   surfaceSwitchingEnabled: true,
   markerMode: 'recessed',

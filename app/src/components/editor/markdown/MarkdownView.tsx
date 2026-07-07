@@ -8,10 +8,13 @@
 // exclusively the `.folio` rich editor now — the SKR-153 round-trip class cannot
 // recur here because there is no parse -> model -> serialize cycle.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LayoutMode } from '@skrive/shared';
 import { RawSourceView } from '../raw/RawSourceView';
 import { Preview } from '../Preview';
+import { WordCountBadge } from '../WordCountBadge';
+import { computeWordCount } from '../../../lib/frontmatter';
+import { usePreferencesStore } from '../../../stores/preferences';
 import './MarkdownView.css';
 
 type Props = {
@@ -98,6 +101,21 @@ export function MarkdownView({
     e.currentTarget.releasePointerCapture(e.pointerId);
   }, []);
 
+  // The counter (SKR-53) rides the same live mirror the preview uses — the
+  // per-frame onLiveInput channel — so it ticks in real time while typing in
+  // raw and split, and follows the settled body in preview. Recomputed only
+  // when the mirror text changes, never per render.
+  const showWordCount = usePreferencesStore((s) => s.showWordCount);
+  const viewRef = useRef<HTMLDivElement>(null);
+  const counts = useMemo(
+    () =>
+      showWordCount
+        ? { words: computeWordCount(liveBody), chars: liveBody.length }
+        : null,
+    [showWordCount, liveBody]
+  );
+  const badge = counts && <WordCountBadge counts={counts} scopeRef={viewRef} />;
+
   const preview = (
     <Preview
       body={liveBody}
@@ -109,29 +127,42 @@ export function MarkdownView({
   );
 
   if (layoutMode === 'raw') {
-    return <RawSourceView body={body} onChange={onChange} />;
+    return (
+      <div className="md-view" ref={viewRef}>
+        <RawSourceView body={body} onChange={onChange} onLiveInput={onLiveInput} />
+        {badge}
+      </div>
+    );
   }
   if (layoutMode === 'preview') {
-    return preview;
+    return (
+      <div className="md-view" ref={viewRef}>
+        {preview}
+        {badge}
+      </div>
+    );
   }
 
   // Split: source on the left, live preview on the right, draggable divider.
   const leftPct = Math.min(MAX_RATIO, Math.max(MIN_RATIO, splitRatio)) * 100;
   return (
-    <div className="md-split" ref={splitRef}>
-      <div className="md-split-pane" style={{ flexBasis: `${leftPct}%` }}>
-        <RawSourceView body={body} onChange={onChange} onLiveInput={onLiveInput} />
+    <div className="md-view" ref={viewRef}>
+      <div className="md-split" ref={splitRef}>
+        <div className="md-split-pane" style={{ flexBasis: `${leftPct}%` }}>
+          <RawSourceView body={body} onChange={onChange} onLiveInput={onLiveInput} />
+        </div>
+        <div
+          className="md-split-divider"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize source and preview"
+          onPointerDown={onDividerDown}
+          onPointerMove={onDividerMove}
+          onPointerUp={onDividerUp}
+        />
+        <div className="md-split-pane md-split-pane--preview">{preview}</div>
       </div>
-      <div
-        className="md-split-divider"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize source and preview"
-        onPointerDown={onDividerDown}
-        onPointerMove={onDividerMove}
-        onPointerUp={onDividerUp}
-      />
-      <div className="md-split-pane md-split-pane--preview">{preview}</div>
+      {badge}
     </div>
   );
 }

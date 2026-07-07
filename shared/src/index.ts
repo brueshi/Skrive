@@ -108,7 +108,8 @@ export type {
   SlugFormat,
   SurfaceId,
   TabState,
-  ThemeId
+  ThemeId,
+  WordCountMetric
 } from './persistence';
 
 export {
