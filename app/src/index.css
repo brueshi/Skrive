@@ -1332,9 +1332,20 @@ body {
 
 .sidebar .file.active {
   background-color: var(--skrive-rule);
-  /* 2px accent at the row's left edge. inset box-shadow renders above
-     the background but below text, doesn't displace layout. */
-  box-shadow: inset 2px 0 0 var(--skrive-fg);
+}
+
+/* 2px ink rule at the active row's left edge. A pseudo-element bar inset
+   from the row's ends rather than an inset box-shadow, which follows any
+   border-radius and wraps the corners into a dark ring (SKR-230). */
+.sidebar .file.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--skrive-fg);
 }
 
 /* Favorites — pinned files surfaced above the folder tree. A flat list
