@@ -617,9 +617,13 @@ body {
 
 /* ===================== Context + dropdown menus (Radix) ===================== */
 
+/* Menu entrance: a short fade-rise from a near-full scale (never from 0 — the
+   surface should read as arriving, not inflating), anchored to the trigger via
+   Radix's transform-origin variable so it grows out of where the user clicked.
+   Ease-out: entrances accelerate into view then settle. */
 @keyframes skrive-ctx-in {
-  from { opacity: 0; transform: translateY(-2px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(-2px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .ctx-menu {
@@ -633,7 +637,11 @@ body {
   font-size: 13px;
   color: var(--skrive-fg);
   z-index: var(--skrive-z-context-menu);
-  animation: skrive-ctx-in var(--skrive-duration-quick) var(--skrive-easing);
+  transform-origin: var(
+    --radix-dropdown-menu-content-transform-origin,
+    var(--radix-context-menu-content-transform-origin, top)
+  );
+  animation: skrive-ctx-in var(--skrive-duration-standard) var(--skrive-easing-out);
 }
 
 .ctx-item {

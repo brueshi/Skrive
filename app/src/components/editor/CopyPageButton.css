@@ -29,6 +29,15 @@
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+/* Slight hover: a faint neutral wash per segment (the toolbar's hover recipe
+   over the card fill). Ink stays fixed. */
+.copy-page-main:hover,
+.copy-page-chevron:hover,
+.copy-page-chevron[data-state='open'] {
+  background: color-mix(in srgb, var(--skrive-fg) 5%, var(--skrive-card-bg));
 }
 
 .copy-page-main {
