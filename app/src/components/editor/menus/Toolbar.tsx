@@ -12,6 +12,7 @@ import { BlockTypeDropdown } from './BlockTypeDropdown';
 import {
   IconBold,
   IconItalic,
+  IconInlineCode,
   IconLink,
   IconQuote,
   IconBulletList,
@@ -72,6 +73,9 @@ export function Toolbar({ controller }: { controller: MenuController }) {
         </ToolbarButton>
         <ToolbarButton label="Italic" active={s.em} onRun={() => controller.toggleMark('em')}>
           <IconItalic />
+        </ToolbarButton>
+        <ToolbarButton label="Inline code" active={s.code} onRun={() => controller.toggleMark('code')}>
+          <IconInlineCode />
         </ToolbarButton>
         <ToolbarButton
           label="Link"
