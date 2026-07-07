@@ -1332,9 +1332,20 @@ body {
 
 .sidebar .file.active {
   background-color: var(--skrive-rule);
-  /* 2px accent at the row's left edge. inset box-shadow renders above
-     the background but below text, doesn't displace layout. */
-  box-shadow: inset 2px 0 0 var(--skrive-fg);
+}
+
+/* 2px ink rule at the active row's left edge. A pseudo-element bar inset
+   from the row's ends rather than an inset box-shadow, which follows any
+   border-radius and wraps the corners into a dark ring (SKR-230). */
+.sidebar .file.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--skrive-fg);
 }
 
 /* Favorites — pinned files surfaced above the folder tree. A flat list
@@ -1748,6 +1759,7 @@ body {
 }
 
 .outline-popover-row {
+  position: relative;
   display: block;
   width: 100%;
   text-align: left;
@@ -1785,9 +1797,19 @@ body {
 }
 
 /* The section actually being read, marked even when the keyboard cursor
-   has moved elsewhere, via a subtle left rule. */
-.outline-popover-row[aria-current='true'] {
-  box-shadow: inset 2px 0 0 var(--skrive-muted);
+   has moved elsewhere, via a subtle left rule. A pseudo-element bar inset
+   from the row's ends, not an inset box-shadow — a shadow follows the
+   border-radius and wraps the corners, reading as a dark broken ring
+   around the row instead of a rule (SKR-230). */
+.outline-popover-row[aria-current='true']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--skrive-muted);
 }
 
 .preview-inner {
@@ -3551,9 +3573,11 @@ body {
     box-shadow var(--skrive-duration-quick) var(--skrive-easing);
 }
 
+/* Accent border only — the inset accent stripe it used to pair with wrapped
+   the card's rounded corners (an inset shadow follows the radius) and read
+   as a broken ring rather than an edge (SKR-230). */
 .updater-card.is-accent {
   border-color: color-mix(in srgb, var(--skrive-accent) 55%, var(--skrive-rule));
-  box-shadow: inset 3px 0 0 0 var(--skrive-accent);
 }
 
 .updater-card.is-error {
