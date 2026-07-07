@@ -11,6 +11,7 @@ import { IconButton } from '../ui/IconButton';
 import { selectActiveTab, useProjectStore } from '../../stores/project';
 import { IconPanels } from '../icons/IconPanels';
 import { platformShortcut } from '../../lib/commands/shortcut-display';
+import { Tooltip } from '../ui/Tooltip';
 
 export function PanelMenu() {
   const activeTab = useProjectStore(selectActiveTab);
@@ -38,20 +39,21 @@ export function PanelMenu() {
 
   return (
     <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
-        <IconButton
-          size="lg"
-          className="panel-menu-trigger"
-          aria-label="Toggle panels"
-          aria-pressed={openCount > 0}
-          title="Panels"
-        >
-          <IconPanels size={16} />
-          {openCount > 0 && (
-            <span className="panel-menu-dot" aria-hidden="true" />
-          )}
-        </IconButton>
-      </DropdownMenu.Trigger>
+      <Tooltip label="Panels" side="bottom">
+        <DropdownMenu.Trigger asChild>
+          <IconButton
+            size="lg"
+            className="panel-menu-trigger"
+            aria-label="Toggle panels"
+            aria-pressed={openCount > 0}
+          >
+            <IconPanels size={16} />
+            {openCount > 0 && (
+              <span className="panel-menu-dot" aria-hidden="true" />
+            )}
+          </IconButton>
+        </DropdownMenu.Trigger>
+      </Tooltip>
       <DropdownMenu.Portal>
         <DropdownMenu.Content
           className="ctx-menu panel-menu"

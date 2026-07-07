@@ -2,6 +2,7 @@ import './layers.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { TooltipProvider } from './components/ui/Tooltip';
 import { perfEnabled } from './lib/perf';
 import { installCrashLog } from './lib/crash-log';
 import './index.css';
@@ -24,6 +25,10 @@ if (!rootEl) throw new Error('Missing #root element in index.html');
 
 createRoot(rootEl).render(
   <StrictMode>
-    <App />
+    {/* App-level tooltip timing context: one provider so the open delay is
+        skipped when the pointer moves between adjacent controls. */}
+    <TooltipProvider>
+      <App />
+    </TooltipProvider>
   </StrictMode>
 );

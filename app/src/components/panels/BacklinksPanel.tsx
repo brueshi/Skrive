@@ -14,6 +14,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconButton } from '../ui/IconButton';
+import { Tooltip } from '../ui/Tooltip';
 import { selectActiveTab, useProjectStore } from '../../stores/project';
 import type { Backlink, OutgoingLink } from '@skrive/shared';
 import { PanelShell } from './PanelShell';
@@ -203,19 +204,21 @@ export function BacklinksPanel() {
           <span className="bl-title">Backlinks</span>
           <span className="bl-count-badge">{inbound.length}</span>
         </div>
-        <IconButton
-          aria-label="Close backlinks"
-          onClick={() => setOpen(false)}
-        >
-          <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden>
-            <path
-              d="M3.5 3.5L10.5 10.5M10.5 3.5L3.5 10.5"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-            />
-          </svg>
-        </IconButton>
+        <Tooltip label="Close backlinks">
+          <IconButton
+            aria-label="Close backlinks"
+            onClick={() => setOpen(false)}
+          >
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden>
+              <path
+                d="M3.5 3.5L10.5 10.5M10.5 3.5L3.5 10.5"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
+            </svg>
+          </IconButton>
+        </Tooltip>
       </header>
 
       <div className="bl-panel-body">

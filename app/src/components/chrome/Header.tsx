@@ -18,7 +18,7 @@ import {
   useProjectStore
 } from '../../stores/project';
 import { IconSidebarToggle } from '../icons/IconSidebarToggle';
-import { platformShortcut } from '../../lib/commands/shortcut-display';
+import { Tooltip } from '../ui/Tooltip';
 import { PanelMenu } from './PanelMenu';
 import { TabBar } from './TabBar';
 import { WindowControls } from './WindowControls';
@@ -84,16 +84,21 @@ export function Header() {
   return (
     <header className={headerClass} style={dragStyle}>
       <div className="header-left" style={noDragStyle}>
-        <IconButton
-          size="lg"
-          className="sidebar-toggle"
-          aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
-          aria-pressed={sidebarVisible}
-          title={platformShortcut('Toggle sidebar  ⌘[')}
-          onClick={() => toggleSidebar()}
+        <Tooltip
+          label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
+          shortcut="⌘["
+          side="bottom"
         >
-          <IconSidebarToggle size={16} shown={sidebarVisible} />
-        </IconButton>
+          <IconButton
+            size="lg"
+            className="sidebar-toggle"
+            aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
+            aria-pressed={sidebarVisible}
+            onClick={() => toggleSidebar()}
+          >
+            <IconSidebarToggle size={16} shown={sidebarVisible} />
+          </IconButton>
+        </Tooltip>
       </div>
 
       <span className="header-sep" aria-hidden="true" />

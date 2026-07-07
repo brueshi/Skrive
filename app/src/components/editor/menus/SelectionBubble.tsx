@@ -10,7 +10,7 @@ import { createPortal } from 'react-dom';
 import { useSyncExternalStore } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import type { MenuController } from './controller';
-import { platformShortcut } from '../../../lib/commands/shortcut-display';
+import { Tooltip } from '../../ui/Tooltip';
 import { useAnchoredRect } from './useAnchoredRect';
 import { BlockTypeDropdown } from './BlockTypeDropdown';
 import { IconBold, IconItalic, IconInlineCode, IconLink } from './toolbar-icons';
@@ -32,17 +32,18 @@ function BubbleButton({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      className={`rich-toolbar-button${active ? ' active' : ''}`}
-      aria-pressed={active}
-      aria-label={label}
-      title={shortcut ? `${label} (${platformShortcut(shortcut)})` : label}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={onRun}
-    >
-      {children}
-    </button>
+    <Tooltip label={label} shortcut={shortcut}>
+      <button
+        type="button"
+        className={`rich-toolbar-button${active ? ' active' : ''}`}
+        aria-pressed={active}
+        aria-label={label}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onRun}
+      >
+        {children}
+      </button>
+    </Tooltip>
   );
 }
 

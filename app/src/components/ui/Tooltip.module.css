@@ -1,0 +1,43 @@
+@layer components {
+  .content {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.5625rem;
+    background: var(--tooltip-bg);
+    color: var(--tooltip-fg);
+    border-radius: var(--tooltip-radius);
+    box-shadow: var(--tooltip-shadow);
+    font-size: 12px;
+    font-weight: 450;
+    line-height: 1.4;
+    white-space: nowrap;
+    user-select: none;
+    z-index: var(--tooltip-z);
+    animation: tooltip-in var(--tooltip-duration) var(--tooltip-easing);
+  }
+
+  .kbd {
+    font-family: inherit;
+    font-size: 11px;
+    color: var(--tooltip-muted);
+    letter-spacing: 0.02em;
+  }
+
+  @keyframes tooltip-in {
+    from {
+      opacity: 0;
+      transform: translateY(2px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .content {
+      animation: none;
+    }
+  }
+}
