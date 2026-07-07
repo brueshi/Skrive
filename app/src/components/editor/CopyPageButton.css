@@ -1,46 +1,54 @@
-/* "Copy page" split button (SKR-126). Styled as a sibling to the rendered/source
-   chip-segmented control: a 26px bordered pill divided into a primary action and
-   a chevron that opens the copy-as menu. Quiet by default (muted), warming on
-   hover, so it reads as ambient chrome rather than a call to action. */
+/* "Copy page" split button (SKR-126, reshaped in SKR-226). Wears the Segmented
+   primitive's track language (SKR-212) so it reads as the same component family
+   as the mode switcher: sunken --segmented-track, md radius, 2px inner pad,
+   26px segments. Being actions rather than a radio group, there is no resting
+   thumb — the raised-pill treatment (bg + thumb shadow) appears on hover and
+   while the copy-as menu is open. */
 .copy-page {
   display: inline-flex;
-  align-items: stretch;
-  height: 26px;
-  border: 1px solid var(--skrive-rule);
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  padding: 2px;
+  background: var(--segmented-track);
   border-radius: var(--skrive-radius-md);
-  overflow: hidden;
 }
 
 .copy-page-main,
 .copy-page-chevron {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  height: 26px;
   background: transparent;
   border: none;
+  border-radius: var(--skrive-radius-sm);
   color: var(--skrive-muted);
   font: inherit;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
   transition:
     color var(--skrive-duration-quick) var(--skrive-easing),
-    background-color var(--skrive-duration-quick) var(--skrive-easing);
+    background-color var(--skrive-duration-quick) var(--skrive-easing),
+    box-shadow var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .copy-page-main {
   gap: 0.4rem;
-  padding: 0 0.6rem;
+  padding: 0 11px;
 }
 
 .copy-page-chevron {
-  padding: 0 0.35rem;
-  border-left: 1px solid var(--skrive-rule);
+  padding: 0 6px;
 }
 
 .copy-page-main:hover,
 .copy-page-chevron:hover,
 .copy-page-chevron[data-state='open'] {
   color: var(--skrive-fg);
-  background: var(--skrive-rule);
+  background: var(--skrive-bg);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--skrive-fg) 9%, transparent);
 }
 
 .copy-page-label {
