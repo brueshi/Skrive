@@ -1,21 +1,64 @@
-/* The quiet document counter (SKR-53). Ambient bottom-left chrome: muted,
-   compact, non-interactive. A soft wash of the page background keeps it
-   legible on narrow panes where prose can reach the corner; tabular numerals
-   stop the live figures from jittering sideways as they tick. */
+/* The floating document counter (SKR-53). Anchored-floater chrome in the
+   selection bubble's language: page fill, hairline border, float lift, md
+   radius. Compact and quiet — muted ui type, tabular numerals so the live
+   figures tick without the chip changing width per digit. Only the chevron
+   is interactive; the label lets clicks fall through to the prose. */
 .word-count-badge {
   position: absolute;
   left: 0.875rem;
   bottom: 0.625rem;
   z-index: var(--skrive-z-sticky);
-  padding: 3px 8px;
-  border-radius: var(--skrive-radius-sm);
-  background: color-mix(in srgb, var(--skrive-bg) 88%, transparent);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 3px 2px 10px;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-md);
+  box-shadow: var(--skrive-shadow-float);
   color: var(--skrive-muted);
   font-family: var(--skrive-ui-font);
   font-size: 11px;
   line-height: 1.4;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  pointer-events: none;
   user-select: none;
+}
+
+.word-count-label {
+  pointer-events: none;
+}
+
+.word-count-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--skrive-radius-xs);
+  color: var(--skrive-muted);
+  cursor: pointer;
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.word-count-chevron:hover,
+.word-count-chevron[data-state='open'] {
+  color: var(--skrive-fg);
+  background: color-mix(in srgb, var(--skrive-fg) 7%, transparent);
+}
+
+/* The metric menu is small; don't stretch it to the shared menu minimum. */
+.word-count-menu {
+  min-width: 8.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .word-count-chevron {
+    transition: none;
+  }
 }

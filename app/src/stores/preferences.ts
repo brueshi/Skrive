@@ -21,7 +21,8 @@ import {
   type RecentFile,
   type RecentProject,
   type SlugFormat,
-  type ThemeId
+  type ThemeId,
+  type WordCountMetric
 } from '@skrive/shared';
 
 const SAVE_DEBOUNCE_MS = 300;
@@ -54,6 +55,7 @@ type PreferencesActions = {
   setTheme(value: ThemeId): void;
   setShowOutlineRail(value: boolean): void;
   setShowWordCount(value: boolean): void;
+  setWordCountMetric(value: WordCountMetric): void;
 
   setLineMeasure(value: LineMeasure): void;
   setSmartTypography(value: boolean): void;
@@ -109,6 +111,7 @@ function snapshot(state: PreferencesState): AppUiState {
     theme: state.theme,
     showOutlineRail: state.showOutlineRail,
     showWordCount: state.showWordCount,
+    wordCountMetric: state.wordCountMetric,
     defaultSurface: state.defaultSurface,
     surfaceSwitchingEnabled: state.surfaceSwitchingEnabled,
     markerMode: state.markerMode,
@@ -243,6 +246,11 @@ export const usePreferencesStore = create<
   setShowWordCount(value) {
     if (get().showWordCount === value) return;
     set({ showWordCount: value });
+    scheduleSave(get);
+  },
+  setWordCountMetric(value) {
+    if (get().wordCountMetric === value) return;
+    set({ wordCountMetric: value });
     scheduleSave(get);
   },
 
