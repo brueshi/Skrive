@@ -62,11 +62,13 @@ export function IconItalic(p: IconProps) {
 }
 
 export function IconInlineCode(p: IconProps) {
-  // A chevroned code capsule set into a line of prose — the flanking dashes
+  // A chevroned code capsule set into a line of prose — the flanking ticks
   // are the "inline" reading. Capsule frame in accent over the faint sheet;
-  // chevrons, slash, and prose dashes are ink.
+  // chevrons, slash, and prose ticks are ink. The source's full-width prose
+  // dashes are compacted to ticks and the icon takes a 20px default so the
+  // capsule holds its own next to the full-height B and I marks.
   return (
-    <Glyph {...p} viewBox="5.5 24.5 134 47">
+    <Glyph {...p} size={p.size ?? 20} viewBox="27.5 24.5 88 47">
       <path
         d="m53.9 29.3h37.1c4.3 0 8 3.7 8 7.7v21c0 4.6-3.7 8.1-7.9 8.1l-37.4-0.1c-3.7 0-7.9-4-7.9-8v-21.2c0-4.2 3.6-7.5 8.1-7.5z"
         fill="var(--skrive-icon-accent-faint)"
@@ -78,8 +80,8 @@ export function IconInlineCode(p: IconProps) {
       <path d="m61.8 57.2c-0.6 0-1.2-0.2-1.7-0.7l-6.4-6.6c-0.8-0.9-1-2.6 0-3.6l6.5-6.8c0.8-0.8 2.6-1.2 3.5-0.2s1.2 2.2-0.4 3.7l-4.7 5 5 5.1c1.3 1.3 0.9 2.9-0.1 3.6-0.4 0.4-0.9 0.5-1.7 0.5z" />
       <path d="m82.9 57.1c-1.9-0.1-2.9-2.2-2-3.6l5.3-5.5-5.2-5.1c-1-1.3-0.9-2.2-0.2-3.2 0.8-1.1 2.6-1.3 3.6-0.3l6.6 6.6c0.9 0.7 1.2 2.8 0.1 3.8l-6.5 6.7c-0.5 0.4-1.2 0.7-1.7 0.6z" />
       <path d="m69.1 60.2c-1.5 0-2.9-1.6-2.3-3.2l6.6-19.6c0.6-1.8 2.5-2.1 3.5-1.3 1 0.6 1.1 1.9 0.9 2.6l-6.4 19.9c-0.3 1.2-1.2 1.6-2.3 1.6z" />
-      <line x1="8.4" x2="35.5" y1="48" y2="48" stroke="currentColor" strokeWidth="5.267" strokeLinecap="round" strokeMiterlimit="10" />
-      <line x1="109.4" x2="136.4" y1="48" y2="48" stroke="currentColor" strokeWidth="5.267" strokeLinecap="round" strokeMiterlimit="10" />
+      <line x1="30.5" x2="38" y1="48" y2="48" stroke="currentColor" strokeWidth="5.267" strokeLinecap="round" strokeMiterlimit="10" />
+      <line x1="104.8" x2="112.3" y1="48" y2="48" stroke="currentColor" strokeWidth="5.267" strokeLinecap="round" strokeMiterlimit="10" />
     </Glyph>
   );
 }
