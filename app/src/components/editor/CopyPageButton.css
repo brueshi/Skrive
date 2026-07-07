@@ -7,6 +7,7 @@
 .copy-page {
   display: inline-flex;
   align-items: center;
+  gap: 3px;
   padding: 3px;
   background: var(--skrive-shell-bg);
   border-radius: var(--skrive-radius-pill);
@@ -18,20 +19,19 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  /* Permanently raised card pills — the switcher's thumb treatment, always
+     on: these are actions, not unselected options, so they never rest
+     recessed or dimmed. */
+  background: var(--skrive-card-bg);
+  box-shadow: var(--skrive-card-shadow);
   border: none;
   border-radius: var(--skrive-radius-pill);
-  /* Fixed ink, not the switcher's muted-until-hover: these are actions, not
-     unselected options, so they don't read as dimmed. */
   color: var(--skrive-fg);
   font: inherit;
   font-size: 0.8rem;
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
-  transition:
-    background-color var(--skrive-duration-quick) var(--skrive-easing),
-    box-shadow var(--skrive-duration-quick) var(--skrive-easing);
 }
 
 .copy-page-main {
@@ -41,13 +41,6 @@
 
 .copy-page-chevron {
   padding: 4px 8px;
-}
-
-.copy-page-main:hover,
-.copy-page-chevron:hover,
-.copy-page-chevron[data-state='open'] {
-  background: var(--skrive-card-bg);
-  box-shadow: var(--skrive-card-shadow);
 }
 
 .copy-page-label {
