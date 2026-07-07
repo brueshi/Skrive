@@ -16,6 +16,7 @@ import {
   useState
 } from 'react';
 import { IconButton } from '../ui/IconButton';
+import { Tooltip } from '../ui/Tooltip';
 import { renderMarkdown } from '../../lib/preview/markdown';
 import {
   paneSegment,
@@ -496,32 +497,34 @@ export function DiffView({
               role="group"
               aria-label="Diff representation"
             >
-              <button
-                type="button"
-                className={`diff-mode-button${mode === 'diff-raw' ? ' active' : ''}`}
-                aria-pressed={mode === 'diff-raw'}
-                title="Diff raw source"
-                onClick={() => onModeChange('diff-raw')}
-              >
-                <IconLayoutRaw size={16} />
-              </button>
-              <button
-                type="button"
-                className={`diff-mode-button${mode === 'diff-preview' ? ' active' : ''}`}
-                aria-pressed={mode === 'diff-preview'}
-                title="Diff rendered preview"
-                onClick={() => onModeChange('diff-preview')}
-              >
-                <IconLayoutPreview size={16} />
-              </button>
+              <Tooltip label="Diff raw source">
+                <button
+                  type="button"
+                  className={`diff-mode-button${mode === 'diff-raw' ? ' active' : ''}`}
+                  aria-pressed={mode === 'diff-raw'}
+                  aria-label="Diff raw source"
+                  onClick={() => onModeChange('diff-raw')}
+                >
+                  <IconLayoutRaw size={16} />
+                </button>
+              </Tooltip>
+              <Tooltip label="Diff rendered preview">
+                <button
+                  type="button"
+                  className={`diff-mode-button${mode === 'diff-preview' ? ' active' : ''}`}
+                  aria-pressed={mode === 'diff-preview'}
+                  aria-label="Diff rendered preview"
+                  onClick={() => onModeChange('diff-preview')}
+                >
+                  <IconLayoutPreview size={16} />
+                </button>
+              </Tooltip>
             </div>
-            <IconButton
-              aria-label="Exit diff mode"
-              title="Exit diff  Esc"
-              onClick={onClose}
-            >
-              <IconX size={16} />
-            </IconButton>
+            <Tooltip label="Exit diff" shortcut="Esc">
+              <IconButton aria-label="Exit diff mode" onClick={onClose}>
+                <IconX size={16} />
+              </IconButton>
+            </Tooltip>
           </div>
         </div>
       </header>

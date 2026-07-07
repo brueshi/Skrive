@@ -10,6 +10,7 @@
     "@radix-ui/react-context-menu": "^2.2.16",
     "@radix-ui/react-dialog": "^1.1.4",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
+    "@radix-ui/react-tooltip": "^1.2.12",
     "@skrive/shared": "workspace:*",
     "cmdk": "^1.1.1",
     "framer-motion": "^12.38.0",

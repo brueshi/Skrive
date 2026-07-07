@@ -24,6 +24,7 @@ import {
 import { IconCopy } from '../icons/IconCopy';
 import { IconCheck } from '../icons/IconCheck';
 import { IconChevronDown } from './menus/toolbar-icons';
+import { Tooltip } from '../ui/Tooltip';
 import './CopyPageButton.css';
 
 const COPIED_FEEDBACK_MS = 1600;
@@ -112,16 +113,17 @@ export function CopyPageButton() {
         <span className="copy-page-label">Copy page</span>
       </button>
       <DropdownMenu.Root>
-        <DropdownMenu.Trigger asChild>
-          <button
-            type="button"
-            className="copy-page-chevron"
-            title="Copy as…"
-            aria-label="Copy options"
-          >
-            <IconChevronDown size={14} />
-          </button>
-        </DropdownMenu.Trigger>
+        <Tooltip label="Copy as…">
+          <DropdownMenu.Trigger asChild>
+            <button
+              type="button"
+              className="copy-page-chevron"
+              aria-label="Copy options"
+            >
+              <IconChevronDown size={14} />
+            </button>
+          </DropdownMenu.Trigger>
+        </Tooltip>
         <DropdownMenu.Portal>
           <DropdownMenu.Content className="ctx-menu" align="end" sideOffset={6}>
             <DropdownMenu.Item

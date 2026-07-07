@@ -9,6 +9,7 @@
 import { useSyncExternalStore } from 'react';
 import type { MenuController } from './controller';
 import { BlockTypeDropdown } from './BlockTypeDropdown';
+import { Tooltip } from '../../ui/Tooltip';
 import {
   IconBold,
   IconItalic,
@@ -25,30 +26,34 @@ import './menus.css';
 
 function ToolbarButton({
   label,
+  shortcut,
   active = false,
   disabled = false,
   onRun,
   children
 }: {
   label: string;
+  /** macOS-symbol shortcut hint for the tooltip. Omitted where none is bound. */
+  shortcut?: string;
   active?: boolean;
   disabled?: boolean;
   onRun: () => void;
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      className={`rich-toolbar-button${active ? ' active' : ''}`}
-      aria-pressed={active}
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={onRun}
-    >
-      {children}
-    </button>
+    <Tooltip label={label} shortcut={shortcut}>
+      <button
+        type="button"
+        className={`rich-toolbar-button${active ? ' active' : ''}`}
+        aria-pressed={active}
+        aria-label={label}
+        disabled={disabled}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onRun}
+      >
+        {children}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -68,10 +73,10 @@ export function Toolbar({ controller }: { controller: MenuController }) {
 
         <span className="rich-toolbar-sep" aria-hidden="true" />
 
-        <ToolbarButton label="Bold" active={s.strong} onRun={() => controller.toggleMark('strong')}>
+        <ToolbarButton label="Bold" shortcut="⌘B" active={s.strong} onRun={() => controller.toggleMark('strong')}>
           <IconBold />
         </ToolbarButton>
-        <ToolbarButton label="Italic" active={s.em} onRun={() => controller.toggleMark('em')}>
+        <ToolbarButton label="Italic" shortcut="⌘I" active={s.em} onRun={() => controller.toggleMark('em')}>
           <IconItalic />
         </ToolbarButton>
         <ToolbarButton
@@ -110,7 +115,7 @@ export function Toolbar({ controller }: { controller: MenuController }) {
         </ToolbarButton>
         {/* Inline code is a mark, not a block conversion — it sits here purely
             to pair visually with the code block, and stays enabled in tables. */}
-        <ToolbarButton label="Inline code" active={s.code} onRun={() => controller.toggleMark('code')}>
+        <ToolbarButton label="Inline code" shortcut="⌘E" active={s.code} onRun={() => controller.toggleMark('code')}>
           <IconInlineCode />
         </ToolbarButton>
         <ToolbarButton

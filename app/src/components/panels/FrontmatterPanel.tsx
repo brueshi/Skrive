@@ -27,6 +27,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { IconButton } from '../ui/IconButton';
+import { Tooltip } from '../ui/Tooltip';
 import { Input } from '../ui/Input';
 import {
   selectActiveTab,
@@ -506,14 +507,15 @@ export function FrontmatterPanel() {
                   )}
                 </div>
 
-                <IconButton
-                  size="sm"
-                  aria-label={`Remove ${row.key}`}
-                  title="Remove field"
-                  onClick={() => discardRow(row)}
-                >
-                  ×
-                </IconButton>
+                <Tooltip label="Remove field">
+                  <IconButton
+                    size="sm"
+                    aria-label={`Remove ${row.key}`}
+                    onClick={() => discardRow(row)}
+                  >
+                    ×
+                  </IconButton>
+                </Tooltip>
               </div>
             );
           })}

@@ -61,4 +61,17 @@
   --dialog-shadow: var(--skrive-shadow-sheet);
   --dialog-z-scrim: var(--skrive-z-modal-backdrop);
   --dialog-z-panel: var(--skrive-z-modal-content);
+
+  /* Tooltip (SKR-228) — the anchored-floater tier of the popup family
+   * (SKR-207 convergence: md radius + float lift; the sheet numbers belong
+   * to scrimmed surfaces). Sits above modals so controls inside a dialog
+   * still get named. */
+  --tooltip-bg: var(--skrive-bg);
+  --tooltip-fg: var(--skrive-fg);
+  --tooltip-muted: var(--skrive-muted);
+  --tooltip-radius: var(--skrive-radius-md);
+  --tooltip-shadow: var(--skrive-shadow-float);
+  --tooltip-z: var(--skrive-z-context-menu);
+  --tooltip-duration: var(--skrive-duration-quick);
+  --tooltip-easing: var(--skrive-easing-out);
 }
