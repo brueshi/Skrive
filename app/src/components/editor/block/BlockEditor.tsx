@@ -21,6 +21,7 @@ import { BlockMenuController } from '../menus/BlockMenuController';
 import { SelectionBubble } from '../menus/SelectionBubble';
 import { LinkEditor } from '../menus/LinkEditor';
 import { BlockSlashMenu } from '../menus/BlockSlashMenu';
+import { OutlineRail } from '../OutlineRail';
 import { useProjectStore } from '../../../stores/project';
 import { skriveAssetResolver } from '../../../lib/preview/imageResolver';
 import './BlockEditor.css';
@@ -104,6 +105,16 @@ export function BlockEditor({ doc, docPath, onChange }: Props): React.ReactEleme
         <div ref={hostRef} className="block-editor-surface" />
         <div ref={caretRef} className="skrive-caret" aria-hidden="true" />
       </div>
+      {/* Document-structure rail (SKR-229), same component the Markdown preview
+          mounts. It measures the surface's real h1-h6 elements and navigates by
+          scroll offset, so no block-id plumbing is needed; renderKey stays
+          constant and structural edits reach it through its ResizeObserver +
+          element-identity path (see the rail's Props comment). */}
+      <OutlineRail
+        scrollerRef={bodyRef}
+        contentRef={hostRef}
+        renderKey=""
+      />
       {ctx && <SelectionBubble controller={ctx.controller} />}
       {ctx && <LinkEditor controller={ctx.controller} />}
       {ctx && <BlockSlashMenu surface={ctx.surface} />}

@@ -9,6 +9,9 @@
   flex-direction: column;
   background: var(--skrive-bg);
   color: var(--skrive-fg);
+  /* Anchors the outline rail (SKR-229) over the scroller's right edge,
+     mirroring .preview-host. */
+  position: relative;
 }
 
 /* The scrolling writing area below the fixed toolbar (mirrors rich-body).
