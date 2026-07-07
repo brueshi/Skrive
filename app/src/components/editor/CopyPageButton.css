@@ -1,13 +1,16 @@
-/* "Copy page" split button (SKR-126). Styled as a sibling to the rendered/source
-   chip-segmented control: a 26px bordered pill divided into a primary action and
-   a chevron that opens the copy-as menu. Quiet by default (muted), warming on
-   hover, so it reads as ambient chrome rather than a call to action. */
+/* "Copy page" split button (SKR-126, reshaped in SKR-226). One raised card
+   capsule in the mode switcher's language: the switcher thumb's card fill and
+   shadow, pill radius, hairline border, with an internal hairline dividing the
+   primary action from the copy-as chevron. Fixed toolbar ink at all times —
+   these are actions, not unselected options, so nothing rests dimmed or
+   changes color on hover. */
 .copy-page {
   display: inline-flex;
   align-items: stretch;
-  height: 26px;
-  border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-radius-md);
+  background: var(--skrive-card-bg);
+  border: 1px solid var(--skrive-card-border);
+  border-radius: var(--skrive-radius-pill);
+  box-shadow: var(--skrive-card-shadow);
   overflow: hidden;
 }
 
@@ -15,32 +18,36 @@
 .copy-page-chevron {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   background: transparent;
   border: none;
-  color: var(--skrive-muted);
+  /* The toolbar's resting ink recipe (--rich-tool-ink is scoped to
+     .rich-toolbar, out of reach here). */
+  color: color-mix(in srgb, var(--skrive-fg) 68%, var(--skrive-bg));
   font: inherit;
-  font-size: 12px;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  white-space: nowrap;
   cursor: pointer;
-  transition:
-    color var(--skrive-duration-quick) var(--skrive-easing),
-    background-color var(--skrive-duration-quick) var(--skrive-easing);
+  transition: background-color 150ms ease;
+}
+
+/* Slight hover: a faint neutral wash per segment (the toolbar's hover recipe
+   over the card fill). Ink stays fixed. */
+.copy-page-main:hover,
+.copy-page-chevron:hover,
+.copy-page-chevron[data-state='open'] {
+  background: color-mix(in srgb, var(--skrive-fg) 5%, var(--skrive-card-bg));
 }
 
 .copy-page-main {
   gap: 0.4rem;
-  padding: 0 0.6rem;
+  padding: 4px 14px;
 }
 
 .copy-page-chevron {
-  padding: 0 0.35rem;
-  border-left: 1px solid var(--skrive-rule);
-}
-
-.copy-page-main:hover,
-.copy-page-chevron:hover,
-.copy-page-chevron[data-state='open'] {
-  color: var(--skrive-fg);
-  background: var(--skrive-rule);
+  padding: 4px 10px;
+  border-left: 1px solid var(--skrive-card-border);
 }
 
 .copy-page-label {
