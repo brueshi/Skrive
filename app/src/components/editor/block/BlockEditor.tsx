@@ -12,7 +12,7 @@
 // active-surface registry rather than rendering it inside the editor.
 
 import { useEffect, useRef, useState } from 'react';
-import { BlockSurface } from '../../../lib/blocksurface';
+import { BlockSurface, DocHistory } from '../../../lib/blocksurface';
 import { attachCustomCaret } from '../../../lib/blocksurface/caret';
 import type { Document } from '../../../lib/blockmodel';
 import { setActiveEditorFlush } from '../active-editor';
@@ -42,11 +42,15 @@ type Props = {
    *  `assets/` folder lands (SKR-175) and anchors the surface's asset-URL resolver
    *  so image srcs load in the shell (SKR-223). */
   docPath: string;
+  /** The tab's session undo history (SKR-179). Read once on mount and handed to
+   *  the surface, so undo survives the remount a tab switch causes. Absent in
+   *  tests -> the surface keeps a private history. */
+  history?: DocHistory;
   /** Receives the edited document on the surface's debounced snapshot. */
   onChange: (next: Document) => void;
 };
 
-export function BlockEditor({ doc, docPath, onChange }: Props): React.ReactElement {
+export function BlockEditor({ doc, docPath, history, onChange }: Props): React.ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const caretRef = useRef<HTMLDivElement>(null);
@@ -77,6 +81,7 @@ export function BlockEditor({ doc, docPath, onChange }: Props): React.ReactEleme
     const surface = new BlockSurface({
       container: host,
       doc,
+      history,
       onDocChange: (next) => onChangeRef.current(next),
       // Resolve model image srcs onto the shell's asset origin at render time
       // (SKR-223). The same helper the Markdown preview uses (one resolver, two
