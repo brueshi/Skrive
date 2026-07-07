@@ -21,14 +21,15 @@
   background: transparent;
   border: none;
   border-radius: var(--skrive-radius-pill);
-  color: var(--skrive-muted);
+  /* Fixed ink, not the switcher's muted-until-hover: these are actions, not
+     unselected options, so they don't read as dimmed. */
+  color: var(--skrive-fg);
   font: inherit;
   font-size: 0.8rem;
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
   transition:
-    color var(--skrive-duration-quick) var(--skrive-easing),
     background-color var(--skrive-duration-quick) var(--skrive-easing),
     box-shadow var(--skrive-duration-quick) var(--skrive-easing);
 }
@@ -45,7 +46,6 @@
 .copy-page-main:hover,
 .copy-page-chevron:hover,
 .copy-page-chevron[data-state='open'] {
-  color: var(--skrive-fg);
   background: var(--skrive-card-bg);
   box-shadow: var(--skrive-card-shadow);
 }
