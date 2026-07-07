@@ -22,3 +22,4 @@ export {
   type CaretContext
 } from './selection';
 export { insertTextInInline, deleteRangeInInline, readInlineFromDOM } from './inline-ops';
+export { DocHistory } from './history';

@@ -505,6 +505,7 @@ export function App() {
                         key={activeTab.path}
                         doc={activeTab.model}
                         docPath={activeTab.path}
+                        history={activeTab.history}
                         onChange={(doc) => setTabModel(activeTabIndex, doc)}
                       />
                     ) : activeTab.mode === 'text' ? (

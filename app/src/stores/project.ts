@@ -32,6 +32,9 @@ import { computeLineDiff } from '../lib/diff/line-diff';
 import { parseFrontmatter } from '../lib/frontmatter';
 import { buildSavePayload, fileMode, type EditorMode } from './save';
 import { generateBlockId, type Document } from '../lib/blockmodel';
+// history.ts is model-pure (zero DOM imports), so the store can hold DocHistory
+// instances without pulling the surface's DOM modules into its graph.
+import { DocHistory } from '../lib/blocksurface/history';
 import {
   folioToModel,
   modelToFolio,
@@ -133,6 +136,12 @@ export type Tab = {
   /** Document metadata for a `rich` tab (title, createdAt, preserved unknowns).
    *  Absent on markdown tabs. */
   docMeta?: FolioMeta;
+  /** Session-scoped undo history for a `rich` tab (SKR-179). BlockEditor remounts
+   *  per tab switch (`key` per path) and rebuilds its surface, so the history
+   *  lives here — same lifetime as `model`, whose snapshots it references — and
+   *  is handed to each new surface. In-memory only, never persisted; a project
+   *  reopen re-parses the model, so it correctly starts a fresh history too. */
+  history?: DocHistory;
   dirty: boolean;
   /** SHA-256 of the file as last loaded or saved. Baseline for external-change
    *  detection — compared against the on-disk file before an auto-save so we
@@ -1037,7 +1046,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
     let contentFields: Pick<
       Tab,
-      'body' | 'frontmatter' | 'model' | 'docId' | 'docMeta'
+      'body' | 'frontmatter' | 'model' | 'docId' | 'docMeta' | 'history'
     >;
     if (mode === 'rich') {
       let folio: FolioDocument;
@@ -1061,7 +1070,8 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         frontmatter: {},
         model: folioToModel(folio),
         docId: folio.docId,
-        docMeta: folio.docMeta
+        docMeta: folio.docMeta,
+        history: new DocHistory()
       };
     } else if (mode === 'text' || mode === 'view') {
       // Plain text (`.txt`, SKR-204) and the read-only HTML viewer (`.html`,

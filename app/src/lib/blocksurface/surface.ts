@@ -111,6 +111,11 @@ export type BlockSurfaceOptions = {
    *  constructor's initial renderDocument runs before any registration call would.
    *  Omitted in tests/harness -> identity (the raw path, today's behavior). */
   resolveAsset?: AssetResolver;
+  /** Session-scoped undo history to continue (SKR-179). The surface is rebuilt on
+   *  every BlockEditor remount (tab switches — `key` per path), so an owned
+   *  history would be wiped each time; the tab owns it instead and hands it in
+   *  here. Omitted (tests/harness) -> a fresh private history, prior behavior. */
+  history?: DocHistory;
 };
 
 type InlineTextBlock = Extract<BlockNode, { type: 'paragraph' | 'heading' }>;
@@ -170,7 +175,8 @@ export class BlockSurface {
   // Authoritative document. Assigned through the `doc` setter everywhere except
   // the constructor and undo/redo, so every edit funnels one history snapshot.
   private _doc: Document;
-  private readonly history = new DocHistory();
+  // Injected session history (see BlockSurfaceOptions.history) or a private one.
+  private readonly history: DocHistory;
   // Hint the setter reads for the next snapshot's edit kind, then resets. Typing
   // and delete set it so consecutive ones coalesce; everything else is its own
   // undo step.
@@ -238,6 +244,7 @@ export class BlockSurface {
   constructor(opts: BlockSurfaceOptions) {
     this.container = opts.container;
     this._doc = opts.doc; // bypass the setter: initial load is not an undoable edit
+    this.history = opts.history ?? new DocHistory();
     this.onDocChange = opts.onDocChange;
     this.resolveAsset = opts.resolveAsset ?? ((url) => url);
 
