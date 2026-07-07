@@ -32,16 +32,12 @@ export type TooltipProps = {
    *  Windows reads Ctrl+E. Omit where none is bound. */
   shortcut?: string;
   side?: 'top' | 'bottom' | 'left' | 'right';
-  /** Force-close override. Pass `false` to suppress the tooltip (e.g. while
-   *  the menu the trigger opens is showing — a tooltip stacked on a menu is
-   *  noise); leave undefined for normal hover/focus behavior. */
-  open?: false;
   children: React.ReactElement;
 };
 
-export function Tooltip({ label, shortcut, side = 'top', open, children }: TooltipProps) {
+export function Tooltip({ label, shortcut, side = 'top', children }: TooltipProps) {
   return (
-    <RadixTooltip.Root open={open}>
+    <RadixTooltip.Root>
       <RadixTooltip.Trigger asChild>{children}</RadixTooltip.Trigger>
       <RadixTooltip.Portal>
         <RadixTooltip.Content

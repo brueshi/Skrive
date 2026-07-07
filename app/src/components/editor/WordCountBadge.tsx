@@ -27,7 +27,6 @@ import {
 import type { LiveCounts } from '../../lib/wordcount/live';
 import { usePreferencesStore } from '../../stores/preferences';
 import { IconChevronDown } from './menus/toolbar-icons';
-import { Tooltip } from '../ui/Tooltip';
 import './WordCountBadge.css';
 
 export function useSelectionCounts(
@@ -131,18 +130,11 @@ export function WordCountBadge({
   const shown = selection ?? counts;
   const reduced = useReducedMotion();
 
-  // Opening the menu suppresses the chevron's tooltip, and keeps it
-  // suppressed after close (Radix returns focus to the trigger, which would
-  // instantly re-open the tooltip over the just-dismissed menu — the noise
-  // Joe flagged). Suppression lifts when the pointer leaves the chip.
-  const [tipSuppressed, setTipSuppressed] = useState(false);
-
   return (
     <motion.div
       className="word-count-badge"
       layout={reduced ? false : 'size'}
       transition={{ type: 'spring', stiffness: 550, damping: 40 }}
-      onPointerLeave={() => setTipSuppressed(false)}
     >
       {/* Keyed by metric (and selection-ness), not by text: switching what is
           shown gets a soft entrance while live count ticks stay still. */}
@@ -156,18 +148,19 @@ export function WordCountBadge({
       >
         {metricLabel(metric, shown, selection !== null)}
       </motion.span>
-      <DropdownMenu.Root onOpenChange={(open) => open && setTipSuppressed(true)}>
-        <Tooltip label="Count metric" open={tipSuppressed ? false : undefined}>
-          <DropdownMenu.Trigger asChild>
-            <button
-              type="button"
-              className="word-count-chevron"
-              aria-label="Choose count metric"
-            >
-              <IconChevronDown size={12} />
-            </button>
-          </DropdownMenu.Trigger>
-        </Tooltip>
+      {/* Deliberately no tooltip: a chevron on a counter chip explains
+          itself, and the label would hover over the prose (Joe, 2026-07-07).
+          The aria-label keeps it named for screen readers. */}
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger asChild>
+          <button
+            type="button"
+            className="word-count-chevron"
+            aria-label="Choose count metric"
+          >
+            <IconChevronDown size={12} />
+          </button>
+        </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
           <DropdownMenu.Content
             className="ctx-menu word-count-menu"
