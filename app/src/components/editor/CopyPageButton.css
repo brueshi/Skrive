@@ -1,17 +1,16 @@
-/* "Copy page" split button (SKR-126, reshaped in SKR-226). Wears the Segmented
-   primitive's track language (SKR-212) so it reads as the same component family
-   as the mode switcher: sunken --segmented-track, md radius, 2px inner pad,
-   26px segments. Being actions rather than a radio group, there is no resting
-   thumb — the raised-pill treatment (bg + thumb shadow) appears on hover and
-   while the copy-as menu is open. */
+/* "Copy page" split button (SKR-126, reshaped in SKR-226). Wears the mode
+   switcher's track language (.md-layout-toggle) so the editor bar's controls
+   read as one family: recessed pill track on the shell tone with an inset
+   hairline, pill segments in the switcher's type. Being actions rather than a
+   radio group, there is no resting thumb — the raised-card treatment appears
+   on hover and while the copy-as menu is open. */
 .copy-page {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  height: 30px;
-  padding: 2px;
-  background: var(--segmented-track);
-  border-radius: var(--skrive-radius-md);
+  padding: 3px;
+  background: var(--skrive-shell-bg);
+  border-radius: var(--skrive-radius-pill);
+  box-shadow: inset 0 0 0 1px var(--skrive-card-border);
 }
 
 .copy-page-main,
@@ -19,14 +18,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 26px;
   background: transparent;
   border: none;
-  border-radius: var(--skrive-radius-sm);
+  border-radius: var(--skrive-radius-pill);
   color: var(--skrive-muted);
   font: inherit;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     color var(--skrive-duration-quick) var(--skrive-easing),
@@ -36,19 +35,19 @@
 
 .copy-page-main {
   gap: 0.4rem;
-  padding: 0 11px;
+  padding: 4px 14px;
 }
 
 .copy-page-chevron {
-  padding: 0 6px;
+  padding: 4px 8px;
 }
 
 .copy-page-main:hover,
 .copy-page-chevron:hover,
 .copy-page-chevron[data-state='open'] {
   color: var(--skrive-fg);
-  background: var(--skrive-bg);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--skrive-fg) 9%, transparent);
+  background: var(--skrive-card-bg);
+  box-shadow: var(--skrive-card-shadow);
 }
 
 .copy-page-label {
