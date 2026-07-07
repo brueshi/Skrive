@@ -18,7 +18,7 @@ import { imageExtension, imageMarkdownLink, pastedImageFilename } from '../clipb
 import { notify } from '../notify';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto, setCodeContent } from './render';
 import type { AssetResolver } from './render';
-import { caretContext, flatOffsetFromDOM, focusedLeafElement, leafCaretContext, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
+import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange } from './doc-position';
 import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
 import { findBlockById, updateBlockById } from './tree';
@@ -27,6 +27,7 @@ import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
 import { changeListType, findImmediateList, indentItem, liftItemToParagraph, outdentItem } from './list-ops';
 import {
   type BooleanMark,
+  coalesceInline,
   deleteRangeInInline,
   inlineLength,
   inlinePlainText,
@@ -192,7 +193,7 @@ export class BlockSurface {
   private composing = false;
   private selectionCb: ((info: SelectionInfo | null) => void) | null = null;
   private selScheduled = false;
-  private savedLink: { blockId: string; start: number; end: number } | null = null;
+  private savedLink: { blockId: string; start: number; end: number; backward: boolean } | null = null;
   // The last text selection observed INSIDE the surface, in MODEL coordinates (a
   // leaf block id + a flat range, OR a table cell's (table id, row, col) + a flat
   // range local to the cell; a caret is start === end), kept across focus loss.
@@ -552,6 +553,10 @@ export class BlockSurface {
     leaves: ReadonlyArray<{ leaf: InlineTextBlock; start: number; end: number }>,
     mark: BooleanMark
   ): void {
+    // Capture drag direction before the re-renders destroy the live selection,
+    // so the restore extends the end the user was dragging (SKR-192).
+    const liveSel = window.getSelection();
+    const backward = liveSel != null && isSelectionBackward(liveSel);
     const on = !leaves.every((l) => rangeHasMark(l.leaf.inline, l.start, l.end, mark));
     let blocks = this.doc.blocks;
     for (const l of leaves) {
@@ -570,8 +575,16 @@ export class BlockSurface {
     const firstEl = this.leafElementById(first.leaf.id);
     const lastEl = this.leafElementById(last.leaf.id);
     if (firstEl && lastEl) {
-      if (firstEl === lastEl) setSelectionRange(firstEl, first.start, last.end);
-      else setCrossBlockSelection(firstEl, first.start, lastEl, last.end);
+      // Swapped points restore a backward selection: setBaseAndExtent takes
+      // base/extent, so base-after-extent IS the direction.
+      if (firstEl === lastEl) {
+        if (backward) setSelectionRange(firstEl, last.end, first.start);
+        else setSelectionRange(firstEl, first.start, last.end);
+      } else if (backward) {
+        setCrossBlockSelection(lastEl, last.end, firstEl, first.start);
+      } else {
+        setCrossBlockSelection(firstEl, first.start, lastEl, last.end);
+      }
     }
     this.scheduleSerialize();
     this.emitSelection();
@@ -610,7 +623,11 @@ export class BlockSurface {
   beginLink(): boolean {
     const t = this.leafTarget();
     if (!t || t.collapsed || t.spansBlocks || !isInlineText(t.leaf)) return false;
-    this.savedLink = { blockId: t.leaf.id, start: t.start, end: t.end };
+    // leafTarget may have resolved from the saved (direction-less) selection;
+    // a live backward drag is the only case with a direction to keep (SKR-192).
+    const liveSel = window.getSelection();
+    const backward = liveSel != null && isSelectionBackward(liveSel);
+    this.savedLink = { blockId: t.leaf.id, start: t.start, end: t.end, backward };
     return true;
   }
 
@@ -639,7 +656,8 @@ export class BlockSurface {
     const el = this.leafElementById(saved.blockId);
     if (!el) return;
     this.container.focus();
-    setSelectionRange(el, saved.start, saved.end);
+    if (saved.backward) setSelectionRange(el, saved.end, saved.start);
+    else setSelectionRange(el, saved.start, saved.end);
     this.emitSelection();
   }
 
@@ -658,19 +676,25 @@ export class BlockSurface {
       // doesn't), but the focus-before-select ordering matters either way.
       this.container.focus();
       renderInlineInto(el, inline, this.resolveAsset);
-      setSelectionRange(el, saved.start, saved.end);
+      if (saved.backward) setSelectionRange(el, saved.end, saved.start);
+      else setSelectionRange(el, saved.start, saved.end);
     }
     this.scheduleSerialize();
     this.emitSelection();
   }
 
   private applyToSelection(transform: (inline: InlineNode[], start: number, end: number) => InlineNode[]): void {
+    // Same direction capture as applyMarkToLeaves: the re-render below destroys
+    // the live selection, and the restore must keep a backward drag backward.
+    const liveSel = window.getSelection();
+    const backward = liveSel != null && isSelectionBackward(liveSel);
     const cell = this.cellTarget();
     if (cell) {
       if (cell.collapsed || cell.spansCells) return;
       const inline = transform(cell.inline, cell.start, cell.end);
       this.commitCell(cell, inline, cell.end);
-      setSelectionRange(cell.cellEl, cell.start, cell.end);
+      if (backward) setSelectionRange(cell.cellEl, cell.end, cell.start);
+      else setSelectionRange(cell.cellEl, cell.start, cell.end);
       this.scheduleSerialize();
       this.emitSelection();
       return;
@@ -680,7 +704,8 @@ export class BlockSurface {
     const inline = transform(t.leaf.inline, t.start, t.end);
     this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, t.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
     renderInlineInto(t.blockEl, inline, this.resolveAsset);
-    setSelectionRange(t.blockEl, t.start, t.end);
+    if (backward) setSelectionRange(t.blockEl, t.end, t.start);
+    else setSelectionRange(t.blockEl, t.start, t.end);
     this.scheduleSerialize();
     this.emitSelection(); // refresh the bubble's active state
   }
@@ -2146,7 +2171,7 @@ export class BlockSurface {
     // Seamless single-paragraph merge — like typing the text in at the caret.
     const only = parsed[0]!;
     if (parsed.length === 1 && only.type === 'paragraph') {
-      const merged: BlockNode = { ...t.leaf, inline: [...head, ...only.inline, ...tail], dirty: true };
+      const merged: BlockNode = { ...t.leaf, inline: coalesceInline([...head, ...only.inline, ...tail]), dirty: true };
       this.commitBlock(index, merged);
       this.reconcile();
       const caret = inlineLength(head) + inlineLength(only.inline);
@@ -2253,9 +2278,9 @@ export class BlockSurface {
     const [head, tail] = splitInline(t.leaf.inline, t.start);
     const firstSeg = segments[0]!;
     const lastSeg = segments[segments.length - 1]!;
-    const first: BlockNode = { ...t.leaf, inline: [...head, ...toInline(firstSeg)], dirty: true };
+    const first: BlockNode = { ...t.leaf, inline: coalesceInline([...head, ...toInline(firstSeg)]), dirty: true };
     const middle = segments.slice(1, -1).map((s) => this.newInlineBlock('paragraph', toInline(s), 1));
-    const last = this.newInlineBlock('paragraph', [...toInline(lastSeg), ...tail], 1);
+    const last = this.newInlineBlock('paragraph', coalesceInline([...toInline(lastSeg), ...tail]), 1);
 
     const blocks = this.doc.blocks.slice();
     blocks.splice(index, 1, first, ...middle, last);
@@ -2268,31 +2293,112 @@ export class BlockSurface {
   // Click on a frozen block selects it as a unit (SKR-216): a frozen block is
   // rendered non-editable (see render.ts), so there is no caret to place inside
   // it — without this a click there was a dead gesture. Checked ahead of the
-  // below-last-block placement below since a frozen block can itself be last.
+  // point placement below since a frozen block can itself be the nearest block.
   // Bound to `click` (not pointerup — WKWebView drops it on a motionless press).
   //
-  // Click below the last block: give it a caret home. Native placement lands
-  // inside a trailing barrier's fence/cell or nowhere (F57), so a click in the
-  // empty area under the document places the caret at the end of a trailing inline
-  // block, or seeds a fresh paragraph after a trailing barrier so the document is
-  // never un-appendable.
+  // A click that lands on the surface itself — the host padding, an inter-block
+  // gap, or the space below the document — has no native placement worth keeping
+  // (it lands in the last cell/fence or nowhere), so route it to the nearest
+  // document position (SKR-192, extending PR #62's below-last affordance).
   private onClick = (event: Event): void => {
-    const target = event.target;
+    const e = event as MouseEvent;
+    const target = e.target;
     const targetEl = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
-    const frozenEl = targetEl?.closest<HTMLElement>(`[${BLOCK_ID_ATTR}]`) ?? null;
-    const frozenId = frozenEl?.getAttribute(BLOCK_ID_ATTR) ?? null;
-    const frozenBlock = frozenId ? findBlockById(this.doc.blocks, frozenId) : null;
-    if (frozenBlock && frozenBlock.type === 'frozen_block') {
-      this.selectBlock(frozenBlock.id);
+    const blockEl = targetEl?.closest<HTMLElement>(`[${BLOCK_ID_ATTR}]`) ?? null;
+    const blockId = blockEl?.getAttribute(BLOCK_ID_ATTR) ?? null;
+    const block = blockId ? findBlockById(this.doc.blocks, blockId) : null;
+    if (block && block.type === 'frozen_block') {
+      this.selectBlock(block.id);
       return;
     }
+    // Inside any other block, native placement already put the caret where it
+    // belongs; only a click on the bare surface needs an affordance.
+    if (block) return;
+    this.placeCaretNearPoint(e.clientX, e.clientY);
+  };
+
+  /** Place the caret at the document position nearest a viewport point (SKR-192).
+   *  Serves clicks with no native placement: the surface's own padding and
+   *  inter-block gaps (via onClick), and the side gutters outside the centered
+   *  host, which never reach the surface's listeners — the editor component
+   *  routes those here from the scroller. A point below the last block keeps the
+   *  click-below affordance (F57): caret at the end of a trailing inline block,
+   *  or a fresh paragraph seeded after a trailing barrier. */
+  placeCaretNearPoint(clientX: number, clientY: number): void {
     const last = this.doc.blocks[this.doc.blocks.length - 1];
     if (!last) return;
     const lastEl = this.registry.get(last.id);
     if (!lastEl) return;
-    // Only act on a click strictly below the last block — its own content, and the
-    // gaps between blocks, are handled by native placement.
-    if ((event as MouseEvent).clientY <= lastEl.getBoundingClientRect().bottom) return;
+    if (clientY > lastEl.getBoundingClientRect().bottom) {
+      this.placeCaretBelowDocument(last, lastEl);
+      return;
+    }
+    const near = this.blockNearestY(clientY);
+    if (!near) return;
+    const block = findBlockById(this.doc.blocks, near.id);
+    if (!block) return;
+    if (block.type === 'frozen_block') {
+      this.selectBlock(block.id);
+      return;
+    }
+    // Clamp the point into the block's box (1px inside so the hit-test cannot
+    // graze the neighbor), then resolve the exact position the way readSelection
+    // would. caretRangeFromPoint exists in both shipping engines (WebKit,
+    // Chromium); the guard covers jsdom.
+    const rect = near.el.getBoundingClientRect();
+    const x = Math.min(Math.max(clientX, rect.left + 1), rect.right - 1);
+    const y = Math.min(Math.max(clientY, rect.top + 1), rect.bottom - 1);
+    const hit = document.caretRangeFromPoint?.(x, y) ?? null;
+    this.focus();
+    if (hit && near.el.contains(hit.startContainer)) {
+      const pos = docPosFromDOMPoint(this.container, hit.startContainer, hit.startOffset);
+      if (pos) {
+        writeSelection(this.container, collapsedRange(pos), 'point-click');
+        return;
+      }
+    }
+    // Hit-test failed (or resolved outside the block): land at the block's near
+    // edge — start when the click was above its vertical middle, else end.
+    if (isInlineText(block)) {
+      setCaret(near.el, clientY < (rect.top + rect.bottom) / 2 ? 0 : inlineLength(block.inline));
+    }
+  }
+
+  /** The top-level block vertically nearest a viewport Y. Document order is
+   *  vertical order, so binary-search the first block whose bottom reaches the
+   *  point, then let the one above win when the point sits nearer its bottom
+   *  edge (a click in the gap between two blocks goes to the closer one). */
+  private blockNearestY(clientY: number): { id: string; el: HTMLElement } | null {
+    const blocks = this.doc.blocks;
+    if (blocks.length === 0) return null;
+    let lo = 0;
+    let hi = blocks.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const el = this.registry.get(blocks[mid]!.id);
+      if (!el) return null; // registry gap: leave the click to native placement
+      if (el.getBoundingClientRect().bottom < clientY) lo = mid + 1;
+      else hi = mid;
+    }
+    const el = this.registry.get(blocks[lo]!.id);
+    if (!el) return null;
+    if (lo > 0) {
+      const above = this.registry.get(blocks[lo - 1]!.id);
+      if (above) {
+        const distAbove = clientY - above.getBoundingClientRect().bottom;
+        const distBelow = el.getBoundingClientRect().top - clientY;
+        if (distAbove >= 0 && distBelow >= 0 && distAbove < distBelow) {
+          return { id: blocks[lo - 1]!.id, el: above };
+        }
+      }
+    }
+    return { id: blocks[lo]!.id, el };
+  }
+
+  // Click below the last block (F57, PR #62): caret at the end of a trailing
+  // inline block, or a fresh paragraph seeded after a trailing barrier so the
+  // document is never un-appendable.
+  private placeCaretBelowDocument(last: BlockNode, lastEl: HTMLElement): void {
     if (isInlineText(last)) {
       this.focus();
       setCaret(lastEl, inlineLength(last.inline));
@@ -2304,7 +2410,7 @@ export class BlockSurface {
     this.focus();
     writeSelection(this.container, collapsedRange({ leaf: { kind: 'block', id: para.id }, offset: 0 }), 'structural');
     this.scheduleSerialize();
-  };
+  }
 
   private onCompositionStart = (): void => {
     this.composing = true;
@@ -3272,6 +3378,12 @@ export class BlockSurface {
     const range = sel.getRangeAt(0);
     if (!range.collapsed || range.startContainer.nodeType !== Node.TEXT_NODE || range.startOffset === 0) return false;
     const tn = range.startContainer as Text;
+    // Deleting the node's last character would leave an EMPTY text node in place
+    // with no re-render: a block emptied this way loses its placeholder <br>
+    // (height + addressable caret — see renderInline), a zero-height caret in
+    // WKWebView (SKR-192). Fall back to the full commit path, which re-renders
+    // and restores the placeholder.
+    if (tn.data.length === 1) return false;
     const off = range.startOffset;
     tn.deleteData(off - 1, 1);
     sel.collapse(tn, off - 1);

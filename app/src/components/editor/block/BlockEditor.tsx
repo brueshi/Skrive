@@ -119,7 +119,18 @@ export function BlockEditor({ doc, docPath, onChange }: Props): React.ReactEleme
 
   return (
     <div className="block-editor">
-      <div ref={bodyRef} className="block-editor-body">
+      {/* Side-gutter clicks land on the scroller, outside the centered surface,
+          so the surface's own click listener never sees them — route them to its
+          nearest-position placement (SKR-192). Only clicks on the scroller
+          itself: a click inside the surface bubbles up here too, but native
+          placement (or the surface's handler) already owns it. */}
+      <div
+        ref={bodyRef}
+        className="block-editor-body"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) ctx?.surface.placeCaretNearPoint(e.clientX, e.clientY);
+        }}
+      >
         <div ref={hostRef} className="block-editor-surface" />
         <div ref={caretRef} className="skrive-caret" aria-hidden="true" />
       </div>

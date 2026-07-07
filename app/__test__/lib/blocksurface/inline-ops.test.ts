@@ -4,10 +4,12 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  coalesceInline,
   deleteRangeInInline,
   inlineLength,
   inlinePlainText,
   insertTextInInline,
+  marksEqual,
   rangeHasLink,
   rangeHasMark,
   setLinkInInline,
@@ -65,11 +67,8 @@ describe('deleteRangeInInline', () => {
     expect(out).toEqual([text('a'), text('d', { em: true })]);
   });
 
-  it('drops a fully-removed run', () => {
-    expect(deleteRangeInInline([text('a'), text('bb', { strong: true }), text('c')], 1, 3)).toEqual([
-      text('a'),
-      text('c')
-    ]);
+  it('drops a fully-removed run and merges the same-mark survivors (SKR-192)', () => {
+    expect(deleteRangeInInline([text('a'), text('bb', { strong: true }), text('c')], 1, 3)).toEqual([text('ac')]);
   });
 
   it('is a no-op when start >= end', () => {
@@ -116,8 +115,9 @@ describe('atoms in the offset space', () => {
   });
 
   it('deleteRangeInInline removes an atom when the range covers its cell (F06)', () => {
-    // Backspace at the caret just after the break deletes [2,3) — the break's cell.
-    expect(deleteRangeInInline([text('ab'), brk(), text('cd')], 2, 3)).toEqual([text('ab'), text('cd')]);
+    // Backspace at the caret just after the break deletes [2,3) — the break's
+    // cell — and the same-mark neighbors merge (SKR-192).
+    expect(deleteRangeInInline([text('ab'), brk(), text('cd')], 2, 3)).toEqual([text('abcd')]);
   });
 
   it('deleteRangeInInline keeps an atom whose cell is outside the range', () => {
@@ -125,9 +125,10 @@ describe('atoms in the offset space', () => {
   });
 
   it('deleteRangeInInline removes only the atoms inside a spanning range (F05)', () => {
-    // a i0 b i1 c  ->  offsets a[0] i0[1] b[2] i1[3] c[4]; delete [1,4) drops both atoms + b.
+    // a i0 b i1 c  ->  offsets a[0] i0[1] b[2] i1[3] c[4]; delete [1,4) drops both
+    // atoms + b, and the unmarked survivors merge (SKR-192).
     const nodes = [text('a'), img('0'), text('b'), img('1'), text('c')];
-    expect(deleteRangeInInline(nodes, 1, 4)).toEqual([text('a'), text('c')]);
+    expect(deleteRangeInInline(nodes, 1, 4)).toEqual([text('ac')]);
   });
 
   it('splitInline sends an atom to exactly one side, never both (F04)', () => {
@@ -167,25 +168,21 @@ describe('toggleMarkInInline', () => {
     expect(toggleMarkInInline([text('hi', { strong: true })], 0, 2, 'strong')).toEqual([text('hi')]);
   });
 
-  it('adds when only part of the range has the mark', () => {
+  it('adds when only part of the range has the mark, coalescing the result', () => {
     const nodes = [text('ab', { em: true }), text('cd')];
-    expect(toggleMarkInInline(nodes, 0, 4, 'em')).toEqual([text('ab', { em: true }), text('cd', { em: true })]);
+    expect(toggleMarkInInline(nodes, 0, 4, 'em')).toEqual([text('abcd', { em: true })]);
   });
 });
 
 describe('setMarkInInline', () => {
-  it('forces the mark on regardless of current state', () => {
+  it('forces the mark on regardless of current state, coalescing the result', () => {
     expect(setMarkInInline([text('ab', { strong: true }), text('cd')], 0, 4, 'strong', true)).toEqual([
-      text('ab', { strong: true }),
-      text('cd', { strong: true })
+      text('abcd', { strong: true })
     ]);
   });
 
-  it('forces the mark off regardless of current state', () => {
-    expect(setMarkInInline([text('ab', { strong: true }), text('cd')], 0, 4, 'strong', false)).toEqual([
-      text('ab'),
-      text('cd')
-    ]);
+  it('forces the mark off regardless of current state, coalescing the result', () => {
+    expect(setMarkInInline([text('ab', { strong: true }), text('cd')], 0, 4, 'strong', false)).toEqual([text('abcd')]);
   });
 
   it('does not invert a half-marked range the way a per-block toggle would', () => {
@@ -194,6 +191,57 @@ describe('setMarkInInline', () => {
     expect(setMarkInInline([text('abcd', { strong: true })], 0, 4, 'strong', true)).toEqual([
       text('abcd', { strong: true })
     ]);
+  });
+});
+
+// SKR-192: adjacent same-mark runs merge so repeated toggling never accumulates
+// sibling <strong>/<em> elements and word selection never stops at a run seam.
+describe('coalesceInline', () => {
+  it('merges adjacent same-mark runs, including chains', () => {
+    expect(coalesceInline([text('a'), text('b'), text('c')])).toEqual([text('abc')]);
+    expect(coalesceInline([text('a', { strong: true }), text('b', { strong: true })])).toEqual([
+      text('ab', { strong: true })
+    ]);
+  });
+
+  it('keeps runs with different marks apart', () => {
+    const nodes = [text('a'), text('b', { em: true }), text('c')];
+    expect(coalesceInline(nodes)).toBe(nodes);
+  });
+
+  it('treats absent and false boolean marks as the same state', () => {
+    expect(coalesceInline([text('a', { strong: false }), text('b')])).toEqual([text('ab', { strong: false })]);
+  });
+
+  it('never merges across an atom', () => {
+    const nodes = [text('a'), brk(), text('b')];
+    expect(coalesceInline(nodes)).toBe(nodes);
+    const withImg = [text('a'), img(), text('b')];
+    expect(coalesceInline(withImg)).toBe(withImg);
+  });
+
+  it('compares links by href AND title', () => {
+    const l = (href: string, title: string | null): InlineNode['marks'] => ({ link: { href, title } });
+    expect(coalesceInline([text('a', l('u', null)), text('b', l('u', null))])).toEqual([text('ab', l('u', null))]);
+    expect(coalesceInline([text('a', l('u', null)), text('b', l('v', null))])).toHaveLength(2);
+    expect(coalesceInline([text('a', l('u', 't')), text('b', l('u', null))])).toHaveLength(2);
+  });
+
+  it('returns the same reference when nothing merges', () => {
+    const nodes = [text('a', { em: true }), text('b')];
+    expect(coalesceInline(nodes)).toBe(nodes);
+    const single = [text('a')];
+    expect(coalesceInline(single)).toBe(single);
+  });
+});
+
+describe('marksEqual', () => {
+  it('compares each boolean mark by truthiness', () => {
+    expect(marksEqual({}, { strong: false })).toBe(true);
+    expect(marksEqual({ em: true }, { em: true, code: false })).toBe(true);
+    expect(marksEqual({ em: true }, { strong: true })).toBe(false);
+    expect(marksEqual({ code: true }, {})).toBe(false);
+    expect(marksEqual({ strikethrough: true }, { strikethrough: true })).toBe(true);
   });
 });
 
