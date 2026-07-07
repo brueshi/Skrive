@@ -27,7 +27,7 @@
 import { useMemo, useRef } from 'react';
 import { renderMarkdown } from '../../lib/preview/markdown';
 import { skriveAssetResolver } from '../../lib/preview/imageResolver';
-import { PreviewOutlineRail } from './PreviewOutlineRail';
+import { OutlineRail } from './OutlineRail';
 
 type Props = {
   body: string;
@@ -176,7 +176,7 @@ export function Preview({
         />
       </div>
       {showRail && (
-        <PreviewOutlineRail
+        <OutlineRail
           scrollerRef={scrollerRef}
           contentRef={innerRef}
           renderKey={railKey}
