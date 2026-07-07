@@ -23,6 +23,7 @@ import { BlockMenuController } from '../components/editor/menus/BlockMenuControl
 import { SelectionBubble } from '../components/editor/menus/SelectionBubble';
 import { LinkEditor } from '../components/editor/menus/LinkEditor';
 import { BlockSlashMenu } from '../components/editor/menus/BlockSlashMenu';
+import { TooltipProvider } from '../components/ui/Tooltip';
 import { parseDocument, serializeDocument, type Document as BlockDocument } from '../lib/blockmodel';
 import {
   buildAdversarialDoc,
@@ -211,7 +212,12 @@ function main(): void {
   if (!rootEl) throw new Error('Missing #root element in harness.html');
   createRoot(rootEl).render(
     <StrictMode>
-      <Harness surface={surface} body={doc.markdown} />
+      {/* The production menus need the app's tooltip context (SKR-228):
+          Radix Tooltip.Root throws without a provider, which killed the
+          whole harness mount and left __skriveBlockSurface unregistered. */}
+      <TooltipProvider>
+        <Harness surface={surface} body={doc.markdown} />
+      </TooltipProvider>
     </StrictMode>
   );
 }
