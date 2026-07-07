@@ -18,6 +18,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { motion, useReducedMotion } from 'framer-motion';
 import type { WordCountMetric } from '@skrive/shared';
 import {
   computeReadingTime,
@@ -128,14 +129,35 @@ export function WordCountBadge({
   const setMetric = usePreferencesStore((s) => s.setWordCountMetric);
   const selection = useSelectionCounts(scopeRef);
   const shown = selection ?? counts;
+  const reduced = useReducedMotion();
+
+  // Opening the menu suppresses the chevron's tooltip, and keeps it
+  // suppressed after close (Radix returns focus to the trigger, which would
+  // instantly re-open the tooltip over the just-dismissed menu — the noise
+  // Joe flagged). Suppression lifts when the pointer leaves the chip.
+  const [tipSuppressed, setTipSuppressed] = useState(false);
 
   return (
-    <div className="word-count-badge">
-      <span className="word-count-label" aria-live="off">
+    <motion.div
+      className="word-count-badge"
+      layout={reduced ? false : 'size'}
+      transition={{ type: 'spring', stiffness: 550, damping: 40 }}
+      onPointerLeave={() => setTipSuppressed(false)}
+    >
+      {/* Keyed by metric (and selection-ness), not by text: switching what is
+          shown gets a soft entrance while live count ticks stay still. */}
+      <motion.span
+        key={`${metric}${selection ? '-sel' : ''}`}
+        className="word-count-label"
+        aria-live="off"
+        initial={reduced ? false : { opacity: 0, y: 3 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+      >
         {metricLabel(metric, shown, selection !== null)}
-      </span>
-      <DropdownMenu.Root>
-        <Tooltip label="Count metric">
+      </motion.span>
+      <DropdownMenu.Root onOpenChange={(open) => open && setTipSuppressed(true)}>
+        <Tooltip label="Count metric" open={tipSuppressed ? false : undefined}>
           <DropdownMenu.Trigger asChild>
             <button
               type="button"
@@ -166,6 +188,6 @@ export function WordCountBadge({
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
-    </div>
+    </motion.div>
   );
 }
