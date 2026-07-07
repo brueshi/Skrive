@@ -74,9 +74,6 @@ export function Toolbar({ controller }: { controller: MenuController }) {
         <ToolbarButton label="Italic" active={s.em} onRun={() => controller.toggleMark('em')}>
           <IconItalic />
         </ToolbarButton>
-        <ToolbarButton label="Inline code" active={s.code} onRun={() => controller.toggleMark('code')}>
-          <IconInlineCode />
-        </ToolbarButton>
         <ToolbarButton
           label="Link"
           active={s.link}
@@ -110,6 +107,11 @@ export function Toolbar({ controller }: { controller: MenuController }) {
         </ToolbarButton>
         <ToolbarButton label="Quote" active={s.inBlockquote} disabled={s.inTable} onRun={() => controller.toggleBlockquote()}>
           <IconQuote />
+        </ToolbarButton>
+        {/* Inline code is a mark, not a block conversion — it sits here purely
+            to pair visually with the code block, and stays enabled in tables. */}
+        <ToolbarButton label="Inline code" active={s.code} onRun={() => controller.toggleMark('code')}>
+          <IconInlineCode />
         </ToolbarButton>
         <ToolbarButton
           label="Code block"
