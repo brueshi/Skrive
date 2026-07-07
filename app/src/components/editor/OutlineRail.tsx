@@ -1,9 +1,10 @@
 // The outline rail: a slim column of ticks down the right edge of the
-// rendered preview, one per heading. The tick for the section you're
-// currently reading is emphasized; clicking a tick scrolls there, and
-// dragging the rail scrubs the document. On hover or keyboard focus it
-// expands into a labeled popover (Image #2) listing every heading, held
-// roughly central and nudged slightly toward the selected tick.
+// document pane — the rendered Markdown preview or the rich block surface
+// (SKR-229) — one per heading. The tick for the section you're currently
+// reading is emphasized; clicking a tick scrolls there, and dragging the
+// rail scrubs the document. On hover or keyboard focus it expands into a
+// labeled popover (Image #2) listing every heading, held roughly central
+// and nudged slightly toward the selected tick.
 //
 // Why it reads the DOM rather than re-parsing the body: the headings are
 // already in the rendered output carrying the exact `id`s anchor links
@@ -23,9 +24,10 @@ import { activeHeadingIndex, type OutlineHeading } from '../../lib/preview/outli
 import { OutlinePopover } from './OutlinePopover';
 
 type Props = {
-  /** The `.preview` scroll container. */
+  /** The scroll container (`.preview`, or `.block-editor-body` in rich mode). */
   scrollerRef: React.RefObject<HTMLDivElement | null>;
-  /** The `.preview-inner` content holding the rendered headings. */
+  /** The content holding the rendered headings (`.preview-inner`, or
+   *  `.block-editor-surface` in rich mode). */
   contentRef: React.RefObject<HTMLDivElement | null>;
   /**
    * Changes when the heading *structure* of the content changes — count,
@@ -82,7 +84,7 @@ function queryHeadingEls(content: HTMLElement): HTMLElement[] {
   );
 }
 
-export function PreviewOutlineRail({ scrollerRef, contentRef, renderKey }: Props) {
+export function OutlineRail({ scrollerRef, contentRef, renderKey }: Props) {
   const [headings, setHeadings] = useState<OutlineHeading[]>([]);
   // The rail spans the scroller, so its height is the scroller's visible
   // height — used to center the tick cluster.
