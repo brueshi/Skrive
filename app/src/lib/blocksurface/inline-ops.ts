@@ -13,6 +13,7 @@
 // array — blocks are immutable, so an edit replaces the one block object.
 
 import type { InlineMarks, InlineNode } from '../blockmodel';
+import { HARD_BREAK_ATTR } from './render';
 
 function isText(node: InlineNode): node is Extract<InlineNode, { kind: 'text' }> {
   return node.kind === 'text';
@@ -22,6 +23,35 @@ function isText(node: InlineNode): node is Extract<InlineNode, { kind: 'text' }>
  *  an atom (image / hard break). */
 function nodeWidth(node: InlineNode): number {
   return isText(node) ? node.text.length : 1;
+}
+
+/** Structural equality of two mark sets. Boolean marks compare by truthiness —
+ *  absent and false are the same mark state — and links by href + title. */
+export function marksEqual(a: InlineMarks, b: InlineMarks): boolean {
+  if (!a.em !== !b.em || !a.strong !== !b.strong || !a.code !== !b.code || !a.strikethrough !== !b.strikethrough) {
+    return false;
+  }
+  if (!a.link !== !b.link) return false;
+  return !a.link || !b.link || (a.link.href === b.link.href && a.link.title === b.link.title);
+}
+
+/** Merge adjacent same-mark text runs (SKR-192). Mark edits split runs at the
+ *  range boundaries and deletes drop the middle, so identical neighbors
+ *  accumulate; unmerged they render as sibling <strong>/<em> elements and
+ *  double-click word selection stops at the seams. Atoms never merge and act as
+ *  seams. Returns the input array unchanged (same reference) when nothing merges. */
+export function coalesceInline(nodes: InlineNode[]): InlineNode[] {
+  if (nodes.length < 2) return nodes;
+  const out: InlineNode[] = [];
+  for (const node of nodes) {
+    const prev = out[out.length - 1];
+    if (prev && isText(prev) && isText(node) && marksEqual(prev.marks, node.marks)) {
+      out[out.length - 1] = { kind: 'text', text: prev.text + node.text, marks: prev.marks };
+    } else {
+      out.push(node);
+    }
+  }
+  return out.length === nodes.length ? nodes : out;
 }
 
 /** Insert text at a flat offset, inheriting the marks of the text run the caret
@@ -93,7 +123,8 @@ export function deleteRangeInInline(nodes: InlineNode[], start: number, end: num
     const kept = left + right;
     if (kept.length > 0) out.push({ kind: 'text', text: kept, marks: node.marks });
   }
-  return out;
+  // Deleting everything between two same-mark runs leaves identical neighbors.
+  return coalesceInline(out);
 }
 
 /** Total flat length of an inline run: text characters plus one per atom. */
@@ -241,12 +272,14 @@ export function setMarkInInline(
   on: boolean
 ): InlineNode[] {
   if (start >= end) return nodes;
-  return mapRange(nodes, start, end, (m) => {
-    const next = { ...m };
-    if (on) next[mark] = true;
-    else delete next[mark];
-    return next;
-  });
+  return coalesceInline(
+    mapRange(nodes, start, end, (m) => {
+      const next = { ...m };
+      if (on) next[mark] = true;
+      else delete next[mark];
+      return next;
+    })
+  );
 }
 
 /** Toggle a boolean mark over a range: remove it if the whole range already has
@@ -269,12 +302,14 @@ export function setLinkInInline(
   link: { href: string; title: string | null } | null
 ): InlineNode[] {
   if (start >= end) return nodes;
-  return mapRange(nodes, start, end, (m) => {
-    const next = { ...m };
-    if (link) next.link = link;
-    else delete next.link;
-    return next;
-  });
+  return coalesceInline(
+    mapRange(nodes, start, end, (m) => {
+      const next = { ...m };
+      if (link) next.link = link;
+      else delete next.link;
+      return next;
+    })
+  );
 }
 
 function markEl(tag: string, marks: InlineMarks): InlineMarks {
@@ -331,5 +366,14 @@ export function readInlineFromDOM(blockEl: HTMLElement): InlineNode[] {
   const out: InlineNode[] = [];
   walkDom(blockEl, {}, out);
   if (out.length === 1 && out[0]!.kind === 'break') return [];
-  return out;
+  // An IME can compose text in FRONT of the placeholder <br> instead of
+  // replacing it, so the lone-br guard above never fires and the placeholder
+  // would read back as a phantom trailing hard break (SKR-192). Real breaks
+  // carry HARD_BREAK_ATTR; a trailing untagged br is the placeholder — drop it.
+  if (out[out.length - 1]?.kind === 'break') {
+    const brs = blockEl.querySelectorAll('br');
+    const lastBr = brs[brs.length - 1];
+    if (lastBr && !lastBr.hasAttribute(HARD_BREAK_ATTR)) out.pop();
+  }
+  return coalesceInline(out);
 }

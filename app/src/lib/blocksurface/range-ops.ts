@@ -12,7 +12,7 @@
 // barrier in its own right.)
 
 import { generateBlockId, type BlockNode, type InlineNode } from '../blockmodel';
-import { deleteRangeInInline, inlineLength, insertTextInInline } from './inline-ops';
+import { coalesceInline, deleteRangeInInline, inlineLength, insertTextInInline } from './inline-ops';
 import { findBlockById, updateBlockById } from './tree';
 
 export type RangeResult = { blocks: BlockNode[]; caret: { id: string; offset: number } };
@@ -162,7 +162,8 @@ export function deleteAcross(
     };
   }
 
-  const merged = [...headOf(startLeaf.inline, sOff), ...tailOf(endLeaf.inline, eOff)];
+  // The join can butt two same-mark runs against each other; merge the seam.
+  const merged = coalesceInline([...headOf(startLeaf.inline, sOff), ...tailOf(endLeaf.inline, eOff)]);
   const removeIds = new Set<string>();
   for (let i = si + 1; i <= ei; i++) removeIds.add(leaves[i]!.id);
 

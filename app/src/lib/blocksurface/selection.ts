@@ -391,19 +391,48 @@ function readEndpoint(container: HTMLElement, node: Node, offset: number, side: 
   return { leaf: boundary, offset: side === 'start' ? 0 : subtreeWidth(el) };
 }
 
+/** True when the selection's focus precedes its anchor in document order — a
+ *  backward drag / Shift+Home. Only the Selection's own anchor/focus carry this;
+ *  a Range is always normalized to document order. Compared as BOUNDARY POINTS
+ *  (a collapsed range + comparePoint), not node order: compareDocumentPosition
+ *  flags an ancestor as PRECEDING, which would misread a ⌘A selection ending on
+ *  the container as backward. */
+export function isSelectionBackward(sel: Selection): boolean {
+  const { anchorNode, focusNode } = sel;
+  if (!anchorNode || !focusNode || sel.isCollapsed) return false;
+  try {
+    const r = document.createRange();
+    r.setStart(anchorNode, sel.anchorOffset);
+    r.collapse(true);
+    return r.comparePoint(focusNode, sel.focusOffset) === -1;
+  } catch {
+    return false; // disjoint roots / unsupported point: treat as forward
+  }
+}
+
 /** Read the current browser selection as a DocRange, or null when it is outside
- *  the surface. anchor = range start, focus = range end (document order). */
+ *  the surface. anchor/focus follow the SELECTION's ends, not document order: a
+ *  backward drag reads back with anchor after focus, so a write (setBaseAndExtent
+ *  via writeSelection) round-trips the direction and a following Shift+Arrow
+ *  extends the end the user was dragging (SKR-192). Consumers that need document
+ *  order re-derive it (orderRange / normalizeSelection). */
 export function readSelection(container: HTMLElement): DocRange | null {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return null;
   const range = sel.getRangeAt(0);
   if (!container.contains(range.startContainer)) return null;
-  const anchor = readEndpoint(container, range.startContainer, range.startOffset, 'start');
-  if (!anchor) return null;
+  const start = readEndpoint(container, range.startContainer, range.startOffset, 'start');
+  if (!start) return null;
 
-  if (range.collapsed) return { anchor, focus: anchor };
-  const focus = readEndpoint(container, range.endContainer, range.endOffset, 'end');
-  return { anchor, focus: focus ?? anchor };
+  if (range.collapsed) return { anchor: start, focus: start };
+  const end = readEndpoint(container, range.endContainer, range.endOffset, 'end') ?? start;
+  return isSelectionBackward(sel) ? { anchor: end, focus: start } : { anchor: start, focus: end };
+}
+
+/** Resolve an arbitrary DOM point (e.g. a caretRangeFromPoint hit) to a document
+ *  position, with the same above-leaf boundary fallback readSelection applies. */
+export function docPosFromDOMPoint(container: HTMLElement, node: Node, offset: number): DocPos | null {
+  return readEndpoint(container, node, offset, 'start');
 }
 
 let caretDebug: boolean | null = null;
