@@ -1,9 +1,11 @@
 // Formatting glyphs for the Rich affordances (toolbar, selection bubble, slash
 // menu). Two families live here:
 //
-// - Marks (Bold / Italic / inline Code / Paragraph): flat currentColor fills
-//   with fill-opacity tiers for hierarchy — formatting verbs stay monochrome
-//   so the toolbar drives inactive/active state by color.
+// - Marks (Bold / Italic / Paragraph): flat currentColor fills with
+//   fill-opacity tiers for hierarchy — formatting verbs stay monochrome so the
+//   toolbar drives inactive/active state by color. Inline code is the
+//   exception: a mark by function, but drawn as an illustrated family member
+//   (SKR-227's custom glyph) so the capsule reads at toolbar size.
 // - Block illustrations (heading tiles, lists, quote, code block, table,
 //   divider, link): the duotone illustrated set. Structural ink rides
 //   currentColor so menu rows still drive state; accent parts read
@@ -55,6 +57,31 @@ export function IconItalic(p: IconProps) {
   return (
     <Glyph {...p} viewBox="43.75 2.15 36 36">
       <path d="m70.2 7.4h-11.8c-0.9 0-1.4 0.4-1.5 1.1l-0.6 2.4c-0.1 0.8 0.3 1.3 1 1.3h3.5l-3.2 15.6h-3.8c-0.8 0.1-1.4 0.5-1.5 1.5l-0.6 2.4c-0.1 0.7 0.4 1.2 1 1.2h12.9c0.9 0 1.1-0.4 1.2-1l0.6-2.7c0.2-1-0.5-1.5-1.2-1.4h-3.2l3.3-15.6h3.5c0.8 0 1.2-0.3 1.4-1.1l0.6-2.5c0.1-0.7-0.2-1.2-0.9-1.2h-0.7z" />
+    </Glyph>
+  );
+}
+
+export function IconInlineCode(p: IconProps) {
+  // A chevroned code capsule set into a line of prose — the flanking ticks
+  // are the "inline" reading. Capsule frame in accent over the faint sheet;
+  // chevrons, slash, and prose ticks are ink. The source's full-width prose
+  // dashes are compacted to ticks and the icon takes a 20px default so the
+  // capsule holds its own next to the full-height B and I marks.
+  return (
+    <Glyph {...p} size={p.size ?? 20} viewBox="27.5 24.5 88 47">
+      <path
+        d="m53.9 29.3h37.1c4.3 0 8 3.7 8 7.7v21c0 4.6-3.7 8.1-7.9 8.1l-37.4-0.1c-3.7 0-7.9-4-7.9-8v-21.2c0-4.2 3.6-7.5 8.1-7.5z"
+        fill="var(--skrive-icon-accent-faint)"
+      />
+      <path
+        d="m90.9 26.7h-36c-1.9 0-3.9 0.4-6.9 2.3-2.6 2-4.7 5-4.7 9v19.8c-0.1 7.2 6.2 10.9 10.7 10.9h37c2.4 0 4 0.1 6-0.3 0-0.7 4.5-4.4 4.5-10.4v-19.8c0-4.7-2.5-9.8-8.5-11.2-0.6-0.2-1.4-0.3-2.1-0.3zm5.8 31.3c0 2.9-2.3 5.9-5.7 5.9h-37.1c-2.3 0-5.9-1.9-5.9-5.9v-20c0-3.5 3-6.2 5.9-6.2h37.1c2.3 0 5.7 2 5.7 6.2v20z"
+        fill="var(--skrive-accent)"
+      />
+      <path d="m61.8 57.2c-0.6 0-1.2-0.2-1.7-0.7l-6.4-6.6c-0.8-0.9-1-2.6 0-3.6l6.5-6.8c0.8-0.8 2.6-1.2 3.5-0.2s1.2 2.2-0.4 3.7l-4.7 5 5 5.1c1.3 1.3 0.9 2.9-0.1 3.6-0.4 0.4-0.9 0.5-1.7 0.5z" />
+      <path d="m82.9 57.1c-1.9-0.1-2.9-2.2-2-3.6l5.3-5.5-5.2-5.1c-1-1.3-0.9-2.2-0.2-3.2 0.8-1.1 2.6-1.3 3.6-0.3l6.6 6.6c0.9 0.7 1.2 2.8 0.1 3.8l-6.5 6.7c-0.5 0.4-1.2 0.7-1.7 0.6z" />
+      <path d="m69.1 60.2c-1.5 0-2.9-1.6-2.3-3.2l6.6-19.6c0.6-1.8 2.5-2.1 3.5-1.3 1 0.6 1.1 1.9 0.9 2.6l-6.4 19.9c-0.3 1.2-1.2 1.6-2.3 1.6z" />
+      <line x1="30.5" x2="38" y1="48" y2="48" stroke="currentColor" strokeWidth="5.267" strokeLinecap="round" strokeMiterlimit="10" />
+      <line x1="104.8" x2="112.3" y1="48" y2="48" stroke="currentColor" strokeWidth="5.267" strokeLinecap="round" strokeMiterlimit="10" />
     </Glyph>
   );
 }
