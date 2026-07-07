@@ -1,0 +1,21 @@
+/* The quiet document counter (SKR-53). Ambient bottom-left chrome: muted,
+   compact, non-interactive. A soft wash of the page background keeps it
+   legible on narrow panes where prose can reach the corner; tabular numerals
+   stop the live figures from jittering sideways as they tick. */
+.word-count-badge {
+  position: absolute;
+  left: 0.875rem;
+  bottom: 0.625rem;
+  z-index: var(--skrive-z-sticky);
+  padding: 3px 8px;
+  border-radius: var(--skrive-radius-sm);
+  background: color-mix(in srgb, var(--skrive-bg) 88%, transparent);
+  color: var(--skrive-muted);
+  font-family: var(--skrive-ui-font);
+  font-size: 11px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}

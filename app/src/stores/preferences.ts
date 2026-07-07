@@ -53,6 +53,7 @@ type PreferencesActions = {
   setAutoUpdateOnLaunch(value: boolean): void;
   setTheme(value: ThemeId): void;
   setShowOutlineRail(value: boolean): void;
+  setShowWordCount(value: boolean): void;
 
   setLineMeasure(value: LineMeasure): void;
   setSmartTypography(value: boolean): void;
@@ -107,6 +108,7 @@ function snapshot(state: PreferencesState): AppUiState {
     autoUpdateOnLaunch: state.autoUpdateOnLaunch,
     theme: state.theme,
     showOutlineRail: state.showOutlineRail,
+    showWordCount: state.showWordCount,
     defaultSurface: state.defaultSurface,
     surfaceSwitchingEnabled: state.surfaceSwitchingEnabled,
     markerMode: state.markerMode,
@@ -236,6 +238,11 @@ export const usePreferencesStore = create<
   setShowOutlineRail(value) {
     if (get().showOutlineRail === value) return;
     set({ showOutlineRail: value });
+    scheduleSave(get);
+  },
+  setShowWordCount(value) {
+    if (get().showWordCount === value) return;
+    set({ showWordCount: value });
     scheduleSave(get);
   },
 

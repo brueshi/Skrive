@@ -254,6 +254,8 @@ function AppearancePane() {
   const setLine = usePreferencesStore((s) => s.setEditorLineHeightX100);
   const outlineRail = usePreferencesStore((s) => s.showOutlineRail);
   const setOutlineRail = usePreferencesStore((s) => s.setShowOutlineRail);
+  const wordCount = usePreferencesStore((s) => s.showWordCount);
+  const setWordCount = usePreferencesStore((s) => s.setShowWordCount);
 
   return (
     <>
@@ -334,6 +336,17 @@ function AppearancePane() {
               checked={outlineRail}
               onChange={setOutlineRail}
               ariaLabel="Outline rail"
+            />
+          }
+        />
+        <SettingRow
+          label="Word count"
+          desc="Show live word, character, and reading-time counts in the corner of the editor."
+          control={
+            <Toggle
+              checked={wordCount}
+              onChange={setWordCount}
+              ariaLabel="Word count"
             />
           }
         />

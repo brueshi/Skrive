@@ -150,6 +150,9 @@ export type AppUiState = {
   theme: ThemeId;
   /** Show the outline rail down the right edge of the preview. */
   showOutlineRail: boolean;
+  /** Show the live word/character/reading-time counter in the editor's
+   *  bottom-left corner (SKR-53). */
+  showWordCount: boolean;
   /** Which editing surface new tabs open in. */
   defaultSurface: SurfaceId;
   /** Whether the writer may switch surfaces (⌘⇧E / the palette command).
@@ -211,6 +214,7 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   autoUpdateOnLaunch: true,
   theme: 'light',
   showOutlineRail: true,
+  showWordCount: true,
   defaultSurface: 'rich',
   surfaceSwitchingEnabled: true,
   markerMode: 'recessed',

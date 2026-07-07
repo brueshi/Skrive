@@ -3,6 +3,18 @@
    RawSourceView (height:100%) and the Preview (.preview-host flex:1) fill it and
    scroll independently. */
 
+/* Layout-neutral wrapper around every layout mode: fills the workspace
+   surface and anchors the word-count badge (SKR-53) to the pane corner. */
+.md-view {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
 .md-split {
   display: flex;
   flex-direction: row;
