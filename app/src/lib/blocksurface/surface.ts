@@ -19,7 +19,7 @@ import { notify } from '../notify';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto, setCodeContent } from './render';
 import type { AssetResolver } from './render';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
-import { collapsedRange, isCollapsed, type DocPos, type DocRange } from './doc-position';
+import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
 import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
 import { findBlockById, updateBlockById } from './tree';
 import { enterInContainer, exitContainer, type StructuralResult } from './structural';
@@ -42,7 +42,7 @@ import {
   toggleMarkInInline
 } from './inline-ops';
 import { lineBoundaryRange, wordBoundaryRange } from './word-boundary';
-import { DocHistory, type EditKind } from './history';
+import { DocHistory, type EditHint } from './history';
 
 /** A block type the insert menu / commands can apply to the current block. */
 export type BlockTypeSpec =
@@ -123,6 +123,12 @@ function isInlineText(block: BlockNode): block is InlineTextBlock {
   return block.type === 'paragraph' || block.type === 'heading';
 }
 
+/** History coalescing target for a table cell — cells have no block id, so the
+ *  run key is the cell's coordinates (SKR-178). */
+function cellKey(c: { tableId: string; row: number; col: number }): string {
+  return `cell:${c.tableId}:${c.row}:${c.col}`;
+}
+
 /** The caret's resolved position, when it sits in an inline-text block (the
  *  editable target for typing, marks, and list rules). Top-level only — see
  *  currentInlineBlock's own resolution (caretContext / registry membership). */
@@ -177,10 +183,10 @@ export class BlockSurface {
   private _doc: Document;
   // Injected session history (see BlockSurfaceOptions.history) or a private one.
   private readonly history: DocHistory;
-  // Hint the setter reads for the next snapshot's edit kind, then resets. Typing
-  // and delete set it so consecutive ones coalesce; everything else is its own
-  // undo step.
-  private nextEditKind: EditKind = 'other';
+  // Hint the setter reads for the next snapshot, then resets. Typing and delete
+  // set it (with the target leaf/cell) so consecutive same-target ones coalesce;
+  // everything else is its own undo step. See EditHint for the rules (SKR-178).
+  private nextEditHint: EditHint = { kind: 'other' };
   // Set while a compound gesture (a paste that deletes a selection THEN inserts)
   // is running: the one snapshot is taken up front, so the setter must not record
   // the intermediate states — the whole gesture is a single undo step (SKR-174).
@@ -276,7 +282,7 @@ export class BlockSurface {
   }
 
   // The document. Reads are plain; every assignment records a pre-edit snapshot
-  // for undo (using nextEditKind for coalescing) before swapping in the new doc.
+  // for undo (using nextEditHint for coalescing) before swapping in the new doc.
   // Reading the selection is deferred to the moment a snapshot is actually
   // pushed, so coalesced keystrokes never touch the DOM on the hot path.
   private get doc(): Document {
@@ -284,28 +290,50 @@ export class BlockSurface {
   }
   private set doc(next: Document) {
     if (!this.suppressHistory) {
-      this.history.record(
-        this._doc,
-        () => readSelection(this.container),
-        this.nextEditKind,
-        performance.now()
-      );
-      this.nextEditKind = 'other';
+      this.history.record(this._doc, () => this.historySelection(), this.nextEditHint, performance.now());
+      this.nextEditHint = { kind: 'other' };
     }
     this._doc = next;
   }
 
-  /** Run a multi-step gesture (delete-then-insert paste) as ONE undo step: record
-   *  a single pre-gesture snapshot up front, then suppress the setter's per-edit
-   *  records for the duration. Selection is read now, before the delete moves it. */
+  /** The selection a history snapshot stores: the live one, falling back to the
+   *  last observed range when focus is outside the surface (a palette command
+   *  edits with no live selection — WKWebView collapsed it), so undoing such a
+   *  step still restores a caret instead of none (SKR-178 / F42). */
+  private historySelection(): DocRange | null {
+    const live = readSelection(this.container);
+    if (live) return live;
+    const saved = this.lastSelection;
+    if (!saved) return null;
+    const leaf: LeafAddr =
+      'tableId' in saved
+        ? { kind: 'cell', tableId: saved.tableId, row: saved.row, col: saved.col }
+        : { kind: 'block', id: saved.blockId };
+    return { anchor: { leaf, offset: saved.start }, focus: { leaf, offset: saved.end } };
+  }
+
+  /** Run a multi-step gesture (delete-then-insert paste, an input rule's
+   *  strip-then-convert) as ONE undo step: record a single pre-gesture snapshot
+   *  up front, then suppress the setter's per-edit records for the duration.
+   *  Selection is read now, before the delete moves it. The hint reset in
+   *  `finally` matters: a suppressed inner edit (applyInsertText) still sets
+   *  nextEditHint, which would otherwise leak onto the next unrelated record. */
   private compoundEdit(fn: () => void): void {
-    this.history.record(this._doc, () => readSelection(this.container), 'other', performance.now());
-    this.nextEditKind = 'other';
+    // Reentrant: a gesture reached from inside another (a wrapped paste whose
+    // insert fires an input rule) belongs to the OUTER step — recording here
+    // would leak a mid-gesture snapshot, and the finally would un-suppress the
+    // outer gesture early.
+    if (this.suppressHistory) {
+      fn();
+      return;
+    }
+    this.history.record(this._doc, () => this.historySelection(), { kind: 'other' }, performance.now());
     this.suppressHistory = true;
     try {
       fn();
     } finally {
       this.suppressHistory = false;
+      this.nextEditHint = { kind: 'other' };
     }
   }
 
@@ -427,15 +455,20 @@ export class BlockSurface {
     }
     // Undo / redo (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z, and Ctrl+Y on Windows). The
     // surface owns history; native contenteditable undo mutates the DOM behind
-    // the model, so we claim the chord and drive our own stack.
+    // the model, so we claim the chord and drive our own stack. Mid-composition
+    // the IME owns the buffer (SKR-178 / F43): reconciling a stale model over an
+    // uncommitted composition would corrupt it, so the chord is dropped — not
+    // passed through — since the model has nothing coherent to undo to either.
     if (e.code === 'KeyZ' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
+      if (e.isComposing || this.composing) return;
       if (e.shiftKey) this.redo();
       else this.undo();
       return;
     }
     if (e.code === 'KeyY' && e.ctrlKey && !e.metaKey) {
       e.preventDefault();
+      if (e.isComposing || this.composing) return;
       this.redo();
       return;
     }
@@ -575,6 +608,7 @@ export class BlockSurface {
       const el = this.leafElementById(l.leaf.id);
       const updated = findBlockById(this.doc.blocks, l.leaf.id);
       if (el && updated && isInlineText(updated)) renderInlineInto(el, updated.inline, this.resolveAsset);
+      this.markRenderedInPlace(l.leaf.id);
     }
     const first = leaves[0];
     const last = leaves[leaves.length - 1];
@@ -683,6 +717,7 @@ export class BlockSurface {
       // doesn't), but the focus-before-select ordering matters either way.
       this.container.focus();
       renderInlineInto(el, inline, this.resolveAsset);
+      this.markRenderedInPlace(saved.blockId);
       if (saved.backward) setSelectionRange(el, saved.end, saved.start);
       else setSelectionRange(el, saved.start, saved.end);
     }
@@ -711,6 +746,7 @@ export class BlockSurface {
     const inline = transform(t.leaf.inline, t.start, t.end);
     this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, t.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
     renderInlineInto(t.blockEl, inline, this.resolveAsset);
+    this.markRenderedInPlace(t.leaf.id);
     if (backward) setSelectionRange(t.blockEl, t.end, t.start);
     else setSelectionRange(t.blockEl, t.start, t.end);
     this.scheduleSerialize();
@@ -1259,12 +1295,18 @@ export class BlockSurface {
     }
     if (!spec) return false;
 
-    // Consume the marker text, then convert the (now marker-less) paragraph.
-    const inline = deleteRangeInInline(cur.block.inline, 0, markerLen);
-    this.commitBlock(cur.index, { ...cur.block, inline, dirty: true });
-    renderInlineInto(cur.blockEl, inline, this.resolveAsset);
-    setCaret(cur.blockEl, 0);
-    this.setBlockType(spec);
+    // Consume the marker text, then convert the (now marker-less) paragraph —
+    // as ONE undo step (SKR-178 / F39): strip + convert used to record two
+    // snapshots, so undo exposed the marker-stripped intermediate paragraph.
+    // The first undo now lands on the literal "- " / "1. " text.
+    this.compoundEdit(() => {
+      const inline = deleteRangeInInline(cur.block.inline, 0, markerLen);
+      this.commitBlock(cur.index, { ...cur.block, inline, dirty: true });
+      renderInlineInto(cur.blockEl, inline, this.resolveAsset);
+      this.markRenderedInPlace(cur.block.id);
+      setCaret(cur.blockEl, 0);
+      this.setBlockType(spec);
+    });
     return true;
   }
 
@@ -1283,13 +1325,19 @@ export class BlockSurface {
       this.closeSlash();
       return;
     }
-    const text = inlinePlainText(cur.block.inline);
-    const inline = deleteRangeInInline(cur.block.inline, slash.slashOffset, text.length);
-    this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, cur.block.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
-    renderInlineInto(cur.blockEl, inline, this.resolveAsset);
-    setCaret(cur.blockEl, slash.slashOffset);
-    this.closeSlash();
-    this.setBlockType(spec);
+    // Strip the /query, then convert — ONE undo step (SKR-178 / F39): recorded
+    // separately, undo exposed the query-stripped intermediate state. The first
+    // undo now restores the block with its literal "/query" text.
+    this.compoundEdit(() => {
+      const text = inlinePlainText(cur.block.inline);
+      const inline = deleteRangeInInline(cur.block.inline, slash.slashOffset, text.length);
+      this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, cur.block.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
+      renderInlineInto(cur.blockEl, inline, this.resolveAsset);
+      this.markRenderedInPlace(cur.block.id);
+      setCaret(cur.blockEl, slash.slashOffset);
+      this.closeSlash();
+      this.setBlockType(spec);
+    });
   }
 
   closeSlash(): void {
@@ -1811,7 +1859,7 @@ export class BlockSurface {
     const point = this.resolveCaretPoint(e.clientX, e.clientY);
     if (!point || !this.placeCaretAtPoint(point)) return; // drop landed off the doc
     this.clearBlockSelectionState(); // a drop supersedes any block-as-unit selection
-    this.nextEditKind = 'other'; // a drop is one atomic history step
+    this.nextEditHint = { kind: 'other' }; // a drop is one atomic history step
     this.interpretTransfer(data, () => {});
   };
 
@@ -2266,18 +2314,22 @@ export class BlockSurface {
       mode === 'literal'
         ? raw.replace(/\r/g, '').split(/\n+/).filter((s) => s.length > 0)
         : plainTextParagraphs(raw);
+    // Single-segment paste rides the ordinary insert for placement, but framed
+    // as its own atomic undo step (SKR-178 / F38): routed bare, applyInsertText
+    // marks it 'type' and a paste would coalesce into adjacent typing.
+    const insertAtomically = (): void => this.compoundEdit(() => this.applyInsertText(segments.join(' ')));
     if (segments.length <= 1) {
-      this.applyInsertText(segments.join(' '));
+      insertAtomically();
       return;
     }
     const t = this.leafTarget();
     if (!t || !t.collapsed || !isInlineText(t.leaf) || !this.isTopLevel(t.blockEl, t.leaf.id)) {
-      this.applyInsertText(segments.join(' '));
+      insertAtomically();
       return;
     }
     const index = this.doc.blocks.findIndex((b) => b.id === t.leaf.id);
     if (index < 0) {
-      this.applyInsertText(segments.join(' '));
+      insertAtomically();
       return;
     }
 
@@ -2477,17 +2529,23 @@ export class BlockSurface {
         return;
       }
       this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, id, (b) => (b.type === 'code_block' ? ({ ...b, text: domText, dirty: true } as BlockNode) : b)) };
+      this.markRenderedInPlace(id); // the IME already mutated the DOM to match
       this.scheduleSerialize();
       return;
     }
 
     if (!isInlineText(leaf)) return;
     this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, id, (b) => ({ ...b, inline: readInlineFromDOM(blockEl), dirty: true }) as BlockNode) };
+    this.markRenderedInPlace(id); // the IME already mutated the DOM to match
     this.scheduleSerialize();
   };
 
   private applyInsertText(text: string): void {
-    this.nextEditKind = 'type'; // consecutive keystrokes coalesce into one undo
+    // Consecutive keystrokes coalesce into one undo step, but only within one
+    // target, and a whitespace insert starts a fresh step so undo walks back
+    // word by word (SKR-178). The hint is set per branch, once the target is
+    // known; the selection-replacing paths record through their own gestures.
+    const typeHint = (target: string): EditHint => ({ kind: 'type', target, breakRun: /^\s/.test(text) });
     const cell = this.cellTarget();
     if (cell) {
       // Typing over a cross-cell / table-crossing selection replaces it rather
@@ -2496,8 +2554,13 @@ export class BlockSurface {
         this.replaceSelectionRange(text);
         return;
       }
-      if (cell.collapsed && this.surgicalInsert(text)) {
+      this.nextEditHint = typeHint(cellKey(cell));
+      const point = cell.collapsed ? this.surgicalPoint() : null;
+      if (point) {
+        // Model first, then the DOM: the snapshot's lazy selection read happens
+        // inside the assignment, so it must see the PRE-mutation caret (F42).
         this.updateCellModel(cell, insertTextInInline(cell.inline, cell.start, text));
+        this.surgicalInsertAt(point, text);
       } else {
         let inline = cell.inline;
         if (!cell.collapsed) inline = deleteRangeInInline(inline, cell.start, cell.end);
@@ -2514,18 +2577,24 @@ export class BlockSurface {
       return;
     }
     if (t.leaf.type === 'code_block') {
+      this.nextEditHint = typeHint(t.leaf.id);
       this.editCodeText(t.leaf, t.blockEl, t.leaf.text.slice(0, t.start) + text + t.leaf.text.slice(t.end), t.start + text.length);
       this.scheduleSerialize();
       return;
     }
     if (!isInlineText(t.leaf)) return;
 
+    this.nextEditHint = typeHint(t.leaf.id);
     // Surgical fast path: insert into the live text node in place. Falls back to a
     // full block re-render only when there is a selection to replace or the caret
-    // is not in a text node.
-    if (t.collapsed && this.surgicalInsert(text)) {
+    // is not in a text node. Model assignment BEFORE the DOM mutation — see the
+    // cell branch above (the snapshot must capture the pre-edit caret).
+    const point = t.collapsed ? this.surgicalPoint() : null;
+    if (point) {
       const inline = insertTextInInline(t.leaf.inline, t.start, text);
       this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, t.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
+      this.surgicalInsertAt(point, text);
+      this.markRenderedInPlace(t.leaf.id);
     } else {
       let inline = t.leaf.inline;
       if (!t.collapsed) inline = deleteRangeInInline(inline, t.start, t.end);
@@ -2541,7 +2610,10 @@ export class BlockSurface {
   }
 
   private applyDeleteBackward(): void {
-    this.nextEditKind = 'delete'; // consecutive deletes coalesce into one undo
+    // Consecutive within-target character deletes coalesce (hint set per branch
+    // below). The structural branches — cross-block range, boundary merge,
+    // outdent, barrier handling — fall through on the default 'other', so each
+    // is its own undo step rather than merging into a delete run (SKR-178).
     const cell = this.cellTarget();
     if (cell) {
       // A selection dragged across cells (or out of the table) is barrier-aware:
@@ -2553,8 +2625,13 @@ export class BlockSurface {
         return;
       }
       if (cell.collapsed && cell.start === 0) return; // start of cell: no merge back
-      if (cell.collapsed && this.surgicalDeleteBack()) {
+      this.nextEditHint = { kind: 'delete', target: cellKey(cell) };
+      const point = cell.collapsed ? this.surgicalPoint() : null;
+      if (point && this.canSurgicalDeleteBack(point)) {
+        // Model first, then the DOM — the snapshot's lazy selection read must
+        // see the pre-mutation caret (F42), same as the insert path.
         this.updateCellModel(cell, deleteRangeInInline(cell.inline, cell.start - 1, cell.start));
+        this.surgicalDeleteBackAt(point);
       } else {
         const from = cell.collapsed ? cell.start - 1 : cell.start;
         const to = cell.collapsed ? cell.start : cell.end;
@@ -2606,17 +2683,23 @@ export class BlockSurface {
     const from = t.collapsed ? t.start - 1 : t.start;
     const to = t.collapsed ? t.start : t.end;
     if (t.leaf.type === 'code_block') {
+      this.nextEditHint = { kind: 'delete', target: t.leaf.id };
       this.editCodeText(t.leaf, t.blockEl, t.leaf.text.slice(0, from) + t.leaf.text.slice(to), from);
       this.scheduleSerialize();
       return;
     }
     if (!isInlineText(t.leaf)) return;
 
+    this.nextEditHint = { kind: 'delete', target: t.leaf.id };
     // Surgical fast path for a within-text-node backspace; full re-render only for
-    // a selection delete or a caret at a text-node boundary.
-    if (t.collapsed && this.surgicalDeleteBack()) {
+    // a selection delete or a caret at a text-node boundary. Model before DOM —
+    // the snapshot must capture the pre-mutation caret (F42).
+    const point = t.collapsed ? this.surgicalPoint() : null;
+    if (point && this.canSurgicalDeleteBack(point)) {
       const inline = deleteRangeInInline(t.leaf.inline, from, to);
       this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, t.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
+      this.surgicalDeleteBackAt(point);
+      this.markRenderedInPlace(t.leaf.id);
     } else {
       this.commitInline(t.leaf.id, deleteRangeInInline(t.leaf.inline, from, to), t.blockEl, from);
     }
@@ -2625,7 +2708,8 @@ export class BlockSurface {
   }
 
   private applyDeleteForward(): void {
-    this.nextEditKind = 'delete'; // consecutive deletes coalesce into one undo
+    // Hint set per within-target branch, mirroring applyDeleteBackward: the
+    // structural paths below stay 'other' so they never merge into a delete run.
     const cell = this.cellTarget();
     if (cell) {
       // Cross-cell / table-crossing selection: same barrier-aware handling as
@@ -2636,6 +2720,7 @@ export class BlockSurface {
       }
       const cellLen = inlineLength(cell.inline);
       if (cell.collapsed && cell.start >= cellLen) return;
+      this.nextEditHint = { kind: 'delete', target: cellKey(cell) };
       const from = cell.start;
       const to = cell.collapsed ? cell.start + 1 : cell.end;
       this.commitCell(cell, deleteRangeInInline(cell.inline, from, to), from);
@@ -2670,11 +2755,13 @@ export class BlockSurface {
     const from = t.start;
     const to = t.collapsed ? t.start + 1 : t.end;
     if (t.leaf.type === 'code_block') {
+      this.nextEditHint = { kind: 'delete', target: t.leaf.id };
       this.editCodeText(t.leaf, t.blockEl, t.leaf.text.slice(0, from) + t.leaf.text.slice(to), from);
       this.scheduleSerialize();
       return;
     }
     if (!isInlineText(t.leaf)) return;
+    this.nextEditHint = { kind: 'delete', target: t.leaf.id };
     this.commitInline(t.leaf.id, deleteRangeInInline(t.leaf.inline, from, to), t.blockEl, from);
     this.scheduleSerialize();
   }
@@ -2693,7 +2780,7 @@ export class BlockSurface {
     if (cell && cell.collapsed && !cell.spansCells) {
       const [from, to] = scan(inlinePlainText(cell.inline), cell.start, false, direction);
       if (from >= to) return this.plainDelete(direction); // at the cell edge
-      this.nextEditKind = 'other'; // a word / line delete is its own atomic step
+      this.nextEditHint = { kind: 'other' }; // a word / line delete is its own atomic step
       this.commitCell(cell, deleteRangeInInline(cell.inline, from, to), from);
       this.scheduleSerialize();
       return;
@@ -2704,14 +2791,14 @@ export class BlockSurface {
       if (leaf.type === 'code_block') {
         const [from, to] = scan(leaf.text, t.start, true, direction);
         if (from >= to) return this.plainDelete(direction); // at the code-line / block edge
-        this.nextEditKind = 'other';
+        this.nextEditHint = { kind: 'other' };
         this.editCodeText(leaf, t.blockEl, leaf.text.slice(0, from) + leaf.text.slice(to), from);
         this.scheduleSerialize();
         return;
       }
       const [from, to] = scan(inlinePlainText(leaf.inline), t.start, false, direction);
       if (from >= to) return this.plainDelete(direction); // at the leaf edge
-      this.nextEditKind = 'other';
+      this.nextEditHint = { kind: 'other' };
       this.commitInline(leaf.id, deleteRangeInInline(leaf.inline, from, to), t.blockEl, from);
       this.scheduleSerialize();
       this.refreshSlash(); // an open slash menu tracks the edit, as plain delete does
@@ -3355,6 +3442,9 @@ export class BlockSurface {
         return { ...b, rows, dirty: true };
       })
     };
+    // Every caller pairs this with an in-place cell DOM update (renderInlineInto,
+    // a surgical edit, or an IME that already mutated it) — never a reconcile.
+    this.markRenderedInPlace(c.tableId);
   }
 
   private commitCell(c: { tableId: string; row: number; col: number; cellEl: HTMLElement }, inline: InlineNode[], caret: number): void {
@@ -3365,36 +3455,37 @@ export class BlockSurface {
 
   // Surgical DOM edits for the common case: a collapsed caret inside a text node.
   // Insert/delete in place rather than rebuilding the block's DOM, so typing is
-  // native-smooth and the selection is never disturbed. Return false to let the
-  // caller fall back to a full re-render (selection replace, caret on an element).
-  private surgicalInsert(text: string): boolean {
+  // native-smooth and the selection is never disturbed. Split into a resolve half
+  // (surgicalPoint / canSurgicalDeleteBack) and an apply half so the caller can
+  // run the model assignment BETWEEN them: the history snapshot's lazy selection
+  // read happens inside that assignment and must see the PRE-mutation caret
+  // (SKR-178 / F42 — the old mutate-then-record order restored undo carets
+  // off-by-one). A null point lets the caller fall back to a full re-render.
+  private surgicalPoint(): { tn: Text; off: number } | null {
     const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return false;
+    if (!sel || sel.rangeCount === 0) return null;
     const range = sel.getRangeAt(0);
-    if (!range.collapsed || range.startContainer.nodeType !== Node.TEXT_NODE) return false;
-    const tn = range.startContainer as Text;
-    const off = range.startOffset;
-    tn.insertData(off, text);
-    sel.collapse(tn, off + text.length);
-    return true;
+    if (!range.collapsed || range.startContainer.nodeType !== Node.TEXT_NODE) return null;
+    return { tn: range.startContainer as Text, off: range.startOffset };
   }
 
-  private surgicalDeleteBack(): boolean {
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return false;
-    const range = sel.getRangeAt(0);
-    if (!range.collapsed || range.startContainer.nodeType !== Node.TEXT_NODE || range.startOffset === 0) return false;
-    const tn = range.startContainer as Text;
-    // Deleting the node's last character would leave an EMPTY text node in place
-    // with no re-render: a block emptied this way loses its placeholder <br>
-    // (height + addressable caret — see renderInline), a zero-height caret in
-    // WKWebView (SKR-192). Fall back to the full commit path, which re-renders
-    // and restores the placeholder.
-    if (tn.data.length === 1) return false;
-    const off = range.startOffset;
-    tn.deleteData(off - 1, 1);
-    sel.collapse(tn, off - 1);
-    return true;
+  private surgicalInsertAt(point: { tn: Text; off: number }, text: string): void {
+    point.tn.insertData(point.off, text);
+    window.getSelection()?.collapse(point.tn, point.off + text.length);
+  }
+
+  // Backspace stays surgical only when it neither crosses the node's start nor
+  // empties it: deleting the last character would leave an EMPTY text node in
+  // place with no re-render — a block emptied this way loses its placeholder
+  // <br> (height + addressable caret, see renderInline), a zero-height caret in
+  // WKWebView (SKR-192). The fallback commit path re-renders and restores it.
+  private canSurgicalDeleteBack(point: { tn: Text; off: number }): boolean {
+    return point.off > 0 && point.tn.data.length > 1;
+  }
+
+  private surgicalDeleteBackAt(point: { tn: Text; off: number }): void {
+    point.tn.deleteData(point.off - 1, 1);
+    window.getSelection()?.collapse(point.tn, point.off - 1);
   }
 
   // Move the caret to the next/previous cell in row-major order. Returns false
@@ -3549,6 +3640,7 @@ export class BlockSurface {
   private commitInline(id: string, inline: InlineNode[], blockEl: HTMLElement, caret: number): void {
     this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
     renderInlineInto(blockEl, inline, this.resolveAsset);
+    this.markRenderedInPlace(id);
     setCaret(blockEl, caret);
   }
 
@@ -3558,6 +3650,7 @@ export class BlockSurface {
     this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, leaf.id, (b) => ({ ...b, text: next, dirty: true }) as BlockNode) };
     const code = blockEl.querySelector('code') ?? blockEl;
     setCodeContent(code as HTMLElement, next);
+    this.markRenderedInPlace(leaf.id);
     setCaret(blockEl, caret);
   }
 
@@ -3577,6 +3670,19 @@ export class BlockSurface {
   // with this.doc.blocks, reusing the element for an unchanged block (same object)
   // and re-rendering one whose block object changed. Add/remove/reorder by id.
   // Runs on structural ops only — never on the typing hot path.
+  /** Keep reconcile's skip-check truthful after an IN-PLACE DOM edit (surgical
+   *  typing, renderInlineInto, code text, cell writes, IME readback): the DOM now
+   *  reflects the CURRENT model object, so renderedFrom must point at it.
+   *  Without this, an undo restoring exactly the object renderedFrom still held
+   *  was skipped by reconcile and the stale DOM survived — undo didn't visually
+   *  revert a pure typing run, and the caret clamped against the stale text node
+   *  (SKR-178 / F42's "off-by-N"). Keyed by the enclosing TOP-LEVEL block: a
+   *  nested leaf edit rebuilds its container object too. */
+  private markRenderedInPlace(leafId: string): void {
+    const top = this.doc.blocks.find((b) => b.id === leafId || findBlockById([b], leafId) != null);
+    if (top) this.renderedFrom.set(top.id, top);
+  }
+
   private reconcile(): void {
     const parent = this.container;
     const have = new Map<string, HTMLElement>();
