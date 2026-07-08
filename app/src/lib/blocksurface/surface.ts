@@ -10,7 +10,7 @@
 // are no-ops until Stage 3b — never letting the browser mutate structure behind
 // the model's back.
 
-import { generateBlockId, parseDocument, serializeDocument, type BlockNode, type Document, type InlineNode, type ListItem, type TableBlock } from '../blockmodel';
+import { generateBlockId, parseDocument, serializeDocument, type BlockNode, type Document, type InlineMarks, type InlineNode, type ListItem, type TableBlock } from '../blockmodel';
 import { markdownForPaste } from '../clipboard/htmlToMarkdown';
 import { plainTextParagraphs } from '../clipboard/plainText';
 import { buildClipboardPayload } from '../clipboard/copyOut';
@@ -34,6 +34,8 @@ import {
   insertBreakInInline,
   insertTextInInline,
   linkHrefInRange,
+  linkRunAt,
+  marksAtOffset,
   rangeHasLink,
   rangeHasMark,
   readInlineFromDOM,
@@ -207,6 +209,15 @@ export class BlockSurface {
   private selectionCb: ((info: SelectionInfo | null) => void) | null = null;
   private selScheduled = false;
   private savedLink: { blockId: string; start: number; end: number; backward: boolean } | null = null;
+  // Pending (stored) boolean marks primed by ⌘B/I/E at a collapsed caret (SKR-177
+  // / F62): the toggled marks the NEXT typed text will carry, Docs-style. Consumed
+  // by applyInsertText and cleared when the caret moves off `pendingCaretKey` (the
+  // model position where it was armed) — recordSelection compares the two.
+  private pendingMarks: { strong?: boolean; em?: boolean; code?: boolean } | null = null;
+  private pendingCaretKey: string | null = null;
+  // App hook to open the link editor from the ⌘K chord (SKR-177): the surface can't
+  // render the editor, so it asks the menu controller (which then calls beginLink).
+  private requestLinkEditor: (() => void) | null = null;
   // The last text selection observed INSIDE the surface, in MODEL coordinates (a
   // leaf block id + a flat range, OR a table cell's (table id, row, col) + a flat
   // range local to the cell; a caret is start === end), kept across focus loss.
@@ -373,6 +384,12 @@ export class BlockSurface {
    *  the menu on an empty block, as its query changes, and when it closes (null). */
   onSlashMenu(cb: ((state: SlashMenuState | null) => void) | null): void {
     this.slashCb = cb;
+  }
+
+  /** Register (or clear) the ⌘K handler that opens the link editor (SKR-177). The
+   *  surface owns the chord but the editor UI is the app's, so it delegates. */
+  onRequestLinkEditor(cb: (() => void) | null): void {
+    this.requestLinkEditor = cb;
   }
 
   /** Register (or clear) the paste-image write delegate (SKR-175). See
@@ -568,24 +585,95 @@ export class BlockSurface {
     } else if (key === 'e') {
       e.preventDefault();
       this.toggleMark('code');
+    } else if (key === 'k') {
+      // ⌘K / Ctrl+K — the universal link chord (SKR-177 / F64). The surface owns
+      // the chord (so it survives WKWebView's focus quirks) and asks the app to
+      // open the link editor; beginLink then targets the selection, or expands the
+      // link run around a collapsed caret.
+      e.preventDefault();
+      this.requestLinkEditor?.();
     }
   };
 
-  /** Toggle a boolean mark over the current selection. A no-op without a
-   *  within-block selection (stored marks for a collapsed caret are a later
-   *  refinement). */
+  /** Toggle a boolean mark over the current selection, or — at a collapsed caret —
+   *  prime it as a pending mark the next typed text will carry (SKR-177). */
   toggleMark(mark: BooleanMark): void {
     // A selection can cover several blocks (select-all, triple-click that bleeds
     // into the next block, or a deliberate multi-paragraph drag). Resolve every
     // covered leaf and mark them as one unit so "bold the whole thing" works.
     const leaves = this.selectedLeaves();
     if (leaves.length > 0) {
+      this.clearPendingMarks();
       this.applyMarkToLeaves(leaves, mark);
       return;
     }
-    // No block-id leaf in the selection means a table cell (cells are addressed by
-    // coordinates, not a block id) — fall back to the single-region path.
+    // A collapsed caret has no range to mark, so prime a PENDING mark the next
+    // typed character will carry (Docs-style), rather than no-op (SKR-177 / F62).
+    if (this.primePendingMark(mark)) return;
+    // No block-id leaf and no primeable caret means a table-cell range selection
+    // (cells are addressed by coordinates, not a block id) — single-region path.
     this.applyToSelection((inline, start, end) => toggleMarkInInline(inline, start, end, mark));
+  }
+
+  private clearPendingMarks(): void {
+    this.pendingMarks = null;
+    this.pendingCaretKey = null;
+  }
+
+  /** The collapsed-caret context for pending marks / caret-state display: the
+   *  inline run, the flat offset, and a position key (so a caret move clears the
+   *  pending mark). Null when there is no collapsed inline caret (a range, a
+   *  cross-block selection, a code block, or focus outside). */
+  private collapsedCaretContext(): { inline: InlineNode[]; offset: number; key: string } | null {
+    const cell = this.cellTarget();
+    if (cell) {
+      if (!cell.collapsed || cell.spansCells) return null;
+      return { inline: cell.inline, offset: cell.start, key: `${cellKey(cell)}:${cell.start}` };
+    }
+    const t = this.leafTarget();
+    if (!t || t.spansBlocks || !t.collapsed || !isInlineText(t.leaf)) return null;
+    return { inline: t.leaf.inline, offset: t.start, key: `${t.leaf.id}:${t.start}` };
+  }
+
+  /** Flip a boolean mark in the pending set, seeded from the caret's current run so
+   *  a second ⌘B turns it back off. Returns false when there is no collapsed caret
+   *  to prime. Re-emits the selection so the toolbar reflects the primed state. */
+  private primePendingMark(mark: BooleanMark): boolean {
+    const ctx = this.collapsedCaretContext();
+    if (!ctx) return false;
+    const current = this.pendingMarks?.[mark] ?? marksAtOffset(ctx.inline, ctx.offset)[mark] === true;
+    this.pendingMarks = { ...(this.pendingMarks ?? {}), [mark]: !current };
+    this.pendingCaretKey = ctx.key;
+    this.emitSelection();
+    return true;
+  }
+
+  /** Force the pending marks over the just-inserted range so the typed text carries
+   *  them regardless of the marks it inherited from its neighbours. */
+  private applyPendingMarks(
+    inline: InlineNode[],
+    start: number,
+    end: number,
+    pending: { strong?: boolean; em?: boolean; code?: boolean }
+  ): InlineNode[] {
+    let out = inline;
+    for (const mark of ['strong', 'em', 'code'] as const) {
+      if (pending[mark] !== undefined) out = setMarkInInline(out, start, end, mark, pending[mark]!);
+    }
+    return out;
+  }
+
+  /** The mark/link state to display for a collapsed caret (SKR-177): the run's marks
+   *  at the caret, with any pending (primed) marks overlaid, plus the link the caret
+   *  sits inside. Feeds the toolbar's active states and the Link control. */
+  private caretMarkState(
+    inline: InlineNode[],
+    offset: number
+  ): { strong: boolean; em: boolean; code: boolean; link: boolean; linkHref: string | null } {
+    const base = marksAtOffset(inline, offset);
+    const has = (m: BooleanMark): boolean => this.pendingMarks?.[m] ?? base[m] === true;
+    const run = linkRunAt(inline, offset);
+    return { strong: has('strong'), em: has('em'), code: has('code'), link: run != null, linkHref: run?.href ?? null };
   }
 
   /** Apply a mark uniformly across the covered leaves. The on/off decision is made
@@ -666,7 +754,16 @@ export class BlockSurface {
    *  Returns false when there is no within-block selection to link. */
   beginLink(): boolean {
     const t = this.leafTarget();
-    if (!t || t.collapsed || t.spansBlocks || !isInlineText(t.leaf)) return false;
+    if (!t || t.spansBlocks || !isInlineText(t.leaf)) return false;
+    if (t.collapsed) {
+      // A collapsed caret is actionable only INSIDE a link: expand savedLink to the
+      // whole link run so it can be edited or removed without selecting its exact
+      // extent (SKR-177 / F64). A bare caret has no range to link.
+      const run = linkRunAt(t.leaf.inline, t.start);
+      if (!run) return false;
+      this.savedLink = { blockId: t.leaf.id, start: run.start, end: run.end, backward: false };
+      return true;
+    }
     // leafTarget may have resolved from the saved (direction-less) selection;
     // a live backward drag is the only case with a direction to keep (SKR-192).
     const liveSel = window.getSelection();
@@ -1542,16 +1639,31 @@ export class BlockSurface {
    *  barrier id and nonsense offsets (SKR-220) — which is exactly the "table's
    *  block id" degenerate case the ticket called out. */
   private recordSelection(): void {
-    if (this.blockSel.length > 0) return;
+    if (this.blockSel.length > 0) {
+      this.clearPendingMarks(); // block selection: the caret's gone, drop primed marks
+      return;
+    }
     const cell = this.liveCellContext();
     if (cell) {
       this.lastSelection = { tableId: cell.tableId, row: cell.row, col: cell.col, start: cell.start, end: cell.end };
+      this.dropPendingIfCaretMoved(cell.collapsed ? `${cellKey(cell)}:${cell.start}` : null);
       return;
     }
     const ctx = leafCaretContext(this.container);
-    if (!ctx) return;
+    if (!ctx) return; // focus outside the surface: keep the primed marks
     const blockId = ctx.blockEl.getAttribute(BLOCK_ID_ATTR);
-    if (blockId != null) this.lastSelection = { blockId, start: ctx.start, end: ctx.end };
+    if (blockId != null) {
+      this.lastSelection = { blockId, start: ctx.start, end: ctx.end };
+      this.dropPendingIfCaretMoved(ctx.collapsed ? `${blockId}:${ctx.start}` : null);
+    }
+  }
+
+  /** Clear primed marks once the caret leaves the position they were armed at (a
+   *  range selection, or a move to a different offset). No re-emit: recordSelection
+   *  runs at the head of emitSelection, so the summary built right after already
+   *  reflects the cleared state (SKR-177). */
+  private dropPendingIfCaretMoved(currentKey: string | null): void {
+    if (this.pendingMarks && currentKey !== this.pendingCaretKey) this.clearPendingMarks();
   }
 
   /** Build the current selection's formatting summary, or null when focus is
@@ -1568,16 +1680,20 @@ export class BlockSurface {
     const cell = this.cellTarget();
     if (cell) {
       const empty = cell.collapsed || cell.spansCells;
+      // A collapsed caret reports the mark/link state of the run it sits in (with
+      // any primed marks), so the toolbar reflects context and the Link control
+      // acts on the surrounding link (SKR-177). A range keeps the whole-range test.
+      const caret = cell.collapsed && !cell.spansCells ? this.caretMarkState(cell.inline, cell.start) : null;
       return {
         rect,
         empty,
         marks: {
-          strong: !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'strong'),
-          em: !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'em'),
-          code: !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'code'),
-          link: !empty && rangeHasLink(cell.inline, cell.start, cell.end)
+          strong: caret ? caret.strong : !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'strong'),
+          em: caret ? caret.em : !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'em'),
+          code: caret ? caret.code : !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'code'),
+          link: caret ? caret.link : !empty && rangeHasLink(cell.inline, cell.start, cell.end)
         },
-        linkHref: empty ? null : linkHrefInRange(cell.inline, cell.start, cell.end),
+        linkHref: caret ? caret.linkHref : empty ? null : linkHrefInRange(cell.inline, cell.start, cell.end),
         blockType: 'table',
         headingLevel: null,
         inBulletList: false,
@@ -1608,16 +1724,25 @@ export class BlockSurface {
       !empty && leaves.every((l) => rangeHasMark(l.leaf.inline, l.start, l.end, mark));
     // A link can only target one block; only offer it for a single-leaf selection.
     const single = leaves.length === 1 ? leaves[0] : null;
+    // Collapsed inline caret: report the run's mark/link context (plus primed
+    // marks) so the toolbar reflects the caret and ⌘K / the Link control can edit
+    // the link the caret sits inside (SKR-177). Range/other selections keep the
+    // multi-leaf resolution the commands use.
+    const leafBlock = leaf?.leaf;
+    const caret =
+      leaf && leaf.collapsed && !leaf.spansBlocks && leafBlock && isInlineText(leafBlock)
+        ? this.caretMarkState(leafBlock.inline, leaf.start)
+        : null;
     return {
       rect,
       empty,
       marks: {
-        strong: every('strong'),
-        em: every('em'),
-        code: every('code'),
-        link: single ? rangeHasLink(single.leaf.inline, single.start, single.end) : false
+        strong: caret ? caret.strong : every('strong'),
+        em: caret ? caret.em : every('em'),
+        code: caret ? caret.code : every('code'),
+        link: caret ? caret.link : single ? rangeHasLink(single.leaf.inline, single.start, single.end) : false
       },
-      linkHref: single ? linkHrefInRange(single.leaf.inline, single.start, single.end) : null,
+      linkHref: caret ? caret.linkHref : single ? linkHrefInRange(single.leaf.inline, single.start, single.end) : null,
       blockType,
       headingLevel,
       inBulletList: flags?.inBulletList ?? false,
@@ -2549,6 +2674,11 @@ export class BlockSurface {
     // word by word (SKR-178). The hint is set per branch, once the target is
     // known; the selection-replacing paths record through their own gestures.
     const typeHint = (target: string): EditHint => ({ kind: 'type', target, breakRun: /^\s/.test(text) });
+    // Pending marks primed by ⌘B/I/E at this caret (SKR-177) are consumed by this
+    // insert. Capture and clear up front; when set, the insert takes the full-render
+    // path (the surgical fast path can't add the marks in place).
+    const pending = this.pendingMarks;
+    this.clearPendingMarks();
     const cell = this.cellTarget();
     if (cell) {
       // Typing over a cross-cell / table-crossing selection replaces it rather
@@ -2558,7 +2688,7 @@ export class BlockSurface {
         return;
       }
       this.nextEditHint = typeHint(cellKey(cell));
-      const point = cell.collapsed ? this.surgicalPoint() : null;
+      const point = cell.collapsed && !pending ? this.surgicalPoint() : null;
       if (point) {
         // Model first, then the DOM: the snapshot's lazy selection read happens
         // inside the assignment, so it must see the PRE-mutation caret (F42).
@@ -2567,7 +2697,9 @@ export class BlockSurface {
       } else {
         let inline = cell.inline;
         if (!cell.collapsed) inline = deleteRangeInInline(inline, cell.start, cell.end);
-        this.commitCell(cell, insertTextInInline(inline, cell.start, text), cell.start + text.length);
+        inline = insertTextInInline(inline, cell.start, text);
+        if (pending) inline = this.applyPendingMarks(inline, cell.start, cell.start + text.length, pending);
+        this.commitCell(cell, inline, cell.start + text.length);
       }
       this.scheduleSerialize();
       return;
@@ -2589,10 +2721,11 @@ export class BlockSurface {
 
     this.nextEditHint = typeHint(t.leaf.id);
     // Surgical fast path: insert into the live text node in place. Falls back to a
-    // full block re-render only when there is a selection to replace or the caret
-    // is not in a text node. Model assignment BEFORE the DOM mutation — see the
+    // full block re-render only when there is a selection to replace, the caret is
+    // not in a text node, or a pending mark must be applied (SKR-177 — the surgical
+    // path can't paint marks). Model assignment BEFORE the DOM mutation — see the
     // cell branch above (the snapshot must capture the pre-edit caret).
-    const point = t.collapsed ? this.surgicalPoint() : null;
+    const point = t.collapsed && !pending ? this.surgicalPoint() : null;
     if (point) {
       const inline = insertTextInInline(t.leaf.inline, t.start, text);
       this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, t.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
@@ -2602,6 +2735,7 @@ export class BlockSurface {
       let inline = t.leaf.inline;
       if (!t.collapsed) inline = deleteRangeInInline(inline, t.start, t.end);
       inline = insertTextInInline(inline, t.start, text);
+      if (pending) inline = this.applyPendingMarks(inline, t.start, t.start + text.length, pending);
       this.commitInline(t.leaf.id, inline, t.blockEl, t.start + text.length);
     }
     this.scheduleSerialize();
