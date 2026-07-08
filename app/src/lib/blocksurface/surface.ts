@@ -249,10 +249,6 @@ export class BlockSurface {
   private internalDrag = false;
 
   constructor(opts: BlockSurfaceOptions) {
-    // TEMP build-stamp (SKR-176 verification): prints on every editor mount so a
-    // stale renderer is unmistakable. Remove before merge.
-    // eslint-disable-next-line no-console
-    console.log('%cSKRIVE build cdd7170 — SKR-176 ZWSP caret filler', 'color:#7c9;font-weight:bold');
     this.container = opts.container;
     this._doc = opts.doc; // bypass the setter: initial load is not an undoable edit
     this.history = opts.history ?? new DocHistory();
