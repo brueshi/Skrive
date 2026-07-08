@@ -93,6 +93,16 @@ function renderInline(nodes: InlineNode[], host: HTMLElement, resolveAsset: Asse
     return;
   }
   for (const node of nodes) host.appendChild(renderInlineNode(node, resolveAsset));
+  // Content ending in a hard break needs a trailing placeholder <br> so the caret
+  // can rest on the (visually empty) new line: contenteditable consumes a lone
+  // trailing <br> as the line terminator and shows no second line — the classic
+  // trailing-<br> problem (SKR-176). The placeholder is untagged, so the offset
+  // map counts it as zero-width and readInlineFromDOM drops it, exactly like the
+  // empty-block placeholder above (and so a block whose only content is a hard
+  // break no longer reads back as empty via the lone-<br> guard).
+  if (nodes[nodes.length - 1]!.kind === 'break') {
+    host.appendChild(document.createElement('br'));
+  }
 }
 
 function renderChildren(blocks: BlockNode[], host: HTMLElement, resolveAsset: AssetResolver): void {

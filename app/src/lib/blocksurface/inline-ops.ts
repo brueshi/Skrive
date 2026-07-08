@@ -100,6 +100,54 @@ export function insertTextInInline(nodes: InlineNode[], offset: number, text: st
   return out;
 }
 
+/** Insert a hard-break atom at a flat offset, splitting the text run it lands in
+ *  and inheriting that run's marks (a break typed inside a bold word stays inside
+ *  the bold run, matching what a DOM readback reconstructs). A caret resting on a
+ *  text|atom seam is consumed by the preceding text run first, so the break lands
+ *  after it; at or past the end it inherits the last text run's marks. Unlike text,
+ *  a break is its own node — it never merges — so no coalesce is needed. */
+export function insertBreakInInline(nodes: InlineNode[], offset: number): InlineNode[] {
+  const out: InlineNode[] = [];
+  let acc = 0;
+  let done = false;
+  for (const node of nodes) {
+    if (isText(node)) {
+      const len = node.text.length;
+      if (!done && offset <= acc + len) {
+        const local = offset - acc;
+        const left = node.text.slice(0, local);
+        const right = node.text.slice(local);
+        if (left) out.push({ kind: 'text', text: left, marks: node.marks });
+        out.push({ kind: 'break', marks: { ...node.marks } });
+        if (right) out.push({ kind: 'text', text: right, marks: node.marks });
+        done = true;
+      } else {
+        out.push(node);
+      }
+      acc += len;
+    } else {
+      if (!done && offset <= acc) {
+        out.push({ kind: 'break', marks: { ...node.marks } });
+        done = true;
+      }
+      out.push(node);
+      acc += 1;
+    }
+  }
+  if (!done) {
+    let marks: InlineMarks = {};
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const n = nodes[i]!;
+      if (isText(n)) {
+        marks = n.marks;
+        break;
+      }
+    }
+    out.push({ kind: 'break', marks: { ...marks } });
+  }
+  return out;
+}
+
 /** Remove the characters in the flat range [start, end). An overlapped text run
  *  keeps its surrounding text (and its marks); a fully-removed run is dropped. */
 export function deleteRangeInInline(nodes: InlineNode[], start: number, end: number): InlineNode[] {
