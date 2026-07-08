@@ -192,8 +192,7 @@ export function App() {
     // Clicking a card opens Settings > Updates, where the explicit Download /
     // Restart controls live — keeping the toast itself button-free.
     const openUpdates = () => {
-      const store = useProjectStore.getState();
-      if (store.activeView !== 'settings') store.toggleSettings();
+      useProjectStore.getState().openSettings('updates');
     };
     const unsubscribe = window.skrive.updater.onStatus((status) => {
       if (status.kind === 'available' && !toasted.has(`a:${status.version}`)) {

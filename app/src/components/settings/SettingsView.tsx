@@ -21,7 +21,11 @@ import {
   AUTOSAVE_IDLE_MIN_MS,
   AUTOSAVE_IDLE_STEP_MS
 } from '../../stores/preferences';
-import { logProjectError, useProjectStore } from '../../stores/project';
+import {
+  logProjectError,
+  useProjectStore,
+  type SettingsSection as SettingsSectionId
+} from '../../stores/project';
 import {
   EDITOR_FONT_PRESETS,
   FONT_SIZE_STEPS,
@@ -56,14 +60,7 @@ declare global {
 const NATIVE_UPDATER =
   typeof window !== 'undefined' && window.__SKRIVE_NATIVE_UPDATER__ === true;
 
-type SectionId =
-  | 'general'
-  | 'appearance'
-  | 'editor'
-  | 'writing'
-  | 'license'
-  | 'updates'
-  | 'about';
+type SectionId = SettingsSectionId;
 
 type NavItem = { id: SectionId; label: string };
 type NavGroup = { cap: string; items: NavItem[] };
@@ -99,7 +96,20 @@ export function SettingsView({
   onReportBug: () => void;
   onSendFeedback: () => void;
 }) {
-  const [section, setSection] = useState<SectionId>('general');
+  // A pending deep-link (e.g. the update toast requesting Updates) is read
+  // from the store. Lazy-init consumes it at mount so we open directly on
+  // the target with no General flash; the effect below covers the case where
+  // Settings is already open and a new deep-link arrives.
+  const requestedSection = useProjectStore((s) => s.settingsSection);
+  const [section, setSection] = useState<SectionId>(
+    () => useProjectStore.getState().settingsSection ?? 'general'
+  );
+  useEffect(() => {
+    if (requestedSection) {
+      setSection(requestedSection);
+      useProjectStore.getState().clearSettingsSection();
+    }
+  }, [requestedSection]);
   const reduced = useReducedMotion();
 
   function renderSection(id: SectionId) {

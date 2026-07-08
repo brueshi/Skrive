@@ -1336,8 +1336,11 @@ body {
 
 /* 2px ink rule at the active row's left edge. A pseudo-element bar inset
    from the row's ends rather than an inset box-shadow, which follows any
-   border-radius and wraps the corners into a dark ring (SKR-230). */
-.sidebar .file.active::before {
+   border-radius and wraps the corners into a dark ring (SKR-230). Uses
+   ::after so it never collides with the tree elbow connector's ::before
+   on nested rows, which previously flooded the elbow box with the dark
+   fill and read as a solid square beside the icon. */
+.sidebar .file.active::after {
   content: '';
   position: absolute;
   left: 0;
@@ -3561,8 +3564,9 @@ body {
   font-size: 12px;
 }
 
-/* Contract-driven updater card (Settings > Updates). Quiet by default; lifts to
-   an accent-edged card with a primary CTA when an update is available or ready. */
+/* Contract-driven updater card (Settings > Updates). Stays a quiet neutral
+   card in every state; the primary "Download" CTA carries the available/ready
+   signal on its own, so the card itself needs no accent edge. */
 .updater-card {
   border: 1px solid var(--skrive-rule);
   border-radius: var(--skrive-radius-md);
@@ -3571,13 +3575,6 @@ body {
   transition:
     border-color var(--skrive-duration-quick) var(--skrive-easing),
     box-shadow var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-/* Accent border only — the inset accent stripe it used to pair with wrapped
-   the card's rounded corners (an inset shadow follows the radius) and read
-   as a broken ring rather than an edge (SKR-230). */
-.updater-card.is-accent {
-  border-color: color-mix(in srgb, var(--skrive-accent) 55%, var(--skrive-rule));
 }
 
 .updater-card.is-error {

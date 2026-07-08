@@ -81,6 +81,18 @@ const DEBOUNCED_SAVE_MS = 1000;
 
 export type WorkspaceView = 'editor' | 'settings';
 
+/** The selectable panes in the Settings view. Kept here (not in the
+ *  component) so callers can deep-link to a section through the store —
+ *  e.g. the "Update available" toast opening straight to `'updates'`. */
+export type SettingsSection =
+  | 'general'
+  | 'appearance'
+  | 'editor'
+  | 'writing'
+  | 'license'
+  | 'updates'
+  | 'about';
+
 /** A one-shot "go to this position with this selection length" request
  *  applied by the editor on the next render. The nonce is what the
  *  Editor effect tracks — bumping it re-fires even when line/column
@@ -217,6 +229,12 @@ type State = {
    *  open / close. */
   activeView: WorkspaceView;
 
+  /** One-shot request to open Settings at a specific section. Set by
+   *  `openSettings(section)`, read once by `SettingsView`, then cleared
+   *  via `clearSettingsSection()`. Null when there's no pending deep-link
+   *  (Settings then opens on its default / last-in-session section). */
+  settingsSection: SettingsSection | null;
+
   /** Most recent project-wide lint report. Refreshed after open and
    *  after any watcher event resolves. Null between project loads.
    *
@@ -306,6 +324,10 @@ type Actions = {
 
   setActiveView(view: WorkspaceView): void;
   toggleSettings(): void;
+  /** Open Settings, optionally deep-linking to a specific section. */
+  openSettings(section?: SettingsSection): void;
+  /** Consume the one-shot `settingsSection` deep-link. */
+  clearSettingsSection(): void;
 
   /** Flush any pending project-state debounce immediately. Used by
    *  the beforeunload handler and project close. Safe to call when no
@@ -839,6 +861,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   historyPairBaseId: null,
   renameModalPath: null,
   activeView: 'editor',
+  settingsSection: null,
   lintReport: null,
 
   unsubscribeWatch: null,
@@ -1583,6 +1606,17 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   toggleSettings() {
     const next = get().activeView === 'settings' ? 'editor' : 'settings';
     set({ activeView: next });
+  },
+
+  openSettings(section) {
+    // Force Settings open (not a toggle) and stage the deep-link. Setting
+    // the section even when already on Settings lets an open pane jump to
+    // the requested section; SettingsView clears it once consumed.
+    set({ activeView: 'settings', settingsSection: section ?? null });
+  },
+
+  clearSettingsSection() {
+    if (get().settingsSection !== null) set({ settingsSection: null });
   },
 
   // ============================ Project state flush ============================
