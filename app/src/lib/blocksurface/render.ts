@@ -16,6 +16,13 @@ export const BLOCK_ID_ATTR = 'data-block-id';
 // the bare <br> an empty block needs for height/caret (which has zero width in
 // the model). Only real breaks carry a cell in the offset space (SKR-155).
 export const HARD_BREAK_ATTR = 'data-hard-break';
+// Zero-width caret filler (U+200B) placed on the empty new line a TRAILING hard
+// break opens (SKR-176). WKWebView commits but mis-PAINTS a caret anchored at the
+// bare element position between the hard-break <br> and a placeholder <br> — it
+// snaps to the block start. A text node is the only anchor WebKit paints reliably,
+// so the filler gives the caret a real text position to sit in. It is zero-width to
+// the offset map and stripped on readback, so the model never sees it.
+export const CARET_FILLER = '\u200b';
 
 /**
  * Maps a Markdown image URL (as it lives in the model, e.g. the document-relative
@@ -93,6 +100,17 @@ function renderInline(nodes: InlineNode[], host: HTMLElement, resolveAsset: Asse
     return;
   }
   for (const node of nodes) host.appendChild(renderInlineNode(node, resolveAsset));
+  // Content ending in a hard break opens an empty new line (the <br> ends the
+  // current line). That line needs a zero-width caret filler so WKWebView can PAINT
+  // a caret there: a caret anchored at the bare element position after the trailing
+  // <br> commits but paints at the block start (the classic trailing-<br> problem,
+  // WKWebView flavour). The U+200B filler is a real text node — the only anchor
+  // WebKit paints reliably — and also gives the line its height. The offset map
+  // treats it as zero-width and readInlineFromDOM strips it, so the model and the
+  // flat offsets never see it (SKR-176).
+  if (nodes[nodes.length - 1]!.kind === 'break') {
+    host.appendChild(document.createTextNode(CARET_FILLER));
+  }
 }
 
 function renderChildren(blocks: BlockNode[], host: HTMLElement, resolveAsset: AssetResolver): void {

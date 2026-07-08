@@ -100,6 +100,54 @@ export function insertTextInInline(nodes: InlineNode[], offset: number, text: st
   return out;
 }
 
+/** Insert a hard-break atom at a flat offset, splitting the text run it lands in
+ *  and inheriting that run's marks (a break typed inside a bold word stays inside
+ *  the bold run, matching what a DOM readback reconstructs). A caret resting on a
+ *  text|atom seam is consumed by the preceding text run first, so the break lands
+ *  after it; at or past the end it inherits the last text run's marks. Unlike text,
+ *  a break is its own node — it never merges — so no coalesce is needed. */
+export function insertBreakInInline(nodes: InlineNode[], offset: number): InlineNode[] {
+  const out: InlineNode[] = [];
+  let acc = 0;
+  let done = false;
+  for (const node of nodes) {
+    if (isText(node)) {
+      const len = node.text.length;
+      if (!done && offset <= acc + len) {
+        const local = offset - acc;
+        const left = node.text.slice(0, local);
+        const right = node.text.slice(local);
+        if (left) out.push({ kind: 'text', text: left, marks: node.marks });
+        out.push({ kind: 'break', marks: { ...node.marks } });
+        if (right) out.push({ kind: 'text', text: right, marks: node.marks });
+        done = true;
+      } else {
+        out.push(node);
+      }
+      acc += len;
+    } else {
+      if (!done && offset <= acc) {
+        out.push({ kind: 'break', marks: { ...node.marks } });
+        done = true;
+      }
+      out.push(node);
+      acc += 1;
+    }
+  }
+  if (!done) {
+    let marks: InlineMarks = {};
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const n = nodes[i]!;
+      if (isText(n)) {
+        marks = n.marks;
+        break;
+      }
+    }
+    out.push({ kind: 'break', marks: { ...marks } });
+  }
+  return out;
+}
+
 /** Remove the characters in the flat range [start, end). An overlapped text run
  *  keeps its surrounding text (and its marks); a fully-removed run is dropped. */
 export function deleteRangeInInline(nodes: InlineNode[], start: number, end: number): InlineNode[] {
@@ -334,13 +382,18 @@ function markEl(tag: string, marks: InlineMarks): InlineMarks {
 function walkDom(node: Node, marks: InlineMarks, out: InlineNode[]): void {
   for (const child of Array.from(node.childNodes)) {
     if (child.nodeType === Node.TEXT_NODE) {
-      const text = (child as Text).data;
+      // Strip the zero-width caret filler (SKR-176) — it is view-only, never model
+      // content. It lives in its own node, but an IME can merge it into an adjacent
+      // run, so strip the character rather than skip the node.
+      const text = (child as Text).data.replace(/\u200b/g, '');
       if (text) out.push({ kind: 'text', text, marks: { ...marks } });
     } else if (child.nodeType === Node.ELEMENT_NODE) {
       const el = child as HTMLElement;
       const tag = el.tagName.toLowerCase();
       if (tag === 'br') {
-        out.push({ kind: 'break', marks: { ...marks } });
+        // Only a tagged <br> is a real hard break. A bare <br> is the placeholder an
+        // empty block carries for height/caret — view-only, not model content.
+        if (el.hasAttribute(HARD_BREAK_ATTR)) out.push({ kind: 'break', marks: { ...marks } });
       } else if (tag === 'img') {
         out.push({
           kind: 'image',
@@ -360,20 +413,13 @@ function walkDom(node: Node, marks: InlineMarks, out: InlineNode[]): void {
 
 /** Reconstruct a block's inline model from its DOM (the inverse of the inline
  *  render). Used to reconcile after a native edit the hot path didn't model —
- *  IME composition. A block whose only content is the placeholder <br> reads as
- *  empty, not as a hard break. */
+ *  IME composition. walkDom already distinguishes a real hard break (tagged <br>)
+ *  from the view-only placeholders — the bare <br> an empty block carries and the
+ *  zero-width caret filler on a trailing-break line — so neither reads back as
+ *  content: an empty block reads empty, and a phantom trailing break can't appear
+ *  even when an IME composes in front of a placeholder (SKR-192 / SKR-176). */
 export function readInlineFromDOM(blockEl: HTMLElement): InlineNode[] {
   const out: InlineNode[] = [];
   walkDom(blockEl, {}, out);
-  if (out.length === 1 && out[0]!.kind === 'break') return [];
-  // An IME can compose text in FRONT of the placeholder <br> instead of
-  // replacing it, so the lone-br guard above never fires and the placeholder
-  // would read back as a phantom trailing hard break (SKR-192). Real breaks
-  // carry HARD_BREAK_ATTR; a trailing untagged br is the placeholder — drop it.
-  if (out[out.length - 1]?.kind === 'break') {
-    const brs = blockEl.querySelectorAll('br');
-    const lastBr = brs[brs.length - 1];
-    if (lastBr && !lastBr.hasAttribute(HARD_BREAK_ATTR)) out.pop();
-  }
   return coalesceInline(out);
 }

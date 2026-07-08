@@ -77,6 +77,12 @@ function collectInline(nodes: InlineNode[], breaks: 'keep' | 'space'): InlineIte
       items.push(item);
     }
   }
+  // A hard break at the very END of a block has no rendered effect in Markdown and
+  // serializes to a bare, dangling `\` (invalid — a hard break must be followed by
+  // content) — F15. The block model and the native `.folio` encoding keep trailing
+  // breaks faithfully; only the lossy Markdown floor (export + copy-out) drops
+  // them, matching what Docs/Notion emit on export.
+  while (items.length > 0 && items[items.length - 1]!.kind === 'break') items.pop();
   return items;
 }
 

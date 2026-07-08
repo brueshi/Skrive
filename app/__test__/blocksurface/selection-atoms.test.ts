@@ -96,3 +96,47 @@ describe('domPointFromFlatOffset with atoms', () => {
     }
   });
 });
+
+// A block ending in a hard break renders `text<br hard>​` — the zero-width
+// caret filler on the empty new line gives the caret a paintable text anchor.
+// WKWebView mis-paints a caret at the bare element position after the trailing
+// <br>, so the after-break offset resolves INTO the filler text node (offset 0);
+// the filler is zero-width, so the flat offset is identical (SKR-176).
+const CARET_FILLER = '\u200b';
+describe('domPointFromFlatOffset with a trailing hard break', () => {
+  const filler = (): Text => document.createTextNode(CARET_FILLER);
+
+  it('lands the caret in the zero-width filler text node, not a bare element point', () => {
+    const b = block(t('ab'), hardBreak(), filler());
+    // After "ab"(2) + break(1) = offset 3, past the counted content.
+    const p = domPointFromFlatOffset(b, 3);
+    expect(p.node).toBe(b.childNodes[2]); // the filler text node
+    expect(p.offset).toBe(0);
+  });
+
+  it('round-trips: the filler point reads back to the after-break offset', () => {
+    const b = block(t('ab'), hardBreak(), filler());
+    const p = domPointFromFlatOffset(b, 3);
+    expect(flatOffsetFromDOM(b, p.node, p.offset)).toBe(3);
+  });
+
+  it('counts the filler as zero width', () => {
+    const b = block(t('ab'), hardBreak(), filler());
+    // The filler node contributes nothing: caret at its offset 0 is still offset 3.
+    expect(flatOffsetFromDOM(b, b.childNodes[2]!, 0)).toBe(3);
+  });
+
+  it('a hard break with following content lands the caret in that text (no filler)', () => {
+    const b = block(t('ab'), hardBreak(), t('cd'));
+    const p = domPointFromFlatOffset(b, 3); // after the break, start of "cd"
+    expect(p.node).toBe(b.childNodes[2]); // the "cd" text node
+    expect(p.offset).toBe(0);
+  });
+
+  it('leaves the lone empty-block placeholder caret at (block, 0)', () => {
+    const b = block(document.createElement('br')); // bare, untagged placeholder
+    const p = domPointFromFlatOffset(b, 0);
+    expect(p.node).toBe(b);
+    expect(p.offset).toBe(0);
+  });
+});

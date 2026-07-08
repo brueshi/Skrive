@@ -31,6 +31,7 @@ import {
   deleteRangeInInline,
   inlineLength,
   inlinePlainText,
+  insertBreakInInline,
   insertTextInInline,
   linkHrefInRange,
   rangeHasLink,
@@ -509,10 +510,12 @@ export class BlockSurface {
       return;
     }
     // Enter is handled here (not beforeinput): preventDefault on keydown reliably
-    // stops the browser's own newline, so the block splits exactly once.
+    // stops the browser's own newline, so the block splits exactly once. Shift+Enter
+    // inserts a hard break instead of splitting (Docs/Notion/iA parity — SKR-176).
     if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault();
-      this.applyEnter();
+      if (e.shiftKey) this.applyLineBreak();
+      else this.applyEnter();
       return;
     }
     // Arrow keys inside a table: navigate cell-to-cell and, at the table's edges,
@@ -2937,6 +2940,77 @@ export class BlockSurface {
     const after = readSelection(this.container);
     if (!after || !isCollapsed(after)) return;
     this.applyEnter();
+  }
+
+  // Shift+Enter: insert a hard break at the caret rather than splitting the block
+  // (SKR-176 / F83). The `break` inline node, its <br> render, and its .folio
+  // serialize were already wired — only this gesture was missing. Each break is
+  // its own undo step (the default {kind:'other'} hint, like applyEnter's split),
+  // so it never coalesces into an adjacent typing run. In a code block a line break
+  // is a literal newline, exactly like Enter there (code holds text, not inline).
+  //
+  // The caret lands AFTER the break, on the (visually empty) new line — an element-
+  // offset position between the hard-break <br> and the trailing placeholder <br>,
+  // with no text node to anchor to. Re-rendering the block wiped the text node the
+  // live selection sat on, so a plain setCaret to that bare position is the exact
+  // WKWebView blindspot: it looks placed but never commits and the caret snaps to
+  // the block start. writeSelection routes it through the rAF-re-asserting robust
+  // placement instead (the same path structural rebuilds use). The Chromium gate is
+  // blind to this — it committed the bare position fine.
+  private applyLineBreak(): void {
+    const cell = this.cellTarget();
+    if (cell) {
+      if (cell.spansCells) {
+        this.lineBreakOverSelection();
+        return;
+      }
+      const base = cell.collapsed ? cell.inline : deleteRangeInInline(cell.inline, cell.start, cell.end);
+      const next = insertBreakInInline(base, cell.start);
+      this.updateCellModel(cell, next);
+      renderInlineInto(cell.cellEl, next, this.resolveAsset);
+      this.writeCaret({ kind: 'cell', tableId: cell.tableId, row: cell.row, col: cell.col }, cell.start + 1);
+      this.scheduleSerialize();
+      return;
+    }
+    const t = this.leafTarget();
+    if (!t) return;
+    if (t.spansBlocks) {
+      this.lineBreakOverSelection();
+      return;
+    }
+    if (t.leaf.type === 'code_block') {
+      this.editCodeText(t.leaf, t.blockEl, t.leaf.text.slice(0, t.start) + '\n' + t.leaf.text.slice(t.end), t.start + 1);
+      this.scheduleSerialize();
+      return;
+    }
+    if (!isInlineText(t.leaf)) return;
+    let inline = t.leaf.inline;
+    if (!t.collapsed) inline = deleteRangeInInline(inline, t.start, t.end);
+    inline = insertBreakInInline(inline, t.start);
+    this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, t.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
+    renderInlineInto(t.blockEl, inline, this.resolveAsset);
+    this.markRenderedInPlace(t.leaf.id);
+    this.writeCaret({ kind: 'block', id: t.leaf.id }, t.start + 1);
+    this.scheduleSerialize();
+  }
+
+  /** Place a collapsed caret at a leaf offset through the robust, rAF-re-asserting
+   *  path (writeSelection → placeCaretRobust). Used where a full block re-render
+   *  wiped the node the selection sat on AND the caret target is a bare element
+   *  position with no text to anchor — the case WKWebView leaves uncommitted. */
+  private writeCaret(leaf: LeafAddr, offset: number): void {
+    writeSelection(this.container, collapsedRange({ leaf, offset }), 'linebreak');
+  }
+
+  // Shift+Enter over a cross-cell / cross-block selection: clear the selection the
+  // same way enterOverSelection does, then re-run at the resulting collapsed caret
+  // so the break lands where the deletion left it.
+  private lineBreakOverSelection(): void {
+    this.deleteSelectionRange();
+    this.closeSlash();
+    const after = readSelection(this.container);
+    if (!after || !isCollapsed(after)) return;
+    this.applyLineBreak();
   }
 
   // Boundary merges (Backspace at a block start, Delete at a block end) and
