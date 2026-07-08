@@ -2948,6 +2948,15 @@ export class BlockSurface {
   // its own undo step (the default {kind:'other'} hint, like applyEnter's split),
   // so it never coalesces into an adjacent typing run. In a code block a line break
   // is a literal newline, exactly like Enter there (code holds text, not inline).
+  //
+  // The caret lands AFTER the break, on the (visually empty) new line — an element-
+  // offset position between the hard-break <br> and the trailing placeholder <br>,
+  // with no text node to anchor to. Re-rendering the block wiped the text node the
+  // live selection sat on, so a plain setCaret to that bare position is the exact
+  // WKWebView blindspot: it looks placed but never commits and the caret snaps to
+  // the block start. writeSelection routes it through the rAF-re-asserting robust
+  // placement instead (the same path structural rebuilds use). The Chromium gate is
+  // blind to this — it committed the bare position fine.
   private applyLineBreak(): void {
     const cell = this.cellTarget();
     if (cell) {
@@ -2955,8 +2964,11 @@ export class BlockSurface {
         this.lineBreakOverSelection();
         return;
       }
-      const inline = cell.collapsed ? cell.inline : deleteRangeInInline(cell.inline, cell.start, cell.end);
-      this.commitCell(cell, insertBreakInInline(inline, cell.start), cell.start + 1);
+      const base = cell.collapsed ? cell.inline : deleteRangeInInline(cell.inline, cell.start, cell.end);
+      const next = insertBreakInInline(base, cell.start);
+      this.updateCellModel(cell, next);
+      renderInlineInto(cell.cellEl, next, this.resolveAsset);
+      this.writeCaret({ kind: 'cell', tableId: cell.tableId, row: cell.row, col: cell.col }, cell.start + 1);
       this.scheduleSerialize();
       return;
     }
@@ -2975,8 +2987,19 @@ export class BlockSurface {
     let inline = t.leaf.inline;
     if (!t.collapsed) inline = deleteRangeInInline(inline, t.start, t.end);
     inline = insertBreakInInline(inline, t.start);
-    this.commitInline(t.leaf.id, inline, t.blockEl, t.start + 1);
+    this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, t.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
+    renderInlineInto(t.blockEl, inline, this.resolveAsset);
+    this.markRenderedInPlace(t.leaf.id);
+    this.writeCaret({ kind: 'block', id: t.leaf.id }, t.start + 1);
     this.scheduleSerialize();
+  }
+
+  /** Place a collapsed caret at a leaf offset through the robust, rAF-re-asserting
+   *  path (writeSelection → placeCaretRobust). Used where a full block re-render
+   *  wiped the node the selection sat on AND the caret target is a bare element
+   *  position with no text to anchor — the case WKWebView leaves uncommitted. */
+  private writeCaret(leaf: LeafAddr, offset: number): void {
+    writeSelection(this.container, collapsedRange({ leaf, offset }), 'linebreak');
   }
 
   // Shift+Enter over a cross-cell / cross-block selection: clear the selection the
