@@ -308,6 +308,53 @@ export function linkHrefInRange(nodes: InlineNode[], start: number, end: number)
   return any ? href : null;
 }
 
+/** The mark context a collapsed caret sits in (SKR-177): the marks of the run
+ *  covering the character BEFORE the caret (Docs semantics — typing continues the
+ *  preceding run's formatting), or the first run's marks at offset 0, or {} when
+ *  empty. Atoms carry marks too, so a caret after a bold hard break stays bold. */
+export function marksAtOffset(nodes: InlineNode[], offset: number): InlineMarks {
+  if (nodes.length === 0) return {};
+  const probe = offset > 0 ? offset - 1 : 0;
+  let acc = 0;
+  for (const node of nodes) {
+    const w = nodeWidth(node);
+    if (probe < acc + w) return node.marks;
+    acc += w;
+  }
+  return nodes[nodes.length - 1]!.marks; // past end: the last run's context
+}
+
+/** The link run a caret at `offset` sits in (SKR-177): the maximal contiguous span
+ *  of runs sharing the link the character BEFORE the caret carries, expanded so a
+ *  caret anywhere inside a link resolves the whole link's range and href. Null when
+ *  the caret is not inside a link (offset 0, or the preceding run is unlinked). Lets
+ *  a collapsed caret edit/remove a link without selecting its exact extent. */
+export function linkRunAt(nodes: InlineNode[], offset: number): { start: number; end: number; href: string } | null {
+  if (offset <= 0) return null;
+  const probe = offset - 1;
+  const bounds: Array<{ start: number; end: number; node: InlineNode }> = [];
+  let acc = 0;
+  let hit: { index: number; link: NonNullable<InlineMarks['link']> } | null = null;
+  for (const node of nodes) {
+    const w = nodeWidth(node);
+    bounds.push({ start: acc, end: acc + w, node });
+    if (hit === null && probe < acc + w) {
+      if (!node.marks.link) return null;
+      hit = { index: bounds.length - 1, link: node.marks.link };
+    }
+    acc += w;
+  }
+  if (!hit) return null;
+  const link = hit.link;
+  const same = (n: InlineNode): boolean =>
+    !!n.marks.link && n.marks.link.href === link.href && (n.marks.link.title ?? null) === (link.title ?? null);
+  let lo = hit.index;
+  while (lo > 0 && same(bounds[lo - 1]!.node)) lo--;
+  let hi = hit.index;
+  while (hi + 1 < bounds.length && same(bounds[hi + 1]!.node)) hi++;
+  return { start: bounds[lo]!.start, end: bounds[hi]!.end, href: link.href };
+}
+
 /** Force a boolean mark on or off over a range, regardless of its current state.
  *  Used for multi-block selections, where every covered block must end up in the
  *  same state (so a toggle decided once over the whole selection applies

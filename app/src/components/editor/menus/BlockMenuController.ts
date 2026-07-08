@@ -45,10 +45,14 @@ export class BlockMenuController implements MenuController {
   constructor(private readonly surface: BlockSurface) {
     this.ingest(surface.getSelectionInfo());
     surface.onSelectionChange((info) => this.ingest(info));
+    // ⌘K in the surface opens the link editor through the same path as the toolbar
+    // / bubble Link button (SKR-177).
+    surface.onRequestLinkEditor(() => this.openLinkEditor());
   }
 
   destroy(): void {
     this.surface.onSelectionChange(null);
+    this.surface.onRequestLinkEditor(null);
     this.listeners.clear();
   }
 
