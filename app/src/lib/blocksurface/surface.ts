@@ -18,7 +18,7 @@ import { imageExtension, imageMarkdownLink, pastedImageFilename } from '../clipb
 import { notify } from '../notify';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto, setCodeContent } from './render';
 import type { AssetResolver } from './render';
-import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
+import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
 import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
 import { findBlockById, updateBlockById } from './tree';
@@ -208,7 +208,14 @@ export class BlockSurface {
   private composing = false;
   private selectionCb: ((info: SelectionInfo | null) => void) | null = null;
   private selScheduled = false;
-  private savedLink: { blockId: string; start: number; end: number; backward: boolean } | null = null;
+  // The selection a link command acts on, saved before focus moves to the URL input
+  // (which collapses the live selection). A discriminated union so a table-cell
+  // range is a first-class target, not just a block (SKR-221): cells are addressed
+  // by coordinates, not a block id, exactly like the mark commands.
+  private savedLink:
+    | { kind: 'block'; blockId: string; start: number; end: number; backward: boolean }
+    | { kind: 'cell'; tableId: string; row: number; col: number; start: number; end: number; backward: boolean }
+    | null = null;
   // Pending (stored) boolean marks primed by ⌘B/I/E at a collapsed caret (SKR-177
   // / F62): the toggled marks the NEXT typed text will carry, Docs-style. Consumed
   // by applyInsertText and cleared when the caret moves off `pendingCaretKey` (the
@@ -753,6 +760,22 @@ export class BlockSurface {
    *  moves to a URL input (which would otherwise collapse the live selection).
    *  Returns false when there is no within-block selection to link. */
   beginLink(): boolean {
+    // Table cells are checked first (they carry no block id of their own): a link
+    // in a cell is a peer of the mark commands that already work there (SKR-221).
+    const cell = this.cellTarget();
+    if (cell) {
+      if (cell.spansCells) return false;
+      if (cell.collapsed) {
+        const run = linkRunAt(cell.inline, cell.start);
+        if (!run) return false;
+        this.savedLink = { kind: 'cell', tableId: cell.tableId, row: cell.row, col: cell.col, start: run.start, end: run.end, backward: false };
+        return true;
+      }
+      const liveSel = window.getSelection();
+      const backward = liveSel != null && isSelectionBackward(liveSel);
+      this.savedLink = { kind: 'cell', tableId: cell.tableId, row: cell.row, col: cell.col, start: cell.start, end: cell.end, backward };
+      return true;
+    }
     const t = this.leafTarget();
     if (!t || t.spansBlocks || !isInlineText(t.leaf)) return false;
     if (t.collapsed) {
@@ -761,14 +784,14 @@ export class BlockSurface {
       // extent (SKR-177 / F64). A bare caret has no range to link.
       const run = linkRunAt(t.leaf.inline, t.start);
       if (!run) return false;
-      this.savedLink = { blockId: t.leaf.id, start: run.start, end: run.end, backward: false };
+      this.savedLink = { kind: 'block', blockId: t.leaf.id, start: run.start, end: run.end, backward: false };
       return true;
     }
     // leafTarget may have resolved from the saved (direction-less) selection;
     // a live backward drag is the only case with a direction to keep (SKR-192).
     const liveSel = window.getSelection();
     const backward = liveSel != null && isSelectionBackward(liveSel);
-    this.savedLink = { blockId: t.leaf.id, start: t.start, end: t.end, backward };
+    this.savedLink = { kind: 'block', blockId: t.leaf.id, start: t.start, end: t.end, backward };
     return true;
   }
 
@@ -794,7 +817,10 @@ export class BlockSurface {
     const saved = this.savedLink;
     this.savedLink = null;
     if (!saved) return;
-    const el = this.leafElementById(saved.blockId);
+    const el =
+      saved.kind === 'cell'
+        ? leafElement(this.container, { kind: 'cell', tableId: saved.tableId, row: saved.row, col: saved.col })
+        : this.leafElementById(saved.blockId);
     if (!el) return;
     this.container.focus();
     if (saved.backward) setSelectionRange(el, saved.end, saved.start);
@@ -805,16 +831,35 @@ export class BlockSurface {
   private applySavedLink(link: { href: string; title: string | null } | null): void {
     const saved = this.savedLink;
     if (!saved) return;
+    // Focus back first, same reason across both variants (SKR-173 / F71 / SKR-220):
+    // the caret otherwise lands arbitrarily in WKWebView when focus returns from the
+    // URL input to a surface with no live selection.
+    if (saved.kind === 'cell') {
+      const table = findBlockById(this.doc.blocks, saved.tableId);
+      if (!table || table.type !== 'table') return;
+      const inline = table.rows[saved.row]?.[saved.col];
+      if (!inline) return;
+      const next = setLinkInInline(inline, saved.start, saved.end, link);
+      const cellEl = leafElement(this.container, { kind: 'cell', tableId: saved.tableId, row: saved.row, col: saved.col });
+      const c = { tableId: saved.tableId, row: saved.row, col: saved.col };
+      if (cellEl) {
+        this.container.focus();
+        this.commitCell({ ...c, cellEl }, next, saved.end); // model + re-render + caret
+        if (saved.backward) setSelectionRange(cellEl, saved.end, saved.start);
+        else setSelectionRange(cellEl, saved.start, saved.end);
+      } else {
+        this.updateCellModel(c, next); // not currently rendered: model only
+      }
+      this.scheduleSerialize();
+      this.emitSelection();
+      return;
+    }
     const block = findBlockById(this.doc.blocks, saved.blockId);
     if (!block || !isInlineText(block)) return;
     const inline = setLinkInInline(block.inline, saved.start, saved.end, link);
     this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, saved.blockId, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
     const el = this.leafElementById(saved.blockId);
     if (el) {
-      // Focus back first, same as cancelLink (SKR-173 / F71 / SKR-220): the caret
-      // otherwise lands arbitrarily in WKWebView when focus returns from the URL
-      // input to a surface with no live selection. Commit re-renders (cancel
-      // doesn't), but the focus-before-select ordering matters either way.
       this.container.focus();
       renderInlineInto(el, inline, this.resolveAsset);
       this.markRenderedInPlace(saved.blockId);
