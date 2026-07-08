@@ -158,6 +158,25 @@ export function domPointFromFlatOffset(blockEl: HTMLElement, target: number): { 
     }
     // Mark-wrapper elements are not counted; the walker descends into them.
   }
+  // Past-end in a block that ENDS in a hard break: renderInline appends a zero-width
+  // placeholder <br> so the empty new line has height, and `last` here is the point
+  // BETWEEN the hard-break <br> and that placeholder. WKWebView commits that element
+  // position but mis-PAINTS the caret at the block start (the logical selection is
+  // right — confirmed via caret instrumentation — but the visible caret is wrong).
+  // Targeting the block END (after the placeholder) paints correctly on the new
+  // line; the placeholder is zero-width so the flat offset is identical (SKR-176).
+  // Guarded to `childNodes.length > 1` so the lone-<br> empty-block placeholder,
+  // whose caret sits at (block, 0), is left untouched.
+  const lastChild = blockEl.lastChild;
+  if (
+    lastChild &&
+    lastChild.nodeType === Node.ELEMENT_NODE &&
+    (lastChild as Element).tagName.toLowerCase() === 'br' &&
+    !isAtomEl(lastChild) &&
+    blockEl.childNodes.length > 1
+  ) {
+    return { node: blockEl, offset: blockEl.childNodes.length };
+  }
   return last;
 }
 

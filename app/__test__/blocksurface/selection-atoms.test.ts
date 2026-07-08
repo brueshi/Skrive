@@ -96,3 +96,40 @@ describe('domPointFromFlatOffset with atoms', () => {
     }
   });
 });
+
+// A block ending in a hard break renders `text<br hard><br placeholder>` — the
+// placeholder gives the empty new line height. WKWebView mis-paints a caret
+// anchored BETWEEN the two <br>s, so the after-break offset resolves to the block
+// END (after the placeholder) instead; zero-width placeholder, identical flat
+// offset (SKR-176).
+describe('domPointFromFlatOffset with a trailing hard break', () => {
+  const placeholder = (): HTMLElement => document.createElement('br'); // bare, untagged
+
+  it('targets the block end (after the placeholder), not between the two <br>s', () => {
+    const b = block(t('ab'), hardBreak(), placeholder());
+    // After "ab"(2) + break(1) = offset 3, past the counted content.
+    const p = domPointFromFlatOffset(b, 3);
+    expect(p.node).toBe(b);
+    expect(p.offset).toBe(3); // childNodes.length: after the placeholder
+  });
+
+  it('round-trips: the block-end point still reads back to the after-break offset', () => {
+    const b = block(t('ab'), hardBreak(), placeholder());
+    const p = domPointFromFlatOffset(b, 3);
+    expect(flatOffsetFromDOM(b, p.node, p.offset)).toBe(3);
+  });
+
+  it('a hard break with following content lands the caret in that text (no redirect)', () => {
+    const b = block(t('ab'), hardBreak(), t('cd'));
+    const p = domPointFromFlatOffset(b, 3); // after the break, start of "cd"
+    expect(p.node).toBe(b.childNodes[2]); // the "cd" text node
+    expect(p.offset).toBe(0);
+  });
+
+  it('leaves the lone empty-block placeholder caret at (block, 0)', () => {
+    const b = block(placeholder());
+    const p = domPointFromFlatOffset(b, 0);
+    expect(p.node).toBe(b);
+    expect(p.offset).toBe(0);
+  });
+});
