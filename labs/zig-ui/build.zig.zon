@@ -1,0 +1,20 @@
+.{
+    .name = .skrive_zig_ui_lab,
+    .version = "0.0.0",
+    .fingerprint = 0x8c80a4b9f09271ca, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        // Pinned to the head of sokol-zig's zig-0.16.0 branch (see
+        // docs/zig-ui-lab-log.md, Stage 0 entry, for the rationale).
+        .sokol = .{
+            .url = "git+https://github.com/floooh/sokol-zig#54776d69dac1650221a84191a07269fc4e1e82cd",
+            .hash = "sokol-0.1.0-pb1HKxTaNgA8rXBh41wxEucgmR4YPuoOXGeXbFyGPvTK",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "README.md",
+    },
+}
