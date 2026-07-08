@@ -3,8 +3,8 @@
 // Shift+Enter inserts a hard break (SKR-176 / F83). The `break` inline node, its
 // <br> render, and its .folio serialize were already wired; the keydown gesture
 // was the missing piece. These pin the gesture end to end: the model gains a
-// break, the DOM gets the trailing placeholder <br> a new line needs, plain Enter
-// still splits, and the break is one atomic undo step.
+// break, the new line gets a zero-width caret filler the caret can anchor to,
+// plain Enter still splits, and the break is one atomic undo step.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { BlockSurface } from '../../src/lib/blocksurface';
@@ -53,15 +53,32 @@ describe('Shift+Enter inserts a hard break (SKR-176)', () => {
     expect(firstParagraph(surface).inline.map((n) => n.kind)).toEqual(['text', 'break']);
   });
 
-  it('renders the hard-break <br> plus a trailing placeholder <br> for the new line', () => {
+  it('renders the hard-break <br> plus a zero-width caret filler on the new line', () => {
     const surface = new BlockSurface({ container, doc: parseDocument('abc\n') });
     caret(container.querySelector('p')!.firstChild!, 3);
     key(surface, { key: 'Enter', shiftKey: true });
 
-    const brs = container.querySelector('p')!.querySelectorAll('br');
-    expect(brs).toHaveLength(2);
-    expect(brs[0]!.hasAttribute(HARD_BREAK_ATTR), 'first <br> is the real hard break').toBe(true);
-    expect(brs[1]!.hasAttribute(HARD_BREAK_ATTR), 'trailing <br> is the zero-width placeholder').toBe(false);
+    const p = container.querySelector('p')!;
+    const brs = p.querySelectorAll('br');
+    expect(brs).toHaveLength(1);
+    expect(brs[0]!.hasAttribute(HARD_BREAK_ATTR), 'the <br> is the real hard break').toBe(true);
+    // The last node is a zero-width caret filler (U+200B) text node — the caret's
+    // paintable anchor on the empty new line.
+    const lastChild = p.lastChild!;
+    expect(lastChild.nodeType).toBe(Node.TEXT_NODE);
+    expect((lastChild as Text).data).toBe('\u200b');
+  });
+
+  it('lands the caret in the filler on the new line, not at the block start', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument('abc\n') });
+    caret(container.querySelector('p')!.firstChild!, 3);
+    key(surface, { key: 'Enter', shiftKey: true });
+
+    // The regression: the caret must anchor in the trailing filler text node (the
+    // new line), not snap back into the paragraph's first text node.
+    const sel = window.getSelection()!;
+    expect(sel.anchorNode).toBe(container.querySelector('p')!.lastChild);
+    expect(sel.anchorOffset).toBe(0);
   });
 
   it('splits the text run when the caret is mid-word', () => {

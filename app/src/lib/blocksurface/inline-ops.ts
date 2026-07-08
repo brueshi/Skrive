@@ -382,13 +382,18 @@ function markEl(tag: string, marks: InlineMarks): InlineMarks {
 function walkDom(node: Node, marks: InlineMarks, out: InlineNode[]): void {
   for (const child of Array.from(node.childNodes)) {
     if (child.nodeType === Node.TEXT_NODE) {
-      const text = (child as Text).data;
+      // Strip the zero-width caret filler (SKR-176) — it is view-only, never model
+      // content. It lives in its own node, but an IME can merge it into an adjacent
+      // run, so strip the character rather than skip the node.
+      const text = (child as Text).data.replace(/\u200b/g, '');
       if (text) out.push({ kind: 'text', text, marks: { ...marks } });
     } else if (child.nodeType === Node.ELEMENT_NODE) {
       const el = child as HTMLElement;
       const tag = el.tagName.toLowerCase();
       if (tag === 'br') {
-        out.push({ kind: 'break', marks: { ...marks } });
+        // Only a tagged <br> is a real hard break. A bare <br> is the placeholder an
+        // empty block carries for height/caret — view-only, not model content.
+        if (el.hasAttribute(HARD_BREAK_ATTR)) out.push({ kind: 'break', marks: { ...marks } });
       } else if (tag === 'img') {
         out.push({
           kind: 'image',
@@ -408,20 +413,13 @@ function walkDom(node: Node, marks: InlineMarks, out: InlineNode[]): void {
 
 /** Reconstruct a block's inline model from its DOM (the inverse of the inline
  *  render). Used to reconcile after a native edit the hot path didn't model —
- *  IME composition. A block whose only content is the placeholder <br> reads as
- *  empty, not as a hard break. */
+ *  IME composition. walkDom already distinguishes a real hard break (tagged <br>)
+ *  from the view-only placeholders — the bare <br> an empty block carries and the
+ *  zero-width caret filler on a trailing-break line — so neither reads back as
+ *  content: an empty block reads empty, and a phantom trailing break can't appear
+ *  even when an IME composes in front of a placeholder (SKR-192 / SKR-176). */
 export function readInlineFromDOM(blockEl: HTMLElement): InlineNode[] {
   const out: InlineNode[] = [];
   walkDom(blockEl, {}, out);
-  if (out.length === 1 && out[0]!.kind === 'break') return [];
-  // An IME can compose text in FRONT of the placeholder <br> instead of
-  // replacing it, so the lone-br guard above never fires and the placeholder
-  // would read back as a phantom trailing hard break (SKR-192). Real breaks
-  // carry HARD_BREAK_ATTR; a trailing untagged br is the placeholder — drop it.
-  if (out[out.length - 1]?.kind === 'break') {
-    const brs = blockEl.querySelectorAll('br');
-    const lastBr = brs[brs.length - 1];
-    if (lastBr && !lastBr.hasAttribute(HARD_BREAK_ATTR)) out.pop();
-  }
   return coalesceInline(out);
 }

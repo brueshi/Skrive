@@ -11,9 +11,16 @@
 // atom is tagged HARD_BREAK_ATTR so it is distinguished from the bare <br> an empty
 // block carries for height (that placeholder is zero-width, like the empty model).
 
-import { BLOCK_ID_ATTR, HARD_BREAK_ATTR } from './render';
+import { BLOCK_ID_ATTR, CARET_FILLER, HARD_BREAK_ATTR } from './render';
 import type { BlockViewRegistry } from './render';
 import { isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
+
+/** The zero-width caret filler renderInline puts on the empty line a trailing hard
+ *  break opens (SKR-176): a real text node so WKWebView can paint the caret, but
+ *  zero-width to the offset map. Its own isolated node, so an exact match is safe. */
+function isFillerText(node: Node): boolean {
+  return node.nodeType === Node.TEXT_NODE && (node as Text).data === CARET_FILLER;
+}
 
 /** An inline atom in the DOM: an image, or a real hard break (not the placeholder
  *  <br> an empty block carries). Each occupies one unit of offset space. */
@@ -70,7 +77,7 @@ export function focusedLeafElement(container: HTMLElement): HTMLElement | null {
 // Total offset-width of a DOM subtree: text characters plus one per atom. Mark
 // wrappers contribute nothing; the walk descends through them.
 function subtreeWidth(node: Node): number {
-  if (node.nodeType === Node.TEXT_NODE) return (node as Text).data.length;
+  if (node.nodeType === Node.TEXT_NODE) return isFillerText(node) ? 0 : (node as Text).data.length;
   if (isAtomEl(node)) return 1;
   let n = 0;
   for (const child of node.childNodes as unknown as Iterable<Node>) n += subtreeWidth(child);
@@ -100,9 +107,10 @@ export function flatOffsetFromDOM(blockEl: HTMLElement, node: Node, offset: numb
     if (done) return;
     if (n === node) {
       // The boundary is here: a text point counts its char offset; an element
-      // point counts the full width of the first `offset` children.
+      // point counts the full width of the first `offset` children. The caret
+      // filler is zero-width, so a boundary inside it contributes nothing.
       if (n.nodeType === Node.TEXT_NODE) {
-        total += Math.min(offset, (n as Text).data.length);
+        total += isFillerText(n) ? 0 : Math.min(offset, (n as Text).data.length);
       } else {
         const kids = n.childNodes;
         for (let i = 0; i < offset && i < kids.length; i++) total += subtreeWidth(kids[i]!);
@@ -111,7 +119,7 @@ export function flatOffsetFromDOM(blockEl: HTMLElement, node: Node, offset: numb
       return;
     }
     if (n.nodeType === Node.TEXT_NODE) {
-      total += (n as Text).data.length;
+      total += isFillerText(n) ? 0 : (n as Text).data.length;
       return;
     }
     if (isAtomEl(n)) {
@@ -146,6 +154,14 @@ export function domPointFromFlatOffset(blockEl: HTMLElement, target: number): { 
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     if (n.nodeType === Node.TEXT_NODE) {
       const t = n as Text;
+      // The zero-width caret filler on a trailing-break line: no width, but it IS
+      // the landing spot for the caret after that break — a text anchor WKWebView
+      // paints, unlike the bare element position between the <br>s. Record it as
+      // `last` so a past-end target resolves here.
+      if (isFillerText(t)) {
+        last = { node: t, offset: 0 };
+        continue;
+      }
       if (acc + t.length >= target) return { node: t, offset: Math.max(0, target - acc) };
       acc += t.length;
       last = { node: t, offset: t.length };
@@ -157,25 +173,6 @@ export function domPointFromFlatOffset(blockEl: HTMLElement, target: number): { 
       last = atomPoint(n, 'after');
     }
     // Mark-wrapper elements are not counted; the walker descends into them.
-  }
-  // Past-end in a block that ENDS in a hard break: renderInline appends a zero-width
-  // placeholder <br> so the empty new line has height, and `last` here is the point
-  // BETWEEN the hard-break <br> and that placeholder. WKWebView commits that element
-  // position but mis-PAINTS the caret at the block start (the logical selection is
-  // right — confirmed via caret instrumentation — but the visible caret is wrong).
-  // Targeting the block END (after the placeholder) paints correctly on the new
-  // line; the placeholder is zero-width so the flat offset is identical (SKR-176).
-  // Guarded to `childNodes.length > 1` so the lone-<br> empty-block placeholder,
-  // whose caret sits at (block, 0), is left untouched.
-  const lastChild = blockEl.lastChild;
-  if (
-    lastChild &&
-    lastChild.nodeType === Node.ELEMENT_NODE &&
-    (lastChild as Element).tagName.toLowerCase() === 'br' &&
-    !isAtomEl(lastChild) &&
-    blockEl.childNodes.length > 1
-  ) {
-    return { node: blockEl, offset: blockEl.childNodes.length };
   }
   return last;
 }
