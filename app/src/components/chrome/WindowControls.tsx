@@ -9,7 +9,8 @@
 // standard top-right, but inherit Skrive's typographic weight and tone tokens
 // rather than the OS metrics — custom chrome, native muscle memory.
 
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useState } from 'react';
+import { noDragProps } from './windowDrag';
 
 // Host-injected control surface; see shell-zig/web/native-bridge-win.ts.
 type SkriveWindowApi = {
@@ -31,7 +32,10 @@ const frameless =
   typeof window !== 'undefined' && window.__SKRIVE_FRAMELESS__ === true;
 
 // The controls sit in the non-draggable lane of the otherwise-draggable header.
-const noDrag: CSSProperties = { WebkitAppRegion: 'no-drag' } as CSSProperties;
+// This component renders only on the frameless Windows host, so the macOS attribute
+// in `noDragProps` is belt-and-braces here — but a no-drag lane that only
+// half-announces itself is exactly how a button becomes a drag handle later.
+
 
 export function WindowControls() {
   const api = typeof window !== 'undefined' ? window.__skriveWindow : undefined;
@@ -59,7 +63,7 @@ export function WindowControls() {
   if (!frameless || !api) return null;
 
   return (
-    <div className="window-controls" style={noDrag}>
+    <div className="window-controls" {...noDragProps}>
       <button
         type="button"
         className="window-control"

@@ -141,6 +141,14 @@ final class CoreBridge {
             onUpdaterDownloadAndInstall?()
             replyToRenderer(id: id, result: [:])
             return true
+        case "window:startDrag":
+            // Fire-and-forget: performDrag runs its own event loop until mouse-up,
+            // so there is nothing to reply to and no reply the renderer could hear.
+            handleWindowStartDrag()
+            return true
+        case "window:toggleZoom":
+            handleWindowToggleZoom()
+            return true
         case "app:version":
             // Host-owned per the contract: return the bundle's real version
             // (stamped from package.json), the same value Sparkle compares
@@ -155,6 +163,18 @@ final class CoreBridge {
         default:
             return false
         }
+    }
+
+    /// Drag / zoom the window from the renderer's topbar (SKR-240). The mechanism, and
+    /// why `NSApp.currentEvent` alone is not enough, lives in WindowDrag.swift.
+    private func handleWindowStartDrag() {
+        guard let window = webView?.window else { return }
+        WindowDrag.start(in: window)
+    }
+
+    private func handleWindowToggleZoom() {
+        guard let window = webView?.window else { return }
+        WindowDrag.toggleZoom(in: window)
     }
 
     /// Open an external URL in the OS default handler, gated by the Part I

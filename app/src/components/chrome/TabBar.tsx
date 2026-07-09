@@ -14,6 +14,7 @@ import {
   useProjectStore,
   type Tab
 } from '../../stores/project';
+import { noDragProps } from './windowDrag';
 import { DocIcon } from '../icons/DocIcon';
 import { IconDotUnsaved } from '../icons/IconDotUnsaved';
 import { IconX } from '../icons/IconX';
@@ -62,6 +63,8 @@ type TabPillProps = {
   onClose: (e: React.MouseEvent) => void;
 };
 
+// The TAB opts out of window dragging, not the strip that holds it. The strip is
+// `flex: 1` and marking IT no-drag swallowed the entire topbar's drag lane (SKR-240).
 function TabPill({ tab, active, onSelect, onClose }: TabPillProps) {
   const name = useMemo(() => leafName(tab.path), [tab.path]);
   return (
@@ -72,6 +75,7 @@ function TabPill({ tab, active, onSelect, onClose }: TabPillProps) {
       aria-selected={active}
       onClick={onSelect}
       title={tab.path}
+      {...noDragProps}
     >
       <span className="tab-icon" aria-hidden="true">
         <DocIcon path={tab.path} size={16} />
