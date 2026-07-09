@@ -14,6 +14,45 @@
 //   - Gaps reconstruct at the seam: captured (string) verbatim, new (null) the
 //     canonical separator.
 //   - A durable block carries its `<!-- sk:ID -->` comment immediately before it.
+//
+// ---------------------------------------------------------------------------
+// THE CANONICALIZATION CONTRACT (SKR-189 / F17, F18). The rule, stated once:
+//
+//   The model carries MEANING. Markdown carries meaning plus a dialect. An
+//   untouched block keeps its dialect because its bytes are kept. A block the
+//   writer actually changed is re-emitted in the house style, because the model
+//   never recorded which of Markdown's several spellings the writer had used.
+//
+// So, on a block that genuinely changed:
+//
+//   `__bold__`      -> `**bold**`        `_em_`   -> `*em*`
+//   `Title\n=====`  -> `# Title`         `a &amp; b` -> `a & b`
+//   `* item`        -> `- item`          `1)`     -> `1.` (kind toggles; SKR-181)
+//
+// None of these change what the document MEANS, and every one of them is
+// invisible until an edit lands on that block. Reverting an edit restores the
+// original bytes exactly, because the guard compares trees, not strings.
+//
+// The alternative — a style facet per construct (heading setext-ness, emphasis
+// delimiter, entity spelling, bullet char) — was considered and refused. It
+// would put presentation into a model whose native format deliberately does not
+// persist it: `.folio` stores an ordered list's `start` and not its `delimiter`
+// (SKR-181). A facet that survives editing but dies on reload is a worse promise
+// than one never made. Style survives where it is free (verbatim `src`), and
+// nowhere else.
+//
+// Freeze granularity (F17) follows from the same idea: a construct the model
+// cannot reproduce freezes the WHOLE top-level block, because a block is the
+// unit that owns `src`. Finer granularity would need sub-block source maps,
+// which is a different design, not a tweak to this one.
+//
+// Two invariants this file owes the parser, and now defends:
+//   - A text run never emits a raw newline (F20). A newline inside a paragraph
+//     is block syntax on the way back in — see `collectInline`.
+//   - A block emits either a whole block or nothing at all (F19). An empty
+//     paragraph has no Markdown form, so it is dropped with its seam gap rather
+//     than leaving a stray blank line behind — see `serializeDocument`.
+// ---------------------------------------------------------------------------
 
 import {
   type InlineItem,
@@ -50,7 +89,15 @@ function collectInline(nodes: InlineNode[], breaks: 'keep' | 'space'): InlineIte
     };
     let item: InlineItem | null = null;
     if (node.kind === 'text') {
-      if (node.text) item = { ...context, kind: m.code === true ? 'code' : 'text', text: node.text };
+      // The serializer defends its own invariant (SKR-189 / F20). A newline is
+      // never content in a text run — a line break is a `break` node — but a run
+      // carrying one used to be emitted raw, and a raw newline inside a paragraph
+      // is BLOCK syntax to the parser on the way back. `"a\n\nb"` reloaded as two
+      // paragraphs; `"| a |\n| - |\n| 1 |"` reloaded as a table. That is the
+      // canonical-fixpoint violation F14 describes, reached through this door
+      // rather than through a missing stringifier extension.
+      const text = node.text.replace(/\r?\n/g, ' ');
+      if (text) item = { ...context, kind: m.code === true ? 'code' : 'text', text };
     } else if (node.kind === 'image') {
       item = { ...context, kind: 'image', url: node.url, alt: node.alt, title: node.title };
     } else {
@@ -254,10 +301,21 @@ function gapForSeam(block: BlockNode, index: number): string {
  */
 export function serializeDocument(doc: Document): string {
   let out = '';
+  let emitted = 0;
   doc.blocks.forEach((block, index) => {
-    out += gapForSeam(block, index);
+    const body = serializeBlock(block);
+    // A paragraph emptied of text has no Markdown form. It used to emit its seam
+    // gap and nothing else, so the file grew a stray blank line and the block
+    // vanished on reload — half a block (SKR-189 / F19). Drop it whole: the gap
+    // goes with the body. The block still lives in the model, and `.folio` (JSON)
+    // keeps it, which is where a blank line the writer typed actually belongs.
+    if (body === '') return;
+    // Whatever survives to be emitted first opens the file, even if the blocks
+    // before it were dropped and captured a seam of their own.
+    out += emitted === 0 && index > 0 ? '' : gapForSeam(block, emitted);
     if (block.durable) out += `${formatAnchorComment(block.id)}\n`;
-    out += serializeBlock(block);
+    out += body;
+    emitted++;
   });
   out += doc.trailingGap;
   return out;
