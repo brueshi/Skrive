@@ -52,8 +52,8 @@ export function SelectionBubble({ controller }: { controller: MenuController }) 
   const s = snap.selection;
   const reduced = useReducedMotion();
 
-  const visible = !s.empty && !snap.link.open && s.blockType !== 'code_block';
-  const { ref, pos } = useAnchoredRect(controller.anchorRect(), visible, snap.rev, 'above');
+  const visible = !s.empty && !snap.dragging && !snap.link.open && s.blockType !== 'code_block';
+  const { ref, pos } = useAnchoredRect(controller.anchorRect(), visible, snap.rev, 'above', controller.liveAnchorRect);
 
   return createPortal(
     <AnimatePresence>

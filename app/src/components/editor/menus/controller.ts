@@ -45,6 +45,9 @@ export type AnchorRect = { top: number; bottom: number; left: number; right: num
 export type MenuSnapshot = {
   selection: MenuSelection;
   link: MenuLinkState;
+  /** True while a pointer drag-select is in progress, so the bubble stays hidden
+   *  until release instead of chasing the growing selection (SKR-184). */
+  dragging: boolean;
   /** Bumped whenever the anchor geometry may have shifted, to force the floating
    *  boxes to re-measure (selection move, doc edit). */
   rev: number;
@@ -73,8 +76,11 @@ export interface MenuController {
   subscribe(listener: () => void): () => void;
   getSnapshot(): MenuSnapshot;
   /** The selection's bounding rect (viewport coords) for the bubble / link editor,
-   *  or null when there is nothing to anchor to. */
+   *  or null when there is nothing to anchor to. Cached at the last selection change. */
   anchorRect(): AnchorRect | null;
+  /** The CURRENT selection's rect, re-measured live — for re-anchoring on scroll,
+   *  where no selectionchange fires and `anchorRect()` would be stale (SKR-184). */
+  liveAnchorRect(): AnchorRect | null;
 
   // Inline marks.
   toggleMark(mark: 'strong' | 'em' | 'code'): void;

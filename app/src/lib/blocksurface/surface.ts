@@ -81,6 +81,10 @@ export type SelectionInfo = {
   rect: DOMRect;
   /** True when there is no range to format (collapsed caret, or crossing blocks). */
   empty: boolean;
+  /** True while a pointer drag is in progress (a text drag-select). The bubble stays
+   *  hidden until release — chasing the growing selection is jarring (SKR-184 / F73;
+   *  Docs/Notion show nothing until mouseup). The toolbar ignores it. */
+  dragging: boolean;
   marks: { strong: boolean; em: boolean; code: boolean; link: boolean };
   /** The href shared across the selection, when it is uniformly one link. */
   linkHref: string | null;
@@ -225,6 +229,9 @@ export class BlockSurface {
   // App hook to open the link editor from the ⌘K chord (SKR-177): the surface can't
   // render the editor, so it asks the menu controller (which then calls beginLink).
   private requestLinkEditor: (() => void) | null = null;
+  // True between a mousedown in the surface and its release — a drag-select in
+  // progress. Gates the selection bubble so it doesn't chase the pointer (SKR-184).
+  private pointerDown = false;
   // The last text selection observed INSIDE the surface, in MODEL coordinates (a
   // leaf block id + a flat range, OR a table cell's (table id, row, col) + a flat
   // range local to the cell; a caret is start === end), kept across focus loss.
@@ -293,6 +300,12 @@ export class BlockSurface {
     this.container.addEventListener('compositionend', this.onCompositionEnd, true);
     this.container.addEventListener('keydown', this.onKeyDown, true);
     this.container.addEventListener('click', this.onClick);
+    // Drag-select tracking for the bubble's drag gate (SKR-184 / F73): mousedown in
+    // the surface starts a potential drag; release ends it. mouseup is on window so a
+    // drag released outside the editor still clears; onClick is the motionless-press
+    // fallback (WKWebView drops pointerup on a motionless press, but click fires).
+    this.container.addEventListener('mousedown', this.onPointerDown);
+    window.addEventListener('mouseup', this.onPointerUp);
     this.container.addEventListener('dragstart', this.onDragStart, true);
     this.container.addEventListener('dragover', this.onDragOver, true);
     this.container.addEventListener('drop', this.onDrop, true);
@@ -427,6 +440,17 @@ export class BlockSurface {
     this.container.focus();
   }
 
+  /** The live selection's bounding rect (viewport coords), or null when there is no
+   *  in-surface selection. Lets a floating menu re-anchor to the CURRENT geometry on
+   *  scroll instead of a rect frozen at the last selectionchange (SKR-184 / F72). */
+  currentSelectionRect(): DOMRect | null {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    const range = sel.getRangeAt(0);
+    if (!this.container.contains(range.startContainer)) return null;
+    return range.getBoundingClientRect();
+  }
+
   /** Drain any pending cold-path snapshot immediately (save / blur / unmount).
    *  Cancels both the debounce and a deferred idle emit, then hands the consumer
    *  a fresh snapshot iff the doc changed since the last emit. Idempotent: a
@@ -450,6 +474,8 @@ export class BlockSurface {
     this.container.removeEventListener('compositionend', this.onCompositionEnd, true);
     this.container.removeEventListener('keydown', this.onKeyDown, true);
     this.container.removeEventListener('click', this.onClick);
+    this.container.removeEventListener('mousedown', this.onPointerDown);
+    window.removeEventListener('mouseup', this.onPointerUp);
     this.container.removeEventListener('dragstart', this.onDragStart, true);
     this.container.removeEventListener('dragover', this.onDragOver, true);
     this.container.removeEventListener('drop', this.onDrop, true);
@@ -1732,6 +1758,7 @@ export class BlockSurface {
       return {
         rect,
         empty,
+        dragging: this.pointerDown,
         marks: {
           strong: caret ? caret.strong : !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'strong'),
           em: caret ? caret.em : !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'em'),
@@ -1781,6 +1808,7 @@ export class BlockSurface {
     return {
       rect,
       empty,
+      dragging: this.pointerDown,
       marks: {
         strong: caret ? caret.strong : every('strong'),
         em: caret ? caret.em : every('em'),
@@ -2543,10 +2571,26 @@ export class BlockSurface {
       this.selectBlock(block.id);
       return;
     }
+    // A click always ends any drag (the motionless-press fallback for window
+    // mouseup — SKR-184 / F73); onPointerUp re-emits so a real drag's bubble shows.
+    this.onPointerUp();
     // Inside any other block, native placement already put the caret where it
     // belongs; only a click on the bare surface needs an affordance.
     if (block) return;
     this.placeCaretNearPoint(e.clientX, e.clientY);
+  };
+
+  // Drag-select gate for the bubble (SKR-184 / F73). mousedown marks a drag in
+  // progress so the selection bubble stays hidden while the range grows; release
+  // (window mouseup / click) clears it and re-emits so the bubble appears settled.
+  private onPointerDown = (): void => {
+    this.pointerDown = true;
+  };
+
+  private onPointerUp = (): void => {
+    if (!this.pointerDown) return; // only act when a drag was actually in progress
+    this.pointerDown = false;
+    this.emitSelection();
   };
 
   /** Place the caret at the document position nearest a viewport point (SKR-192).

@@ -19,34 +19,39 @@ export function useAnchoredRect(
   // Bumped by the caller whenever the anchor or the box's own size may have changed
   // (selection geometry, a growing query), to force a re-measure.
   revision: number,
-  placement: Placement = 'above'
+  placement: Placement = 'above',
+  // Optional live re-measure, preferred over `rect` when present (SKR-184): scroll
+  // fires no selectionchange, so the cached `rect` goes stale as the page moves —
+  // this reads the CURRENT selection geometry on each reposition instead.
+  liveRect?: () => AnchorRect | null
 ) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
   const reposition = useCallback(() => {
-    if (!visible || !rect) return;
+    const anchor = liveRect?.() ?? rect;
+    if (!visible || !anchor) return;
     const el = ref.current;
     const width = el?.offsetWidth ?? 0;
     const height = el?.offsetHeight ?? 0;
-    const center = (rect.left + rect.right) / 2;
+    const center = (anchor.left + anchor.right) / 2;
 
     let left = center - width / 2;
     left = Math.max(MARGIN, Math.min(left, window.innerWidth - width - MARGIN));
 
     let top: number;
     if (placement === 'above') {
-      top = rect.top - height - GAP;
-      if (top < MARGIN) top = rect.bottom + GAP; // flip below
+      top = anchor.top - height - GAP;
+      if (top < MARGIN) top = anchor.bottom + GAP; // flip below
     } else {
-      top = rect.bottom + GAP;
-      const above = rect.top - height - GAP;
+      top = anchor.bottom + GAP;
+      const above = anchor.top - height - GAP;
       if (top + height > window.innerHeight - MARGIN && above >= MARGIN) {
         top = above; // flip above when there's no room below
       }
     }
     setPos({ top, left });
-  }, [visible, rect, placement]);
+  }, [visible, rect, placement, liveRect]);
 
   // Measure + place synchronously after render so the box paints in position.
   useLayoutEffect(() => {
