@@ -67,7 +67,19 @@ export function BlockTypeDropdown({ controller, blockType, headingLevel, disable
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content className="ctx-menu rich-blocktype-menu" align="start" sideOffset={4}>
+        <DropdownMenu.Content
+          className="ctx-menu rich-blocktype-menu"
+          align="start"
+          sideOffset={4}
+          // Radix refocuses the trigger button on close by default, which strands the
+          // caret in the toolbar after a conversion — typing goes nowhere and Space
+          // reopens the menu (SKR-184 / F70). Send focus back to the editor instead,
+          // where setBlockType already placed the caret.
+          onCloseAutoFocus={(e) => {
+            e.preventDefault();
+            controller.focusEditor();
+          }}
+        >
           <DropdownMenu.Item className="ctx-item" onSelect={() => controller.setParagraph()}>
             <span className="ctx-icon">
               <IconParagraph size={18} />

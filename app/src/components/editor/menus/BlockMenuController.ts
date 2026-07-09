@@ -36,10 +36,11 @@ function toSelection(info: SelectionInfo | null): MenuSelection {
 
 export class BlockMenuController implements MenuController {
   private readonly listeners = new Set<() => void>();
-  private snapshot: MenuSnapshot = { selection: EMPTY_MENU_SELECTION, link: CLOSED_MENU_LINK, rev: 0 };
+  private snapshot: MenuSnapshot = { selection: EMPTY_MENU_SELECTION, link: CLOSED_MENU_LINK, dragging: false, rev: 0 };
   private selection: MenuSelection = EMPTY_MENU_SELECTION;
   private link: MenuLinkState = CLOSED_MENU_LINK;
   private rect: AnchorRect | null = null;
+  private dragging = false;
   private rev = 0;
 
   constructor(private readonly surface: BlockSurface) {
@@ -58,12 +59,13 @@ export class BlockMenuController implements MenuController {
 
   private ingest(info: SelectionInfo | null): void {
     this.rect = info?.rect ?? null;
+    this.dragging = info?.dragging ?? false;
     this.selection = toSelection(info);
     this.commit();
   }
 
   private commit(): void {
-    this.snapshot = { selection: this.selection, link: this.link, rev: ++this.rev };
+    this.snapshot = { selection: this.selection, link: this.link, dragging: this.dragging, rev: ++this.rev };
     for (const l of this.listeners) l();
   }
 
@@ -73,6 +75,7 @@ export class BlockMenuController implements MenuController {
   };
   getSnapshot = (): MenuSnapshot => this.snapshot;
   anchorRect = (): AnchorRect | null => this.rect;
+  liveAnchorRect = (): AnchorRect | null => this.surface.currentSelectionRect();
 
   toggleMark(mark: 'strong' | 'em' | 'code'): void {
     this.surface.toggleMark(mark);
