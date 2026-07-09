@@ -13,7 +13,27 @@ const std = @import("std");
 // extern symbols in src/watcher.zig resolve regardless of the import graph.
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    // An OMITTED `-Doptimize` means ReleaseSafe here, not Debug (SKR-236). It was
+    // omitted: build-macos.sh never passed the flag to the Zig step, so every shipped
+    // macOS build linked an -O0 core. A forgotten flag must fail toward "optimized and
+    // checked", never toward "unoptimized" (this bug) or "unchecked" (its Windows twin,
+    // SKR-235).
+    //
+    // Rolled by hand rather than with `standardOptimizeOption`'s `preferred_optimize_
+    // mode`: that field does not mean "default to this". It swaps `-Doptimize` for a
+    // `-Drelease` boolean and still resolves to Debug when the flag is absent, which is
+    // the exact hazard this line exists to remove. Measured, not assumed.
+    //
+    // ReleaseSafe keeps every runtime safety check -- bounds, overflow, null unwrap --
+    // so an out-of-bounds slice aborts with a stack trace into the crash-log pipeline
+    // instead of reading adjacent memory. The core is a file watcher, a dispatch table
+    // and a loopback file server; nothing here is hot enough to buy anything by turning
+    // the checks off.
+    const optimize = b.option(
+        std.builtin.OptimizeMode,
+        "optimize",
+        "Prioritize performance, safety, or binary size (default: ReleaseSafe)",
+    ) orelse .ReleaseSafe;
 
     const lib = b.addLibrary(.{
         .name = "skrive_core",

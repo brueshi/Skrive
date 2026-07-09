@@ -38,7 +38,7 @@ bun build "$WEB_DIR/native-bridge.ts" \
     --outfile "$WEB_DIR/dist/native-bridge.js" \
     --format iife --target browser
 
-echo "==> 3/6 zig core static lib"
+echo "==> 3/6 zig core static lib ($CONFIG)"
 # Build only the static lib (`lib` step), not the native fixture harness: the
 # harness is host-only tooling and links FSEvents directly, which Zig can't
 # resolve under this explicit cross-target. The host links the frameworks.
@@ -47,8 +47,14 @@ echo "==> 3/6 zig core static lib"
 # cross-compiles and won't auto-detect it, but the vendored watcher's C++
 # includes need the SDK's framework + usr/include headers (build.zig wires
 # those paths from b.sysroot).
+#
+# CONFIG must reach the ZIG step, not only the Swift one (SKR-236). It never did:
+# `zig build` with no -Doptimize resolved to Debug, so `./build-macos.sh release`
+# shipped a release Swift host linked against an -O0 core. Release now builds the
+# core ReleaseSafe -- optimized, with every safety check retained.
 MACOS_SDK="$(xcrun --show-sdk-path)"
-(cd "$CORE_DIR" && zig build lib "-Dtarget=aarch64-macos.$ZIG_MACOS_MIN" --sysroot "$MACOS_SDK")
+ZIG_OPTIMIZE=$([[ "$CONFIG" == "release" ]] && echo ReleaseSafe || echo Debug)
+(cd "$CORE_DIR" && zig build lib "-Dtarget=aarch64-macos.$ZIG_MACOS_MIN" "-Doptimize=$ZIG_OPTIMIZE" --sysroot "$MACOS_SDK")
 
 echo "==> 4/6 re-archive core for ld64 alignment"
 # Zig's archiver writes members ld64 rejects ("not 8-byte aligned"); Apple's
