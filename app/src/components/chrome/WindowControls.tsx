@@ -10,6 +10,7 @@
 // rather than the OS metrics — custom chrome, native muscle memory.
 
 import { useEffect, useState, type CSSProperties } from 'react';
+import { NO_DRAG_ATTR } from './windowDrag';
 
 // Host-injected control surface; see shell-zig/web/native-bridge-win.ts.
 type SkriveWindowApi = {
@@ -31,7 +32,13 @@ const frameless =
   typeof window !== 'undefined' && window.__SKRIVE_FRAMELESS__ === true;
 
 // The controls sit in the non-draggable lane of the otherwise-draggable header.
+// Declared twice: the CSS for Electron and the Windows host, the attribute for the
+// macOS host's mousedown handler, which cannot see the CSS (SKR-240). This component
+// renders only on the frameless Windows host, so the attribute is belt-and-braces —
+// but a no-drag lane that only half-announces itself is exactly how a button becomes
+// a drag handle later.
 const noDrag: CSSProperties = { WebkitAppRegion: 'no-drag' } as CSSProperties;
+const noDragProps = { style: noDrag, [NO_DRAG_ATTR]: true };
 
 export function WindowControls() {
   const api = typeof window !== 'undefined' ? window.__skriveWindow : undefined;
@@ -59,7 +66,7 @@ export function WindowControls() {
   if (!frameless || !api) return null;
 
   return (
-    <div className="window-controls" style={noDrag}>
+    <div className="window-controls" {...noDragProps}>
       <button
         type="button"
         className="window-control"

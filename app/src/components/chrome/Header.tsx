@@ -11,7 +11,7 @@
 //
 // The project menu lives in the sidebar's section header — not here.
 
-import { type CSSProperties } from 'react';
+import { type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import { IconButton } from '../ui/IconButton';
 import {
   selectActiveTab,
@@ -22,6 +22,11 @@ import { Tooltip } from '../ui/Tooltip';
 import { PanelMenu } from './PanelMenu';
 import { TabBar } from './TabBar';
 import { WindowControls } from './WindowControls';
+import {
+  DRAG_REGION_ATTR,
+  NO_DRAG_ATTR,
+  handleChromeMouseDown
+} from './windowDrag';
 
 const isMacOS =
   typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
@@ -42,17 +47,31 @@ export function Header() {
   const headerClass = `header${isMacOS ? ' is-macos' : ''}${
     isFrameless ? ' is-frameless' : ''
   }`;
-  const dragStyle: CSSProperties = { WebkitAppRegion: 'drag' } as CSSProperties;
-  const noDragStyle: CSSProperties = {
-    WebkitAppRegion: 'no-drag'
-  } as CSSProperties;
+  // The drag lane is declared TWICE, on purpose, and both are load-bearing:
+  //   - `-webkit-app-region` is what Electron and the Windows host (WebView2's
+  //     non-client-region support) read. It is a Chromium extension.
+  //   - the data attributes are what the macOS host reads, via the mousedown handler
+  //     below, because WKWebView does not implement that CSS property at all and
+  //     ignores it silently (SKR-240).
+  // Drop either one and a shell loses its window dragging, quietly.
+  const dragProps = {
+    style: { WebkitAppRegion: 'drag' } as CSSProperties,
+    [DRAG_REGION_ATTR]: true,
+    onMouseDown: (e: ReactMouseEvent) => {
+      handleChromeMouseDown(e);
+    }
+  };
+  const noDragProps = {
+    style: { WebkitAppRegion: 'no-drag' } as CSSProperties,
+    [NO_DRAG_ATTR]: true
+  };
 
   // Settings is a full-page view, not a modal — the topbar collapses to
   // Back / Settings / Done so the chrome matches the focused context.
   if (activeView === 'settings') {
     return (
-      <header className={`${headerClass} header-settings`} style={dragStyle}>
-        <div className="header-left" style={noDragStyle}>
+      <header className={`${headerClass} header-settings`} {...dragProps}>
+        <div className="header-left" {...noDragProps}>
           <button
             type="button"
             className="settings-back"
@@ -82,8 +101,8 @@ export function Header() {
   }
 
   return (
-    <header className={headerClass} style={dragStyle}>
-      <div className="header-left" style={noDragStyle}>
+    <header className={headerClass} {...dragProps}>
+      <div className="header-left" {...noDragProps}>
         <Tooltip
           label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
           shortcut="⌘["
@@ -103,12 +122,12 @@ export function Header() {
 
       <span className="header-sep" aria-hidden="true" />
 
-      <div style={noDragStyle} className="header-tabs">
+      <div className="header-tabs" {...noDragProps}>
         <TabBar />
       </div>
 
       {activeTab && (
-        <div className="header-right" style={noDragStyle}>
+        <div className="header-right" {...noDragProps}>
           {/* Save status lives in the editor toolbar band (EditorBar, SKR-123);
               the rendered/source switch was retired to the command palette
               (SKR-126). The panel popover stays in the topbar. */}

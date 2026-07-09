@@ -40,6 +40,8 @@ declare global {
     // Marks "this renderer is hosted by the native shell" (vs Electron). Set on
     // both native shells; Electron loads no bridge so it's absent there.
     __SKRIVE_NATIVE_SHELL__?: boolean;
+    // macOS-only window dragging (SKR-240). Absent on every other host.
+    __skriveWindowDrag?: { start(): void; toggleZoom(): void };
   }
 }
 
@@ -62,6 +64,16 @@ function nativeInvoke(
     pending.set(id, { resolve, reject });
     host.postMessage(JSON.stringify({ v: 1, id, cmd, payload }));
   });
+}
+
+/** Fire-and-forget host command. The host replies to nothing here, so unlike
+ *  `nativeInvoke` this registers no pending promise — one that could never settle
+ *  would leak an entry per call, and a window drag is one per mousedown. The `id` is
+ *  still sent: the host's parser requires the field before it routes anything. */
+function nativeNotify(cmd: string): void {
+  const host = window.webkit?.messageHandlers?.skriveInvoke;
+  if (!host) return;
+  host.postMessage(JSON.stringify({ v: 1, id: nextRequestId++, cmd, payload: {} }));
 }
 
 // The single fixed entry point the host calls (Part I delivery rule). The
@@ -128,6 +140,17 @@ window.__SKRIVE_NATIVE_UPDATER__ = false;
 // this to suppress Electron-only flows like the M4a migration notice. Kept
 // separate from the updater flag above, which means something different.
 window.__SKRIVE_NATIVE_SHELL__ = true;
+
+// Window dragging for the macOS host (SKR-240). The renderer's topbar carries
+// `-webkit-app-region: drag`, a Chromium extension WKWebView does not implement — so
+// on this host the header must ask AppKit to drag the window itself. Deliberately a
+// SEPARATE global from the Windows host's `__skriveWindow` (minimize / maximize /
+// close): the two hosts expose different chrome, and merging them would force one
+// shell's API to go optional in the other's types. Its absence is the feature test.
+window.__skriveWindowDrag = {
+  start: () => nativeNotify('window:startDrag'),
+  toggleZoom: () => nativeNotify('window:toggleZoom')
+};
 
 // Test-only hook: lets the SKRIVE_DIAG self-test drive the native channel
 // directly (e.g. diag:poison for the 1.4 delivery-rule round-trip) without

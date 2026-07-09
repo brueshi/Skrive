@@ -141,6 +141,14 @@ final class CoreBridge {
             onUpdaterDownloadAndInstall?()
             replyToRenderer(id: id, result: [:])
             return true
+        case "window:startDrag":
+            // Fire-and-forget: performDrag runs its own event loop until mouse-up,
+            // so there is nothing to reply to and no reply the renderer could hear.
+            handleWindowStartDrag()
+            return true
+        case "window:toggleZoom":
+            handleWindowToggleZoom()
+            return true
         case "app:version":
             // Host-owned per the contract: return the bundle's real version
             // (stamped from package.json), the same value Sparkle compares
@@ -154,6 +162,44 @@ final class CoreBridge {
             return true
         default:
             return false
+        }
+    }
+
+    /// Drag the window from the renderer's topbar (SKR-240).
+    ///
+    /// The renderer marks its drag lane with `-webkit-app-region: drag`, which is a
+    /// Chromium extension: WebView2 honors it natively (the Windows host just enables
+    /// non-client-region support) and WKWebView ignores it entirely. Since the webview
+    /// is the window's contentView under a fullSizeContentView titlebar, it covers the
+    /// native titlebar band too — so without this the window cannot be moved at all.
+    ///
+    /// `performDrag` needs the live mouse-down. WKWebView delivers a script message
+    /// while that event is still current, which is what makes `NSApp.currentEvent`
+    /// the right one — the same mechanism Tauri and Ghostty use. The type check is the
+    /// guard: if the message ever arrives detached from a mouse event, do nothing
+    /// rather than drag the window from a keystroke.
+    private func handleWindowStartDrag() {
+        guard let window = webView?.window, let event = NSApp.currentEvent else { return }
+        switch event.type {
+        case .leftMouseDown, .leftMouseDragged:
+            window.performDrag(with: event)
+        default:
+            break
+        }
+    }
+
+    /// Double-click on the drag lane. macOS lets the user choose what that means
+    /// (System Settings > Desktop & Dock > "Double-click a window's title bar to"),
+    /// so read the preference rather than assuming zoom. An unset default is Maximize.
+    private func handleWindowToggleZoom() {
+        guard let window = webView?.window else { return }
+        switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+        case "Minimize":
+            window.miniaturize(nil)
+        case "None":
+            break
+        default:
+            window.zoom(nil)
         }
     }
 
