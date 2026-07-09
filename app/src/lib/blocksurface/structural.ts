@@ -38,7 +38,7 @@ function isInlineText(b: BlockNode): b is InlineTextBlock {
  * The container path used to pass only `start`, so the selected text was never
  * removed — it survived in the right half and was DUPLICATED into both.
  */
-function splitBlockAt(
+export function splitBlockAt(
   child: InlineTextBlock,
   start: number,
   end: number,
@@ -46,21 +46,29 @@ function splitBlockAt(
 ): { left: BlockNode; right: BlockNode } {
   const inline = start === end ? child.inline : deleteRangeInInline(child.inline, start, end);
   const [leftInline, rightInline] = splitInline(inline, start);
+  const heading = child.type === 'heading';
   const emptyLeft = inlineLength(leftInline) === 0;
   const emptyRight = inlineLength(rightInline) === 0;
 
-  // An empty heading must not survive on either side of the split. Guarded on the
-  // OTHER half being non-empty, so Enter on a wholly empty heading still leaves the
-  // heading in place (it becomes "heading + empty paragraph", not two paragraphs) —
-  // pressing Enter on a heading you just created should not silently erase it.
-  const keepsType = (empty: boolean, otherEmpty: boolean) => child.type !== 'heading' || !empty || otherEmpty;
-  const left: BlockNode = keepsType(emptyLeft, emptyRight)
-    ? { ...child, inline: leftInline, dirty: true }
-    : newParagraph(leftInline, child.id);
+  // The two heading rules are NOT mirror images, and writing them as one symmetric
+  // rule gets the empty-heading case wrong.
+  //
+  // Right: Enter at the END of a heading always drops to body text. Unconditional.
+  // Left:  Enter at the START of a heading pushes the heading down and leaves an
+  //        empty paragraph above — but only when there IS a heading being pushed
+  //        down. Press Enter on a heading you just created and left/right are both
+  //        empty; demoting the left would silently erase the heading. So the left
+  //        rule is guarded on the right half carrying the text.
+  const demoteLeft = heading && emptyLeft && !emptyRight;
+  const demoteRight = heading && emptyRight;
+
+  const left: BlockNode = demoteLeft
+    ? newParagraph(leftInline, child.id)
+    : { ...child, inline: leftInline, dirty: true };
   // The right half is a NEW block: fresh id, no durable source text to reuse.
-  const right: BlockNode = keepsType(emptyRight, emptyLeft)
-    ? { ...child, id: gen(), durable: false, src: null, gapBefore: null, inline: rightInline, dirty: true }
-    : newParagraph(rightInline, gen());
+  const right: BlockNode = demoteRight
+    ? newParagraph(rightInline, gen())
+    : { ...child, id: gen(), durable: false, src: null, gapBefore: null, inline: rightInline, dirty: true };
   return { left, right };
 }
 
