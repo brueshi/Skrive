@@ -24,7 +24,7 @@ import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteB
 import { findBlockById, updateBlockById } from './tree';
 import { enterInContainer, exitContainer, type StructuralResult } from './structural';
 import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
-import { changeListType, findImmediateList, indentItem, liftItemToParagraph, outdentItem } from './list-ops';
+import { changeListType, findImmediateList, indentItem, liftItemOut, outdentItem } from './list-ops';
 import {
   type BooleanMark,
   coalesceInline,
@@ -1000,7 +1000,7 @@ export class BlockSurface {
   }
 
   /** Mark a block dirty for re-serialization, leaving a frozen block (which has no
-   *  dirty flag and re-emits verbatim) untouched — the guard liftItemToParagraph
+   *  dirty flag and re-emits verbatim) untouched — the guard liftItemOut
    *  uses, shared by the wrap/unwrap toggles that re-home blocks. */
   private dirtyBlock(b: BlockNode): BlockNode {
     return b.type === 'frozen_block' ? b : ({ ...b, dirty: true } as BlockNode);
@@ -1125,7 +1125,7 @@ export class BlockSurface {
     if (findImmediateList(blocks, leafId)) {
       let out: BlockNode[] | null;
       while ((out = outdentItem(blocks, leafId, generateBlockId)) !== null) blocks = out;
-      const lifted = liftItemToParagraph(blocks, leafId, generateBlockId);
+      const lifted = liftItemOut(blocks, leafId, generateBlockId);
       if (lifted) blocks = lifted;
     }
     const source = findBlockById(blocks, leafId);
@@ -1236,11 +1236,11 @@ export class BlockSurface {
   }
 
   /** Shift+Tab: outdent a nested item one level; a top-level item is lifted out of
-   *  the list to a paragraph (splitting the list). Same dispatch backs toggle-off. */
+   *  the list entirely (splitting the list). Same dispatch backs toggle-off. */
   private applyOutdent(leafId: string, offset: number): void {
     const blocks =
       outdentItem(this.doc.blocks, leafId, generateBlockId) ??
-      liftItemToParagraph(this.doc.blocks, leafId, generateBlockId);
+      liftItemOut(this.doc.blocks, leafId, generateBlockId);
     if (blocks) this.applyStructural({ blocks, caret: { id: leafId, offset } });
   }
 
@@ -1252,7 +1252,7 @@ export class BlockSurface {
     let blocks = this.doc.blocks;
     for (const id of leafIds) {
       const next = outdent
-        ? (outdentItem(blocks, id, generateBlockId) ?? liftItemToParagraph(blocks, id, generateBlockId))
+        ? (outdentItem(blocks, id, generateBlockId) ?? liftItemOut(blocks, id, generateBlockId))
         : indentItem(blocks, id, generateBlockId);
       if (next) blocks = next;
     }

@@ -129,7 +129,7 @@ export function indentItem(blocks: BlockNode[], leafId: string, gen: () => strin
  * sibling after its parent item. Items that followed it in the sublist re-home
  * under the lifted item (preserving document order); items before it stay; an
  * emptied sublist is removed. Returns null when the item has no parent list (a
- * top-level item — handled by liftItemToParagraph instead).
+ * top-level item — handled by liftItemOut instead).
  */
 export function outdentItem(blocks: BlockNode[], leafId: string, gen: () => string): BlockNode[] | null {
   return recurse(blocks);
@@ -196,8 +196,11 @@ export function outdentItem(blocks: BlockNode[], leafId: string, gen: () => stri
  * into before/after fragments around them. The focused leaf keeps its id (so the
  * caller restores the caret); the surviving fragments keep stable ids where
  * possible. Returns null when the leaf is not a direct item of a top-level list.
+ *
+ * Named `…Out`, not `…ToParagraph`: the lifted children keep their own types, so
+ * an item holding a heading lifts out as a heading.
  */
-export function liftItemToParagraph(blocks: BlockNode[], leafId: string, gen: () => string): BlockNode[] | null {
+export function liftItemOut(blocks: BlockNode[], leafId: string, gen: () => string): BlockNode[] | null {
   return recurse(blocks);
 
   function recurse(nodes: BlockNode[]): BlockNode[] | null {

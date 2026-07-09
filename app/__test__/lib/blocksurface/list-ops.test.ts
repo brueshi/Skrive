@@ -1,5 +1,5 @@
 // List ergonomics structural transforms (SKR-112, Stage 4). Tab nesting,
-// Shift+Tab outdent, top-level lift-to-paragraph, and list-kind toggle, as pure
+// Shift+Tab outdent, top-level lift-out, and list-kind toggle, as pure
 // tree transforms. The load-bearing assertion is round-trip byte-stability
 // through the Markdown floor: a transform's output serializes, and an indent that
 // is immediately outdented restores the original bytes.
@@ -9,7 +9,7 @@ import {
   changeListType,
   findImmediateList,
   indentItem,
-  liftItemToParagraph,
+  liftItemOut,
   outdentItem
 } from '../../../src/lib/blocksurface/list-ops';
 import { parseDocument } from '../../../src/lib/blockmodel/parse';
@@ -97,7 +97,7 @@ describe('outdentItem', () => {
     expect(ser(out!, d)).toBe('- p\n  - a\n- b\n  - c\n');
   });
 
-  it('returns null for a top-level item (lift-to-paragraph handles it)', () => {
+  it('returns null for a top-level item (liftItemOut handles it)', () => {
     const d = doc('- one\n- two\n');
     expect(outdentItem(d.blocks, leafId(d.blocks, 'two'), generateBlockId)).toBeNull();
   });
@@ -113,28 +113,28 @@ describe('indent then outdent is byte-identical', () => {
   });
 });
 
-describe('liftItemToParagraph', () => {
+describe('liftItemOut', () => {
   it('lifts a middle item out, splitting the list', () => {
     const d = doc('- a\n- b\n- c\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
     expect(ser(out!, d)).toBe('- a\n\nb\n\n- c\n');
   });
 
   it('lifts the first item to a leading paragraph', () => {
     const d = doc('- a\n- b\n- c\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'a'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'a'), generateBlockId);
     expect(ser(out!, d)).toBe('a\n\n- b\n- c\n');
   });
 
   it('lifts the last item to a trailing paragraph', () => {
     const d = doc('- a\n- b\n- c\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'c'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'c'), generateBlockId);
     expect(ser(out!, d)).toBe('- a\n- b\n\nc\n');
   });
 
   it('lifts a sole item to a plain paragraph', () => {
     const d = doc('- only\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'only'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'only'), generateBlockId);
     expect(ser(out!, d)).toBe('only\n');
   });
 });
@@ -160,38 +160,38 @@ describe('changeListType', () => {
 describe('ordered-list numbering survives splits', () => {
   it('lifting a middle item keeps the before-fragment and resumes the after-fragment', () => {
     const d = doc('3. a\n4. b\n5. c\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
     expect(ser(out!, d)).toBe('3. a\n\nb\n\n5. c\n');
   });
 
   it('lifting the first item resumes the remainder past it', () => {
     const d = doc('3. a\n4. b\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'a'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'a'), generateBlockId);
     expect(ser(out!, d)).toBe('a\n\n4. b\n');
   });
 
   it('lifting the last item leaves the head numbering untouched', () => {
     const d = doc('3. a\n4. b\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
     expect(ser(out!, d)).toBe('3. a\n\nb\n');
   });
 
   it('preserves the delimiter across a split', () => {
     const d = doc('3) a\n4) b\n5) c\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
     expect(ser(out!, d)).toBe('3) a\n\nb\n\n5) c\n');
   });
 
   it('preserves the bullet marker across a split', () => {
     const d = doc('* a\n* b\n* c\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
     expect(ser(out!, d)).toBe('* a\n\nb\n\n* c\n');
   });
 
   it('the before-fragment keeps the original list id', () => {
     const d = doc('3. a\n4. b\n5. c\n');
     const listId = d.blocks[0]!.id;
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId)!;
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'b'), generateBlockId)!;
     expect(out[0]!.id).toBe(listId);
     expect(out[2]!.id).not.toBe(listId);
   });
