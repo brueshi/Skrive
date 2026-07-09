@@ -22,7 +22,7 @@ import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
 import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
 import { findBlockById, updateBlockById } from './tree';
-import { enterInContainer, exitContainer, type StructuralResult } from './structural';
+import { enterInContainer, exitContainer, splitBlockAt, type StructuralResult } from './structural';
 import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
 import { changeListType, findImmediateList, indentItem, itemsHoldingLeaves, liftItemOut, outdentItem, splitListAround } from './list-ops';
 import {
@@ -3000,6 +3000,16 @@ export class BlockSurface {
         // Backspace at the start of a list item removes its marker: outdent one
         // level, or lift the item out to a paragraph at the top level.
         this.applyOutdent(t.leaf.id, 0);
+      } else if (t.leaf.type === 'heading' && this.doc.blocks[0]?.id === t.leaf.id) {
+        // Backspace at the very start of the document has nothing to merge into, so
+        // the gesture used to dead-end on a heading. Strip the heading instead: the
+        // same rule the list branch above applies — the first Backspace at a block's
+        // start removes its FORMATTING, not its text (SKR-180 / F51).
+        //
+        // Deliberately doc-start only. Elsewhere, Backspace at offset 0 still merges
+        // a heading into the block above, which is a gesture writers rely on; Notion
+        // demotes there first, but that would cost the merge its first keystroke.
+        this.setBlockType({ kind: 'paragraph' });
       } else if (isInlineText(t.leaf)) {
         // Merge into the previous inline leaf in document order — across a list /
         // quote boundary too (the old merge only joined top-level paragraphs).
@@ -3226,7 +3236,9 @@ export class BlockSurface {
       const result =
         inlineLength(t.leaf.inline) === 0
           ? exitContainer(this.doc.blocks, t.leaf.id, generateBlockId)
-          : enterInContainer(this.doc.blocks, t.leaf.id, t.start, generateBlockId);
+          : // [t.start, t.end) is deleted before the split, as at the top level. Passing
+            // only t.start left the selected text in the right half, duplicating it.
+            enterInContainer(this.doc.blocks, t.leaf.id, t.start, t.end, generateBlockId);
       if (result) this.applyStructural(result);
       return;
     }
@@ -3234,22 +3246,25 @@ export class BlockSurface {
     const index = this.doc.blocks.findIndex((b) => b.id === t.leaf.id);
     if (index < 0) return;
 
-    let inline = t.leaf.inline;
-    if (!t.collapsed) inline = deleteRangeInInline(inline, t.start, t.end);
-    const [left, right] = splitInline(inline, t.start);
-
-    const leftBlock: BlockNode = { ...t.leaf, inline: left, dirty: true };
-    // Enter at the END of a heading drops to body text (the Docs/Notion
-    // convention); splitting mid-heading keeps the heading type for the rest.
-    const rightType = t.leaf.type === 'heading' && inlineLength(right) === 0 ? 'paragraph' : t.leaf.type;
-    const level = t.leaf.type === 'heading' ? t.leaf.level : 1;
-    const rightBlock = this.newInlineBlock(rightType, right, level);
-
+    // Both halves come from the one splitter the container path uses, so the type
+    // rules cannot drift apart again (SKR-180): Enter at the END of a heading drops
+    // to body text, Enter at its START leaves an empty PARAGRAPH above rather than an
+    // empty heading, and a mid-heading split keeps the heading on both sides.
+    const { left: leftBlock, right: rightBlock } = splitBlockAt(t.leaf, t.start, t.end, generateBlockId);
     const blocks = this.doc.blocks.slice();
     blocks.splice(index, 1, leftBlock, rightBlock);
-    this.doc = { ...this.doc, blocks };
 
-    renderInlineInto(t.blockEl, left, this.resolveAsset);
+    // Enter at the start of a heading rewrites the LEFT half's tag, which the
+    // surgical path below cannot express — it only replaces inline content, never the
+    // element. A rare gesture: pay for a reconcile rather than complicate the typing
+    // hot path that every other Enter rides.
+    if (leftBlock.type !== t.leaf.type) {
+      this.applyStructural({ blocks, caret: { id: rightBlock.id, offset: 0 } });
+      return;
+    }
+
+    this.doc = { ...this.doc, blocks };
+    renderInlineInto(t.blockEl, (leftBlock as typeof t.leaf).inline, this.resolveAsset);
     const rightEl = renderBlock(rightBlock, this.resolveAsset);
     t.blockEl.after(rightEl);
     this.registry.set(rightBlock.id, rightEl);

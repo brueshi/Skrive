@@ -31,7 +31,7 @@ function counter(): () => string {
 
 describe('enterInContainer', () => {
   it('splits a quote child into two paragraphs', () => {
-    const r = enterInContainer([quote('q', [para('qp', 'hello')])], 'qp', 2, counter());
+    const r = enterInContainer([quote('q', [para('qp', 'hello')])], 'qp', 2, 2, counter());
     expect(r).not.toBeNull();
     const q = r!.blocks[0]!;
     expect(q.type === 'blockquote' && q.children.length).toBe(2);
@@ -40,21 +40,21 @@ describe('enterInContainer', () => {
   });
 
   it('splits a list item into two items', () => {
-    const r = enterInContainer([list('l', [[para('lp', 'hi')]])], 'lp', 1, counter());
+    const r = enterInContainer([list('l', [[para('lp', 'hi')]])], 'lp', 1, 1, counter());
     const l = r!.blocks[0]!;
     expect(l.type === 'bullet_list' && l.items.length).toBe(2);
     expect(r!.caret.id).toBe('new0');
   });
 
   it('returns null for a top-level block (the caller handles it)', () => {
-    expect(enterInContainer([para('top', 'x')], 'top', 1, counter())).toBeNull();
+    expect(enterInContainer([para('top', 'x')], 'top', 1, 1, counter())).toBeNull();
   });
 
   it('splits a NESTED list item (depth 2), not just the top level', () => {
     // outer list > item[ para 'a', inner list > item[ para 'b' ] ]
     const inner = list('inner', [[para('b', 'bbb')]]);
     const outer = list('outer', [[para('a', 'a'), inner]]);
-    const r = enterInContainer([outer], 'b', 1, counter());
+    const r = enterInContainer([outer], 'b', 1, 1, counter());
     expect(r, 'nested item Enter is handled (was a silent no-op)').not.toBeNull();
     const o = r!.blocks[0]!;
     // The inner list now has two items; the caret is in the freshly minted one.
