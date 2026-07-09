@@ -1648,6 +1648,13 @@ body {
   color: var(--skrive-fg);
 }
 
+/* The scroller carries tabindex=-1 so cycling into preview can focus it for
+   keyboard scrolling (SKR-183). It is a scroll container, not a control: a focus
+   ring around the whole page of prose would be noise. */
+.preview:focus {
+  outline: none;
+}
+
 /* ----- Outline rail (preview-only) ----- */
 
 /* Slim column hugging the right edge. Captures the pointer (like a
