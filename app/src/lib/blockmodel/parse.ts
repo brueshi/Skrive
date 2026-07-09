@@ -16,7 +16,7 @@
 // corrupt it.
 
 import type { Code, List, ListItem as MdListItem, PhrasingContent, RootContent, Table } from 'mdast';
-import { parseMarkdown } from '../markdown-core';
+import { normalizeLineEndings, parseMarkdown } from '../markdown-core';
 import { parseAnchorComment } from './anchor';
 import { generateBlockId } from './id';
 import type {
@@ -321,8 +321,12 @@ function blockToModel(
  * map and restoring/assigning block ids. `<!-- sk:ID -->` anchor comments are
  * consumed and bound to the block they precede.
  */
-export function parseDocument(md: string, options?: ParseOptions): Document {
+export function parseDocument(source: string, options?: ParseOptions): Document {
   const genId = options?.generateId ?? generateBlockId;
+  // The SAME string the parser sees (SKR-160). mdast offsets index the normalized
+  // text, and `src` slices index `ctx.md` — hand them different bytes and every
+  // slice after the first CRLF is off by the carriage returns before it.
+  const md = normalizeLineEndings(source);
   const ctx: ParseCtx = { md, genId, inlineHtmlAsText: options?.inlineHtmlAsText === true };
   const root = parseMarkdown(md);
   const children = root.children ?? [];

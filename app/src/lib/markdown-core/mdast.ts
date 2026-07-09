@@ -45,8 +45,26 @@ function flowSoftBreaks(node: { type?: string; value?: string; children?: unknow
   }
 }
 
+/**
+ * The line-ending policy for everything downstream of Markdown: the model holds
+ * LF, always (SKR-160 / F10).
+ *
+ * micromark does not normalize CRLF, and a soft break lives inside a `text`
+ * node's value — so `alpha\r\nbeta` used to model as the literal text
+ * `alpha\r beta`, with a stray CR carried as content into `.folio` on paste and
+ * on import. Normalizing here, before anything reads a byte, is what makes that
+ * unrepresentable rather than merely unlikely: a `\r` cannot enter the model
+ * because the parser never sees one.
+ *
+ * `.md` files on disk keep whatever endings they have — that path saves
+ * text→text and never round-trips through this parser (SKR-196).
+ */
+export function normalizeLineEndings(md: string): string {
+  return md.replace(/\r\n?/g, '\n');
+}
+
 export function parseMarkdown(md: string): Root {
-  const root = fromMarkdown(md, { extensions, mdastExtensions }) as Root;
+  const root = fromMarkdown(normalizeLineEndings(md), { extensions, mdastExtensions }) as Root;
   flowSoftBreaks(root);
   return root;
 }
