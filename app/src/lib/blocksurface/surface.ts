@@ -2516,6 +2516,10 @@ export class BlockSurface {
     this.reconcile();
     this.focus();
     writeSelection(this.container, collapsedRange({ leaf: { kind: 'block', id: caret.id }, offset: caret.offset }), 'paste');
+    // The paste landed at the document end, which is off-screen in any document
+    // long enough to scroll. Placing a caret does not scroll to it, so without
+    // this the pasted text appears to have gone nowhere (SKR-186 / F31).
+    this.leafElementById(caret.id)?.scrollIntoView({ block: 'nearest' });
     this.scheduleSerialize();
   }
 
@@ -2552,7 +2556,10 @@ export class BlockSurface {
   // cannot hold a paragraph seam. Line structure survives in all of them.
   private pasteText(raw: string, mode: 'flow' | 'literal'): void {
     const segments = mode === 'literal' ? literalParagraphs(raw) : plainTextParagraphs(raw);
-    if (segments.length === 0) return;
+    // Nothing to insert: a paste of "\n" segments to a single empty string. Falling
+    // through would record an undo step for an edit that changed no text, so ⌘Z
+    // afterwards would appear to do nothing (SKR-186 / F31).
+    if (segments.length === 0 || segments.every((s) => s === '')) return;
     const multiline = segments.length > 1 || segments[0]!.includes('\n');
 
     // A single line rides the ordinary insert for placement, but framed as its own

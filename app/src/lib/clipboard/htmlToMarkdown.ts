@@ -12,6 +12,8 @@
 //                                             a fragment, not a full document
 //   rehypeSanitizeUrls  hast -> hast          drop javascript:/data:/file: URLs
 //                                             before they can become model nodes
+//   rehypeSourceQuirks  hast -> hast          repair block structure per source
+//                                             (Word lists, Docs items, code, <br>)
 //   rehypeCleanRichText hast -> hast          unwrap source-specific cruft
 //   rehype-remark       hast -> mdast         styling Markdown can't represent
 //                                             (colour, underline, font) is
@@ -32,6 +34,7 @@ import remarkGfm from 'remark-gfm';
 import remarkStringify from 'remark-stringify';
 import { rehypeCleanRichText } from './cleanHtml';
 import { rehypeSanitizeUrls } from './sanitizeUrls';
+import { rehypeSourceQuirks } from './sourceQuirks';
 
 // Notion copies a callout block as an `<aside>…</aside>` wrapper, but *escaped*
 // (`&lt;aside&gt;`), so it survives the HTML pipeline as literal `<aside>` /
@@ -41,9 +44,14 @@ import { rehypeSanitizeUrls } from './sanitizeUrls';
 // lines is converted, so prose that merely mentions `<aside>` is left untouched.
 const ASIDE_OPEN = /^\\?<aside>\\?\s*$/;
 const ASIDE_CLOSE = /^\\?<\/aside>\s*$/;
+// The gate. `ASIDE_OPEN` is anchored to a whole STRING, so testing it against the
+// document only matched a paste that was nothing but the marker — a callout at the
+// very start of a paste fell through untouched, while one further down matched the
+// `\n`-prefixed alternative (SKR-186). Anchor to a line instead.
+const HAS_ASIDE = /(^|\n)\\?<aside>/;
 
 function convertNotionCallouts(md: string): string {
-  if (!ASIDE_OPEN.test(md) && !/\n\\?<aside>/.test(md)) return md;
+  if (!HAS_ASIDE.test(md)) return md;
   const lines = md.split('\n');
   const out: string[] = [];
   for (let i = 0; i < lines.length; i++) {
@@ -71,6 +79,7 @@ function convertNotionCallouts(md: string): string {
 const processor = unified()
   .use(rehypeParse, { fragment: true })
   .use(rehypeSanitizeUrls)
+  .use(rehypeSourceQuirks)
   .use(rehypeCleanRichText)
   .use(rehypeRemark)
   .use(remarkGfm)
