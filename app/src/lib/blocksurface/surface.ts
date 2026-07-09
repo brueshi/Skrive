@@ -3226,7 +3226,9 @@ export class BlockSurface {
       const result =
         inlineLength(t.leaf.inline) === 0
           ? exitContainer(this.doc.blocks, t.leaf.id, generateBlockId)
-          : enterInContainer(this.doc.blocks, t.leaf.id, t.start, generateBlockId);
+          : // [t.start, t.end) is deleted before the split, as at the top level. Passing
+            // only t.start left the selected text in the right half, duplicating it.
+            enterInContainer(this.doc.blocks, t.leaf.id, t.start, t.end, generateBlockId);
       if (result) this.applyStructural(result);
       return;
     }
