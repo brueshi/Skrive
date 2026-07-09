@@ -1047,3 +1047,85 @@ test('SKR-222: a selection covering every item still drops the whole list', asyn
   expect(md).toContain('beta');
   expect(serializeDocument(parseDocument(md)), 'stable after full unwrap').toBe(md);
 });
+
+// Where the caret lives right now, as "row,col" of the enclosing table cell, or
+// 'outside' when the selection has left the table. Used by the SKR-182 specs to
+// assert movement without reading the model (arrows move the caret, not the doc).
+async function caretCell(page: Page): Promise<string> {
+  return await page.evaluate(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return 'none';
+    const node = sel.getRangeAt(0).startContainer;
+    const el = (node.nodeType === 1 ? (node as Element) : node.parentElement) as Element | null;
+    const cell = el?.closest('[data-cell-row]');
+    if (!cell) return 'outside';
+    return `${cell.getAttribute('data-cell-row')},${cell.getAttribute('data-cell-col')}`;
+  });
+}
+
+// SKR-182 / F56: the table arrow hijack read only e.key, so a MODIFIED arrow was
+// swallowed and re-interpreted as plain cell-to-cell movement. Shift+Arrow must
+// extend a selection, not move the caret.
+test('SKR-182: Shift+Arrow at a cell edge extends a selection instead of moving', async ({ page }) => {
+  await open(page, 1);
+  await insertViaMenu(page, 'table');
+  await page.keyboard.type('AB');
+  await page.waitForTimeout(60);
+  expect(await caretCell(page), 'caret starts in the header cell').toBe('0,0');
+
+  // The caret sits at the cell's END, which is exactly the edge the hijack owns:
+  // an unmodified ArrowRight there steps to cell (0,1). Shift+ArrowRight used to
+  // do the same, silently discarding the selection the writer asked for. Pressing
+  // it mid-text would prove nothing — mid-text arrows already fall through.
+  await page.keyboard.press('Shift+ArrowRight');
+  await page.waitForTimeout(60);
+  expect(await caretCell(page), 'the caret did not step to the next cell').toBe('0,0');
+  expect(
+    await page.evaluate(() => window.getSelection()?.isCollapsed ?? true),
+    'the selection extended rather than the caret moving'
+  ).toBe(false);
+});
+
+test('SKR-182: an unmodified arrow still steps cell to cell', async ({ page }) => {
+  await open(page, 1);
+  await insertViaMenu(page, 'table');
+  await page.waitForTimeout(60);
+  expect(await caretCell(page)).toBe('0,0');
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(60);
+  expect(await caretCell(page), 'ArrowDown steps to the row below').toBe('1,0');
+  await page.keyboard.press('ArrowUp');
+  await page.waitForTimeout(60);
+  expect(await caretCell(page), 'ArrowUp steps back').toBe('0,0');
+});
+
+// A cell whose text wraps owns ArrowDown until the caret reaches its last visual
+// line; only then does the arrow mean "leave this cell".
+test('SKR-182: ArrowDown in a wrapped cell walks its own lines first', async ({ page }) => {
+  await open(page, 1);
+  await insertViaMenu(page, 'table');
+  await page.keyboard.type('wrap '.repeat(40).trim());
+  await page.waitForTimeout(80);
+
+  const lines = await page.evaluate(() => {
+    const cell = document.querySelector('[data-cell-row="0"][data-cell-col="0"]');
+    if (!cell) return 0;
+    const r = document.createRange();
+    r.selectNodeContents(cell);
+    return r.getClientRects().length;
+  });
+  expect(lines, 'the cell text wraps to several visual lines').toBeGreaterThan(1);
+
+  // Caret is at the END of the wrapped text (last visual line) after typing, so
+  // put it back on the first line before testing the walk.
+  await page.evaluate(() => {
+    const cell = document.querySelector('[data-cell-row="0"][data-cell-col="0"]') as HTMLElement;
+    const sel = window.getSelection()!;
+    sel.collapse(cell.firstChild, 0);
+  });
+  await page.waitForTimeout(60);
+
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(60);
+  expect(await caretCell(page), 'stayed in the cell, moved to its second line').toBe('0,0');
+});
