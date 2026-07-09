@@ -1235,3 +1235,25 @@ test('SKR-185: literal paste replaces a selection instead of flattening it', asy
   expect(md, 'the selection was replaced').not.toContain('replace me');
   expect(md, 'both pasted lines landed, as a break').toContain('x\\\ny');
 });
+
+// SKR-186 / F31: a paste with nothing to insert recorded an undo step anyway, so
+// the next ⌘Z silently spent itself on an edit that changed no text.
+test('SKR-186: a whitespace-only paste records no undo step', async ({ page }) => {
+  await open(page, 3);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('anchor');
+  await page.waitForTimeout(80);
+  expect(await serialized(page)).toContain('anchor');
+
+  await stubClipboard(page, '\n');
+  await page.keyboard.press('ControlOrMeta+Shift+KeyV');
+  await page.waitForTimeout(120);
+  expect(await serialized(page), 'nothing was inserted').toContain('anchor');
+
+  // One undo must reach the typing. Before the fix it was absorbed by the paste's
+  // phantom step and the text stayed on screen.
+  await page.keyboard.press('ControlOrMeta+KeyZ');
+  await page.waitForTimeout(120);
+  expect(await serialized(page), 'undo reached the typing, not a phantom paste step').not.toContain('anchor');
+});
