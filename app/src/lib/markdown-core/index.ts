@@ -4,7 +4,7 @@
 // subtle, hardened logic that must never fork into two divergent copies. Each
 // substrate flattens its own inline content into InlineItem[] and feeds it here.
 
-export { parseMarkdown } from './mdast';
+export { normalizeLineEndings, parseMarkdown } from './mdast';
 export { mdastEqual, semanticallyEqual } from './idempotence';
 export {
   type InlineItem,
