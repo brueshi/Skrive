@@ -1257,3 +1257,58 @@ test('SKR-186: a whitespace-only paste records no undo step', async ({ page }) =
   await page.waitForTimeout(120);
   expect(await serialized(page), 'undo reached the typing, not a phantom paste step').not.toContain('anchor');
 });
+
+// SKR-238: the code-block arrow hijack read only e.key, so a MODIFIED arrow at the
+// fence's edge was swallowed and re-interpreted as the SKR-152 exit gesture. The
+// sibling handleTableArrow already bails on any modifier (SKR-182 / F56).
+test('SKR-238: Shift+ArrowDown on a code block\'s last line extends a selection', async ({ page }) => {
+  await open(page, 3);
+  await insertViaMenu(page, 'code'); // a paragraph follows, so the exit had somewhere to land
+  await page.keyboard.type('x = 1');
+  await page.waitForTimeout(60);
+
+  // The caret is on the last (only) line — exactly the edge the hijack owns, so an
+  // unmodified ArrowDown here leaves the block. Pressing from a middle line would
+  // prove nothing: the handler already falls through there.
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.waitForTimeout(60);
+  expect(
+    await page.evaluate(() => window.getSelection()?.isCollapsed ?? true),
+    'the selection extended rather than the caret stepping out of the block'
+  ).toBe(false);
+});
+
+// The exit gesture SEEDS a paragraph when the code block is last (SKR-152), so the
+// hijack did not merely move the caret — a selection gesture mutated the document.
+test('SKR-238: Shift+ArrowDown at a terminal code block seeds no paragraph', async ({ page }) => {
+  await open(page, 1);
+  await insertViaMenu(page, 'code'); // code block becomes the last block
+  await page.keyboard.type('x = 1');
+  await page.waitForTimeout(60);
+  const before = await page.evaluate(() => window.__skriveBlockSurface!.blockCount());
+
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.waitForTimeout(60);
+  expect(
+    await page.evaluate(() => window.__skriveBlockSurface!.blockCount()),
+    'a selection gesture must not append a block'
+  ).toBe(before);
+});
+
+test('SKR-238: an unmodified ArrowLeft still exits a code block at its start', async ({ page }) => {
+  await open(page, 3);
+  await insertViaMenu(page, 'code');
+  await page.keyboard.type('x = 1');
+  await page.keyboard.press('Home');
+  await page.keyboard.press('ArrowLeft');
+  await page.waitForTimeout(60);
+  expect(
+    await page.evaluate(() => {
+      const sel = window.getSelection();
+      const node = sel?.getRangeAt(0).startContainer;
+      const el = (node?.nodeType === 1 ? (node as Element) : node?.parentElement) as Element | null;
+      return el?.closest('pre, code') !== null && el?.closest('pre, code') !== undefined;
+    }),
+    'the caret left the code block'
+  ).toBe(false);
+});
