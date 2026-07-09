@@ -999,3 +999,51 @@ test('Stage 3a: IME composition lands in the model', async ({ page, context }) =
   await page.waitForTimeout(80);
   expect(await serialized(page), 'composed text reconciled into the model').toContain(phrase);
 });
+
+// SKR-222: a same-kind toggle over PART of a list unwraps only the selected items
+// and splits the list around them (Docs/Notion). It used to unwrap the whole list,
+// because the toggle read the top-level block run and never looked at which items
+// the selection actually covered.
+test('SKR-222: partial same-kind toggle unwraps only the selected items', async ({ page }) => {
+  await open(page, 5);
+  await insertViaMenu(page, 'bullet');
+  await page.keyboard.type('alpha');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('beta');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('gamma');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('delta');
+  await page.waitForTimeout(80);
+  expect(await serialized(page), 'four bullet items').toContain('- alpha\n- beta\n- gamma\n- delta');
+
+  // Select the middle two items, then toggle bullets off.
+  await selectAcross(page, 'beta', 0, 'gamma', 5);
+  await page.keyboard.press('ControlOrMeta+Shift+Digit8');
+  await page.waitForTimeout(80);
+
+  const md = await serialized(page);
+  expect(md, 'selected items became paragraphs').toContain('- alpha\n\nbeta\n\ngamma\n\n- delta');
+  expect(md, 'the unselected items are still list items').toMatch(/(^|\n)- alpha/);
+  expect(md, 'trailing fragment survives as a list').toMatch(/(^|\n)- delta/);
+  expect(serializeDocument(parseDocument(md)), 'stable after partial unwrap').toBe(md);
+});
+
+test('SKR-222: a selection covering every item still drops the whole list', async ({ page }) => {
+  await open(page, 5);
+  await insertViaMenu(page, 'bullet');
+  await page.keyboard.type('alpha');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('beta');
+  await page.waitForTimeout(80);
+
+  await selectAcross(page, 'alpha', 0, 'beta', 4);
+  await page.keyboard.press('ControlOrMeta+Shift+Digit8');
+  await page.waitForTimeout(80);
+
+  const md = await serialized(page);
+  expect(md, 'no list remains').not.toMatch(/(^|\n)- alpha/);
+  expect(md).toContain('alpha');
+  expect(md).toContain('beta');
+  expect(serializeDocument(parseDocument(md)), 'stable after full unwrap').toBe(md);
+});

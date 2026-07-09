@@ -53,6 +53,66 @@ function numberAt(list: ListBlock, index: number): number {
   return (list.type === 'ordered_list' ? list.start : 1) + index;
 }
 
+/**
+ * Replace `list` with: the items before `from` as a list fragment, the children of
+ * items `from..to` lifted out as sibling blocks, then the items after `to` as a
+ * second fragment. Empty fragments are omitted. The lifted children keep their own
+ * types (a heading stays a heading).
+ *
+ * The single choke point for "take items out of a list and split it around them" —
+ * a top-level Shift+Tab (one item, SKR-181) and a partial same-kind unwrap (a run
+ * of items, SKR-222) are the same operation over a different span, so the fragment
+ * numbering and id reuse are decided in exactly one place.
+ *
+ * Ids: one surviving fragment reuses the list's id so a durable list keeps its
+ * identity; the other, when both exist, mints a fresh one. Numbering: the
+ * before-fragment keeps the list's `start`, the after-fragment resumes past the
+ * items that left.
+ *
+ * Caveat: when the lifted items contribute only lists of their own, the fragments
+ * land adjacent and same-markered, so the Markdown floor re-parses them as ONE
+ * list on reload — the in-session split is not representable there. `.folio` keeps
+ * the blocks distinct.
+ */
+export function splitListAround(
+  list: ListBlock,
+  from: number,
+  to: number,
+  gen: () => string
+): { nodes: BlockNode[]; lifted: BlockNode[] } {
+  const before = list.items.slice(0, from);
+  const after = list.items.slice(to + 1);
+  const lifted: BlockNode[] = [];
+  for (const item of list.items.slice(from, to + 1)) {
+    for (const child of item.children) {
+      lifted.push(child.type === 'frozen_block' ? child : { ...child, dirty: true });
+    }
+  }
+  const nodes: BlockNode[] = [];
+  if (before.length > 0) nodes.push(listLike(list, before, gen, numberAt(list, 0), list.id));
+  nodes.push(...lifted);
+  if (after.length > 0) {
+    nodes.push(listLike(list, after, gen, numberAt(list, to + 1), before.length > 0 ? undefined : list.id));
+  }
+  return { nodes, lifted };
+}
+
+/** The indices of the items that hold any of `leafIds`, anywhere beneath them. */
+export function itemsHoldingLeaves(list: ListBlock, leafIds: ReadonlySet<string>): number[] {
+  const out: number[] = [];
+  list.items.forEach((item, index) => {
+    if (item.children.some((child) => subtreeHasLeaf(child, leafIds))) out.push(index);
+  });
+  return out;
+}
+
+function subtreeHasLeaf(node: BlockNode, leafIds: ReadonlySet<string>): boolean {
+  if (leafIds.has(node.id)) return true;
+  if (isList(node)) return node.items.some((it) => it.children.some((c) => subtreeHasLeaf(c, leafIds)));
+  if (node.type === 'blockquote') return node.children.some((c) => subtreeHasLeaf(c, leafIds));
+  return false;
+}
+
 /** The list whose item DIRECTLY contains the focused leaf, or null. Used to read
  *  the immediate list's type for the toggle shortcut. */
 export function findImmediateList(blocks: BlockNode[], leafId: string): ListBlock | null {
@@ -209,28 +269,8 @@ export function liftItemOut(blocks: BlockNode[], leafId: string, gen: () => stri
       if (isList(b)) {
         const k = b.items.findIndex((it) => itemHasLeaf(it, leafId));
         if (k >= 0) {
-          const item = b.items[k]!;
-          const before = b.items.slice(0, k);
-          const after = b.items.slice(k + 1);
-          const replacement: BlockNode[] = [];
-          // Reuse the list's id for one surviving fragment so a durable list keeps
-          // its identity; the other fragment, when both exist, mints a fresh id.
-          // The before-fragment keeps the original numbering; the after-fragment
-          // resumes past the lifted item, so `3./4./5.` minus the middle item reads
-          // `3.` … `5.` and not `1.` … `1.` (SKR-181).
-          if (before.length > 0) replacement.push(listLike(b, before, gen, numberAt(b, 0), b.id));
-          for (const child of item.children) {
-            replacement.push(child.type === 'frozen_block' ? child : { ...child, dirty: true });
-          }
-          if (after.length > 0) {
-            // Caveat: when the lifted item's only child is itself a list, the three
-            // fragments land adjacent and same-markered, so the Markdown floor
-            // re-parses them as ONE list on reload — the in-session split is not
-            // representable there. `.folio` keeps the blocks distinct.
-            replacement.push(listLike(b, after, gen, numberAt(b, k + 1), before.length > 0 ? undefined : b.id));
-          }
           const out = nodes.slice();
-          out.splice(i, 1, ...replacement);
+          out.splice(i, 1, ...splitListAround(b, k, k, gen).nodes);
           return out;
         }
       } else if (b.type === 'blockquote') {
