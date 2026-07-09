@@ -44,8 +44,22 @@ bun build "$WEB_DIR/native-bridge-win.ts" \
     --format iife --target browser
 
 echo "==> 3/4 zig host ($ZIG_TARGET, $CONFIG)"
+# ReleaseSafe, not ReleaseFast (SKR-235). ReleaseFast elides every Zig runtime safety
+# check: no slice bounds check, no integer overflow check, no null-unwrap panic. An
+# out-of-bounds read becomes undefined behaviour that quietly returns adjacent memory
+# instead of aborting with a stack trace into the crash-log pipeline.
+#
+# The host is a WebView2 shell around a file watcher, a dispatch table and a loopback
+# file server, and it links the same core (windows/build.zig imports it as a module, so
+# the core inherits THIS optimize mode). Nothing here is hot enough for the checks to
+# cost anything worth having, and Bun's Zig-to-Rust port is the cautionary tale: a
+# latent OOB at `ptrs[4095]` lived for years because ReleaseFast had been eliding the
+# bounds check that would have caught it.
+#
+# The debug branch deliberately omits -Doptimize; windows/build.zig's
+# standardOptimizeOption resolves that to Debug, which is what a dev build wants.
 if [[ "$CONFIG" == "release" ]]; then
-    (cd "$WIN_DIR" && zig build -Dtarget="$ZIG_TARGET" -Dversion="$VERSION" -Doptimize=ReleaseFast)
+    (cd "$WIN_DIR" && zig build -Dtarget="$ZIG_TARGET" -Dversion="$VERSION" -Doptimize=ReleaseSafe)
 else
     (cd "$WIN_DIR" && zig build -Dtarget="$ZIG_TARGET" -Dversion="$VERSION")
 fi
