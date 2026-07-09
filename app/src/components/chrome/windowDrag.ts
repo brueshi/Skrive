@@ -17,10 +17,30 @@
 // Every other host leaves `__skriveWindowDrag` undefined and keeps its CSS behavior.
 // Its absence is the feature test — never a platform sniff.
 
+import type { CSSProperties } from 'react';
+
 /** Marks the region a drag may start in. Mirrors `-webkit-app-region: drag`. */
 export const DRAG_REGION_ATTR = 'data-drag-region';
 /** Marks an interactive island inside it. Mirrors `-webkit-app-region: no-drag`. */
 export const NO_DRAG_ATTR = 'data-no-drag';
+
+/**
+ * Opt an element out of window dragging. Spread onto the CONTROL — a button, a tab —
+ * and never onto the layout box that holds it.
+ *
+ * That distinction is the whole bug: `.header-tabs` is `flex: 1`, so marking the
+ * container no-drag consumed the entire middle of the topbar and left no pixels to
+ * grab. It went unnoticed under Electron, whose `hiddenInset` titlebar gave the window
+ * a native drag band regardless. Our webview covers that band, so the renderer's drag
+ * lane is the only one there is.
+ *
+ * Both forms are emitted together: the CSS for Electron and the Windows host, the
+ * attribute for the macOS host's mousedown handler, which cannot see the CSS.
+ */
+export const noDragProps = {
+  style: { WebkitAppRegion: 'no-drag' } as CSSProperties,
+  [NO_DRAG_ATTR]: true
+} as const;
 
 type WindowDragHost = { start(): void; toggleZoom(): void };
 

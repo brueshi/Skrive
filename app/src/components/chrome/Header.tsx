@@ -22,11 +22,7 @@ import { Tooltip } from '../ui/Tooltip';
 import { PanelMenu } from './PanelMenu';
 import { TabBar } from './TabBar';
 import { WindowControls } from './WindowControls';
-import {
-  DRAG_REGION_ATTR,
-  NO_DRAG_ATTR,
-  handleChromeMouseDown
-} from './windowDrag';
+import { DRAG_REGION_ATTR, handleChromeMouseDown, noDragProps } from './windowDrag';
 
 const isMacOS =
   typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
@@ -60,10 +56,6 @@ export function Header() {
     onMouseDown: (e: ReactMouseEvent) => {
       handleChromeMouseDown(e);
     }
-  };
-  const noDragProps = {
-    style: { WebkitAppRegion: 'no-drag' } as CSSProperties,
-    [NO_DRAG_ATTR]: true
   };
 
   // Settings is a full-page view, not a modal — the topbar collapses to
@@ -122,7 +114,9 @@ export function Header() {
 
       <span className="header-sep" aria-hidden="true" />
 
-      <div className="header-tabs" {...noDragProps}>
+      {/* NOT no-drag: this box is flex:1, so opting it out consumed the entire
+          topbar's drag lane. Each tab opts itself out instead (SKR-240). */}
+      <div className="header-tabs">
         <TabBar />
       </div>
 

@@ -64,6 +64,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private let servingMode = ProcessInfo.processInfo.environment["SKRIVE_SERVE"] ?? "scheme"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Observe left mouse-downs so the renderer's topbar can drag the window
+        // (SKR-240). Installed before the window exists: it is a tap on the event
+        // stream, not tied to any window.
+        WindowDrag.install()
         // Build the updater engine with our custom driver before the menu (the
         // "Check for Updates…" item drives it). startUpdater() is deferred until
         // after the bridge exists so the driver's status events have somewhere
