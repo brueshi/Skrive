@@ -8,9 +8,9 @@
 // exclusively the `.folio` rich editor now — the SKR-153 round-trip class cannot
 // recur here because there is no parse -> model -> serialize cycle.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { LayoutMode } from '@skrive/shared';
-import { RawSourceView } from '../raw/RawSourceView';
+import { RawSourceView, type RawViewState } from '../raw/RawSourceView';
 import { Preview } from '../Preview';
 import { WordCountBadge } from '../WordCountBadge';
 import { computeWordCount } from '../../../lib/frontmatter';
@@ -77,6 +77,28 @@ export function MarkdownView({
     []
   );
 
+  // Cycling the layout REMOUNTS the textarea: `raw` renders it as a direct child of
+  // .md-view, `split` nests it two levels deeper, so React tears the old one down
+  // rather than moving it. MarkdownView itself is keyed only by file path, so it
+  // outlives every cycle — which makes it the right owner of the writer's place in
+  // the text. The outgoing textarea reports caret + scroll here; the incoming one
+  // reads them back (SKR-183).
+  const viewStateRef = useRef<RawViewState | null>(null);
+  const onViewStateChange = useCallback((s: RawViewState) => {
+    viewStateRef.current = s;
+  }, []);
+  const getInitialViewState = useCallback(() => viewStateRef.current, []);
+
+  // A mount that follows a layout change takes focus; a document's first mount does
+  // not — opening a file should not steal focus from wherever the writer summoned it
+  // (the sidebar, the palette). `isCycle` is read during render because the child's
+  // mount effect runs before any effect here could set a flag.
+  const lastLayoutRef = useRef(layoutMode);
+  const isCycle = lastLayoutRef.current !== layoutMode;
+  useEffect(() => {
+    lastLayoutRef.current = layoutMode;
+  }, [layoutMode]);
+
   const onDividerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     dragging.current = true;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -107,6 +129,16 @@ export function MarkdownView({
   // when the mirror text changes, never per render.
   const showWordCount = usePreferencesStore((s) => s.showWordCount);
   const viewRef = useRef<HTMLDivElement>(null);
+
+  // Preview mode has no textarea to focus. Focus the preview's own scroller instead,
+  // so Space / PageDown scroll the prose the writer just cycled into rather than
+  // falling through to <body>. Layout effect: focus lands before the frame paints.
+  useLayoutEffect(() => {
+    if (isCycle && layoutMode === 'preview') {
+      viewRef.current?.querySelector<HTMLElement>('.preview')?.focus();
+    }
+  }, [isCycle, layoutMode]);
+
   const counts = useMemo(
     () =>
       showWordCount
@@ -115,6 +147,17 @@ export function MarkdownView({
     [showWordCount, liveBody]
   );
   const badge = counts && <WordCountBadge counts={counts} scopeRef={viewRef} />;
+
+  const source = (
+    <RawSourceView
+      body={body}
+      onChange={onChange}
+      onLiveInput={onLiveInput}
+      getInitialViewState={getInitialViewState}
+      onViewStateChange={onViewStateChange}
+      autoFocus={isCycle}
+    />
+  );
 
   const preview = (
     <Preview
@@ -129,7 +172,7 @@ export function MarkdownView({
   if (layoutMode === 'raw') {
     return (
       <div className="md-view" ref={viewRef}>
-        <RawSourceView body={body} onChange={onChange} onLiveInput={onLiveInput} />
+        {source}
         {badge}
       </div>
     );
@@ -149,7 +192,7 @@ export function MarkdownView({
     <div className="md-view" ref={viewRef}>
       <div className="md-split" ref={splitRef}>
         <div className="md-split-pane" style={{ flexBasis: `${leftPct}%` }}>
-          <RawSourceView body={body} onChange={onChange} onLiveInput={onLiveInput} />
+          {source}
         </div>
         <div
           className="md-split-divider"

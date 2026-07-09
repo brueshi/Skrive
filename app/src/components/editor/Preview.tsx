@@ -180,6 +180,9 @@ export function Preview({
         role="document"
         onClick={handleClick}
         ref={scrollerRef}
+        // Programmatically focusable, never in the Tab order: cycling into preview
+        // focuses the scroller so Space / PageDown act on the prose (SKR-183).
+        tabIndex={-1}
       >
         <div
           className="preview-inner"
