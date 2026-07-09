@@ -104,6 +104,10 @@ const SERIALIZE_DEBOUNCE_MS = 400;
 // suppression. Every block element carries BLOCK_ID_ATTR; this rides on the same
 // element.
 const BLOCK_SELECTED_ATTR = 'data-block-selected';
+/** How far the pointer may travel between mousedown and mouseup and still count as a
+ *  press rather than a drag. A trackpad wobbles a pixel or two under a finger; a
+ *  drag-select does not (SKR-239). */
+const DRAG_SLOP_PX = 3;
 
 export type BlockSurfaceOptions = {
   container: HTMLElement;
@@ -232,6 +236,9 @@ export class BlockSurface {
   // True between a mousedown in the surface and its release — a drag-select in
   // progress. Gates the selection bubble so it doesn't chase the pointer (SKR-184).
   private pointerDown = false;
+  // Where that mousedown landed, so the click it eventually produces can be told
+  // apart from a press-in-place (SKR-239). Viewport coordinates.
+  private downPoint: { x: number; y: number } | null = null;
   // The last text selection observed INSIDE the surface, in MODEL coordinates (a
   // leaf block id + a flat range, OR a table cell's (table id, row, col) + a flat
   // range local to the cell; a caret is start === end), kept across focus loss.
@@ -2670,6 +2677,14 @@ export class BlockSurface {
   // document position (SKR-192, extending PR #62's below-last affordance).
   private onClick = (event: Event): void => {
     const e = event as MouseEvent;
+    // A drag that selected text also fires a click, on the common ancestor of its
+    // endpoints — the container, once the drag leaves the block it started in. Every
+    // affordance below assumes a click means "put the caret here"; against a live
+    // selection they all destroy it. Bail before any of them (SKR-239).
+    if (this.concludedDragSelection(e)) {
+      this.onPointerUp();
+      return;
+    }
     const target = e.target;
     const targetEl = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
     const blockEl = targetEl?.closest<HTMLElement>(`[${BLOCK_ID_ATTR}]`) ?? null;
@@ -2691,8 +2706,10 @@ export class BlockSurface {
   // Drag-select gate for the bubble (SKR-184 / F73). mousedown marks a drag in
   // progress so the selection bubble stays hidden while the range grows; release
   // (window mouseup / click) clears it and re-emits so the bubble appears settled.
-  private onPointerDown = (): void => {
+  private onPointerDown = (event: Event): void => {
     this.pointerDown = true;
+    const e = event as MouseEvent;
+    this.downPoint = { x: e.clientX, y: e.clientY };
   };
 
   private onPointerUp = (): void => {
@@ -2700,6 +2717,26 @@ export class BlockSurface {
     this.pointerDown = false;
     this.emitSelection();
   };
+
+  /** Did this click merely END a drag that selected text? A `click` fires on the
+   *  nearest common ancestor of its mousedown and mouseup targets, so a drag that
+   *  crosses a block boundary — or releases in the host padding — reports the
+   *  surface container as its target and looks exactly like a click on bare surface
+   *  (SKR-239). It is not one, and the caret affordances below must not run: they
+   *  would collapse the range the writer just made.
+   *
+   *  Tested by MOVEMENT, not by the selection alone. Clicking a frozen block leaves a
+   *  non-collapsed selection of its own (it is non-editable), so a selection-only
+   *  guard would break SKR-216's click-to-select-a-block. A motionless press is a
+   *  click whatever the selection looks like afterwards. */
+  private concludedDragSelection(e: MouseEvent): boolean {
+    const from = this.downPoint;
+    if (!from) return false;
+    const moved = Math.abs(e.clientX - from.x) > DRAG_SLOP_PX || Math.abs(e.clientY - from.y) > DRAG_SLOP_PX;
+    if (!moved) return false;
+    const sel = window.getSelection();
+    return !!sel && !sel.isCollapsed && sel.anchorNode !== null && this.container.contains(sel.anchorNode);
+  }
 
   /** Place the caret at the document position nearest a viewport point (SKR-192).
    *  Serves clicks with no native placement: the surface's own padding and
