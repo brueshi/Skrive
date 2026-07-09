@@ -577,11 +577,22 @@ export class BlockSurface {
       else this.applyEnter();
       return;
     }
-    // Arrow keys inside a table: navigate cell-to-cell and, at the table's edges,
-    // step the caret OUT to the adjacent block (the native contenteditable caret
-    // can't reliably leave a <table>, worst of all when the table is the last
-    // block). Outside a table — or mid-cell — fall through to native movement.
+    // Arrow keys inside a table or a code block: navigate cell-to-cell / line-to-line
+    // and, at the barrier's edges, step the caret OUT to the adjacent block (the
+    // native contenteditable caret can't reliably leave a <table> or a fence, worst
+    // of all when it is the last block). Outside a barrier — or mid-content — fall
+    // through to native movement.
+    //
+    // A MODIFIED arrow is a different gesture entirely — extend (Shift), move by word
+    // (Alt), jump to the document edge (Cmd/Ctrl) — and the browser already implements
+    // all three across and out of both barriers. Hijacking them made Shift+Right at a
+    // cell edge *move* the caret with no selection (SKR-182 / F56), and Shift+Down on a
+    // code block's last line step out of the fence — appending a paragraph, since the
+    // exit gesture seeds one when the block is last (SKR-238). The bail lives here
+    // rather than in each handler: it is one rule about what an arrow *means*, and both
+    // handlers are only reached from this site.
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      if (e.shiftKey || e.metaKey || e.altKey || e.ctrlKey) return;
       if (this.handleTableArrow(e) || this.handleCodeArrow(e)) e.preventDefault();
       return;
     }
@@ -3917,14 +3928,9 @@ export class BlockSurface {
   // Arrow-key navigation inside a table: step cell-to-cell, and at the grid's
   // edges step OUT to the block before/after the table. Returns true when it
   // handled the key (caller preventDefaults); false to let native movement run
-  // (outside a table, mid-cell text, or a non-collapsed selection).
+  // (outside a table, mid-cell text, or a non-collapsed selection). The caller
+  // has already bailed on any modifier.
   private handleTableArrow(e: KeyboardEvent): boolean {
-    // A modified arrow is a different gesture entirely — extend (Shift), move by
-    // word (Alt), jump to the document edge (Cmd/Ctrl) — and the browser already
-    // implements all three across cells. Hijacking them made Shift+Right at a cell
-    // edge *move* the caret with no selection, and Cmd+Down land in the next cell
-    // instead of the document end (SKR-182 / F56).
-    if (e.shiftKey || e.metaKey || e.altKey || e.ctrlKey) return false;
     const cell = this.cellTarget();
     if (!cell || !cell.collapsed) return false;
     const table = findBlockById(this.doc.blocks, cell.tableId);
@@ -3967,7 +3973,8 @@ export class BlockSurface {
   // step the caret OUT to the adjacent block (seeding a paragraph when the code
   // block is the last block), since the native caret can't reliably leave a code
   // block and dead-ends there (SKR-152). Mid-text arrows fall through to native
-  // movement. Returns true when it handled the key (caller preventDefaults).
+  // movement. Returns true when it handled the key (caller preventDefaults). The
+  // caller has already bailed on any modifier (SKR-238).
   private handleCodeArrow(e: KeyboardEvent): boolean {
     const t = this.leafTarget();
     if (!t || !t.collapsed || t.leaf.type !== 'code_block') return false;
