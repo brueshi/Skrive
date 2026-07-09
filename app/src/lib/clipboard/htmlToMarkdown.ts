@@ -10,6 +10,8 @@
 //
 //   rehype-parse        HTML string -> hast   fragment mode: clipboard HTML is
 //                                             a fragment, not a full document
+//   rehypeSanitizeUrls  hast -> hast          drop javascript:/data:/file: URLs
+//                                             before they can become model nodes
 //   rehypeCleanRichText hast -> hast          unwrap source-specific cruft
 //   rehype-remark       hast -> mdast         styling Markdown can't represent
 //                                             (colour, underline, font) is
@@ -29,6 +31,7 @@ import rehypeRemark from 'rehype-remark';
 import remarkGfm from 'remark-gfm';
 import remarkStringify from 'remark-stringify';
 import { rehypeCleanRichText } from './cleanHtml';
+import { rehypeSanitizeUrls } from './sanitizeUrls';
 
 // Notion copies a callout block as an `<aside>…</aside>` wrapper, but *escaped*
 // (`&lt;aside&gt;`), so it survives the HTML pipeline as literal `<aside>` /
@@ -67,6 +70,7 @@ function convertNotionCallouts(md: string): string {
 
 const processor = unified()
   .use(rehypeParse, { fragment: true })
+  .use(rehypeSanitizeUrls)
   .use(rehypeCleanRichText)
   .use(rehypeRemark)
   .use(remarkGfm)
