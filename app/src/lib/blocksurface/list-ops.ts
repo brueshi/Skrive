@@ -28,15 +28,29 @@ function itemHasLeaf(item: ListItem, leafId: string): boolean {
 }
 
 /** A fresh list block of the same kind (and marker/delimiter) as `template`,
- *  carrying `items`. Ordered sublists restart at 1 — a fresh sublist, not a
- *  continuation of the parent's numbering. `id` defaults to a freshly minted one;
- *  pass an explicit id to keep identity stable when a list is merely re-split. */
-function listLike(template: ListBlock, items: ListItem[], gen: () => string, id?: string): ListBlock {
+ *  carrying `items`. `start` is the number the first item should carry — 1 for a
+ *  freshly opened sublist, `template.start + <items consumed before these>` for a
+ *  fragment that continues the template's numbering (SKR-181); it is ignored for
+ *  bullet lists. `id` defaults to a freshly minted one; pass an explicit id to keep
+ *  identity stable when a list is merely re-split. */
+function listLike(
+  template: ListBlock,
+  items: ListItem[],
+  gen: () => string,
+  start: number,
+  id?: string
+): ListBlock {
   const base = { id: id ?? gen(), durable: false, src: null, gapBefore: null, dirty: true };
   if (template.type === 'ordered_list') {
-    return { type: 'ordered_list', ...base, start: 1, delimiter: template.delimiter, spread: template.spread, items };
+    return { type: 'ordered_list', ...base, start, delimiter: template.delimiter, spread: template.spread, items };
   }
   return { type: 'bullet_list', ...base, marker: template.marker, spread: template.spread, items };
+}
+
+/** The number the item at `index` carries in `list` — the serializer numbers items
+ *  positionally from `start`, so this is the only place the arithmetic lives. */
+function numberAt(list: ListBlock, index: number): number {
+  return (list.type === 'ordered_list' ? list.start : 1) + index;
 }
 
 /** The list whose item DIRECTLY contains the focused leaf, or null. Used to read
@@ -81,7 +95,7 @@ export function indentItem(blocks: BlockNode[], leafId: string, gen: () => strin
             const prevChildren =
               last && isList(last) && last.type === b.type
                 ? [...prev.children.slice(0, -1), { ...last, items: [...last.items, moving], dirty: true }]
-                : [...prev.children, listLike(b, [moving], gen)];
+                : [...prev.children, listLike(b, [moving], gen, 1)]; // a new sublist opens at 1
             const items = b.items.slice();
             items.splice(k - 1, 2, { ...prev, children: prevChildren });
             const out = nodes.slice();
@@ -135,8 +149,12 @@ export function outdentItem(blocks: BlockNode[], leafId: string, gen: () => stri
             const lifted = child.items[k]!;
             const before = child.items.slice(0, k);
             const after = child.items.slice(k + 1);
+            // The re-homed trailing siblings stay at the sublist's visual depth, so
+            // they keep counting from where they were (SKR-181).
             const liftedChildren =
-              after.length > 0 ? [...lifted.children, listLike(child, after, gen)] : lifted.children.slice();
+              after.length > 0
+                ? [...lifted.children, listLike(child, after, gen, numberAt(child, k + 1))]
+                : lifted.children.slice();
             // Spread-copy so task-list state (checked) survives the lift.
             const liftedItem: ListItem = { ...lifted, children: liftedChildren };
             const parentChildren =
@@ -194,11 +212,20 @@ export function liftItemToParagraph(blocks: BlockNode[], leafId: string, gen: ()
           const replacement: BlockNode[] = [];
           // Reuse the list's id for one surviving fragment so a durable list keeps
           // its identity; the other fragment, when both exist, mints a fresh id.
-          if (before.length > 0) replacement.push(listLike(b, before, gen, b.id));
+          // The before-fragment keeps the original numbering; the after-fragment
+          // resumes past the lifted item, so `3./4./5.` minus the middle item reads
+          // `3.` … `5.` and not `1.` … `1.` (SKR-181).
+          if (before.length > 0) replacement.push(listLike(b, before, gen, numberAt(b, 0), b.id));
           for (const child of item.children) {
             replacement.push(child.type === 'frozen_block' ? child : { ...child, dirty: true });
           }
-          if (after.length > 0) replacement.push(listLike(b, after, gen, before.length > 0 ? undefined : b.id));
+          if (after.length > 0) {
+            // Caveat: when the lifted item's only child is itself a list, the three
+            // fragments land adjacent and same-markered, so the Markdown floor
+            // re-parses them as ONE list on reload — the in-session split is not
+            // representable there. `.folio` keeps the blocks distinct.
+            replacement.push(listLike(b, after, gen, numberAt(b, k + 1), before.length > 0 ? undefined : b.id));
+          }
           const out = nodes.slice();
           out.splice(i, 1, ...replacement);
           return out;
@@ -220,6 +247,14 @@ export function liftItemToParagraph(blocks: BlockNode[], leafId: string, gen: ()
  * Toggle shortcut switching list kind: change the immediate list (the one whose
  * item directly holds the leaf) to `target`, keeping its items and id. Returns
  * null when the leaf is not in a list.
+ *
+ * The toggle is deliberately memoryless (SKR-181): a kind change normalizes style,
+ * so `3) one` -> bullet -> ordered comes back as `1. one`, and undo is the way to
+ * recover the original. Carrying the counterpart kind's style across the toggle
+ * would only survive in memory — `.folio`, the native format, persists `start` but
+ * not `delimiter` or `marker`, so a round trip would be lossless in-session and
+ * lossy after a reload. Numbering that IS structural (list splits, item lifts) is
+ * preserved by the ops above.
  */
 export function changeListType(
   blocks: BlockNode[],

@@ -153,6 +153,80 @@ describe('changeListType', () => {
   });
 });
 
+// SKR-181. Ordered numbering is positional from the list's `start`, so any op that
+// splits a list has to hand each fragment the number its first item already had.
+// Style (delimiter, bullet marker) rides along on a split; a KIND toggle drops it,
+// deliberately — see the note on changeListType.
+describe('ordered-list numbering survives splits', () => {
+  it('lifting a middle item keeps the before-fragment and resumes the after-fragment', () => {
+    const d = doc('3. a\n4. b\n5. c\n');
+    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
+    expect(ser(out!, d)).toBe('3. a\n\nb\n\n5. c\n');
+  });
+
+  it('lifting the first item resumes the remainder past it', () => {
+    const d = doc('3. a\n4. b\n');
+    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'a'), generateBlockId);
+    expect(ser(out!, d)).toBe('a\n\n4. b\n');
+  });
+
+  it('lifting the last item leaves the head numbering untouched', () => {
+    const d = doc('3. a\n4. b\n');
+    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
+    expect(ser(out!, d)).toBe('3. a\n\nb\n');
+  });
+
+  it('preserves the delimiter across a split', () => {
+    const d = doc('3) a\n4) b\n5) c\n');
+    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
+    expect(ser(out!, d)).toBe('3) a\n\nb\n\n5) c\n');
+  });
+
+  it('preserves the bullet marker across a split', () => {
+    const d = doc('* a\n* b\n* c\n');
+    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
+    expect(ser(out!, d)).toBe('* a\n\nb\n\n* c\n');
+  });
+
+  it('the before-fragment keeps the original list id', () => {
+    const d = doc('3. a\n4. b\n5. c\n');
+    const listId = d.blocks[0]!.id;
+    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId)!;
+    expect(out[0]!.id).toBe(listId);
+    expect(out[2]!.id).not.toBe(listId);
+  });
+
+  // The blank line is load-bearing: CommonMark only lets an ordered list interrupt
+  // a paragraph when it starts at 1, so `- p` / `  3. a` would lazily continue p.
+  const nested = '- p\n\n  3. a\n  4. b\n  5. c\n';
+
+  it('outdenting re-homes trailing siblings at their own numbers', () => {
+    const d = doc(nested);
+    const out = outdentItem(d.blocks, leafId(d.blocks, 'a'), generateBlockId);
+    expect(ser(out!, d)).toBe('- p\n- a\n  4. b\n  5. c\n');
+  });
+
+  it('outdenting a middle item splits the sublist without renumbering either half', () => {
+    const d = doc(nested);
+    const out = outdentItem(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
+    expect(ser(out!, d)).toBe('- p\n\n  3. a\n- b\n  5. c\n');
+  });
+
+  it('a fresh sublist opens at 1 rather than continuing the parent', () => {
+    const d = doc('3. a\n4. b\n');
+    const out = indentItem(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
+    expect(ser(out!, d)).toBe('3. a\n   1. b\n');
+  });
+
+  it('a kind toggle is memoryless: style does not survive the round trip', () => {
+    const d = doc('3) a\n');
+    const bullets = changeListType(d.blocks, leafId(d.blocks, 'a'), 'bullet_list')!;
+    expect(ser(bullets, d)).toBe('- a\n');
+    const back = changeListType(bullets, leafId(bullets, 'a'), 'ordered_list')!;
+    expect(ser(back, d)).toBe('1. a\n');
+  });
+});
+
 describe('findImmediateList', () => {
   it('finds the list directly holding the leaf', () => {
     const d = doc('- one\n  - two\n');
