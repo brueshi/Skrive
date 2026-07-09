@@ -1312,3 +1312,79 @@ test('SKR-238: an unmodified ArrowLeft still exits a code block at its start', a
     'the caret left the code block'
   ).toBe(false);
 });
+
+// SKR-239: a real mouse drag-select. Nothing else in this matrix drives mouse
+// down/move/up — every other selection fixture builds its range programmatically,
+// which never dispatches a `click`. That blind spot is exactly why this shipped: a
+// `click` fires on the nearest common ancestor of its mousedown and mouseup targets,
+// so any drag leaving the block it started in reports the CONTAINER as its target
+// and looked, to onClick, like a click on bare surface. The point-click affordance
+// then collapsed the selection the writer had just made.
+async function dragSelect(page: Page, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 12 });
+  await page.mouse.up();
+  await page.waitForTimeout(80);
+}
+const selectionCollapsed = (page: Page): Promise<boolean> =>
+  page.evaluate(() => window.getSelection()?.isCollapsed ?? true);
+const blockBox = async (page: Page, i: number) => (await page.locator('.bespoke-root > *').nth(i).boundingBox())!;
+
+test('SKR-239: a drag-select within one block survives the release', async ({ page }) => {
+  await open(page, 4);
+  const b = await blockBox(page, 0);
+  await dragSelect(page, { x: b.x + 5, y: b.y + b.height / 2 }, { x: b.x + b.width * 0.6, y: b.y + b.height / 2 });
+  expect(await selectionCollapsed(page), 'the selection survived').toBe(false);
+});
+
+test('SKR-239: a drag-select ACROSS two blocks survives the release', async ({ page }) => {
+  await open(page, 4);
+  const first = await blockBox(page, 0);
+  const second = await blockBox(page, 1);
+  await dragSelect(
+    page,
+    { x: first.x + 5, y: first.y + first.height / 2 },
+    { x: second.x + second.width * 0.5, y: second.y + second.height / 2 }
+  );
+  expect(await selectionCollapsed(page), 'a cross-block selection survived mouseup').toBe(false);
+  expect(
+    await page.evaluate(() => (window.getSelection()?.toString() ?? '').length),
+    'and it actually covers text'
+  ).toBeGreaterThan(0);
+});
+
+test('SKR-239: a drag-select released off-block, in the gutter, survives', async ({ page }) => {
+  await open(page, 4);
+  const root = (await page.locator('.bespoke-root').boundingBox())!;
+  const first = await blockBox(page, 0);
+  await page.mouse.move(first.x + 5, first.y + first.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(first.x + first.width * 0.7, first.y + first.height / 2, { steps: 8 });
+  await page.mouse.move(root.x + root.width - 2, first.y + first.height + 40, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(80);
+  expect(await selectionCollapsed(page), 'releasing off-block did not collapse it').toBe(false);
+});
+
+// The guard fixtures: the affordances the drag bail must NOT disable. A press in
+// place is a click whatever the pointer did before it.
+test('SKR-239: a plain click below the document still seeds a caret (SKR-192)', async ({ page }) => {
+  await open(page, 2);
+  const root = (await page.locator('.bespoke-root').boundingBox())!;
+  const before = await page.evaluate(() => window.__skriveBlockSurface!.blockCount());
+  await page.mouse.click(root.x + 20, root.y + root.height - 4);
+  await page.waitForTimeout(60);
+  await page.keyboard.type('TYPED');
+  await page.waitForTimeout(80);
+  expect(await serialized(page), 'the click placed a caret and typing landed').toContain('TYPED');
+  expect(await page.evaluate(() => window.__skriveBlockSurface!.blockCount())).toBeGreaterThanOrEqual(before);
+});
+
+test('SKR-239: a plain click inside a block still places the caret there', async ({ page }) => {
+  await open(page, 3);
+  const b = await blockBox(page, 1);
+  await page.mouse.click(b.x + 10, b.y + b.height / 2);
+  await page.waitForTimeout(60);
+  expect(await selectionCollapsed(page), 'a motionless click collapses to a caret').toBe(true);
+});
