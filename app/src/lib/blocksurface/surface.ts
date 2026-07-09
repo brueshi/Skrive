@@ -3855,6 +3855,12 @@ export class BlockSurface {
   // handled the key (caller preventDefaults); false to let native movement run
   // (outside a table, mid-cell text, or a non-collapsed selection).
   private handleTableArrow(e: KeyboardEvent): boolean {
+    // A modified arrow is a different gesture entirely — extend (Shift), move by
+    // word (Alt), jump to the document edge (Cmd/Ctrl) — and the browser already
+    // implements all three across cells. Hijacking them made Shift+Right at a cell
+    // edge *move* the caret with no selection, and Cmd+Down land in the next cell
+    // instead of the document end (SKR-182 / F56).
+    if (e.shiftKey || e.metaKey || e.altKey || e.ctrlKey) return false;
     const cell = this.cellTarget();
     if (!cell || !cell.collapsed) return false;
     const table = findBlockById(this.doc.blocks, cell.tableId);
@@ -3862,14 +3868,21 @@ export class BlockSurface {
     const rows = table.rows.length;
     const cols = table.rows[0]?.length ?? 0;
     const len = inlineLength(cell.inline);
+    // The caret's x, read BEFORE the move: vertical movement should land under the
+    // caret's screen column, not at the same character offset in the next cell —
+    // a short cell above a long one would otherwise jump to its start.
+    const goalX = this.caretRect()?.left ?? null;
     switch (e.key) {
       case 'ArrowUp':
+        // A wrapped cell owns ArrowUp until the caret reaches its first visual line.
+        if (!this.caretOnCellEdgeLine(cell.cellEl, 'first')) return false;
         return cell.row > 0
-          ? this.focusCell(table, cell.row - 1, cell.col, cell.start)
+          ? this.focusCellAtColumn(table, cell.row - 1, cell.col, goalX, 'last', cell.start)
           : this.exitBarrier(cell.tableId, 'before');
       case 'ArrowDown':
+        if (!this.caretOnCellEdgeLine(cell.cellEl, 'last')) return false;
         return cell.row < rows - 1
-          ? this.focusCell(table, cell.row + 1, cell.col, cell.start)
+          ? this.focusCellAtColumn(table, cell.row + 1, cell.col, goalX, 'first', cell.start)
           : this.exitBarrier(cell.tableId, 'after');
       case 'ArrowLeft':
         if (cell.start > 0) return false; // move within the cell's text
@@ -3927,6 +3940,77 @@ export class BlockSurface {
 
   private focusCellEnd(table: TableBlock, row: number, col: number): boolean {
     return this.focusCell(table, row, col, inlineLength(table.rows[row]?.[col] ?? []));
+  }
+
+  /** One client rect per VISUAL line of a cell's content. A range over the cell's
+   *  contents yields a rect per line box, which is how a wrapped cell is detected
+   *  without measuring fonts. Empty in jsdom, which implements no layout. */
+  private cellLineRects(cellEl: HTMLElement): DOMRect[] {
+    const range = cellEl.ownerDocument.createRange();
+    range.selectNodeContents(cellEl);
+    return Array.from(range.getClientRects());
+  }
+
+  /** The collapsed caret's rect, or null where layout can't produce one (an empty
+   *  cell, jsdom). A collapsed range reports a zero-WIDTH rect, not a zero-size
+   *  one, so a 0x0 result means "no layout" rather than "caret at the origin". */
+  private caretRect(): DOMRect | null {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    const range = sel.getRangeAt(0);
+    if (!this.container.contains(range.startContainer)) return null;
+    const first = range.getClientRects()[0];
+    if (first) return first;
+    const box = range.getBoundingClientRect();
+    return box.width === 0 && box.height === 0 ? null : box;
+  }
+
+  /** Whether the caret sits on the cell's first / last VISUAL line. A cell whose
+   *  text wraps must let ArrowUp/Down walk its own lines before the arrow means
+   *  "leave this cell" (SKR-182 / F56). Without layout (jsdom) or with a single
+   *  line, every line is an edge line, which preserves the old hijack. */
+  private caretOnCellEdgeLine(cellEl: HTMLElement, edge: 'first' | 'last'): boolean {
+    const caret = this.caretRect();
+    if (!caret) return true;
+    const lines = this.cellLineRects(cellEl);
+    if (lines.length <= 1) return true;
+    const mid = caret.top + caret.height / 2;
+    return edge === 'first' ? mid < lines[0]!.bottom : mid > lines[lines.length - 1]!.top;
+  }
+
+  /** Move into a cell landing under `goalX` on its first / last visual line — the
+   *  screen column a vertical arrow preserves. Falls back to `fallbackOffset` (the
+   *  character offset) when there is no layout or the point resolves outside the
+   *  cell, which is what jsdom and an empty target cell get. */
+  private focusCellAtColumn(
+    table: TableBlock,
+    row: number,
+    col: number,
+    goalX: number | null,
+    edge: 'first' | 'last',
+    fallbackOffset: number
+  ): boolean {
+    const inline = table.rows[row]?.[col];
+    if (!inline) return false;
+    const target = this.leafElementById(table.id)?.querySelector(
+      `[data-cell-row="${row}"][data-cell-col="${col}"]`
+    ) as HTMLElement | null;
+    if (!target) return false;
+
+    if (goalX !== null) {
+      const lines = this.cellLineRects(target);
+      const line = edge === 'first' ? lines[0] : lines[lines.length - 1];
+      if (line) {
+        const x = Math.min(Math.max(goalX, line.left), line.right);
+        const point = this.resolveCaretPoint(x, line.top + line.height / 2);
+        if (point && target.contains(point.node)) {
+          setCaret(target, Math.min(flatOffsetFromDOM(target, point.node, point.offset), inlineLength(inline)));
+          return true;
+        }
+      }
+    }
+    setCaret(target, Math.min(fallbackOffset, inlineLength(inline)));
+    return true;
   }
 
   // Step the caret out of a (top-level) table to the adjacent block. Lands at the
