@@ -552,10 +552,19 @@ export class BlockSurface {
         return;
       }
       const t = this.leafTarget();
-      if (t && !t.spansBlocks && isInlineText(t.leaf) && findImmediateList(this.doc.blocks, t.leaf.id)) {
-        e.preventDefault();
-        if (e.shiftKey) this.applyOutdent(t.leaf.id, t.start);
-        else this.applyIndent(t.leaf.id, t.start);
+      if (t && !t.spansBlocks) {
+        if (isInlineText(t.leaf) && findImmediateList(this.doc.blocks, t.leaf.id)) {
+          e.preventDefault();
+          if (e.shiftKey) this.applyOutdent(t.leaf.id, t.start);
+          else this.applyIndent(t.leaf.id, t.start);
+        } else if (isInlineText(t.leaf) || t.leaf.type === 'code_block') {
+          // A plain paragraph / heading / code block: Tab must never throw focus to
+          // the chrome (SKR-188 / F53). Tab inserts two spaces; Shift+Tab is a
+          // claimed no-op (still consumes the key so focus stays put) — a soft
+          // outdent is a deferred nicety.
+          e.preventDefault();
+          if (!e.shiftKey) this.applyInsertText('  ');
+        }
       }
       return;
     }
@@ -1443,13 +1452,17 @@ export class BlockSurface {
     else setCrossBlockSelection(firstEl, 0, lastEl, lastLen);
   }
 
-  /** Affordance input rule: a typed space after a list marker at the start of a
-   *  top-level paragraph (`- `, `* `, `+ `, or `N.`/`N)`) converts the block to a
-   *  list and consumes the marker — it never persists as Markdown syntax. Returns
-   *  true when it fired. */
-  private tryListInputRule(): boolean {
-    const cur = this.currentInlineBlock();
-    if (!cur || cur.block.type !== 'paragraph' || !this.isTopLevel(cur.blockEl, cur.block.id)) return false;
+  /** Affordance input rule: a typed space after a Markdown marker at the start of a
+   *  paragraph converts the block and consumes the marker (it never persists as
+   *  syntax). Handles list markers (`- `, `* `, `+ `, `N.`/`N)`) and headings
+   *  (`# `…`###### `). Works at top level AND inside a blockquote — resolved via
+   *  `leafTarget` (SKR-188). Skips a paragraph that is already an immediate list
+   *  item: the marker there is ambiguous (it would unwrap the list), so the caret
+   *  keeps the literal text. Returns true when it fired. */
+  private tryBlockInputRule(): boolean {
+    const cur = this.currentInlineLeaf();
+    if (!cur || cur.block.type !== 'paragraph' || !cur.collapsed) return false;
+    if (findImmediateList(this.doc.blocks, cur.block.id)) return false;
     const prefix = inlinePlainText(cur.block.inline).slice(0, cur.caret);
 
     let spec: BlockTypeSpec | null = null;
@@ -1458,10 +1471,14 @@ export class BlockSurface {
       spec = { kind: 'bullet_list' };
       markerLen = 2;
     } else {
-      const m = /^(\d{1,9})([.)]) $/.exec(prefix);
-      if (m) {
-        spec = { kind: 'ordered_list', start: Number(m[1]), delimiter: m[2] as '.' | ')' };
-        markerLen = m[0].length;
+      const ol = /^(\d{1,9})([.)]) $/.exec(prefix);
+      const h = /^(#{1,6}) $/.exec(prefix);
+      if (ol) {
+        spec = { kind: 'ordered_list', start: Number(ol[1]), delimiter: ol[2] as '.' | ')' };
+        markerLen = ol[0].length;
+      } else if (h) {
+        spec = { kind: 'heading', level: h[1]!.length };
+        markerLen = h[0].length;
       }
     }
     if (!spec) return false;
@@ -1469,10 +1486,11 @@ export class BlockSurface {
     // Consume the marker text, then convert the (now marker-less) paragraph —
     // as ONE undo step (SKR-178 / F39): strip + convert used to record two
     // snapshots, so undo exposed the marker-stripped intermediate paragraph.
-    // The first undo now lands on the literal "- " / "1. " text.
+    // The first undo now lands on the literal "- " / "# " text. Address the leaf by
+    // id (updateBlockById) so it works nested, not just at a top-level index.
     this.compoundEdit(() => {
       const inline = deleteRangeInInline(cur.block.inline, 0, markerLen);
-      this.commitBlock(cur.index, { ...cur.block, inline, dirty: true });
+      this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, cur.block.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
       renderInlineInto(cur.blockEl, inline, this.resolveAsset);
       this.markRenderedInPlace(cur.block.id);
       setCaret(cur.blockEl, 0);
@@ -2828,10 +2846,10 @@ export class BlockSurface {
       this.commitInline(t.leaf.id, inline, t.blockEl, t.start + text.length);
     }
     this.scheduleSerialize();
-    // A typed space at the start of a paragraph may fire a list input rule (the
-    // marker is consumed, never persisted as syntax). It owns the rest of the
-    // gesture, so skip slash handling when it fires.
-    if (text === ' ' && this.tryListInputRule()) return;
+    // A typed space at the start of a paragraph may fire a marker input rule (list
+    // or heading — the marker is consumed, never persisted as syntax). It owns the
+    // rest of the gesture, so skip slash handling when it fires.
+    if (text === ' ' && this.tryBlockInputRule()) return;
     this.handleSlashAfterInsert(text);
   }
 
