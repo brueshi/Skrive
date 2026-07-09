@@ -200,10 +200,25 @@ function listToModel(node: List, ctx: ParseCtx, base: BlockBaseInit): BlockNode 
   return { type: 'bullet_list', ...base, marker: bulletMarker(node, ctx.md), spread, items };
 }
 
+// A table is rectangular in the model: every consumer — render.ts, the cell
+// selection map, Tab-between-cells — indexes `rows[r][c]` against one column
+// count, and structure editing will too.
+//
+// GFM makes rows ragged in both directions, and the two are not symmetric. A
+// SHORT row is padded, which the spec also prescribes and which loses nothing. A
+// row with EXCESS cells used to be clamped to the header's width, so those cells
+// were read out of mdast and thrown away (SKR-159 / F09) — silently, with no
+// freeze, no signal, and no way back after an import, which is one-way.
+//
+// So the table is sized to its WIDEST row, and the header and alignment gain
+// empty cells to match. Nothing the writer typed is dropped. The table gains a
+// column that a GFM renderer would not have shown — the spec says excess cells
+// "are ignored" — but a cell in the source the writer can no longer see is a
+// worse outcome than a column they can.
 function tableToModel(node: Table, base: BlockBaseInit, ctx: ParseCtx): BlockNode | null {
   const rowsM = node.children ?? [];
   if (rowsM.length === 0) return null;
-  const colCount = (rowsM[0]?.children ?? []).length;
+  const colCount = rowsM.reduce((max, row) => Math.max(max, (row?.children ?? []).length), 0);
   if (colCount === 0) return null;
   const alignM = node.align ?? [];
 
