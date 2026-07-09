@@ -10,6 +10,7 @@
 // is a feature add, not a rewrite of selection/commands.
 
 import type { BlockNode, InlineMarks, InlineNode } from '../blockmodel';
+import { isSafeUrl } from '../security/urls';
 
 export const BLOCK_ID_ATTR = 'data-block-id';
 // Marks a rendered hard-break atom so the offset mapping can tell it apart from
@@ -58,7 +59,10 @@ function renderInlineNode(node: InlineNode, resolveAsset: AssetResolver): Node {
     dom = document.createTextNode(node.text);
   } else if (node.kind === 'image') {
     const img = document.createElement('img');
-    img.src = resolveAsset(node.url);
+    // Checked on the MODEL url, before resolveAsset rewrites a relative path to
+    // whatever origin the shell serves assets from — that resolved form is not
+    // a URL the allowlist knows about (SKR-187 / F29).
+    if (isSafeUrl(node.url)) img.src = resolveAsset(node.url);
     img.alt = node.alt;
     if (node.title != null) img.title = node.title;
     dom = img;
@@ -75,7 +79,12 @@ function renderInlineNode(node: InlineNode, resolveAsset: AssetResolver): Node {
   if (marks.strikethrough) dom = wrap('s', dom);
   if (marks.link) {
     const a = document.createElement('a');
-    a.href = marks.link.href;
+    // The second, independent URL check (SKR-187 / F29). Paste sanitizes at
+    // ingestion, but a link can reach the model without passing through it — a
+    // markdown link arriving as `text/plain`, a URL typed into the link editor,
+    // a file authored elsewhere. An <a> with no href is inert, and leaving the
+    // element in place keeps the inline structure the selection model counts on.
+    if (isSafeUrl(marks.link.href)) a.href = marks.link.href;
     if (marks.link.title != null) a.title = marks.link.title;
     a.appendChild(dom);
     dom = a;

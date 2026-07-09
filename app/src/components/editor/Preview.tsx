@@ -27,6 +27,7 @@
 import { useMemo, useRef } from 'react';
 import { renderMarkdown } from '../../lib/preview/markdown';
 import { skriveAssetResolver } from '../../lib/preview/imageResolver';
+import { isSafeUrl } from '../../lib/security/urls';
 import { OutlineRail } from './OutlineRail';
 
 type Props = {
@@ -126,16 +127,27 @@ export function Preview({
   }
 
   function handleClick(e: React.MouseEvent<HTMLDivElement>) {
-    // Modifier-clicks (open in new window etc.) aren't meaningful in a
-    // single-window app but leave them to the browser anyway.
-    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-
     const target = e.target as Element | null;
     const anchor = target?.closest?.('a') as HTMLAnchorElement | null;
     if (!anchor) return;
 
     const href = anchor.getAttribute('href');
     if (!href) return;
+
+    // Refuse a disallowed scheme before ANY other branch, modifier-clicks
+    // included (SKR-187 / F29). The modifier bail below hands the click to the
+    // browser, which would navigate a `javascript:` href in the app's own origin
+    // — the host's scheme allowlist never sees it, because `openExternal` is
+    // never called. Preview renders file markdown with `allowDangerousHtml`, so
+    // the anchor can come from raw HTML in the document as easily as from a link.
+    if (!isSafeUrl(href)) {
+      e.preventDefault();
+      return;
+    }
+
+    // Modifier-clicks (open in new window etc.) aren't meaningful in a
+    // single-window app but leave them to the browser anyway.
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
 
     // Same-document anchor: scroll the preview, never leave the app.
     if (href.startsWith('#')) {

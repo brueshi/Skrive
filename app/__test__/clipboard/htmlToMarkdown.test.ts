@@ -160,3 +160,94 @@ describe('round-trip: house-style Markdown survives render -> convert', () => {
     });
   }
 });
+
+// SKR-187 / F29 — security fixtures. Clipboard HTML is external input crossing
+// into a trust model built for local files. Each blocked case here is a URL a
+// browser would navigate; a regression is exploitable, not cosmetic. The paired
+// guard lives in render.ts (an href the model already holds), and a third in the
+// Swift host (`ExternalLink.allowedSchemes`).
+describe('htmlToMarkdown drops URLs the trust model refuses', () => {
+  const blocked: Array<{ name: string; html: string; expected: string }> = [
+    {
+      name: 'javascript: href unwraps to its text',
+      html: '<p><a href="javascript:alert(1)">click</a></p>',
+      expected: 'click'
+    },
+    {
+      name: 'uppercase JavaScript: is caught too',
+      html: '<p><a href="JavaScript:alert(1)">click</a></p>',
+      expected: 'click'
+    },
+    {
+      name: 'a tab inside the scheme does not smuggle it through',
+      html: '<p><a href="java&#9;script:alert(1)">click</a></p>',
+      expected: 'click'
+    },
+    {
+      name: 'data:text/html href unwraps',
+      html: '<p><a href="data:text/html,<script>alert(1)</script>">doc</a></p>',
+      expected: 'doc'
+    },
+    {
+      name: 'file: href unwraps',
+      html: '<p><a href="file:///etc/passwd">passwd</a></p>',
+      expected: 'passwd'
+    },
+    {
+      name: 'a dangerous image collapses to its alt text',
+      html: '<p><img src="data:text/html,<script>alert(1)</script>" alt="chart"></p>',
+      expected: 'chart'
+    },
+    {
+      name: 'a dangerous image with no alt disappears entirely',
+      html: '<p>before<img src="javascript:alert(1)">after</p>',
+      expected: 'beforeafter'
+    },
+    {
+      name: 'marks inside an unwrapped link survive',
+      html: '<p><a href="javascript:alert(1)">a <b>bold</b> word</a></p>',
+      expected: 'a **bold** word'
+    }
+  ];
+  for (const { name, html, expected } of blocked) {
+    it(name, () => expect(htmlToMarkdown(html)).toBe(expected));
+  }
+
+  it('never emits the dangerous scheme anywhere in the output', () => {
+    const md = htmlToMarkdown('<p><a href="javascript:alert(1)">click</a></p>');
+    expect(md).not.toContain('javascript');
+  });
+});
+
+describe('htmlToMarkdown keeps the URLs the trust model permits', () => {
+  const allowed: Array<{ name: string; html: string; expected: string }> = [
+    {
+      name: 'https link',
+      html: '<p><a href="https://example.com">x</a></p>',
+      expected: '[x](https://example.com)'
+    },
+    {
+      name: 'mailto link',
+      html: '<p><a href="mailto:joe@example.com">mail</a></p>',
+      expected: '[mail](mailto:joe@example.com)'
+    },
+    {
+      name: 'relative link to a sibling note',
+      html: '<p><a href="./notes/1.md">note</a></p>',
+      expected: '[note](./notes/1.md)'
+    },
+    {
+      name: 'fragment link',
+      html: '<p><a href="#section">jump</a></p>',
+      expected: '[jump](#section)'
+    },
+    {
+      name: 'relative image',
+      html: '<p><img src="assets/x.png" alt="x"></p>',
+      expected: '![x](assets/x.png)'
+    }
+  ];
+  for (const { name, html, expected } of allowed) {
+    it(name, () => expect(htmlToMarkdown(html)).toBe(expected));
+  }
+});
