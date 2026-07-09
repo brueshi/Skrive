@@ -24,7 +24,7 @@ import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteB
 import { findBlockById, updateBlockById } from './tree';
 import { enterInContainer, exitContainer, type StructuralResult } from './structural';
 import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
-import { changeListType, findImmediateList, indentItem, liftItemToParagraph, outdentItem } from './list-ops';
+import { changeListType, findImmediateList, indentItem, itemsHoldingLeaves, liftItemOut, outdentItem, splitListAround } from './list-ops';
 import {
   type BooleanMark,
   coalesceInline,
@@ -1000,7 +1000,7 @@ export class BlockSurface {
   }
 
   /** Mark a block dirty for re-serialization, leaving a frozen block (which has no
-   *  dirty flag and re-emits verbatim) untouched — the guard liftItemToParagraph
+   *  dirty flag and re-emits verbatim) untouched — the guard liftItemOut
    *  uses, shared by the wrap/unwrap toggles that re-home blocks. */
   private dirtyBlock(b: BlockNode): BlockNode {
     return b.type === 'frozen_block' ? b : ({ ...b, dirty: true } as BlockNode);
@@ -1125,7 +1125,7 @@ export class BlockSurface {
     if (findImmediateList(blocks, leafId)) {
       let out: BlockNode[] | null;
       while ((out = outdentItem(blocks, leafId, generateBlockId)) !== null) blocks = out;
-      const lifted = liftItemToParagraph(blocks, leafId, generateBlockId);
+      const lifted = liftItemOut(blocks, leafId, generateBlockId);
       if (lifted) blocks = lifted;
     }
     const source = findBlockById(blocks, leafId);
@@ -1236,11 +1236,11 @@ export class BlockSurface {
   }
 
   /** Shift+Tab: outdent a nested item one level; a top-level item is lifted out of
-   *  the list to a paragraph (splitting the list). Same dispatch backs toggle-off. */
+   *  the list entirely (splitting the list). Same dispatch backs toggle-off. */
   private applyOutdent(leafId: string, offset: number): void {
     const blocks =
       outdentItem(this.doc.blocks, leafId, generateBlockId) ??
-      liftItemToParagraph(this.doc.blocks, leafId, generateBlockId);
+      liftItemOut(this.doc.blocks, leafId, generateBlockId);
     if (blocks) this.applyStructural({ blocks, caret: { id: leafId, offset } });
   }
 
@@ -1252,7 +1252,7 @@ export class BlockSurface {
     let blocks = this.doc.blocks;
     for (const id of leafIds) {
       const next = outdent
-        ? (outdentItem(blocks, id, generateBlockId) ?? liftItemToParagraph(blocks, id, generateBlockId))
+        ? (outdentItem(blocks, id, generateBlockId) ?? liftItemOut(blocks, id, generateBlockId))
         : indentItem(blocks, id, generateBlockId);
       if (next) blocks = next;
     }
@@ -1305,16 +1305,31 @@ export class BlockSurface {
     const out = blocks.slice();
 
     if (run.every((b) => b.type === target)) {
-      // Unwrap: drop each list, lifting its items' children to top level in place.
+      // Unwrap: lift the SELECTED items' children to top level, splitting each list
+      // around them. A selection covering only some of a list's items unwraps only
+      // those, leaving the rest a list (SKR-222 — Docs/Notion); one covering every
+      // item degenerates to dropping the list, which is the old whole-list path.
+      const selectedIds = new Set(this.selectedLeaves().map((l) => l.leaf.id));
+      const replacement: BlockNode[] = [];
       const lifted: BlockNode[] = [];
       for (const b of run) {
-        if (b.type === 'bullet_list' || b.type === 'ordered_list') {
-          for (const item of b.items) for (const child of item.children) lifted.push(this.dirtyBlock(child));
-        } else {
-          lifted.push(b);
+        if (b.type !== 'bullet_list' && b.type !== 'ordered_list') {
+          replacement.push(b);
+          continue;
         }
+        // A list wholly inside the selection reports no leaf ids of its own only if
+        // the selection is collapsed; fall back to the whole list so the toggle-off
+        // can never silently no-op.
+        const picked = itemsHoldingLeaves(b, selectedIds);
+        const from = picked.length > 0 ? picked[0]! : 0;
+        const to = picked.length > 0 ? picked[picked.length - 1]! : b.items.length - 1;
+        const split = splitListAround(b, from, to, generateBlockId);
+        replacement.push(...split.nodes);
+        lifted.push(...split.lifted);
       }
-      out.splice(first, run.length, ...lifted);
+      out.splice(first, run.length, ...replacement);
+      // Anchor the restored range on what was lifted, not on the surviving
+      // fragments — a repeat toggle must see the same span it just unwrapped.
       this.commitWrapToggle(out, lifted[0] ?? null, lifted[lifted.length - 1] ?? null);
       return;
     }

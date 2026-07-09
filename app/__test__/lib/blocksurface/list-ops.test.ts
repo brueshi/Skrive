@@ -1,5 +1,5 @@
 // List ergonomics structural transforms (SKR-112, Stage 4). Tab nesting,
-// Shift+Tab outdent, top-level lift-to-paragraph, and list-kind toggle, as pure
+// Shift+Tab outdent, top-level lift-out, and list-kind toggle, as pure
 // tree transforms. The load-bearing assertion is round-trip byte-stability
 // through the Markdown floor: a transform's output serializes, and an indent that
 // is immediately outdented restores the original bytes.
@@ -9,13 +9,15 @@ import {
   changeListType,
   findImmediateList,
   indentItem,
-  liftItemToParagraph,
-  outdentItem
+  itemsHoldingLeaves,
+  liftItemOut,
+  outdentItem,
+  splitListAround
 } from '../../../src/lib/blocksurface/list-ops';
 import { parseDocument } from '../../../src/lib/blockmodel/parse';
 import { serializeDocument } from '../../../src/lib/blockmodel/serialize';
 import { generateBlockId } from '../../../src/lib/blockmodel/id';
-import type { BlockNode, Document, InlineNode } from '../../../src/lib/blockmodel/types';
+import type { BlockNode, BulletListBlock, Document, InlineNode } from '../../../src/lib/blockmodel/types';
 
 function plain(inline: InlineNode[]): string {
   return inline.map((n) => (n.kind === 'text' ? n.text : '')).join('');
@@ -97,7 +99,7 @@ describe('outdentItem', () => {
     expect(ser(out!, d)).toBe('- p\n  - a\n- b\n  - c\n');
   });
 
-  it('returns null for a top-level item (lift-to-paragraph handles it)', () => {
+  it('returns null for a top-level item (liftItemOut handles it)', () => {
     const d = doc('- one\n- two\n');
     expect(outdentItem(d.blocks, leafId(d.blocks, 'two'), generateBlockId)).toBeNull();
   });
@@ -113,28 +115,28 @@ describe('indent then outdent is byte-identical', () => {
   });
 });
 
-describe('liftItemToParagraph', () => {
+describe('liftItemOut', () => {
   it('lifts a middle item out, splitting the list', () => {
     const d = doc('- a\n- b\n- c\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
     expect(ser(out!, d)).toBe('- a\n\nb\n\n- c\n');
   });
 
   it('lifts the first item to a leading paragraph', () => {
     const d = doc('- a\n- b\n- c\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'a'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'a'), generateBlockId);
     expect(ser(out!, d)).toBe('a\n\n- b\n- c\n');
   });
 
   it('lifts the last item to a trailing paragraph', () => {
     const d = doc('- a\n- b\n- c\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'c'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'c'), generateBlockId);
     expect(ser(out!, d)).toBe('- a\n- b\n\nc\n');
   });
 
   it('lifts a sole item to a plain paragraph', () => {
     const d = doc('- only\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'only'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'only'), generateBlockId);
     expect(ser(out!, d)).toBe('only\n');
   });
 });
@@ -160,38 +162,38 @@ describe('changeListType', () => {
 describe('ordered-list numbering survives splits', () => {
   it('lifting a middle item keeps the before-fragment and resumes the after-fragment', () => {
     const d = doc('3. a\n4. b\n5. c\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
     expect(ser(out!, d)).toBe('3. a\n\nb\n\n5. c\n');
   });
 
   it('lifting the first item resumes the remainder past it', () => {
     const d = doc('3. a\n4. b\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'a'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'a'), generateBlockId);
     expect(ser(out!, d)).toBe('a\n\n4. b\n');
   });
 
   it('lifting the last item leaves the head numbering untouched', () => {
     const d = doc('3. a\n4. b\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
     expect(ser(out!, d)).toBe('3. a\n\nb\n');
   });
 
   it('preserves the delimiter across a split', () => {
     const d = doc('3) a\n4) b\n5) c\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
     expect(ser(out!, d)).toBe('3) a\n\nb\n\n5) c\n');
   });
 
   it('preserves the bullet marker across a split', () => {
     const d = doc('* a\n* b\n* c\n');
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'b'), generateBlockId);
     expect(ser(out!, d)).toBe('* a\n\nb\n\n* c\n');
   });
 
   it('the before-fragment keeps the original list id', () => {
     const d = doc('3. a\n4. b\n5. c\n');
     const listId = d.blocks[0]!.id;
-    const out = liftItemToParagraph(d.blocks, leafId(d.blocks, 'b'), generateBlockId)!;
+    const out = liftItemOut(d.blocks, leafId(d.blocks, 'b'), generateBlockId)!;
     expect(out[0]!.id).toBe(listId);
     expect(out[2]!.id).not.toBe(listId);
   });
@@ -224,6 +226,74 @@ describe('ordered-list numbering survives splits', () => {
     expect(ser(bullets, d)).toBe('- a\n');
     const back = changeListType(bullets, leafId(bullets, 'a'), 'ordered_list')!;
     expect(ser(back, d)).toBe('1. a\n');
+  });
+});
+
+// SKR-222. The primitive behind both a one-item Shift+Tab and a partial same-kind
+// unwrap: take a span of items out, leave the rest a list.
+describe('splitListAround', () => {
+  const listOf = (md: string) => {
+    const d = doc(md);
+    const b = d.blocks[0]!;
+    if (b.type !== 'bullet_list' && b.type !== 'ordered_list') throw new Error('not a list');
+    return { d, list: b };
+  };
+
+  it('lifts a middle span, leaving a fragment on each side', () => {
+    const { d, list } = listOf('- a\n- b\n- c\n- d\n');
+    const { nodes, lifted } = splitListAround(list, 1, 2, generateBlockId);
+    expect(ser(nodes, d)).toBe('- a\n\nb\n\nc\n\n- d\n');
+    expect(lifted).toHaveLength(2);
+  });
+
+  it('lifts a leading span, leaving only a trailing fragment', () => {
+    const { d, list } = listOf('- a\n- b\n- c\n');
+    const { nodes } = splitListAround(list, 0, 1, generateBlockId);
+    expect(ser(nodes, d)).toBe('a\n\nb\n\n- c\n');
+  });
+
+  it('lifting every item drops the list entirely', () => {
+    const { d, list } = listOf('- a\n- b\n');
+    const { nodes, lifted } = splitListAround(list, 0, 1, generateBlockId);
+    expect(ser(nodes, d)).toBe('a\n\nb\n');
+    expect(nodes).toEqual(lifted);
+  });
+
+  it('resumes the after-fragment past the lifted span', () => {
+    const { d, list } = listOf('3. a\n4. b\n5. c\n6. d\n');
+    const { nodes } = splitListAround(list, 1, 2, generateBlockId);
+    expect(ser(nodes, d)).toBe('3. a\n\nb\n\nc\n\n6. d\n');
+  });
+
+  it('lifts every child of an item, not just the first', () => {
+    const { d, list } = listOf('- a\n\n  a2\n- b\n');
+    const { nodes, lifted } = splitListAround(list, 0, 0, generateBlockId);
+    expect(lifted).toHaveLength(2);
+    expect(ser(nodes, d)).toBe('a\n\na2\n\n- b\n');
+  });
+});
+
+describe('itemsHoldingLeaves', () => {
+  const listOf = (md: string) => {
+    const d = doc(md);
+    return { d, list: d.blocks[0] as BulletListBlock };
+  };
+
+  it('reports the indices of items holding the given leaves', () => {
+    const { d, list } = listOf('- a\n- b\n- c\n');
+    const ids = new Set([leafId(d.blocks, 'b'), leafId(d.blocks, 'c')]);
+    expect(itemsHoldingLeaves(list, ids)).toEqual([1, 2]);
+  });
+
+  it('finds a leaf nested in a sublist and credits its top-level item', () => {
+    const { d, list } = listOf('- a\n- b\n  - deep\n');
+    const ids = new Set([leafId(d.blocks, 'deep')]);
+    expect(itemsHoldingLeaves(list, ids)).toEqual([1]);
+  });
+
+  it('reports nothing when no leaf is held', () => {
+    const { list } = listOf('- a\n- b\n');
+    expect(itemsHoldingLeaves(list, new Set(['nonexistent']))).toEqual([]);
   });
 });
 
