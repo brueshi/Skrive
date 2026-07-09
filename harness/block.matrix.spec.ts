@@ -1129,3 +1129,109 @@ test('SKR-182: ArrowDown in a wrapped cell walks its own lines first', async ({ 
   await page.waitForTimeout(60);
   expect(await caretCell(page), 'stayed in the cell, moved to its second line').toBe('0,0');
 });
+
+// Make ⌘⇧V read `text` — the chord reads the clipboard itself (the shell issues
+// no paste event for it), through the skrive bridge when present.
+async function stubClipboard(page: Page, text: string): Promise<void> {
+  await page.evaluate((t) => {
+    (window as unknown as { skrive?: unknown }).skrive = {
+      ...(window as unknown as { skrive?: object }).skrive,
+      clipboard: { readText: () => Promise.resolve(t) }
+    };
+  }, text);
+}
+
+// SKR-185 / F28: literal paste is the escape hatch from Markdown interpretation,
+// and must also be an escape hatch from reflow. It used to split(/\n+/), erasing
+// blank lines, making each line its own paragraph, and — off the top-level fast
+// path — joining the lines back with spaces.
+test('SKR-185: literal paste keeps breaks and paragraph seams distinct', async ({ page }) => {
+  await open(page, 3);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await stubClipboard(page, 'a\nb\n\nc');
+  await page.keyboard.press('ControlOrMeta+Shift+KeyV');
+  await page.waitForTimeout(150);
+
+  const md = await serialized(page);
+  expect(md, 'single newline is a hard break; blank line is a paragraph seam').toContain('a\\\nb\n\nc');
+  expect(md, 'the lines were not flowed together').not.toContain('a b');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('SKR-185: literal paste preserves indentation the flow path would trim', async ({ page }) => {
+  await open(page, 3);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await stubClipboard(page, 'def f():\n    return 1');
+  await page.keyboard.press('ControlOrMeta+Shift+KeyV');
+  await page.waitForTimeout(150);
+
+  const md = await serialized(page);
+  // One paragraph joined by a hard break — not two paragraphs (what the old split
+  // produced), and not one flowed line. The leading space is emitted as `&#x20;`
+  // because a raw indent after a break would re-parse as an indented code block;
+  // that escape is how the indent survives the round trip at all.
+  expect(md, 'a break joins the lines and the indent survives').toContain('def f():\\\n&#x20;   return 1');
+  expect(md, 'the lines were not flowed together').not.toContain('def f(): return 1');
+  expect(md, 'the lines did not become separate paragraphs').not.toContain('def f():\n\ndef');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('SKR-185: a lone CR is a newline, not a character to delete', async ({ page }) => {
+  await open(page, 3);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await stubClipboard(page, 'first\rsecond');
+  await page.keyboard.press('ControlOrMeta+Shift+KeyV');
+  await page.waitForTimeout(150);
+
+  const md = await serialized(page);
+  expect(md, 'the CR became a hard break').toContain('first\\\nsecond');
+  expect(md, 'the lines were not glued together').not.toContain('firstsecond');
+});
+
+// The fallback path: a container's leaf cannot hold a paragraph seam, so the
+// lines survive as hard breaks rather than being joined with spaces.
+test('SKR-185: literal paste into a list item keeps its lines', async ({ page }) => {
+  await open(page, 3);
+  await insertViaMenu(page, 'bullet');
+  await page.keyboard.type('item');
+  await stubClipboard(page, ' one\ntwo');
+  await page.keyboard.press('ControlOrMeta+Shift+KeyV');
+  await page.waitForTimeout(150);
+
+  const md = await serialized(page);
+  expect(md, 'still a list item').toMatch(/(^|\n)- item one/);
+  expect(md, 'the second line survived as a break, not a space').toContain('one\\');
+  expect(md, 'the lines were not flowed').not.toContain('item one two');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
+});
+
+test('SKR-185: literal paste replaces a selection instead of flattening it', async ({ page }) => {
+  await open(page, 3);
+  await caretAt(page, 'SKRIVE_FIRST_BLOCK');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('replace me');
+  await page.waitForTimeout(60);
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.evaluate(() => {
+    // ⌘A selects the document; re-select just the typed paragraph's text.
+    const el = Array.from(document.querySelectorAll('[data-block-id]')).find(
+      (n) => n.textContent === 'replace me'
+    ) as HTMLElement;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+  });
+  await stubClipboard(page, 'x\ny');
+  await page.keyboard.press('ControlOrMeta+Shift+KeyV');
+  await page.waitForTimeout(200);
+
+  const md = await serialized(page);
+  expect(md, 'the selection was replaced').not.toContain('replace me');
+  expect(md, 'both pasted lines landed, as a break').toContain('x\\\ny');
+});

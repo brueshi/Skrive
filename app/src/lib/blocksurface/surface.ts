@@ -12,7 +12,7 @@
 
 import { generateBlockId, parseDocument, serializeDocument, type BlockNode, type Document, type InlineMarks, type InlineNode, type ListItem, type TableBlock } from '../blockmodel';
 import { markdownForPaste } from '../clipboard/htmlToMarkdown';
-import { plainTextParagraphs } from '../clipboard/plainText';
+import { literalParagraphs, plainTextParagraphs } from '../clipboard/plainText';
 import { buildClipboardPayload } from '../clipboard/copyOut';
 import { imageExtension, imageMarkdownLink, pastedImageFilename } from '../clipboard/pasteImage';
 import { notify } from '../notify';
@@ -2531,55 +2531,112 @@ export class BlockSurface {
     return { id: landing.id, offset: 0 };
   }
 
-  // Paste plain text (SKR-118 Stage 3; segmentation reworked in SKR-148).
-  // Interpreted paste ('flow') applies CommonMark paragraph semantics: blank
-  // lines separate paragraphs, single newlines flow as spaces, line edges are
-  // trimmed. Literal paste ('literal', Cmd/Ctrl+Shift+V) keeps every line as its
-  // own paragraph, verbatim — the escape hatch for line-oriented text. A single
-  // paragraph's worth goes through the normal insert (which also handles
-  // replacing a selection). Multi-paragraph paste is supported at a collapsed
-  // caret in a top-level inline leaf: the caret splits the block, the first
-  // pasted paragraph joins the head, the last joins the tail, the rest land
-  // between. A caret in a container / code / cell falls back to a single-block
-  // insert (paragraphs joined by spaces) rather than risk corrupting it —
-  // refined later.
+  // Paste plain text (SKR-118 Stage 3; segmentation reworked in SKR-148, literal
+  // semantics fixed in SKR-185).
+  //
+  // Interpreted paste ('flow') applies CommonMark paragraph semantics: blank lines
+  // separate paragraphs, single newlines flow as spaces, line edges are trimmed.
+  //
+  // Literal paste ('literal', Cmd/Ctrl+Shift+V) is the escape hatch, and it escapes
+  // reflow as well as Markdown: a blank line is a paragraph seam, a single newline
+  // is a HARD BREAK inside the paragraph, and nothing is trimmed or dropped. It used
+  // to `split(/\n+/)`, which erased blank-line structure, made every line its own
+  // paragraph, and — off the top-level fast path — joined the lines back together
+  // with spaces, which is the exact opposite of verbatim (F28).
+  //
+  // Placement: a multi-paragraph literal paste splits a top-level inline leaf at a
+  // collapsed caret, exactly as before. Everywhere else — a selection to replace, a
+  // list item, a blockquote, a table cell — it replays the text as inserts and hard
+  // breaks through the ordinary edit path, which every one of those contexts already
+  // handles. Blank lines become a pair of breaks there, since a container's leaf
+  // cannot hold a paragraph seam. Line structure survives in all of them.
   private pasteText(raw: string, mode: 'flow' | 'literal'): void {
-    const segments =
-      mode === 'literal'
-        ? raw.replace(/\r/g, '').split(/\n+/).filter((s) => s.length > 0)
-        : plainTextParagraphs(raw);
-    // Single-segment paste rides the ordinary insert for placement, but framed
-    // as its own atomic undo step (SKR-178 / F38): routed bare, applyInsertText
-    // marks it 'type' and a paste would coalesce into adjacent typing.
-    const insertAtomically = (): void => this.compoundEdit(() => this.applyInsertText(segments.join(' ')));
-    if (segments.length <= 1) {
-      insertAtomically();
+    const segments = mode === 'literal' ? literalParagraphs(raw) : plainTextParagraphs(raw);
+    if (segments.length === 0) return;
+    const multiline = segments.length > 1 || segments[0]!.includes('\n');
+
+    // A single line rides the ordinary insert for placement, but framed as its own
+    // atomic undo step (SKR-178 / F38): routed bare, applyInsertText marks it 'type'
+    // and a paste would coalesce into adjacent typing.
+    if (!multiline) {
+      this.compoundEdit(() => this.applyInsertText(segments[0]!));
       return;
     }
+
+    // The fallback when the caret isn't a collapsed caret in a top-level leaf.
+    //
+    // Literal replays the text through the ordinary edit path — one compound undo
+    // step, and every context (selection to replace, container, cell) is already
+    // handled by applyInsertText / applyLineBreak. A blank line becomes a pair of
+    // breaks, since a container's leaf cannot hold a paragraph seam.
+    //
+    // Flow keeps its old single-block join: its segments are already reflowed
+    // prose, and changing where a flow paste lands in a container belongs to the
+    // paste-placement work (SKR-174), not here.
+    const fallback = (): void =>
+      this.compoundEdit(() => {
+        if (mode === 'flow') {
+          this.applyInsertText(segments.join(' '));
+          return;
+        }
+        segments.forEach((segment, s) => {
+          if (s > 0) {
+            this.applyLineBreak();
+            this.applyLineBreak();
+          }
+          segment.split('\n').forEach((line, i) => {
+            if (i > 0) this.applyLineBreak();
+            if (line !== '') this.applyInsertText(line);
+          });
+        });
+      });
+
+    // Only a MULTI-paragraph paste splits the block. A single paragraph carrying
+    // breaks has no seam to split at, and the splice below would insert it twice —
+    // its first and last segment are the same string. It replays instead.
+    if (segments.length === 1) {
+      fallback();
+      return;
+    }
+
     const t = this.leafTarget();
     if (!t || !t.collapsed || !isInlineText(t.leaf) || !this.isTopLevel(t.blockEl, t.leaf.id)) {
-      insertAtomically();
+      fallback();
       return;
     }
     const index = this.doc.blocks.findIndex((b) => b.id === t.leaf.id);
     if (index < 0) {
-      insertAtomically();
+      fallback();
       return;
     }
 
-    const toInline = (s: string): InlineNode[] => (s ? [{ kind: 'text', text: s, marks: {} }] : []);
+    // A segment's own newlines become break atoms; flow segments never carry any.
+    const toInline = (s: string): InlineNode[] => {
+      const out: InlineNode[] = [];
+      s.split('\n').forEach((line, i) => {
+        if (i > 0) out.push({ kind: 'break', marks: {} });
+        if (line !== '') out.push({ kind: 'text', text: line, marks: {} });
+      });
+      return out;
+    };
     const [head, tail] = splitInline(t.leaf.inline, t.start);
     const firstSeg = segments[0]!;
-    const lastSeg = segments[segments.length - 1]!;
+    const lastInline = toInline(segments[segments.length - 1]!);
     const first: BlockNode = { ...t.leaf, inline: coalesceInline([...head, ...toInline(firstSeg)]), dirty: true };
     const middle = segments.slice(1, -1).map((s) => this.newInlineBlock('paragraph', toInline(s), 1));
-    const last = this.newInlineBlock('paragraph', coalesceInline([...toInline(lastSeg), ...tail]), 1);
+    const last = this.newInlineBlock('paragraph', coalesceInline([...lastInline, ...tail]), 1);
 
     const blocks = this.doc.blocks.slice();
     blocks.splice(index, 1, first, ...middle, last);
     this.doc = { ...this.doc, blocks };
     this.reconcile();
-    writeSelection(this.container, collapsedRange({ leaf: { kind: 'block', id: last.id }, offset: lastSeg.length }), 'paste');
+    // The caret lands after the pasted text, which is the length of the LAST
+    // segment's inline — breaks count one offset each, so a character count lies.
+    writeSelection(
+      this.container,
+      collapsedRange({ leaf: { kind: 'block', id: last.id }, offset: inlineLength(lastInline) }),
+      'paste'
+    );
     this.scheduleSerialize();
   }
 
