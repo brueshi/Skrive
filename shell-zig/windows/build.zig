@@ -22,10 +22,15 @@ pub fn build(b: *std.Build) void {
     // A single `dev` switch gates everything that should be absent from a
     // shipped build: the `skrive-diag.log` file logger (B2) and the WebView2
     // DevTools/F12 surface (B5) — both answer the same question, "is this a
-    // release the user runs?". Defaults to on for Debug, off otherwise, so a
-    // plain `-Doptimize=ReleaseFast` is release-clean with no extra flag;
-    // `-Ddev=true` forces a triage build (logger + DevTools) on any mode.
+    // release the user runs?". Defaults to on for Debug, off otherwise, so any
+    // release mode is release-clean with no extra flag; `-Ddev=true` forces a
+    // triage build (logger + DevTools) on any mode.
     // (Supersedes the handoff's tentative `-Ddiag` name.)
+    //
+    // The default keys off `.Debug` specifically, not off "not ReleaseFast", so the
+    // SKR-235 switch to `-Doptimize=ReleaseSafe` leaves it off. Verified against the
+    // built exe, not just read: the `skrive-diag.log` string is absent from a
+    // ReleaseSafe binary and present in a Debug one.
     const dev = b.option(bool, "dev", "Enable the diag file logger + DevTools (default: Debug only)") orelse
         (optimize == .Debug);
     // The app version, stamped from the repo-root package.json by
