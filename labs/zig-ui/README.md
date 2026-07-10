@@ -17,4 +17,10 @@ The complete plan — decision record, stage ladder, exit criteria — lives in
 `planning/zig-ui-lab.md` (disk-only, not committed). The running session log
 is `docs/zig-ui-lab-log.md`. Build and run with `zig build run` from this
 directory (Zig 0.16.0, matching `shell-zig/core`'s pin). `--continuous`
-starts in continuous-render mode; space toggles it at runtime.
+starts in continuous-render mode; space toggles it at runtime. Scene keys:
+`1` demo, `2` toast taste test, `3`/`4` stress large/small, `S` stress
+shadows. `zig build run -- --bench` runs the fixed measurement schedule
+(keyboard ignored) and quits. Shaders are authored in
+`src/gfx/*.glsl` and compiled with `zig build shaders`; the generated
+`.glsl.zig` artifacts are checked in, so ordinary builds never need
+sokol-shdc.
