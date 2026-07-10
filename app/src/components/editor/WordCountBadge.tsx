@@ -29,15 +29,23 @@ import { usePreferencesStore } from '../../stores/preferences';
 import { IconChevronDown } from './menus/toolbar-icons';
 import './WordCountBadge.css';
 
+// A live selection counter needs at most a few updates a second to read as
+// live; `sel.toString()` is O(selection text), so recomputing it every frame
+// during a drag scaled with the document and stole frame time (SKR-190).
+const SELECTION_COUNT_MIN_INTERVAL_MS = 120;
+
 export function useSelectionCounts(
   scopeRef: React.RefObject<HTMLElement | null>
 ): LiveCounts | null {
   const [counts, setCounts] = useState<LiveCounts | null>(null);
   const rafRef = useRef<number | null>(null);
+  const trailingRef = useRef<number | null>(null);
+  const lastRunRef = useRef(0);
 
   useEffect(() => {
     const read = () => {
       rafRef.current = null;
+      lastRunRef.current = performance.now();
       const scope = scopeRef.current;
       if (!scope) return;
 
@@ -78,14 +86,25 @@ export function useSelectionCounts(
     };
 
     const onSelectionChange = () => {
-      if (rafRef.current != null) return;
-      rafRef.current = requestAnimationFrame(read);
+      if (rafRef.current != null || trailingRef.current != null) return;
+      const since = performance.now() - lastRunRef.current;
+      if (since >= SELECTION_COUNT_MIN_INTERVAL_MS) {
+        rafRef.current = requestAnimationFrame(read);
+        return;
+      }
+      // Inside the interval: coalesce into one trailing read so the final
+      // selection state is never missed, just deferred.
+      trailingRef.current = window.setTimeout(() => {
+        trailingRef.current = null;
+        if (rafRef.current == null) rafRef.current = requestAnimationFrame(read);
+      }, SELECTION_COUNT_MIN_INTERVAL_MS - since);
     };
 
     document.addEventListener('selectionchange', onSelectionChange);
     return () => {
       document.removeEventListener('selectionchange', onSelectionChange);
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      if (trailingRef.current != null) clearTimeout(trailingRef.current);
     };
   }, [scopeRef]);
 

@@ -16,6 +16,23 @@ import {
   EMPTY_MENU_SELECTION
 } from './controller';
 
+function selectionsEqual(a: MenuSelection, b: MenuSelection): boolean {
+  return (
+    a.empty === b.empty &&
+    a.strong === b.strong &&
+    a.em === b.em &&
+    a.code === b.code &&
+    a.link === b.link &&
+    a.linkHref === b.linkHref &&
+    a.blockType === b.blockType &&
+    a.headingLevel === b.headingLevel &&
+    a.inBulletList === b.inBulletList &&
+    a.inOrderedList === b.inOrderedList &&
+    a.inBlockquote === b.inBlockquote &&
+    a.inTable === b.inTable
+  );
+}
+
 function toSelection(info: SelectionInfo | null): MenuSelection {
   if (!info) return EMPTY_MENU_SELECTION;
   return {
@@ -58,9 +75,19 @@ export class BlockMenuController implements MenuController {
   }
 
   private ingest(info: SelectionInfo | null): void {
-    this.rect = info?.rect ?? null;
-    this.dragging = info?.dragging ?? false;
-    this.selection = toSelection(info);
+    this.rect = info?.rect ?? null; // always fresh: anchorRect() reads it on demand
+    const dragging = info?.dragging ?? false;
+    const next = toSelection(info);
+    // A collapsed caret moving (every keystroke) changes only the rect. With the
+    // bubble hidden (empty) and no link editor anchored, nothing React-visible
+    // changed — skip the rev bump so typing doesn't re-render the chrome per
+    // keystroke (SKR-190). A visible bubble or an open link editor still
+    // re-anchors on every frame via the commit below.
+    if (next.empty && !this.link.open && this.dragging === dragging && selectionsEqual(next, this.selection)) {
+      return;
+    }
+    this.dragging = dragging;
+    this.selection = next;
     this.commit();
   }
 

@@ -61,6 +61,24 @@ function readBigP99Ceiling(): number {
   return ceiling;
 }
 
+/**
+ * Absolute ceiling for the p95 frame gap while drag-selecting at 10k blocks
+ * (SKR-190). The selection observer, summary build, and chrome notify are all
+ * rAF-coalesced, so per-frame work that scales with the document stretches the
+ * gap between consecutive animation frames directly — before the SKR-190 fix
+ * the 10k drag measured seconds per frame (p95 ~2400ms); after it, ~9ms.
+ */
+function readDragFrameP95Ceiling(): number {
+  const raw = JSON.parse(readFileSync(BASELINE_PATH, 'utf8')) as {
+    stage3aDragSelect?: { frameP95CeilingMs?: number };
+  };
+  const ceiling = raw.stage3aDragSelect?.frameP95CeilingMs;
+  if (typeof ceiling !== 'number') {
+    throw new Error('harness/bespoke.latency.json is missing stage3aDragSelect.frameP95CeilingMs');
+  }
+  return ceiling;
+}
+
 async function open(page: Page, blocks: number): Promise<void> {
   await page.goto(`/harness.html?surface=block&blocks=${blocks}`);
   await page.waitForFunction(
@@ -140,6 +158,48 @@ test('Stage 3a: the bespoke engine types constant-time', async ({ page }) => {
   expect(big.p99, `block-10k p99 (${big.p99.toFixed(2)}ms) within the absolute ceiling`).toBeLessThanOrEqual(
     bigP99Ceiling
   );
+});
+
+// SKR-190: drag-selection at 10k blocks must not do per-frame work that scales
+// with the document. A REAL mouse drag (the programmatic-range fixtures dispatch
+// no mouse events, so they never exercised this path — the SKR-239 lesson) while
+// an rAF loop samples the gap between consecutive frames; a blocked main thread
+// stretches the gaps. Absolute ceiling per the SKR-215 doctrine: the ratio is
+// the noisy metric, the absolute number is the stable one.
+test('Stage 3a: drag-selection stays within frame budget at 10k blocks', async ({ page }) => {
+  const ceiling = readDragFrameP95Ceiling();
+  await open(page, 10_000);
+  const first = await blockBox(page, 0);
+  await page.evaluate(() => {
+    const w = window as unknown as { __skriveDragFrames: number[]; __skriveDragFramesOn: boolean };
+    w.__skriveDragFrames = [];
+    w.__skriveDragFramesOn = true;
+    let last = performance.now();
+    const loop = (t: number): void => {
+      w.__skriveDragFrames.push(t - last);
+      last = t;
+      if (w.__skriveDragFramesOn) requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  });
+  await page.mouse.move(first.x + 5, first.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(first.x + 400, first.y + 700, { steps: 25 });
+  await page.mouse.up();
+  const frames = (
+    await page.evaluate(() => {
+      const w = window as unknown as { __skriveDragFrames: number[]; __skriveDragFramesOn: boolean };
+      w.__skriveDragFramesOn = false;
+      return w.__skriveDragFrames;
+    })
+  ).slice(1); // the first gap includes sampler start-up, not drag work
+  expect(await selectionCollapsed(page), 'the drag produced a real selection').toBe(false);
+  const sorted = [...frames].sort((a, b) => a - b);
+  const p95 = sorted[Math.min(sorted.length - 1, Math.floor(0.95 * sorted.length))] ?? 0;
+  const max = sorted[sorted.length - 1] ?? 0;
+  // eslint-disable-next-line no-console
+  console.log(`[3a drag] block-10k frame p95=${p95.toFixed(1)}ms max=${max.toFixed(1)}ms (n=${sorted.length}, ceiling ${ceiling}ms)`);
+  expect(p95, `drag-selection frame p95 (${p95.toFixed(1)}ms) within the ceiling`).toBeLessThanOrEqual(ceiling);
 });
 
 test('Stage 3a: the model stays authoritative and faithful', async ({ page }) => {
