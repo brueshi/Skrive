@@ -21,7 +21,7 @@ import type { AssetResolver } from './render';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
 import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
-import { findBlockById, updateBlockById } from './tree';
+import { blockIndexOf, findBlockById, updateBlockById, updateBlockInTop } from './tree';
 import { enterInContainer, exitContainer, splitBlockAt, type StructuralResult } from './structural';
 import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
 import { changeListType, findImmediateList, indentItem, itemsHoldingLeaves, liftItemOut, outdentItem, splitListAround } from './list-ops';
@@ -98,6 +98,32 @@ export type SelectionInfo = {
 };
 
 const SERIALIZE_DEBOUNCE_MS = 400;
+
+/** Value-compare two selection summaries (rect by geometry), so an unchanged
+ *  selection frame skips notifying the chrome (SKR-190). */
+function summariesEqual(a: SelectionInfo | null, b: SelectionInfo | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.rect.x === b.rect.x &&
+    a.rect.y === b.rect.y &&
+    a.rect.width === b.rect.width &&
+    a.rect.height === b.rect.height &&
+    a.empty === b.empty &&
+    a.dragging === b.dragging &&
+    a.marks.strong === b.marks.strong &&
+    a.marks.em === b.marks.em &&
+    a.marks.code === b.marks.code &&
+    a.marks.link === b.marks.link &&
+    a.linkHref === b.linkHref &&
+    a.blockType === b.blockType &&
+    a.headingLevel === b.headingLevel &&
+    a.inBulletList === b.inBulletList &&
+    a.inOrderedList === b.inOrderedList &&
+    a.inBlockquote === b.inBlockquote &&
+    a.inTable === b.inTable
+  );
+}
 
 // Marks the block element selected as a unit (SKR-203). Data-attribute scoped so
 // the ring in BlockEditor.css is unaffected by the surface's :focus-visible
@@ -215,6 +241,10 @@ export class BlockSurface {
   private dirtySinceEmit = false;
   private composing = false;
   private selectionCb: ((info: SelectionInfo | null) => void) | null = null;
+  // The last summary handed to selectionCb, so an unchanged selection frame
+  // does not re-notify (and re-render) the chrome (SKR-190). `undefined` means
+  // "nothing sent yet" — distinct from null, which is a real "outside" summary.
+  private lastEmitted: SelectionInfo | null | undefined = undefined;
   private selScheduled = false;
   // The selection a link command acts on, saved before focus moves to the URL input
   // (which collapses the live selection). A discriminated union so a table-cell
@@ -405,6 +435,9 @@ export class BlockSurface {
    *  rAF-coalesced on selection change, never per keystroke. */
   onSelectionChange(cb: ((info: SelectionInfo | null) => void) | null): void {
     this.selectionCb = cb;
+    // A fresh subscriber must get the next summary even if it equals the last
+    // one sent to its predecessor (SKR-190's emit diffing).
+    this.lastEmitted = undefined;
   }
 
   /** Register (or clear) the insert (slash) menu observer. Fired when a `/` opens
@@ -749,10 +782,16 @@ export class BlockSurface {
     const liveSel = window.getSelection();
     const backward = liveSel != null && isSelectionBackward(liveSel);
     const on = !leaves.every((l) => rangeHasMark(l.leaf.inline, l.start, l.end, mark));
-    let blocks = this.doc.blocks;
+    // One sliced array with per-leaf scoped rewrites, not one O(document)
+    // updateBlockById pass per leaf — select-all over a large document made
+    // this O(n²) (SKR-190).
+    const index = blockIndexOf(this.doc.blocks);
+    const blocks = this.doc.blocks.slice();
     for (const l of leaves) {
+      const i = index.get(l.leaf.id);
+      if (i === undefined) continue;
       const inline = setMarkInInline(l.leaf.inline, l.start, l.end, mark, on);
-      blocks = updateBlockById(blocks, l.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode);
+      blocks[i] = updateBlockInTop(blocks[i]!, l.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode);
     }
     this.doc = { ...this.doc, blocks };
     for (const l of leaves) {
@@ -790,8 +829,9 @@ export class BlockSurface {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return [];
     const range = sel.getRangeAt(0);
+    if (!range.intersectsNode(this.container)) return [];
     const out: Array<{ leaf: InlineTextBlock; start: number; end: number }> = [];
-    this.container.querySelectorAll(`[${BLOCK_ID_ATTR}]`).forEach((node) => {
+    const visit = (node: Element): void => {
       if (!(node instanceof HTMLElement)) return;
       const id = node.getAttribute(BLOCK_ID_ATTR);
       if (!id) return;
@@ -805,8 +845,33 @@ export class BlockSurface {
         : inlineLength(block.inline);
       if (start >= end) return;
       out.push({ leaf: block, start, end });
-    });
+    };
+    // Walk only the top-level blocks the range actually spans (document order is
+    // DOM order), instead of querySelectorAll over every block in the document —
+    // O(selection) per call, not O(document), which made drag-selection O(n²)
+    // per frame at large documents (SKR-190).
+    const startTop = this.topElementFor(range.startContainer, range.startOffset, false) ?? this.container.firstElementChild;
+    const endTop = this.topElementFor(range.endContainer, range.endOffset, true) ?? this.container.lastElementChild;
+    for (let el: Element | null = startTop; el; el = el.nextElementSibling) {
+      visit(el);
+      for (const nested of el.querySelectorAll(`[${BLOCK_ID_ATTR}]`)) visit(nested);
+      if (el === endTop) break;
+    }
     return out;
+  }
+
+  /** The direct child of the surface container that holds a range endpoint, or
+   *  null when the endpoint lives outside the container (callers clamp to the
+   *  container's first/last child). An endpoint ON the container resolves to the
+   *  child at its offset (select-all addresses the container itself). */
+  private topElementFor(node: Node, offset: number, isEnd: boolean): Element | null {
+    if (node === this.container) {
+      const idx = isEnd ? Math.min(offset, this.container.children.length) - 1 : offset;
+      return this.container.children[Math.max(0, idx)] ?? null;
+    }
+    let cur: Node | null = node;
+    while (cur && cur.parentNode !== this.container) cur = cur.parentNode;
+    return cur instanceof Element ? cur : null;
   }
 
   /** Remember the current selection so a link can be applied to it after focus
@@ -1087,9 +1152,14 @@ export class BlockSurface {
     leaves: ReadonlyArray<{ leaf: InlineTextBlock; start: number; end: number }>,
     spec: BlockTypeSpec
   ): void {
-    let blocks = this.doc.blocks;
+    // Same batched shape as applyMarkToLeaves: one sliced array, scoped
+    // per-leaf rewrites (SKR-190).
+    const index = blockIndexOf(this.doc.blocks);
+    const blocks = this.doc.blocks.slice();
     for (const l of leaves) {
-      blocks = updateBlockById(blocks, l.leaf.id, (b) => this.convertedBlock(spec, b).node);
+      const i = index.get(l.leaf.id);
+      if (i === undefined) continue;
+      blocks[i] = updateBlockInTop(blocks[i]!, l.leaf.id, (b) => this.convertedBlock(spec, b).node);
     }
     this.doc = { ...this.doc, blocks };
     this.reconcile();
@@ -1744,7 +1814,13 @@ export class BlockSurface {
     this.recordSelection();
     const cb = this.selectionCb;
     if (!cb) return;
-    cb(this.selectionSummary());
+    const summary = this.selectionSummary();
+    // Notify only on a real change: selectionchange storms (caret blink, focus
+    // churn, every keystroke) otherwise re-render the chrome with an identical
+    // summary each frame (SKR-190).
+    if (this.lastEmitted !== undefined && summariesEqual(summary, this.lastEmitted)) return;
+    this.lastEmitted = summary;
+    cb(summary);
   }
 
   /** Keep lastSelection fresh from the rAF-coalesced selection observer, so a
@@ -1905,7 +1981,11 @@ export class BlockSurface {
       }
       return null;
     };
-    return walk(this.doc.blocks, { inBulletList: false, inOrderedList: false, inBlockquote: false }) ?? {
+    // Scoped to the leaf's containing top-level block — this runs per selection
+    // frame, so a whole-document walk here was O(document) per frame (SKR-190).
+    const i = blockIndexOf(this.doc.blocks).get(leafId);
+    const top = i === undefined ? undefined : this.doc.blocks[i];
+    return (top && walk([top], { inBulletList: false, inOrderedList: false, inBlockquote: false })) || {
       inBulletList: false,
       inOrderedList: false,
       inBlockquote: false
@@ -4165,7 +4245,14 @@ export class BlockSurface {
   }
 
   private leafElementById(id: string): HTMLElement | null {
-    return this.registry.get(id) ?? (this.container.querySelector(`[${BLOCK_ID_ATTR}="${id}"]`) as HTMLElement | null);
+    const direct = this.registry.get(id);
+    if (direct) return direct;
+    // A nested leaf has no registry entry; scope the query to its top-level
+    // element rather than the whole surface (SKR-190), falling back to the
+    // container only when the index doesn't know the id.
+    const i = blockIndexOf(this.doc.blocks).get(id);
+    const topEl = i === undefined ? null : this.registry.get(this.doc.blocks[i]!.id);
+    return ((topEl ?? this.container).querySelector(`[${BLOCK_ID_ATTR}="${id}"]`) as HTMLElement | null);
   }
 
   private isTopLevel(blockEl: HTMLElement, id: string): boolean {
@@ -4216,7 +4303,9 @@ export class BlockSurface {
    *  (SKR-178 / F42's "off-by-N"). Keyed by the enclosing TOP-LEVEL block: a
    *  nested leaf edit rebuilds its container object too. */
   private markRenderedInPlace(leafId: string): void {
-    const top = this.doc.blocks.find((b) => b.id === leafId || findBlockById([b], leafId) != null);
+    // Index lookup, not a scan: this runs per keystroke (SKR-190).
+    const i = blockIndexOf(this.doc.blocks).get(leafId);
+    const top = i === undefined ? undefined : this.doc.blocks[i];
     if (top) this.renderedFrom.set(top.id, top);
   }
 
