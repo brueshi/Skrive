@@ -73,7 +73,13 @@ function renderInlineNode(node: InlineNode, resolveAsset: AssetResolver): Node {
   }
 
   const marks: InlineMarks = node.marks;
-  if (marks.code) dom = wrap('code', dom);
+  if (marks.code) {
+    const codeEl = wrap('code', dom);
+    // Code is code, not prose: no spellcheck squiggles inside inline code
+    // (SKR-191; the surface itself has spellcheck on).
+    codeEl.setAttribute('spellcheck', 'false');
+    dom = codeEl;
+  }
   if (marks.em) dom = wrap('em', dom);
   if (marks.strong) dom = wrap('strong', dom);
   if (marks.strikethrough) dom = wrap('s', dom);
@@ -158,6 +164,9 @@ export function renderBlock(
       break;
     case 'code_block': {
       el = document.createElement('pre');
+      // Code is code, not prose: the surface's spellcheck (SKR-191) stops at
+      // the fence.
+      el.setAttribute('spellcheck', 'false');
       const code = document.createElement('code');
       setCodeContent(code, block.text);
       el.appendChild(code);

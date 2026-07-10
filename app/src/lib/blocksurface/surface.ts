@@ -318,11 +318,24 @@ export class BlockSurface {
     this.resolveAsset = opts.resolveAsset ?? ((url) => url);
 
     this.container.contentEditable = 'true';
+    // Spellcheck stays OFF — decided deliberately, twice (SKR-191). The
+    // writer-first answer is ON, and 2026-07-09 shipped the full enable
+    // (attribute on, corrections mapped onto the model, host continuous-checking
+    // default + Spelling menu). Shell verification then showed WebKit cannot
+    // keep squiggles alive over this surface: the as-you-type marking pass
+    // rides WebKit's native TypingCommand — preventDefaulted here by design —
+    // and its markers die with every reconcile/renderInlineInto DOM rebuild, so
+    // squiggles appeared only on the caret word and vanished on Enter. Re-check
+    // heuristics (attribute flip, selection hop) each hit another face of the
+    // same wall. Reliable squiggles need native-typing readback or a bespoke
+    // checker painted as decorations — the SKR-242 spike. applyReplacementText
+    // (below) stays: correct, spec'd, and required the day squiggles land.
     this.container.spellcheck = false;
     // Disable the OS text services that fire on word boundaries (autocorrect /
-    // capitalization / smart substitution). In a contenteditable they emit
-    // insertReplacementText on space/period, which the hot path would have to
-    // fight — the source of the word-then-space / word-then-period lag.
+    // capitalization / smart substitution). Unlike spellcheck — which is passive
+    // until the writer invokes a correction — these rewrite text DURING typing:
+    // they emit insertReplacementText on space/period, which the hot path would
+    // have to fight — the source of the word-then-space / word-then-period lag.
     this.container.setAttribute('autocorrect', 'off');
     this.container.setAttribute('autocapitalize', 'off');
     this.container.setAttribute('autocomplete', 'off');
@@ -2047,6 +2060,12 @@ export class BlockSurface {
     } else if (type === 'deleteSoftLineForward' || type === 'deleteHardLineForward') {
       e.preventDefault();
       this.applyRunDelete('forward', lineScan);
+    } else if (type === 'insertReplacementText') {
+      // A spellcheck correction / dictation revision (SKR-191). With spellcheck
+      // enabled these MUST land in the model — left to the catch-all below, the
+      // squiggle's correction would silently do nothing.
+      e.preventDefault();
+      this.applyReplacementText(e);
     } else if (type.startsWith('insert') || type.startsWith('delete')) {
       // Still-unmodeled edits (e.g. insertFromDrop / deleteByDrag, handled by the
       // drop listener instead) — block them so the browser cannot mutate structure
@@ -2054,6 +2073,61 @@ export class BlockSurface {
       e.preventDefault();
     }
   };
+
+  /** Land a text-service replacement (SKR-191): the engine proposes swapping a
+   *  target range (the misspelled word) for new text. The event's target range —
+   *  not the live selection, which the context-menu interaction may have moved —
+   *  is mapped to flat offsets and routed through the same delete+insert inline
+   *  primitives as typing, one history step. Scope: within one inline leaf or
+   *  one table cell (text services never propose cross-block replacements); an
+   *  unresolvable range is refused, and since the event is already prevented a
+   *  refusal is a clean no-op, never a DOM mutation behind the model. */
+  private applyReplacementText(e: InputEvent): void {
+    const text = e.data ?? e.dataTransfer?.getData('text/plain') ?? '';
+    const range = (typeof e.getTargetRanges === 'function' ? e.getTargetRanges() : [])[0];
+    if (!range) return;
+    const start = range.startContainer;
+    if (!this.container.contains(start)) return;
+    const closestEl = (node: Node, selector: string): HTMLElement | null => {
+      const el = node instanceof HTMLElement ? node : node.parentElement;
+      return (el?.closest(selector) as HTMLElement | null) ?? null;
+    };
+
+    // A cell first: it carries coordinates, not a block id, so the generic block
+    // walk below would resolve the whole table (the SKR-220 degenerate case).
+    const cellEl = closestEl(start, '[data-cell-row]');
+    if (cellEl) {
+      if (!cellEl.contains(range.endContainer)) return;
+      const tableEl = closestEl(cellEl, `[${BLOCK_ID_ATTR}]`);
+      const tableId = tableEl?.getAttribute(BLOCK_ID_ATTR);
+      const table = tableId != null ? findBlockById(this.doc.blocks, tableId) : null;
+      if (tableId == null || !table || table.type !== 'table') return;
+      const row = Number(cellEl.dataset.cellRow);
+      const col = Number(cellEl.dataset.cellCol);
+      const inline = table.rows[row]?.[col];
+      if (!inline) return;
+      const s = flatOffsetFromDOM(cellEl, start, range.startOffset);
+      const en = flatOffsetFromDOM(cellEl, range.endContainer, range.endOffset);
+      if (s > en) return;
+      this.commitCell(
+        { tableId, row, col, cellEl },
+        insertTextInInline(deleteRangeInInline(inline, s, en), s, text),
+        s + text.length
+      );
+      this.scheduleSerialize();
+      return;
+    }
+
+    const blockEl = closestEl(start, `[${BLOCK_ID_ATTR}]`);
+    const id = blockEl?.getAttribute(BLOCK_ID_ATTR);
+    const leaf = id != null ? findBlockById(this.doc.blocks, id) : null;
+    if (!blockEl || !leaf || !isInlineText(leaf) || !blockEl.contains(range.endContainer)) return;
+    const s = flatOffsetFromDOM(blockEl, start, range.startOffset);
+    const en = flatOffsetFromDOM(blockEl, range.endContainer, range.endOffset);
+    if (s > en) return;
+    this.commitInline(leaf.id, insertTextInInline(deleteRangeInInline(leaf.inline, s, en), s, text), blockEl, s + text.length);
+    this.scheduleSerialize();
+  }
 
   // Paste-in interpretation (SKR-119). Rich sources (web pages, Notion, Obsidian
   // reading view) carry `text/html`; we convert it to canonical Markdown and parse
