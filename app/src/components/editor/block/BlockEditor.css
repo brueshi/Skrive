@@ -64,16 +64,19 @@
   font-weight: 650;
 }
 
+/* Logical (inline-start) properties, not physical left: each block resolves its
+   own direction via dir="auto" (SKR-232), so the quote rule and list padding
+   must sit on the text's start side — left in LTR, right in RTL. */
 .block-editor-surface blockquote {
-  margin-left: 0;
-  padding-left: 1rem;
-  border-left: 3px solid var(--skrive-rule);
+  margin-inline-start: 0;
+  padding-inline-start: 1rem;
+  border-inline-start: 3px solid var(--skrive-rule);
   color: color-mix(in srgb, var(--skrive-fg) 80%, var(--skrive-bg));
 }
 
 .block-editor-surface ul,
 .block-editor-surface ol {
-  padding-left: 1.5rem;
+  padding-inline-start: 1.5rem;
 }
 
 .block-editor-surface pre {
@@ -110,7 +113,9 @@
 .block-editor-surface td {
   border: 1px solid var(--skrive-rule);
   padding: 0.4em 0.6em;
-  text-align: left;
+  /* start, not left: cells carry dir="auto" (SKR-232), so an RTL cell aligns
+     to its own reading direction while the column order stays fixed. */
+  text-align: start;
 }
 
 .block-editor-surface a {
