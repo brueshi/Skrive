@@ -318,14 +318,19 @@ export class BlockSurface {
     this.resolveAsset = opts.resolveAsset ?? ((url) => url);
 
     this.container.contentEditable = 'true';
-    // Spellcheck is ON — a writer-first default, decided deliberately (SKR-191,
-    // 2026-07-09): a writing app without red squiggles is a real gap vs iA and
-    // Docs. Its corrections arrive as insertReplacementText, which the
-    // beforeinput pipeline maps onto the model (applyReplacementText) — enabling
-    // this WITHOUT that mapping produces squiggles whose corrections silently do
-    // nothing (the audit's F80 trap). Code blocks and inline code opt out at
-    // render time (render.ts): code is code, not prose.
-    this.container.spellcheck = true;
+    // Spellcheck stays OFF — decided deliberately, twice (SKR-191). The
+    // writer-first answer is ON, and 2026-07-09 shipped the full enable
+    // (attribute on, corrections mapped onto the model, host continuous-checking
+    // default + Spelling menu). Shell verification then showed WebKit cannot
+    // keep squiggles alive over this surface: the as-you-type marking pass
+    // rides WebKit's native TypingCommand — preventDefaulted here by design —
+    // and its markers die with every reconcile/renderInlineInto DOM rebuild, so
+    // squiggles appeared only on the caret word and vanished on Enter. Re-check
+    // heuristics (attribute flip, selection hop) each hit another face of the
+    // same wall. Reliable squiggles need native-typing readback or a bespoke
+    // checker painted as decorations — the SKR-242 spike. applyReplacementText
+    // (below) stays: correct, spec'd, and required the day squiggles land.
+    this.container.spellcheck = false;
     // Disable the OS text services that fire on word boundaries (autocorrect /
     // capitalization / smart substitution). Unlike spellcheck — which is passive
     // until the writer invokes a correction — these rewrite text DURING typing:

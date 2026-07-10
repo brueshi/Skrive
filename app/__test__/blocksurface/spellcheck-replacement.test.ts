@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 //
-// Spellcheck is ON and its corrections land in the model (SKR-191). The audit's
-// F80 trap: `insertReplacementText` was swallowed by the beforeinput catch-all,
-// so enabling spellcheck naively produced squiggles whose corrections silently
-// did nothing. These specs pin the three halves: the surface enables spellcheck
-// (code opts out at render time), and applyReplacementText maps a target range
-// onto the inline primitives — for a top-level leaf, a nested leaf, and a table
-// cell — while refusing a range it cannot resolve.
+// The spellcheck decision and its replacement plumbing (SKR-191). Spellcheck is
+// deliberately OFF: the 2026-07-09 enable was reverted the same day because
+// WebKit's marker lifecycle cannot survive this surface (marking rides the
+// native TypingCommand the pipeline preventDefaults; markers die on every DOM
+// rebuild) — see SKR-242 for the real integration. What SHIPS from that work
+// and is pinned here: applyReplacementText maps an insertReplacementText target
+// range onto the inline primitives — for a top-level leaf, a nested leaf, and a
+// table cell — refusing a range it cannot resolve (the audit's F80 trap was
+// corrections that silently no-op), and code opts out of checking at render
+// time so squiggles never touch code when spellcheck returns.
 //
 // jsdom implements neither StaticRange nor InputEvent.getTargetRanges, so the
 // replacement specs drive the handler directly with a range-shaped literal (the
@@ -45,9 +48,9 @@ const replace = (surface: BlockSurface, data: string, node: Node, start: number,
 };
 
 describe('spellcheck posture', () => {
-  it('the surface enables spellcheck', () => {
+  it('the surface keeps spellcheck off (deliberate — SKR-191/SKR-242)', () => {
     new BlockSurface({ container, doc: parseDocument('hello\n') });
-    expect(container.spellcheck).toBe(true);
+    expect(container.spellcheck).toBe(false);
   });
 
   it('code blocks and inline code opt out', () => {
