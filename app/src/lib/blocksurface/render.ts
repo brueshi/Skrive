@@ -178,6 +178,9 @@ export function renderBlock(
       }
       for (const item of block.items) {
         const li = document.createElement('li');
+        // Per-item direction: each item's marker sits on its own text's side
+        // (SKR-232), so one RTL item in an LTR list reads correctly.
+        li.setAttribute('dir', 'auto');
         renderChildren(item.children, li, resolveAsset);
         el.appendChild(li);
       }
@@ -197,6 +200,9 @@ export function renderBlock(
           // id); the surface edits a cell by (table id, row, col).
           cellEl.dataset.cellRow = String(r);
           cellEl.dataset.cellCol = String(c);
+          // Cells resolve direction individually; the table element itself
+          // stays direction-neutral so the COLUMN order never flips (SKR-232).
+          cellEl.setAttribute('dir', 'auto');
           renderInline(cell, cellEl, resolveAsset);
           tr.appendChild(cellEl);
         });
@@ -222,6 +228,14 @@ export function renderBlock(
   }
 
   el.setAttribute(BLOCK_ID_ATTR, block.id);
+  // Bidi (SKR-232): every block resolves its own direction from its first
+  // strong character, so an RTL paragraph lays out RTL inside an LTR document
+  // (and vice versa) — per-paragraph direction, the Docs/Word model. The lone
+  // exception is the table ELEMENT: direction on a table reorders its columns,
+  // so the table stays neutral and its cells (above) resolve individually.
+  // The companion CSS (BlockEditor.css) uses logical properties
+  // (border-inline-start etc.) so quote rules and list padding follow.
+  if (block.type !== 'table') el.setAttribute('dir', 'auto');
   return el;
 }
 
