@@ -1,22 +1,24 @@
 // ⌘P file switcher. Same shell as CommandPalette; haystack is the
 // project manifest's files.
 //
-// Empty query (SKR-243): the working set — the same array the summon fan
-// and (Stage 2) the sidebar desk render, so the lists can never diverge —
+// Rows speak the fan's language (SKR-243): doc icon, display name
+// (`.folio` stripped, `.md` kept — the front-title rule), dimmed parent
+// folder on the right. Not the mono path voice — the switcher lists
+// documents, not files; typing still matches against the full path.
+//
+// Empty query: the working set — the same array the summon fan and
+// (Stage 2) the sidebar desk render, so the lists can never diverge —
 // then pinned documents, then everything else. The live doc leads but is
 // disabled, so the first *selectable* row is the previous document and
 // ⌘P ⏎ = "back to the last doc" (the Obsidian pattern).
-//
-// Typed query: cmdk's built-in fuzzy filter ranks the whole library. We
-// feed it flat `{ path, leaf }` rows; cmdk filters against each row's
-// `value` (path) so leaf-first matches still rank well — most scoring
-// frameworks weight prefix and segment-boundary hits.
 
 import { Command as Cmd } from 'cmdk';
 import { useEffect, useState } from 'react';
 import type { FileEntry } from '@skrive/shared';
 import { CommandModal } from './CommandModal';
 import { logProjectError, useProjectStore } from '../../stores/project';
+import { DocIcon } from '../icons/DocIcon';
+import { stripFolioExtension } from '../../lib/title';
 import { notify } from '../../lib/notify';
 
 type Props = {
@@ -24,14 +26,44 @@ type Props = {
   onClose: () => void;
 };
 
-function leafName(p: string): string {
+function displayName(p: string): string {
   const i = p.lastIndexOf('/');
-  return i === -1 ? p : p.slice(i + 1);
+  return stripFolioExtension(i === -1 ? p : p.slice(i + 1));
 }
 
-function dirOf(p: string): string {
+/** The dimmed origin hint: the parent folder's own name, not the full
+ *  path — enough to disambiguate without reading as a filesystem. */
+function parentName(p: string): string {
   const i = p.lastIndexOf('/');
-  return i === -1 ? '' : p.slice(0, i);
+  if (i === -1) return '';
+  const dir = p.slice(0, i);
+  const j = dir.lastIndexOf('/');
+  return j === -1 ? dir : dir.slice(j + 1);
+}
+
+type DocRowProps = {
+  path: string;
+  current?: boolean;
+  onSelect: (path: string) => void;
+};
+
+function DocRow({ path, current = false, onSelect }: DocRowProps) {
+  return (
+    <Cmd.Item
+      value={path}
+      disabled={current}
+      onSelect={() => onSelect(path)}
+      className={`cmdk-item cmdk-doc-row${current ? ' cmdk-current' : ''}`}
+    >
+      <span className="cmdk-doc-glyph" aria-hidden="true">
+        <DocIcon path={path} size={16} />
+      </span>
+      <span className="cmdk-doc-name">{displayName(path)}</span>
+      <span className="cmdk-doc-where">
+        {current ? 'current' : parentName(path)}
+      </span>
+    </Cmd.Item>
+  );
 }
 
 export function FileSwitcher({ open, onClose }: Props) {
@@ -70,23 +102,6 @@ export function FileSwitcher({ open, onClose }: Props) {
     });
   }
 
-  function fileRow(path: string, keyPrefix = '', current = false) {
-    return (
-      <Cmd.Item
-        key={`${keyPrefix}${path}`}
-        value={path}
-        disabled={current}
-        onSelect={() => handleSelect(path)}
-        className={`cmdk-item cmdk-file-row${current ? ' cmdk-current' : ''}`}
-      >
-        <span className="cmdk-file-leaf">{leafName(path)}</span>
-        <span className="cmdk-file-dir">
-          {current ? 'current' : dirOf(path)}
-        </span>
-      </Cmd.Item>
-    );
-  }
-
   return (
     <CommandModal
       open={open}
@@ -99,14 +114,21 @@ export function FileSwitcher({ open, onClose }: Props) {
     >
       {curated && workingRows.length > 0 && (
         <Cmd.Group heading="Recent" className="cmdk-group">
-          {workingRows.map((entry) =>
-            fileRow(entry.path, 'ws:', entry.path === liveDoc?.path)
-          )}
+          {workingRows.map((entry) => (
+            <DocRow
+              key={`ws:${entry.path}`}
+              path={entry.path}
+              current={entry.path === liveDoc?.path}
+              onSelect={handleSelect}
+            />
+          ))}
         </Cmd.Group>
       )}
       {curated && pinnedRows.length > 0 && (
         <Cmd.Group heading="Pinned" className="cmdk-group">
-          {pinnedRows.map((path) => fileRow(path, 'pin:'))}
+          {pinnedRows.map((path) => (
+            <DocRow key={`pin:${path}`} path={path} onSelect={handleSelect} />
+          ))}
         </Cmd.Group>
       )}
       <Cmd.Group
@@ -117,7 +139,7 @@ export function FileSwitcher({ open, onClose }: Props) {
           // While showing the curated sections, hide entries that already
           // appear up top so the user doesn't see them twice.
           if (curated && curatedPaths.has(f.path)) return null;
-          return fileRow(f.path);
+          return <DocRow key={f.path} path={f.path} onSelect={handleSelect} />;
         })}
       </Cmd.Group>
     </CommandModal>

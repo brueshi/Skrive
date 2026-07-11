@@ -4408,7 +4408,6 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--skrive-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-weight: 600;
 }
 
@@ -4436,8 +4435,7 @@ body {
   white-space: nowrap;
 }
 
-/* UI font like every other shortcut hint (SKR-211); the mono voice stays
-   reserved for file paths (.cmdk-file-row below). */
+/* UI font like every other shortcut hint (SKR-211). */
 .cmdk-item-shortcut {
   flex-shrink: 0;
   color: var(--skrive-muted);
@@ -4445,35 +4443,47 @@ body {
   letter-spacing: 0.02em;
 }
 
-/* File-row variant: leaf name on the left, dimmed dir on the right. */
-.cmdk-file-row {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+/* Document rows (SKR-243): the fan's anatomy — glyph, display name,
+   dimmed parent folder on the right. The old mono path voice retired
+   with the re-language: the switcher lists documents, not files. */
+.cmdk-doc-row {
+  align-items: center;
+  gap: 0.5625rem;
 }
 
-.cmdk-file-leaf {
+.cmdk-doc-glyph {
+  display: inline-flex;
   flex-shrink: 0;
-  font-weight: 600;
-  color: var(--skrive-fg);
+  color: var(--skrive-muted);
 }
 
-.cmdk-file-dir {
-  flex: 1;
+.cmdk-doc-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+}
+
+.cmdk-doc-where {
+  margin-left: auto;
+  padding-left: 1.5rem;
+  flex-shrink: 0;
   color: var(--skrive-muted);
   font-size: 0.75rem;
 }
 
-/* The live doc's row in the empty-state working set (SKR-243): marked as
-   where you are (the fan's selection tint), disabled so the first
+/* The live doc's row in the empty-state working set: marked as where you
+   are (the fan's selection tint + weight), disabled so the first
    selectable row is the previous document and ⌘P ⏎ jumps back to it. */
-.cmdk-file-row.cmdk-current {
+.cmdk-doc-row.cmdk-current {
   background: var(--skrive-selection);
 }
 
-.cmdk-file-row.cmdk-current .cmdk-file-dir {
-  text-align: right;
+.cmdk-doc-row.cmdk-current .cmdk-doc-name {
+  font-weight: 600;
+}
+
+.cmdk-doc-row.cmdk-current .cmdk-doc-where {
   font-style: italic;
 }
 
