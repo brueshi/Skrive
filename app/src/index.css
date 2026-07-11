@@ -312,16 +312,12 @@ body {
      scroll for an overflowing tree lives on `.sidebar-inner`. */
 }
 
-/* The header's tabs slot — fills the middle of the topbar between the
-   left (sidebar toggle) and right (panel + mode toggle) clusters. */
-.header-tabs {
+/* Holds the middle of the topbar open between the left (sidebar toggle)
+   and right (panel menu) clusters; the front-title floats centered over
+   it (SKR-243). Stays drag-enabled — it IS the drag lane. */
+.header-spacer {
   flex: 1;
-  display: flex;
   min-width: 0;
-}
-
-.header-tabs > .tabs {
-  flex: 1;
 }
 
 /* The sidebar resize handle has a 1px decorative line via ::before

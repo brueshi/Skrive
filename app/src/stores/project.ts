@@ -301,11 +301,6 @@ type Actions = {
   /** Walk the trail one visit back / forward (⌘⇧[ / ⌘⇧]). */
   historyBack(): Promise<void>;
   historyForward(): Promise<void>;
-  /** COMPAT (dies with TabBar in the SKR-243 Stage 1 cleanup): remove a
-   *  document from the working set. Removing the live doc saves it and
-   *  hydrates the next entry. The final model has no close affordance —
-   *  eviction is LRU-only. */
-  dropFromWorkingSet(path: string): Promise<void>;
   /** Cleared from the editor after the selection has been applied so a
    *  subsequent re-render with the same nonce doesn't re-apply. */
   clearPendingSelection(): void;
@@ -1313,44 +1308,6 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   async historyForward() {
     await walkTrail(get, set, 1);
-  },
-
-  async dropFromWorkingSet(path: string) {
-    // COMPAT — the tab strip's close affordance during the SKR-243
-    // transition; deleted with TabBar. Dropping never touches the trail
-    // (only deleted files leave history).
-    const { liveDoc, workingSet } = get();
-    const remaining = workingSet.filter((e) => e.path !== path);
-    if (remaining.length === workingSet.length) return;
-    if (liveDoc?.path !== path) {
-      set({ workingSet: remaining });
-      scheduleImmediateSave(get);
-      return;
-    }
-    // Dropping the live doc: keep the old closeTab semantics — flush,
-    // best-effort save, then bring up the next most recent entry.
-    flushActiveEditor();
-    const doc = get().liveDoc;
-    if (doc?.dirty && get().manifest) {
-      try {
-        const writable: LiveDoc = {
-          ...doc,
-          frontmatter: { ...doc.frontmatter }
-        };
-        await window.skrive.fs.writeFile(
-          get().manifest!.root,
-          doc.path,
-          buildSavePayload(writable)
-        );
-      } catch (err) {
-        console.error('[skrive] save-on-close failed', err);
-      }
-    }
-    set({ liveDoc: null, workingSet: remaining });
-    scheduleImmediateSave(get);
-    if (remaining[0]) {
-      await get().openDoc(remaining[0].path, { nav: 'none' });
-    }
   },
 
   clearPendingSelection() {

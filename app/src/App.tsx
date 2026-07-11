@@ -536,7 +536,7 @@ export function App() {
                 </>
               ) : (
                 <div className="empty-pane">
-                  <p>Select a file from the sidebar to open it as a tab.</p>
+                  <p>Select a file from the sidebar to start writing.</p>
                 </div>
               )}
             </section>
