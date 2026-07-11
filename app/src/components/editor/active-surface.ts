@@ -36,3 +36,17 @@ export function subscribeActiveBlockMenu(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
+
+/**
+ * Refocus the editing surface once the current React commit has landed —
+ * two frames, so a just-switched document's surface exists and has wired
+ * itself before the focus call. Used by chrome that closes over a switch
+ * (the summon fan, the file switcher) so the caret returns to the writing
+ * instead of stranding on the dismissed trigger. No-op when no block
+ * surface is mounted (raw source / HTML view keep their own focus).
+ */
+export function focusEditorSoon(): void {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => getActiveBlockMenu()?.focusEditor());
+  });
+}
