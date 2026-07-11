@@ -55,7 +55,9 @@ export function FileSwitcher({ open, onClose }: Props) {
   const workingRows = workingSet.filter((e) => exists(e.path));
   const workingPaths = new Set(workingRows.map((e) => e.path));
   const pinnedRows = pinned.filter((p) => exists(p) && !workingPaths.has(p));
-  const curated = query.trim().length === 0 && workingRows.length > 0;
+  const curated =
+    query.trim().length === 0 &&
+    (workingRows.length > 0 || pinnedRows.length > 0);
   const curatedPaths = new Set([...workingPaths, ...pinnedRows]);
 
   const allFiles: FileEntry[] = manifest.files;
@@ -95,7 +97,7 @@ export function FileSwitcher({ open, onClose }: Props) {
       onQueryChange={setQuery}
       emptyState={<span>No matching files.</span>}
     >
-      {curated && (
+      {curated && workingRows.length > 0 && (
         <Cmd.Group heading="Recent" className="cmdk-group">
           {workingRows.map((entry) =>
             fileRow(entry.path, 'ws:', entry.path === liveDoc?.path)

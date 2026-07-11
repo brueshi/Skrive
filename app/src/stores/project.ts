@@ -1039,6 +1039,17 @@ async function performOpenDoc(
     diff: null
   };
 
+  // The reads above awaited: the project may have switched or closed
+  // underneath this call — drop the switch rather than write another
+  // project's state.
+  if (get().manifest?.root !== manifest.root) return;
+  // And a file deleted mid-switch may have been pruned from the working
+  // set already; the captured copy must not resurrect it as a ghost row.
+  const manifestNow = get().manifest;
+  workingSet = workingSet.filter(
+    (e) => e.path === path || findEntry(manifestNow, e.path) !== null
+  );
+
   set({
     liveDoc,
     workingSet: promoteEntry(workingSet, entryFromLiveDoc(liveDoc), get().pinned),
@@ -1069,9 +1080,16 @@ async function walkTrail(
   const index = get().trail.index + dir;
   await get().openDoc(target, { nav: 'none' });
   // Commit the cursor move only if the switch landed (a vanished file or
-  // parse failure leaves the trail where it was).
+  // parse failure leaves the trail where it was). Clamp against a trail
+  // pruned mid-switch by a watcher event.
+  const after = get().trail;
   if (get().liveDoc?.path === target) {
-    set({ trail: { ...get().trail, index } });
+    set({
+      trail: {
+        ...after,
+        index: Math.max(-1, Math.min(index, after.paths.length - 1))
+      }
+    });
   }
 }
 
