@@ -468,25 +468,29 @@ body {
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
-  transition: background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
-.front-title:hover,
-.front-title[aria-expanded='true'] {
-  background: color-mix(in srgb, var(--skrive-fg) 6%, transparent);
-}
-
-/* The chevron says "I open" — visible only on hover / while summoned. */
+/* The chevron is the whole affordance (the macOS document-title
+   convention): it fades in on hover and holds, rotated, while the fan
+   is summoned. Deliberately no surface response — a fill here read as a
+   form control sitting in the calmest part of the band (hover pass,
+   2026-07-11). */
 .front-title-chev {
   flex-shrink: 0;
   color: var(--skrive-muted);
   opacity: 0;
-  transition: opacity var(--skrive-duration-quick) var(--skrive-easing);
+  transition:
+    opacity var(--skrive-duration-quick) var(--skrive-easing),
+    transform 160ms var(--skrive-easing-out);
 }
 
-.front-title:hover .front-title-chev,
+.front-title:hover .front-title-chev {
+  opacity: 1;
+}
+
 .front-title[aria-expanded='true'] .front-title-chev {
   opacity: 1;
+  transform: rotate(180deg);
 }
 
 /* No document open: dimmed project name + the keyboard path as the hint. */
