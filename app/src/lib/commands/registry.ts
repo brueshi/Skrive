@@ -19,6 +19,7 @@
 import { flushActiveEditor } from '../../components/editor/active-editor';
 import { getActiveBlockMenu } from '../../components/editor/active-surface';
 import { useProjectStore, logProjectError } from '../../stores/project';
+import { peekVisit } from '../../stores/working-set';
 import { fileMode } from '../../stores/save';
 import { EXPORT_FORMATS } from '../export';
 import { importKind } from '../import';
@@ -28,7 +29,6 @@ import { notify } from '../notify';
 
 export type CommandGroup =
   | 'File'
-  | 'Tabs'
   | 'View'
   | 'Insert'
   | 'Project'
@@ -95,7 +95,6 @@ export type CommandDeps = {
 
 export const COMMAND_GROUP_ORDER: CommandGroup[] = [
   'File',
-  'Tabs',
   'View',
   'Insert',
   'Project',
@@ -110,35 +109,39 @@ export const COMMAND_GROUP_ORDER: CommandGroup[] = [
 // at invocation time.
 
 const whenManifestOpen = () => useProjectStore.getState().manifest !== null;
-const whenActiveTab = () => useProjectStore.getState().activeTabIndex >= 0;
-const whenActiveTabAndManifest = () => {
+const whenLiveDoc = () => useProjectStore.getState().liveDoc !== null;
+const whenLiveDocAndManifest = () => {
   const s = useProjectStore.getState();
-  return s.manifest !== null && s.activeTabIndex >= 0;
+  return s.manifest !== null && s.liveDoc !== null;
 };
-const whenActiveTabDirty = () => {
+const whenLiveDocDirty = () => {
   const s = useProjectStore.getState();
-  return (
-    s.activeView === 'editor' &&
-    s.activeTabIndex >= 0 &&
-    (s.tabs[s.activeTabIndex]?.dirty ?? false)
-  );
+  return s.activeView === 'editor' && (s.liveDoc?.dirty ?? false);
 };
-const whenMultipleTabs = () => useProjectStore.getState().tabs.length > 1;
+/** ⌘⇧[ / ⌘⇧] walk the trail of document visits (SKR-243). */
+const whenTrailBack = () => {
+  const s = useProjectStore.getState();
+  return peekVisit(s.trail, -1) !== null;
+};
+const whenTrailForward = () => {
+  const s = useProjectStore.getState();
+  return peekVisit(s.trail, 1) !== null;
+};
 
-/** Export acts on the active document and only makes sense for a native `.folio`
+/** Export acts on the live document and only makes sense for a native `.folio`
  *  (the format we project out of). */
 const whenActiveFolio = () => {
   const s = useProjectStore.getState();
-  const tab = s.tabs[s.activeTabIndex];
-  return s.manifest !== null && tab != null && fileMode(tab.path) === 'rich';
+  const doc = s.liveDoc;
+  return s.manifest !== null && doc != null && fileMode(doc.path) === 'rich';
 };
 
-/** The `.md`/import -> `.folio` upgrade acts on the active tab, and only when it's
+/** The `.md`/import -> `.folio` upgrade acts on the live doc, and only when it's
  *  a convertible source (Markdown / HTML / plain text — not already a `.folio`). */
 const whenActiveConvertible = () => {
   const s = useProjectStore.getState();
-  const tab = s.tabs[s.activeTabIndex];
-  return s.manifest !== null && tab != null && importKind(tab.path) !== null;
+  const doc = s.liveDoc;
+  return s.manifest !== null && doc != null && importKind(doc.path) !== null;
 };
 
 /** The Insert commands act on the block surface, so they're runnable only when
@@ -240,12 +243,12 @@ export function buildRegistry(deps: CommandDeps): {
       group: 'File',
       label: 'Save',
       commandId: 'file.save',
-      when: whenActiveTabDirty,
+      when: whenLiveDocDirty,
       run: async () => {
         try {
-          await useProjectStore.getState().saveActiveTab();
+          await useProjectStore.getState().saveLiveDoc();
         } catch (err) {
-          logProjectError('saveActiveTab (binding)', err);
+          logProjectError('saveLiveDoc (binding)', err);
           notify.error("Couldn't save", err);
         }
       }
@@ -257,57 +260,37 @@ export function buildRegistry(deps: CommandDeps): {
       group: 'File',
       label: 'Rename file…',
       commandId: 'file.rename',
-      when: whenActiveTabAndManifest,
+      when: whenLiveDocAndManifest,
       run: () => {
-        const s = useProjectStore.getState();
-        const tab = s.tabs[s.activeTabIndex];
-        if (tab) deps.openRename(tab.path);
+        const doc = useProjectStore.getState().liveDoc;
+        if (doc) deps.openRename(doc.path);
       }
     },
 
-    // ============ Tabs ============
+    // ⌘⇧[ / ⌘⇧] — the chords tabs vacated (SKR-243): document history
+    // back / forward, so the old prev/next-tab muscle memory transfers to
+    // the trail with zero displacement. ⌘W is deliberately unbound — the
+    // platform default (close window) takes over; there is nothing to
+    // "close" in the working-set model.
     {
-      chord: { code: 'KeyW', mod: true },
-      display: '⌘W',
+      chord: { code: 'BracketLeft', mod: true, shift: true },
+      display: '⌘⇧[',
       scope: 'window',
-      group: 'Tabs',
-      label: 'Close tab',
-      commandId: 'tabs.close',
-      when: whenActiveTab,
-      run: () => {
-        const s = useProjectStore.getState();
-        if (s.activeTabIndex >= 0) void s.closeTab(s.activeTabIndex);
-      }
+      group: 'File',
+      label: 'Previous document',
+      commandId: 'history.back',
+      when: whenTrailBack,
+      run: () => void useProjectStore.getState().historyBack()
     },
     {
       chord: { code: 'BracketRight', mod: true, shift: true },
       display: '⌘⇧]',
       scope: 'window',
-      group: 'Tabs',
-      label: 'Next tab',
-      commandId: 'tabs.next',
-      when: whenMultipleTabs,
-      run: () => {
-        const s = useProjectStore.getState();
-        if (s.tabs.length === 0) return;
-        s.switchTab((s.activeTabIndex + 1) % s.tabs.length);
-      }
-    },
-    {
-      chord: { code: 'BracketLeft', mod: true, shift: true },
-      display: '⌘⇧[',
-      scope: 'window',
-      group: 'Tabs',
-      label: 'Previous tab',
-      commandId: 'tabs.prev',
-      when: whenMultipleTabs,
-      run: () => {
-        const s = useProjectStore.getState();
-        if (s.tabs.length === 0) return;
-        s.switchTab(
-          (s.activeTabIndex - 1 + s.tabs.length) % s.tabs.length
-        );
-      }
+      group: 'File',
+      label: 'Next document',
+      commandId: 'history.forward',
+      when: whenTrailForward,
+      run: () => void useProjectStore.getState().historyForward()
     },
 
     // ============ View ============
@@ -328,7 +311,7 @@ export function buildRegistry(deps: CommandDeps): {
       group: 'View',
       label: 'Toggle frontmatter panel',
       commandId: 'view.toggleFrontmatter',
-      when: whenActiveTab,
+      when: whenLiveDoc,
       run: () => useProjectStore.getState().toggleFrontmatterPanel()
     },
     {
@@ -338,7 +321,7 @@ export function buildRegistry(deps: CommandDeps): {
       group: 'View',
       label: 'Toggle backlinks panel',
       commandId: 'view.toggleBacklinks',
-      when: whenActiveTab,
+      when: whenLiveDoc,
       run: () => useProjectStore.getState().toggleBacklinksPanel()
     },
     {
@@ -348,7 +331,7 @@ export function buildRegistry(deps: CommandDeps): {
       group: 'View',
       label: 'Toggle version history panel',
       commandId: 'view.toggleHistory',
-      when: whenActiveTab,
+      when: whenLiveDoc,
       run: () => useProjectStore.getState().toggleHistoryPanel()
     },
     {
@@ -358,7 +341,7 @@ export function buildRegistry(deps: CommandDeps): {
       group: 'View',
       label: 'Cycle editor layout',
       commandId: 'view.toggleSource',
-      when: whenActiveTab,
+      when: whenLiveDoc,
       // Flush-then-switch: drain the outgoing surface's pending edits into the
       // canonical body, then cycle the Markdown layout (source -> split ->
       // preview). Both are synchronous store writes inside one keydown handler,
@@ -368,11 +351,11 @@ export function buildRegistry(deps: CommandDeps): {
       run: () => {
         flushActiveEditor();
         const s = useProjectStore.getState();
-        const tab = s.tabs[s.activeTabIndex];
-        if (!tab || tab.mode !== 'markdown') return;
+        const doc = s.liveDoc;
+        if (!doc || doc.mode !== 'markdown') return;
         const order = ['raw', 'split', 'preview'] as const;
-        const next = order[(order.indexOf(tab.layoutMode) + 1) % order.length]!;
-        s.setTabLayoutMode(s.activeTabIndex, next);
+        const next = order[(order.indexOf(doc.layoutMode) + 1) % order.length]!;
+        s.setLiveDocLayoutMode(doc.path, next);
       }
     },
 
@@ -504,12 +487,12 @@ export function buildRegistry(deps: CommandDeps): {
       label: 'Save',
       group: 'File',
       shortcut: get('file.save'),
-      when: whenActiveTabDirty,
+      when: whenLiveDocDirty,
       run: async () => {
         try {
-          await useProjectStore.getState().saveActiveTab();
+          await useProjectStore.getState().saveLiveDoc();
         } catch (err) {
-          logProjectError('saveActiveTab (palette)', err);
+          logProjectError('saveLiveDoc (palette)', err);
           notify.error("Couldn't save", err);
         }
       }
@@ -519,11 +502,10 @@ export function buildRegistry(deps: CommandDeps): {
       label: 'Rename file…',
       group: 'File',
       shortcut: get('file.rename'),
-      when: whenActiveTabAndManifest,
+      when: whenLiveDocAndManifest,
       run: () => {
-        const s = useProjectStore.getState();
-        const tab = s.tabs[s.activeTabIndex];
-        if (tab) deps.openRename(tab.path);
+        const doc = useProjectStore.getState().liveDoc;
+        if (doc) deps.openRename(doc.path);
       }
     },
     // One "Export as <format>" per registered format. Runnable only for a native
@@ -536,8 +518,7 @@ export function buildRegistry(deps: CommandDeps): {
         when: whenActiveFolio,
         run: () => {
           const s = useProjectStore.getState();
-          const tab = s.tabs[s.activeTabIndex];
-          if (tab) void s.exportDocument(tab.path, fmt.id);
+          if (s.liveDoc) void s.exportDocument(s.liveDoc.path, fmt.id);
         }
       })
     ),
@@ -548,48 +529,25 @@ export function buildRegistry(deps: CommandDeps): {
       when: whenActiveConvertible,
       run: () => {
         const s = useProjectStore.getState();
-        const tab = s.tabs[s.activeTabIndex];
-        if (tab) void s.convertToFolio(tab.path);
+        if (s.liveDoc) void s.convertToFolio(s.liveDoc.path);
       }
     },
 
-    // ============ Tabs ============
     {
-      id: 'tabs.close',
-      label: 'Close tab',
-      group: 'Tabs',
-      shortcut: get('tabs.close'),
-      when: whenActiveTab,
-      run: () => {
-        const s = useProjectStore.getState();
-        if (s.activeTabIndex >= 0) void s.closeTab(s.activeTabIndex);
-      }
+      id: 'history.back',
+      label: 'Previous document',
+      group: 'File',
+      shortcut: get('history.back'),
+      when: whenTrailBack,
+      run: () => void useProjectStore.getState().historyBack()
     },
     {
-      id: 'tabs.next',
-      label: 'Next tab',
-      group: 'Tabs',
-      shortcut: get('tabs.next'),
-      when: whenMultipleTabs,
-      run: () => {
-        const s = useProjectStore.getState();
-        if (s.tabs.length === 0) return;
-        s.switchTab((s.activeTabIndex + 1) % s.tabs.length);
-      }
-    },
-    {
-      id: 'tabs.prev',
-      label: 'Previous tab',
-      group: 'Tabs',
-      shortcut: get('tabs.prev'),
-      when: whenMultipleTabs,
-      run: () => {
-        const s = useProjectStore.getState();
-        if (s.tabs.length === 0) return;
-        s.switchTab(
-          (s.activeTabIndex - 1 + s.tabs.length) % s.tabs.length
-        );
-      }
+      id: 'history.forward',
+      label: 'Next document',
+      group: 'File',
+      shortcut: get('history.forward'),
+      when: whenTrailForward,
+      run: () => void useProjectStore.getState().historyForward()
     },
 
     // ============ View ============
@@ -606,7 +564,7 @@ export function buildRegistry(deps: CommandDeps): {
       label: 'Toggle frontmatter panel',
       group: 'View',
       shortcut: get('view.toggleFrontmatter'),
-      when: whenActiveTab,
+      when: whenLiveDoc,
       run: () => useProjectStore.getState().toggleFrontmatterPanel()
     },
     {
@@ -614,7 +572,7 @@ export function buildRegistry(deps: CommandDeps): {
       label: 'Toggle backlinks panel',
       group: 'View',
       shortcut: get('view.toggleBacklinks'),
-      when: whenActiveTab,
+      when: whenLiveDoc,
       run: () => useProjectStore.getState().toggleBacklinksPanel()
     },
     {
@@ -622,7 +580,7 @@ export function buildRegistry(deps: CommandDeps): {
       label: 'Toggle version history panel',
       group: 'View',
       shortcut: get('view.toggleHistory'),
-      when: whenActiveTab,
+      when: whenLiveDoc,
       run: () => useProjectStore.getState().toggleHistoryPanel()
     },
     {
@@ -630,15 +588,15 @@ export function buildRegistry(deps: CommandDeps): {
       label: 'Cycle editor layout',
       group: 'View',
       shortcut: get('view.toggleSource'),
-      when: whenActiveTab,
+      when: whenLiveDoc,
       run: () => {
         flushActiveEditor();
         const s = useProjectStore.getState();
-        const tab = s.tabs[s.activeTabIndex];
-        if (!tab || tab.mode !== 'markdown') return;
+        const doc = s.liveDoc;
+        if (!doc || doc.mode !== 'markdown') return;
         const order = ['raw', 'split', 'preview'] as const;
-        const next = order[(order.indexOf(tab.layoutMode) + 1) % order.length]!;
-        s.setTabLayoutMode(s.activeTabIndex, next);
+        const next = order[(order.indexOf(doc.layoutMode) + 1) % order.length]!;
+        s.setLiveDocLayoutMode(doc.path, next);
       }
     },
 

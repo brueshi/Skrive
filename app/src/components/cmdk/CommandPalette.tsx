@@ -34,8 +34,8 @@ export function CommandPalette({ open, onClose, deps }: Props) {
     [
       s.manifest === null ? '' : s.manifest.root,
       s.activeView,
-      s.activeTabIndex,
-      s.tabs.map((t) => `${t.path}:${t.dirty ? '1' : '0'}`).join('|')
+      s.liveDoc ? `${s.liveDoc.path}:${s.liveDoc.dirty ? '1' : '0'}` : '',
+      `${s.trail.index}/${s.trail.paths.length}`
     ].join('§')
   );
 
@@ -49,7 +49,6 @@ export function CommandPalette({ open, onClose, deps }: Props) {
 
   const grouped: Record<CommandGroup, Command[]> = {
     File: [],
-    Tabs: [],
     View: [],
     Insert: [],
     Project: [],

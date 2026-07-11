@@ -164,7 +164,15 @@ describe('SKR-240: the Header is actually wired to it', () => {
     document.body.appendChild(mount);
     const root = createRoot(mount);
     // Header's sidebar toggle is wrapped in a Tooltip, which needs its provider.
-    act(() => root.render(React.createElement(TooltipProvider, null, React.createElement(Header))));
+    act(() =>
+      root.render(
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(Header, { onOpenSwitcher: () => {} })
+        )
+      )
+    );
 
     const rendered = mount.querySelector('header')!;
     expect(rendered.hasAttribute(DRAG_REGION_ATTR), 'the header declares itself a drag region').toBe(true);
@@ -183,15 +191,16 @@ describe('SKR-240: the Header is actually wired to it', () => {
     expect(start, 'a press on the sidebar toggle is not a window drag').not.toHaveBeenCalled();
     start.mockClear();
 
-        // The bug that survived the first fix: `.header-tabs` is `flex: 1`, and marking
-    // that CONTAINER no-drag consumed the whole middle of the topbar, leaving nothing
-    // to grab. The lane must be the tab, not the box that holds it.
-    const tabStrip = rendered.querySelector('.header-tabs')!;
-    expect(tabStrip.hasAttribute(NO_DRAG_ATTR), 'the tab strip is NOT a no-drag lane').toBe(false);
+    // The bug that survived the first fix: the flex:1 middle of the topbar
+    // (the tab strip then, the spacer under the front-title now, SKR-243) is
+    // the main drag lane — marking that CONTAINER no-drag consumed the whole
+    // middle of the topbar, leaving nothing to grab.
+    const spacer = rendered.querySelector('.header-spacer')!;
+    expect(spacer.hasAttribute(NO_DRAG_ATTR), 'the header spacer is NOT a no-drag lane').toBe(false);
     act(() => {
-      tabStrip.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 1 }));
+      spacer.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 1 }));
     });
-    expect(start, 'the empty area of the tab strip drags the window').toHaveBeenCalledOnce();
+    expect(start, 'the empty middle of the topbar drags the window').toHaveBeenCalledOnce();
 
     act(() => root.unmount());
     mount.remove();

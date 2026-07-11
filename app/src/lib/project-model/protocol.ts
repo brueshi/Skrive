@@ -7,7 +7,7 @@
 // unsolicited push. That makes ordering deterministic: when an upsert
 // resolves, the caller is guaranteed the new manifest has already been
 // delivered — no race between `await upsert()` and a separate push
-// event (createFile → openTab depends on exactly this).
+// event (createFile → openDoc depends on exactly this).
 
 import type {
   ProjectManifest,

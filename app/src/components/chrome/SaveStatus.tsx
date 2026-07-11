@@ -6,13 +6,13 @@
 // reassurance exactly at the moment a save completes.
 
 import { useEffect, useRef, useState } from 'react';
-import { selectActiveTab, useProjectStore } from '../../stores/project';
+import { selectLiveDoc, useProjectStore } from '../../stores/project';
 import { IconCheck } from '../icons/IconCheck';
 
 const SAVED_VISIBLE_MS = 1600;
 
 export function SaveStatus() {
-  const activeTab = useProjectStore(selectActiveTab);
+  const activeTab = useProjectStore(selectLiveDoc);
   const dirty = activeTab?.dirty ?? false;
   const path = activeTab?.path ?? null;
   const [visible, setVisible] = useState(false);

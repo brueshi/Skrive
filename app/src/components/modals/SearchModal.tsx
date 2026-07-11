@@ -3,7 +3,7 @@
 // ⌘F opens it (overrides the in-document find — Skrive's find is
 // project-wide; in-doc navigation is by scroll). Debounced 150ms query,
 // monotonic search token discards out-of-order responses, hits grouped
-// by file. Enter / click jumps to the hit via openTabAtLine.
+// by file. Enter / click jumps to the hit via openDocAtLine.
 //
 // Two-pane layout (Skrive 1.0): the grouped result list on the left, a
 // context preview of the highlighted match on the right — see the match
@@ -104,7 +104,7 @@ const RESULTS_LISTBOX_ID = 'skrive-search-results';
 const HIT_OPTION_ID = (idx: number) => `skrive-search-hit-${idx}`;
 
 export function SearchModal({ open, onClose }: Props) {
-  const openTabAtLine = useProjectStore((s) => s.openTabAtLine);
+  const openDocAtLine = useProjectStore((s) => s.openDocAtLine);
   const manifestRoot = useProjectStore((s) => s.manifest?.root ?? null);
 
   const [query, setQuery] = useState('');
@@ -231,9 +231,9 @@ export function SearchModal({ open, onClose }: Props) {
     if (!hit) return;
     onClose();
     try {
-      await openTabAtLine(hit.path, hit.line, hit.column, hit.matchLength);
+      await openDocAtLine(hit.path, hit.line, hit.column, hit.matchLength);
     } catch (err) {
-      logProjectError('openTabAtLine', err);
+      logProjectError('openDocAtLine', err);
       notify.error(`Couldn't open ${hit.path}`, err);
     }
   }

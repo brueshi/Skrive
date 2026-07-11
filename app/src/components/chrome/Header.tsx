@@ -1,9 +1,9 @@
-// Top bar of the workspace. Houses the sidebar toggle, the
-// Notion-style tab strip, and the per-document tool cluster: a panel
-// popover (FM/Backlinks/History) plus the Raw/Split/Preview mode
-// toggle. The full-cluster ("classic") and bottom-rail ("collapsed-
-// bottom") variants were retired in the 13c stabilization pass — this
-// is the only topbar layout that ships.
+// Top bar of the workspace. Houses the sidebar toggle, the centered
+// front-title (+ its summon fan, SKR-243 — the tab strip is gone), and
+// the per-document tool cluster (the panel popover). The full-cluster
+// ("classic") and bottom-rail ("collapsed-bottom") variants were retired
+// in the 13c stabilization pass — this is the only topbar layout that
+// ships.
 //
 // The window uses macOS hiddenInset titleBarStyle (main.ts), so traffic
 // lights float over our chrome. We pad the header on macOS only;
@@ -14,13 +14,13 @@
 import { type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import { IconButton } from '../ui/IconButton';
 import {
-  selectActiveTab,
+  selectLiveDoc,
   useProjectStore
 } from '../../stores/project';
 import { IconSidebarToggle } from '../icons/IconSidebarToggle';
 import { Tooltip } from '../ui/Tooltip';
+import { FrontTitle } from './FrontTitle';
 import { PanelMenu } from './PanelMenu';
-import { TabBar } from './TabBar';
 import { WindowControls } from './WindowControls';
 import { DRAG_REGION_ATTR, handleChromeMouseDown, noDragProps } from './windowDrag';
 
@@ -33,8 +33,14 @@ const isMacOS =
 const isFrameless =
   typeof window !== 'undefined' && window.__SKRIVE_FRAMELESS__ === true;
 
-export function Header() {
-  const activeTab = useProjectStore(selectActiveTab);
+type HeaderProps = {
+  /** Opens the ⌘P switcher — threaded to the front-title fan's footer
+   *  row (the switcher modal lives in App). */
+  onOpenSwitcher: () => void;
+};
+
+export function Header({ onOpenSwitcher }: HeaderProps) {
+  const activeTab = useProjectStore(selectLiveDoc);
   const sidebarVisible = useProjectStore((s) => s.sidebarVisible);
   const toggleSidebar = useProjectStore((s) => s.toggleSidebar);
   const activeView = useProjectStore((s) => s.activeView);
@@ -112,13 +118,16 @@ export function Header() {
         </Tooltip>
       </div>
 
-      <span className="header-sep" aria-hidden="true" />
+      {/* NOT no-drag: this box is flex:1, so opting it out would consume the
+          entire topbar's drag lane (SKR-240). It only holds the band open
+          between the left and right clusters. */}
+      <div className="header-spacer" />
 
-      {/* NOT no-drag: this box is flex:1, so opting it out consumed the entire
-          topbar's drag lane. Each tab opts itself out instead (SKR-240). */}
-      <div className="header-tabs">
-        <TabBar />
-      </div>
+      {/* The front-title (SKR-243): centered over the whole band so the
+          left/right cluster widths can't skew it. The slot is pointer-
+          transparent; only the title button itself takes clicks (and opts
+          out of window dragging). */}
+      <FrontTitle onOpenSwitcher={onOpenSwitcher} />
 
       {activeTab && (
         <div className="header-right" {...noDragProps}>

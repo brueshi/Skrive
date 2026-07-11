@@ -1,7 +1,8 @@
-// Phase 4 app shell: real overlay title bar (Header), Notion-style
-// tabs, multi-tab editor surface with per-tab layout mode + split
-// ratio. Toasts via sonner. Right-click context menus + delete-confirm
-// modal land in Sidebar. Phase 9 wires per-project persistence.
+// App shell: overlay title bar (Header), the live document's editor
+// surface (one hydrated document over the SKR-243 working-set model),
+// per-document layout mode + split ratio. Toasts via sonner. Right-click
+// context menus + delete-confirm modal land in Sidebar. Phase 9 wires
+// per-project persistence.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from './components/ui/Button';
@@ -36,7 +37,7 @@ import {
 } from './lib/commands/registry';
 import {
   logProjectError,
-  selectActiveTab,
+  selectLiveDoc,
   useProjectStore
 } from './stores/project';
 import { usePreferencesStore } from './stores/preferences';
@@ -71,21 +72,18 @@ const MIGRATION_PROMPT_DELAY_MS = 2500;
 
 export function App() {
   const manifest = useProjectStore((s) => s.manifest);
-  const activeTab = useProjectStore(selectActiveTab);
-  const activeTabIndex = useProjectStore((s) => s.activeTabIndex);
-  const setTabBody = useProjectStore((s) => s.setTabBody);
-  const setTabModel = useProjectStore((s) => s.setTabModel);
-  const setTabSplitDividerRatio = useProjectStore(
-    (s) => s.setTabSplitDividerRatio
+  const activeTab = useProjectStore(selectLiveDoc);
+  const setLiveDocBody = useProjectStore((s) => s.setLiveDocBody);
+  const setLiveDocModel = useProjectStore((s) => s.setLiveDocModel);
+  const setLiveDocSplitDividerRatio = useProjectStore(
+    (s) => s.setLiveDocSplitDividerRatio
   );
-  const saveAllDirty = useProjectStore((s) => s.saveAllDirty);
+  const saveDirty = useProjectStore((s) => s.saveDirty);
   const openProjectFromDialog = useProjectStore(
     (s) => s.openProjectFromDialog
   );
-  const setTabDiffMode = useProjectStore((s) => s.setTabDiffMode);
-  const setTabDiffDividerRatio = useProjectStore(
-    (s) => s.setTabDiffDividerRatio
-  );
+  const setDiffMode = useProjectStore((s) => s.setDiffMode);
+  const setDiffDividerRatio = useProjectStore((s) => s.setDiffDividerRatio);
   const closeDiff = useProjectStore((s) => s.closeDiff);
   const openRenameModal = useProjectStore((s) => s.openRenameModal);
   const persistProjectStateNow = useProjectStore(
@@ -375,30 +373,32 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [bindings]);
 
-  // Debounced auto-save flushes any dirty tabs after the writer pauses.
+  // Debounced auto-save flushes the live doc after the writer pauses.
   // The idle delay is the autosaveIdleDelayMs preference; ⌘S still forces
-  // an immediate save independent of this timer.
-  const dirtyTabHash = useProjectStore((s) =>
-    s.tabs.map((t) => `${t.path}:${t.dirty ? '1' : '0'}`).join('|')
+  // an immediate save independent of this timer. (Demoted documents are
+  // flushed by the switch itself, so the live doc is the only dirtyable
+  // state.)
+  const liveDocDirtyHash = useProjectStore((s) =>
+    s.liveDoc ? `${s.liveDoc.path}:${s.liveDoc.dirty ? '1' : '0'}` : ''
   );
   useEffect(() => {
-    if (!dirtyTabHash.includes(':1')) return;
+    if (!liveDocDirtyHash.endsWith(':1')) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       saveTimerRef.current = null;
-      void saveAllDirty().catch((err) => {
-        logProjectError('saveAllDirty', err);
+      void saveDirty().catch((err) => {
+        logProjectError('saveDirty', err);
         notify.error("Couldn't save", err);
       });
     }, autosaveIdleDelayMs);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [dirtyTabHash, saveAllDirty, autosaveIdleDelayMs]);
+  }, [liveDocDirtyHash, saveDirty, autosaveIdleDelayMs]);
 
   // Best-effort save on unload — beforeunload can't await async, so
   // pending writes that haven't completed by the time the renderer
-  // closes are lost. We still flush dirty tabs, project state, and
+  // closes are lost. We still flush the live doc, project state, and
   // any pending preferences debounce; all best-effort.
   useEffect(() => {
     function onBeforeUnload() {
@@ -406,7 +406,7 @@ export function App() {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
       }
-      void saveAllDirty().catch((err) => logProjectError('saveAllDirty', err));
+      void saveDirty().catch((err) => logProjectError('saveDirty', err));
       void persistProjectStateNow().catch((err) =>
         logProjectError('persistProjectStateNow', err)
       );
@@ -416,7 +416,7 @@ export function App() {
     }
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [saveAllDirty, persistProjectStateNow, persistPreferencesNow]);
+  }, [saveDirty, persistProjectStateNow, persistPreferencesNow]);
 
   // Pre-quit flush. Unlike beforeunload, this can await: main pauses the quit
   // until we ack. We drain the Rich surface's pending PM->text snapshot into the
@@ -431,7 +431,7 @@ export function App() {
             clearTimeout(saveTimerRef.current);
             saveTimerRef.current = null;
           }
-          await saveAllDirty();
+          await saveDirty();
           await persistProjectStateNow();
           await persistPreferencesNow();
         } catch (err) {
@@ -441,7 +441,7 @@ export function App() {
         }
       })();
     });
-  }, [saveAllDirty, persistProjectStateNow, persistPreferencesNow]);
+  }, [saveDirty, persistProjectStateNow, persistPreferencesNow]);
 
   // Suppress the empty-state flash while preferences haven't loaded —
   // a recent project may auto-open once the store is hydrated. The
@@ -451,7 +451,7 @@ export function App() {
 
   return (
     <div className="app-root">
-      <Header />
+      <Header onOpenSwitcher={() => commandDeps.toggleFileSwitcher()} />
 
       <main className="app-body">
         {activeView === 'settings' ? (
@@ -477,10 +477,8 @@ export function App() {
                   }}
                   dividerRatio={activeTab.diff.dividerRatio}
                   rows={activeTab.diff.rows}
-                  onModeChange={(mode) => setTabDiffMode(activeTabIndex, mode)}
-                  onDividerChange={(ratio) =>
-                    setTabDiffDividerRatio(activeTabIndex, ratio)
-                  }
+                  onModeChange={(mode) => setDiffMode(mode)}
+                  onDividerChange={(ratio) => setDiffDividerRatio(ratio)}
                   onClose={closeDiff}
                 />
               ) : activeTab ? (
@@ -505,7 +503,7 @@ export function App() {
                         doc={activeTab.model}
                         docPath={activeTab.path}
                         history={activeTab.history}
-                        onChange={(doc) => setTabModel(activeTabIndex, doc)}
+                        onChange={(doc) => setLiveDocModel(activeTab.path, doc)}
                       />
                     ) : activeTab.mode === 'text' ? (
                       // Plain-text mode (SKR-204): raw text edit, no rendered
@@ -513,7 +511,7 @@ export function App() {
                       <RawSourceView
                         key={activeTab.path}
                         body={activeTab.body}
-                        onChange={(next) => setTabBody(activeTabIndex, next)}
+                        onChange={(next) => setLiveDocBody(activeTab.path, next)}
                         ariaLabel="Plain text"
                       />
                     ) : (
@@ -524,13 +522,13 @@ export function App() {
                       <MarkdownView
                         key={activeTab.path}
                         body={activeTab.body}
-                        onChange={(next) => setTabBody(activeTabIndex, next)}
+                        onChange={(next) => setLiveDocBody(activeTab.path, next)}
                         filePath={activeTab.path}
                         projectRoot={manifest?.root ?? ''}
                         layoutMode={activeTab.layoutMode}
                         splitRatio={activeTab.splitDividerRatio}
                         onSplitRatioChange={(r) =>
-                          setTabSplitDividerRatio(activeTabIndex, r)
+                          setLiveDocSplitDividerRatio(activeTab.path, r)
                         }
                       />
                     )}
@@ -538,7 +536,7 @@ export function App() {
                 </>
               ) : (
                 <div className="empty-pane">
-                  <p>Select a file from the sidebar to open it as a tab.</p>
+                  <p>Select a file from the sidebar to start writing.</p>
                 </div>
               )}
             </section>

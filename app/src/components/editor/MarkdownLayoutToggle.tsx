@@ -16,9 +16,8 @@ const MODES: ReadonlyArray<{ mode: LayoutMode; label: string }> = [
 ];
 
 export function MarkdownLayoutToggle() {
-  const activeTabIndex = useProjectStore((s) => s.activeTabIndex);
-  const tab = useProjectStore((s) => s.tabs[s.activeTabIndex]);
-  const setTabLayoutMode = useProjectStore((s) => s.setTabLayoutMode);
+  const tab = useProjectStore((s) => s.liveDoc);
+  const setLiveDocLayoutMode = useProjectStore((s) => s.setLiveDocLayoutMode);
 
   const trackRef = useRef<HTMLDivElement>(null);
   const btnRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -69,7 +68,7 @@ export function MarkdownLayoutToggle() {
             type="button"
             className={`md-layout-btn${active ? ' active' : ''}`}
             aria-pressed={active}
-            onClick={() => setTabLayoutMode(activeTabIndex, mode)}
+            onClick={() => setLiveDocLayoutMode(tab.path, mode)}
           >
             {label}
           </button>

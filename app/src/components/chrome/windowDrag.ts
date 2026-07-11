@@ -25,14 +25,15 @@ export const DRAG_REGION_ATTR = 'data-drag-region';
 export const NO_DRAG_ATTR = 'data-no-drag';
 
 /**
- * Opt an element out of window dragging. Spread onto the CONTROL — a button, a tab —
- * and never onto the layout box that holds it.
+ * Opt an element out of window dragging. Spread onto the CONTROL — a button,
+ * the front-title — and never onto the layout box that holds it.
  *
- * That distinction is the whole bug: `.header-tabs` is `flex: 1`, so marking the
- * container no-drag consumed the entire middle of the topbar and left no pixels to
- * grab. It went unnoticed under Electron, whose `hiddenInset` titlebar gave the window
- * a native drag band regardless. Our webview covers that band, so the renderer's drag
- * lane is the only one there is.
+ * That distinction is the whole bug: the flex:1 middle of the topbar (the tab
+ * strip then, `.header-spacer` now) is the main drag lane, and marking the
+ * container no-drag consumed all of it and left no pixels to grab. It went
+ * unnoticed under Electron, whose `hiddenInset` titlebar gave the window a
+ * native drag band regardless. Our webview covers that band, so the renderer's
+ * drag lane is the only one there is.
  *
  * Both forms are emitted together: the CSS for Electron and the Windows host, the
  * attribute for the macOS host's mousedown handler, which cannot see the CSS.

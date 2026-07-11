@@ -26,13 +26,21 @@ export type CursorPosition = {
   column: number;
 };
 
-export type TabState = {
+/** One remembered document in the working set (schemaVersion 2): the path
+ *  plus the cheap view state a document keeps while it is off-screen. Entry 0
+ *  is always the live document. Same per-entry fields as the schemaVersion-1
+ *  TabState — the migration is a reorder + truncate, never a reshape. */
+export type WorkingSetEntryState = {
   path: string;
   layoutMode: LayoutMode;
   cursor: CursorPosition;
   scrollTop: number;
   splitDividerRatio: number;
 };
+
+/** LEGACY (schemaVersion 1). Kept so v1 state files still parse; see
+ *  `ProjectUiStateV1` and `migrateProjectUiState`. */
+export type TabState = WorkingSetEntryState;
 
 /** How the "All" file tree is ordered. 'created' needs a birthtime from
  *  the native scanner (Zig core); the other two derive from data the
@@ -51,15 +59,55 @@ export type SidebarState = {
 };
 
 export type ProjectUiState = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   projectPath: string;
   projectName: string;
   /** Unix milliseconds. Set at save time. */
   lastOpenedMs: number;
   sidebar: SidebarState;
+  /** Bounded LRU of recently open documents, most recent first. Entry 0 is
+   *  the live document (SKR-243: tabs retired for the working-set model). */
+  workingSet: WorkingSetEntryState[];
+};
+
+/** LEGACY on-disk shape (schemaVersion 1, the tabs era). Never written
+ *  anymore; loaded state files in this shape pass through
+ *  `migrateProjectUiState` before the renderer reads them. */
+export type ProjectUiStateV1 = {
+  schemaVersion: 1;
+  projectPath: string;
+  projectName: string;
+  lastOpenedMs: number;
+  sidebar: SidebarState;
   tabs: TabState[];
   activeTabIndex: number;
 };
+
+/** Cap on the unpinned portion of the working set (SKR-243; adjustable
+ *  during the dogfood). Pinned documents never evict and don't count. */
+export const WORKING_SET_CAP = 8;
+
+/** Bring a loaded project-state file up to schemaVersion 2. The shells store
+ *  and return the file opaquely (the Zig core does no schema work on project
+ *  state), so migration lives here, at the single point every load funnels
+ *  through. v1 → v2: the active tab becomes entry 0, the rest keep their
+ *  order, truncated to the cap. Unrecognizable input degrades to null (the
+ *  same posture as a missing file). */
+export function migrateProjectUiState(
+  raw: ProjectUiState | ProjectUiStateV1 | null
+): ProjectUiState | null {
+  if (raw == null || typeof raw !== 'object') return null;
+  if (raw.schemaVersion === 2) {
+    return Array.isArray(raw.workingSet) ? raw : null;
+  }
+  if (raw.schemaVersion !== 1 || !Array.isArray(raw.tabs)) return null;
+  const { tabs, activeTabIndex, ...restV1 } = raw;
+  const active = tabs[activeTabIndex];
+  const workingSet = (
+    active ? [active, ...tabs.filter((_, i) => i !== activeTabIndex)] : tabs
+  ).slice(0, WORKING_SET_CAP);
+  return { ...restV1, schemaVersion: 2, workingSet };
+}
 
 export type RecentProject = {
   path: string;
@@ -245,7 +293,7 @@ export function defaultProjectUiState(
   projectName: string
 ): ProjectUiState {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     projectPath,
     projectName,
     lastOpenedMs: Date.now(),
@@ -255,7 +303,6 @@ export function defaultProjectUiState(
       pinned: [],
       sortKey: 'name'
     },
-    tabs: [],
-    activeTabIndex: -1
+    workingSet: []
   };
 }

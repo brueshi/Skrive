@@ -101,6 +101,7 @@ export type {
   NewFileLocation,
   NewFileNaming,
   ProjectUiState,
+  ProjectUiStateV1,
   RecentFile,
   RecentProject,
   SidebarSortKey,
@@ -109,7 +110,8 @@ export type {
   SurfaceId,
   TabState,
   ThemeId,
-  WordCountMetric
+  WordCountMetric,
+  WorkingSetEntryState
 } from './persistence';
 
 export {
@@ -117,5 +119,7 @@ export {
   DEFAULT_RECENT_PROJECTS_CAP,
   DEFAULT_SIDEBAR_WIDTH,
   DEFAULT_SPLIT_DIVIDER_RATIO,
-  defaultProjectUiState
+  WORKING_SET_CAP,
+  defaultProjectUiState,
+  migrateProjectUiState
 } from './persistence';

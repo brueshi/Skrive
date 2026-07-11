@@ -1,26 +1,28 @@
 // ⌘P file switcher. Same shell as CommandPalette; haystack is the
-// project manifest's markdown files, with an LRU of recent files
-// floated to the top when the query is empty.
+// project manifest's files.
 //
-// Cmdk's built-in fuzzy filter handles ranking. We feed it a flat
-// list of `{ path, leaf }` rows; cmdk filters against each row's
-// `value` (path) so leaf-first matches still rank well — most
-// scoring frameworks weight prefix and segment-boundary hits.
+// Empty query (SKR-243): the working set — the same array the summon fan
+// and (Stage 2) the sidebar desk render, so the lists can never diverge —
+// then pinned documents, then everything else. The live doc leads but is
+// disabled, so the first *selectable* row is the previous document and
+// ⌘P ⏎ = "back to the last doc" (the Obsidian pattern).
+//
+// Typed query: cmdk's built-in fuzzy filter ranks the whole library. We
+// feed it flat `{ path, leaf }` rows; cmdk filters against each row's
+// `value` (path) so leaf-first matches still rank well — most scoring
+// frameworks weight prefix and segment-boundary hits.
 
 import { Command as Cmd } from 'cmdk';
 import { useEffect, useState } from 'react';
 import type { FileEntry } from '@skrive/shared';
 import { CommandModal } from './CommandModal';
 import { logProjectError, useProjectStore } from '../../stores/project';
-import { usePreferencesStore } from '../../stores/preferences';
 import { notify } from '../../lib/notify';
 
 type Props = {
   open: boolean;
   onClose: () => void;
 };
-
-const RECENT_DISPLAY_CAP = 8;
 
 function leafName(p: string): string {
   const i = p.lastIndexOf('/');
@@ -34,8 +36,10 @@ function dirOf(p: string): string {
 
 export function FileSwitcher({ open, onClose }: Props) {
   const manifest = useProjectStore((s) => s.manifest);
-  const openTab = useProjectStore((s) => s.openTab);
-  const recentFiles = usePreferencesStore((s) => s.recentFiles);
+  const openDoc = useProjectStore((s) => s.openDoc);
+  const liveDoc = useProjectStore((s) => s.liveDoc);
+  const workingSet = useProjectStore((s) => s.workingSet);
+  const pinned = useProjectStore((s) => s.pinned);
 
   const [query, setQuery] = useState('');
   useEffect(() => {
@@ -44,25 +48,43 @@ export function FileSwitcher({ open, onClose }: Props) {
 
   if (!manifest) return null;
 
-  // The "recent" section is only meaningful with an empty query —
-  // when the user types, cmdk's filter does the work and the LRU
-  // just becomes ranking input.
-  const recentForProject = recentFiles
-    .filter((r) => r.projectPath === manifest.root)
-    .filter((r) => manifest.files.some((f) => f.path === r.filePath))
-    .slice(0, RECENT_DISPLAY_CAP);
+  const exists = (p: string) => manifest.files.some((f) => f.path === p);
 
-  const showingRecent = query.trim().length === 0 && recentForProject.length > 0;
-  const recentSet = new Set(recentForProject.map((r) => r.filePath));
+  // The curated sections only render on an empty query — once the user
+  // types, cmdk's filter does the work over the flat library.
+  const workingRows = workingSet.filter((e) => exists(e.path));
+  const workingPaths = new Set(workingRows.map((e) => e.path));
+  const pinnedRows = pinned.filter((p) => exists(p) && !workingPaths.has(p));
+  const curated =
+    query.trim().length === 0 &&
+    (workingRows.length > 0 || pinnedRows.length > 0);
+  const curatedPaths = new Set([...workingPaths, ...pinnedRows]);
 
   const allFiles: FileEntry[] = manifest.files;
 
   function handleSelect(path: string) {
     onClose();
-    void openTab(path).catch((err) => {
-      logProjectError('openTab (switcher)', err);
+    void openDoc(path).catch((err) => {
+      logProjectError('openDoc (switcher)', err);
       notify.error(`Couldn't open ${path}`, err);
     });
+  }
+
+  function fileRow(path: string, keyPrefix = '', current = false) {
+    return (
+      <Cmd.Item
+        key={`${keyPrefix}${path}`}
+        value={path}
+        disabled={current}
+        onSelect={() => handleSelect(path)}
+        className={`cmdk-item cmdk-file-row${current ? ' cmdk-current' : ''}`}
+      >
+        <span className="cmdk-file-leaf">{leafName(path)}</span>
+        <span className="cmdk-file-dir">
+          {current ? 'current' : dirOf(path)}
+        </span>
+      </Cmd.Item>
+    );
   }
 
   return (
@@ -75,40 +97,27 @@ export function FileSwitcher({ open, onClose }: Props) {
       onQueryChange={setQuery}
       emptyState={<span>No matching files.</span>}
     >
-      {showingRecent && (
+      {curated && workingRows.length > 0 && (
         <Cmd.Group heading="Recent" className="cmdk-group">
-          {recentForProject.map((r) => (
-            <Cmd.Item
-              key={`recent:${r.filePath}`}
-              value={r.filePath}
-              onSelect={() => handleSelect(r.filePath)}
-              className="cmdk-item cmdk-file-row"
-            >
-              <span className="cmdk-file-leaf">{leafName(r.filePath)}</span>
-              <span className="cmdk-file-dir">{dirOf(r.filePath)}</span>
-            </Cmd.Item>
-          ))}
+          {workingRows.map((entry) =>
+            fileRow(entry.path, 'ws:', entry.path === liveDoc?.path)
+          )}
+        </Cmd.Group>
+      )}
+      {curated && pinnedRows.length > 0 && (
+        <Cmd.Group heading="Pinned" className="cmdk-group">
+          {pinnedRows.map((path) => fileRow(path, 'pin:'))}
         </Cmd.Group>
       )}
       <Cmd.Group
-        heading={showingRecent ? 'All files' : undefined}
+        heading={curated ? 'All files' : undefined}
         className="cmdk-group"
       >
         {allFiles.map((f) => {
-          // While showing recent, hide entries that already appear up
-          // top so the user doesn't see them twice.
-          if (showingRecent && recentSet.has(f.path)) return null;
-          return (
-            <Cmd.Item
-              key={f.path}
-              value={f.path}
-              onSelect={() => handleSelect(f.path)}
-              className="cmdk-item cmdk-file-row"
-            >
-              <span className="cmdk-file-leaf">{leafName(f.path)}</span>
-              <span className="cmdk-file-dir">{dirOf(f.path)}</span>
-            </Cmd.Item>
-          );
+          // While showing the curated sections, hide entries that already
+          // appear up top so the user doesn't see them twice.
+          if (curated && curatedPaths.has(f.path)) return null;
+          return fileRow(f.path);
         })}
       </Cmd.Group>
     </CommandModal>

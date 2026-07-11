@@ -8,13 +8,13 @@
 
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { IconButton } from '../ui/IconButton';
-import { selectActiveTab, useProjectStore } from '../../stores/project';
+import { selectLiveDoc, useProjectStore } from '../../stores/project';
 import { IconPanels } from '../icons/IconPanels';
 import { platformShortcut } from '../../lib/commands/shortcut-display';
 import { Tooltip } from '../ui/Tooltip';
 
 export function PanelMenu() {
-  const activeTab = useProjectStore(selectActiveTab);
+  const activeTab = useProjectStore(selectLiveDoc);
   const backlinksPanelOpen = useProjectStore((s) => s.backlinksPanelOpen);
   const toggleBacklinksPanel = useProjectStore(
     (s) => s.toggleBacklinksPanel

@@ -312,16 +312,12 @@ body {
      scroll for an overflowing tree lives on `.sidebar-inner`. */
 }
 
-/* The header's tabs slot — fills the middle of the topbar between the
-   left (sidebar toggle) and right (panel + mode toggle) clusters. */
-.header-tabs {
+/* Holds the middle of the topbar open between the left (sidebar toggle)
+   and right (panel menu) clusters; the front-title floats centered over
+   it (SKR-243). Stays drag-enabled — it IS the drag lane. */
+.header-spacer {
   flex: 1;
-  display: flex;
   min-width: 0;
-}
-
-.header-tabs > .tabs {
-  flex: 1;
 }
 
 /* The sidebar resize handle has a 1px decorative line via ::before
@@ -348,6 +344,8 @@ body {
   height: 40px;
   box-sizing: border-box;
   border-bottom: 1px solid var(--skrive-rule);
+  /* Anchor for the centered front-title slot (SKR-243). */
+  position: relative;
 }
 
 /* Clear the macOS traffic-light cluster. With titleBarStyle:
@@ -365,16 +363,6 @@ body {
   gap: 0.5rem;
   flex-shrink: 0;
   min-width: 0;
-}
-
-/* Hairline between the window-controls cluster (lights + sidebar toggle)
-   and the tab strip — separates them into their own box. */
-.header-sep {
-  align-self: center;
-  flex-shrink: 0;
-  width: 1px;
-  height: 18px;
-  background: var(--skrive-rule);
 }
 
 /* Project menu trigger. Lives in the sidebar's section header now —
@@ -439,99 +427,183 @@ body {
   height: 20px;
 }
 
-/* Lifted browser tabs: the strip hugs the bottom of the chrome row (6px
-   top inset is the shelf), the active tab a rounded paper card lifted
-   off the desk. Separated from the window-controls cluster on the left
-   by .header-sep. */
-.header .tabs {
-  flex: 1;
-  display: flex;
-  align-items: stretch;
-  gap: 2px;
-  min-width: 0;
-  padding-top: 6px;
-  overflow: hidden;
-}
-
-/* Content-width tabs (icon + name + close): shrink to a 36px floor when
-   crowded, cap at 14rem so one long filename can't dominate. Rounded
-   tops so the active tab reads as a lifted card. */
-.tab {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0 0.5rem 0 0.625rem;
-  background: transparent;
-  border: none;
-  border-radius: var(--skrive-radius-md) var(--skrive-radius-md) 0 0;
-  color: var(--skrive-muted);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  white-space: nowrap;
-  flex: 0 1 auto;
-  min-width: 36px;
-  max-width: 14rem;
-  overflow: hidden;
-  transition:
-    color var(--skrive-duration-quick) var(--skrive-easing),
-    background-color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.tab:hover {
-  color: var(--skrive-fg);
-  background: var(--skrive-rule);
-}
-
-.tab.active {
-  color: var(--skrive-fg);
-  background: var(--skrive-bg);
-}
-
-.tab-icon {
-  display: inline-flex;
-  flex-shrink: 0;
-}
-
-.tab-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
-.tab-dirty {
-  display: inline-flex;
-  color: var(--skrive-fg);
-}
-
-.tab-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity var(--skrive-duration-quick) var(--skrive-easing);
-  border-radius: var(--skrive-radius-xs);
-  padding: 2px;
-  color: var(--skrive-muted);
-  cursor: pointer;
-}
-
-.tab:hover .tab-close,
-.tab.active .tab-close {
-  opacity: 1;
-}
-
-.tab-close:hover {
-  color: var(--skrive-fg);
-  background: var(--skrive-rule);
-}
-
 .header-right {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
+}
+
+/* ===================== Front-title + summon fan (SKR-243) =====================
+   The centered document name in the band tabs vacated, and the anchored
+   working-set panel it summons. Sheet voice for the fan — the shipped
+   toast's lift (--skrive-shadow-sheet, --skrive-radius-xl), not the
+   ctx-menu's dropdown tier. Reference: the Stage 0 mock, frames 1-2. */
+
+/* True centering over the whole band, immune to the left/right cluster
+   widths. The slot itself is pointer-transparent so it never eats the
+   header's drag lane; only the title button takes clicks. */
+.front-title-slot {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.front-title {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 40rem;
+  padding: 4px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--skrive-radius-sm);
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.front-title:hover,
+.front-title[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--skrive-fg) 6%, transparent);
+}
+
+/* The chevron says "I open" — visible only on hover / while summoned. */
+.front-title-chev {
+  flex-shrink: 0;
+  color: var(--skrive-muted);
+  opacity: 0;
+  transition: opacity var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.front-title:hover .front-title-chev,
+.front-title[aria-expanded='true'] .front-title-chev {
+  opacity: 1;
+}
+
+/* No document open: dimmed project name + the keyboard path as the hint. */
+.front-title-empty {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.625rem;
+  font-size: 13px;
+  color: var(--skrive-muted);
+  white-space: nowrap;
+}
+
+.front-title-empty-name {
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+.front-title-empty-hint {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+/* The fan: the working set as an anchored sheet under the title. */
+.fan {
+  width: 330px;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-card-border);
+  border-radius: var(--skrive-radius-xl);
+  box-shadow: var(--skrive-shadow-sheet);
+  padding: 6px;
+  font-family: var(--skrive-ui-font);
+  font-size: 13px;
+  color: var(--skrive-fg);
+  z-index: var(--skrive-z-context-menu);
+}
+
+.fan-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: var(--skrive-radius-md);
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+
+/* Rows land like cards laid on a desk: a short fall with a per-row
+   stagger (--fan-i set inline). Backwards fill keeps late rows hidden
+   until their delay elapses. */
+@media (prefers-reduced-motion: no-preference) {
+  .fan-row {
+    animation: skrive-fan-land 240ms var(--skrive-easing-out) backwards;
+    animation-delay: calc(var(--fan-i, 0) * 24ms);
+  }
+}
+
+@keyframes skrive-fan-land {
+  from {
+    opacity: 0;
+    transform: translateY(-7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fan-row[data-highlighted] {
+  background: color-mix(in srgb, var(--skrive-fg) 7%, transparent);
+}
+
+/* The live doc: marked as where you are, not clickable-to-switch. */
+.fan-row.current {
+  background: var(--skrive-selection);
+  cursor: default;
+}
+
+.fan-row.current .fan-name {
+  font-weight: 600;
+}
+
+.fan-glyph {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--skrive-muted);
+}
+
+.fan-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Dimmed parent folder, right-aligned — enough origin to disambiguate
+   without reading as a path. */
+.fan-where {
+  margin-left: auto;
+  padding-left: 24px;
+  flex-shrink: 0;
+  color: var(--skrive-muted);
+  font-size: 12px;
+}
+
+.fan-sep {
+  height: 1px;
+  margin: 5px 8px;
+  background: color-mix(in srgb, var(--skrive-rule) 70%, transparent);
+}
+
+.fan-foot .fan-name {
+  color: var(--skrive-muted);
+}
+
+.fan-foot[data-highlighted] .fan-name {
+  color: var(--skrive-fg);
 }
 
 /* ---- Custom window controls (frameless Windows host only, B3) ----
@@ -4391,6 +4463,18 @@ body {
   white-space: nowrap;
   color: var(--skrive-muted);
   font-size: 0.75rem;
+}
+
+/* The live doc's row in the empty-state working set (SKR-243): marked as
+   where you are (the fan's selection tint), disabled so the first
+   selectable row is the previous document and ⌘P ⏎ jumps back to it. */
+.cmdk-file-row.cmdk-current {
+  background: var(--skrive-selection);
+}
+
+.cmdk-file-row.cmdk-current .cmdk-file-dir {
+  text-align: right;
+  font-style: italic;
 }
 
 /* ===================== History panel (Phase 10) ===================== */

@@ -80,9 +80,11 @@ type PreferencesActions = {
   recordRecentProject(path: string, name: string): void;
   removeRecentProject(path: string): void;
 
-  /** LRU bookkeeping for the file switcher (Phase 11). Most recent
-   *  open lives at index 0; entries dedupe by `(projectPath, filePath)`
-   *  and the list caps at RECENT_FILES_CAP. */
+  /** App-wide recent-files LRU. Since SKR-243 the switcher reads the
+   *  working set instead; the sidebar's Recents section is the last
+   *  reader and dies with the Stage 2 desk (this bookkeeping goes with
+   *  it). Most recent open lives at index 0; entries dedupe by
+   *  `(projectPath, filePath)` and the list caps at RECENT_FILES_CAP. */
   recordRecentFile(projectPath: string, filePath: string): void;
 
   resetEditorDefaults(): void;
