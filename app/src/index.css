@@ -365,16 +365,6 @@ body {
   min-width: 0;
 }
 
-/* Hairline between the window-controls cluster (lights + sidebar toggle)
-   and the tab strip — separates them into their own box. */
-.header-sep {
-  align-self: center;
-  flex-shrink: 0;
-  width: 1px;
-  height: 18px;
-  background: var(--skrive-rule);
-}
-
 /* Project menu trigger. Lives in the sidebar's section header now —
    used to be in the topbar. The font reads as the section heading it
    replaces (uppercase, letter-spaced) so the affordance integrates
@@ -435,94 +425,6 @@ body {
 .sidebar-toggle svg {
   width: 20px;
   height: 20px;
-}
-
-/* Lifted browser tabs: the strip hugs the bottom of the chrome row (6px
-   top inset is the shelf), the active tab a rounded paper card lifted
-   off the desk. Separated from the window-controls cluster on the left
-   by .header-sep. */
-.header .tabs {
-  flex: 1;
-  display: flex;
-  align-items: stretch;
-  gap: 2px;
-  min-width: 0;
-  padding-top: 6px;
-  overflow: hidden;
-}
-
-/* Content-width tabs (icon + name + close): shrink to a 36px floor when
-   crowded, cap at 14rem so one long filename can't dominate. Rounded
-   tops so the active tab reads as a lifted card. */
-.tab {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0 0.5rem 0 0.625rem;
-  background: transparent;
-  border: none;
-  border-radius: var(--skrive-radius-md) var(--skrive-radius-md) 0 0;
-  color: var(--skrive-muted);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  white-space: nowrap;
-  flex: 0 1 auto;
-  min-width: 36px;
-  max-width: 14rem;
-  overflow: hidden;
-  transition:
-    color var(--skrive-duration-quick) var(--skrive-easing),
-    background-color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.tab:hover {
-  color: var(--skrive-fg);
-  background: var(--skrive-rule);
-}
-
-.tab.active {
-  color: var(--skrive-fg);
-  background: var(--skrive-bg);
-}
-
-.tab-icon {
-  display: inline-flex;
-  flex-shrink: 0;
-}
-
-.tab-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
-.tab-dirty {
-  display: inline-flex;
-  color: var(--skrive-fg);
-}
-
-.tab-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity var(--skrive-duration-quick) var(--skrive-easing);
-  border-radius: var(--skrive-radius-xs);
-  padding: 2px;
-  color: var(--skrive-muted);
-  cursor: pointer;
-}
-
-.tab:hover .tab-close,
-.tab.active .tab-close {
-  opacity: 1;
-}
-
-.tab-close:hover {
-  color: var(--skrive-fg);
-  background: var(--skrive-rule);
 }
 
 .header-right {

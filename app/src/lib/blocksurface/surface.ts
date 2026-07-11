@@ -507,8 +507,9 @@ export class BlockSurface {
   /** Drain any pending cold-path snapshot immediately (save / blur / unmount).
    *  Cancels both the debounce and a deferred idle emit, then hands the consumer
    *  a fresh snapshot iff the doc changed since the last emit. Idempotent: a
-   *  second call with nothing pending is a no-op, so double-draining (e.g. a
-   *  closeTab flush followed by the unmount flush) never re-emits stale state. */
+   *  second call with nothing pending is a no-op, so double-draining (e.g. the
+   *  switch-demote flush followed by the unmount flush) never re-emits stale
+   *  state. */
   flush(): void {
     if (this.debounceTimer != null) {
       clearTimeout(this.debounceTimer);

@@ -3,7 +3,7 @@
 // ⌘F opens it (overrides the in-document find — Skrive's find is
 // project-wide; in-doc navigation is by scroll). Debounced 150ms query,
 // monotonic search token discards out-of-order responses, hits grouped
-// by file. Enter / click jumps to the hit via openTabAtLine.
+// by file. Enter / click jumps to the hit via openDocAtLine.
 //
 // Two-pane layout (Skrive 1.0): the grouped result list on the left, a
 // context preview of the highlighted match on the right — see the match

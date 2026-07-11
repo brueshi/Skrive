@@ -5,7 +5,7 @@ type Props = {
 
 // Filled, multi-tone plain document (paper.design): a folded page of text with
 // no markdown hash, the sibling of IconDocMarkdown. Used for non-markdown files
-// in the tree/tabs. Currently dormant — the tree shows markdown only — but wired
+// in the tree / the summon fan. Currently dormant — the tree shows markdown only — but wired
 // so it surfaces the moment other file types appear. Tones resolve from the
 // --skrive-icon-doc-* tokens, tuned per theme (see index.css).
 export function IconDoc({ size = 24, className = '' }: Props) {

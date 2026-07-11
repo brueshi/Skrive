@@ -86,9 +86,10 @@ export const SIDEBAR_MAX_WIDTH = 500;
 export const SIDEBAR_DEFAULT_WIDTH = 260;
 
 // Markdown-mode layout (SKR-197): raw source / split / rendered preview.
-// layoutMode + splitDividerRatio ride on the tab and persist per project. A new
-// Markdown tab opens in split (edit the source with a live preview beside it);
-// `.folio` rich tabs ignore layoutMode (they have a single editing surface).
+// layoutMode + splitDividerRatio ride on the document's working-set entry and
+// persist per project. A new Markdown document opens in split (edit the source
+// with a live preview beside it); `.folio` rich documents ignore layoutMode
+// (they have a single editing surface).
 const DEFAULT_LAYOUT_MODE: LayoutMode = 'split';
 const DEFAULT_SPLIT_RATIO = 0.5;
 const DEBOUNCED_SAVE_MS = 1000;
@@ -145,7 +146,7 @@ export type DiffState = {
  *  path + cheap view state — hydrated back into this shape on switch. */
 export type LiveDoc = {
   path: string;
-  /** The editing path this tab routes through, decided once at open from the
+  /** The editing path this document routes through, decided once at open from the
    *  file extension (SKR-196). `markdown` edits text and saves text -> text;
    *  `rich` edits the block model and saves the native `.folio` format. */
   mode: EditorMode;
@@ -236,18 +237,18 @@ type State = {
 
   /** Path of the file currently being renamed, or null when no
    *  rename modal is open. Lives at the project level so the modal
-   *  doesn't lose its target if the active tab changes mid-flight. */
+   *  doesn't lose its target if the live doc changes mid-flight. */
   renameModalPath: string | null;
 
   /** Floating top-right history list (phase 10). One row per git
-   *  commit or checkpoint touching the active tab. Mutually exclusive
+   *  commit or checkpoint touching the live doc. Mutually exclusive
    *  with backlinks + frontmatter. */
   historyPanelOpen: boolean;
   /** Project-level history backend, decided at project:open. Drives
    *  the panel's mode badge and gates the manual-checkpoint action. */
   historyMode: HistoryMode | null;
-  /** History rows for the active tab. Refreshed on tab change + on
-   *  watcher events that touch the tab's path. */
+  /** History rows for the live doc. Refreshed on document switch + on
+   *  watcher events that touch its path. */
   historyOfActive: HistoryEntry[];
   /** The "baseline" entry for shift-click pair compares. Stashed by
    *  every single click; consumed by the next shift-click. */
@@ -398,15 +399,15 @@ type Actions = {
   toggleHistoryPanel(): void;
   closeHistoryPanel(): void;
   setHistoryPairBaseId(id: string | null): void;
-  /** Refresh history rows for the active tab. Called when the panel
-   *  opens, when the active tab changes, and when the watcher reports
+  /** Refresh history rows for the live doc. Called when the panel
+   *  opens, when the live doc changes, and when the watcher reports
    *  a change to the active path. Best-effort. */
   refreshHistory(): Promise<void>;
   /** Flip the global git-history preference. Persists it, pushes it to the
    *  shell, updates the open project's effective history mode, and refreshes
    *  the history rows so the panel switches backends live. */
   setGitHistoryEnabled(enabled: boolean): Promise<void>;
-  /** Render the diff overlay on the active tab. Single click passes
+  /** Render the diff overlay on the live doc. Single click passes
    *  `(entry, null)` — diff against current. Shift-click passes
    *  `(entry, baseline)` — pair-diff. Older side always lands on the
    *  "before" pane regardless of click order. */
@@ -484,11 +485,12 @@ let watchRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let lintInFlight = false;
 let lintRerunQueued = false;
 
-// Closed-file body cache for lint. Open tabs always supply their live in-memory
-// body; the bodies of *closed* files change only via the watcher, which hands us
-// the exact path. So we read each closed file once, cache it, and re-read only
-// the paths the watcher reports dirty — during editing no closed file changes,
-// so the per-pass disk reads (the cost the AST memo didn't cover) drop to zero.
+// Closed-file body cache for lint. The live doc always supplies its in-memory
+// body; the bodies of every other file change only via the watcher (demoted
+// documents flush to disk on switch), which hands us the exact path. So we read
+// each closed file once, cache it, and re-read only the paths the watcher
+// reports dirty — during editing no closed file changes, so the per-pass disk
+// reads (the cost the AST memo didn't cover) drop to zero.
 // Keyed by project-relative path; cleared on project switch since paths can
 // collide across projects.
 const closedBodyCache = new Map<string, string>();
@@ -880,9 +882,9 @@ function resolveCurrentSide(doc: LiveDoc): DiffSide {
   };
 }
 
-// The body to feed the (Markdown-oriented) project model after writing a tab.
-// Only a markdown tab feeds its real bytes. A rich (`.folio`) or plain-text
-// (`.txt`) tab registers its path with an EMPTY body: the file stays in the
+// The body to feed the (Markdown-oriented) project model after writing a doc.
+// Only a markdown document feeds its real bytes. A rich (`.folio`) or plain-text
+// (`.txt`) one registers its path with an EMPTY body: the file stays in the
 // manifest/sidebar, but its content is never parsed as Markdown for links or lint
 // (the engine is catalog, never custodian — non-Markdown content is not the
 // Markdown model's concern).
@@ -1110,8 +1112,8 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     set({ loading: true });
     try {
       // Flush any debounced project state from the previously open
-      // project before tearing it down. closeProject already saves
-      // dirty tabs, but if the user goes File → Open without quitting,
+      // project before tearing it down. closeProject already saves the
+      // live doc, but if the user goes File → Open without quitting,
       // the previous project's project.json could lose a debounced
       // sidebar/scroll write otherwise.
       await get().persistProjectStateNow();
@@ -1154,8 +1156,8 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
       // Phase 9: pull the persisted UI state for this project before
       // committing the manifest, so the initial render lands with the
-      // saved sidebar geometry / tabs / cursor instead of flashing
-      // defaults.
+      // saved sidebar geometry / working set / cursor instead of
+      // flashing defaults.
       const persisted = await window.skrive.persistence.loadProjectState(
         manifest.root
       );

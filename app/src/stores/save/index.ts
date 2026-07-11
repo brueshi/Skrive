@@ -40,7 +40,7 @@ export function buildSavePayload(tab: SaveTab): string {
     throw new Error('Cannot save a read-only (view) tab.');
   }
   if (tab.mode === 'rich') {
-    // A rich tab always carries these once opened (openTab sets them); the guard
+    // A rich doc always carries these once opened (openDoc sets them); the guard
     // is a defensive invariant, not an expected branch.
     if (!tab.model || !tab.docId || !tab.docMeta) {
       throw new Error('Cannot save a rich (.folio) tab without a model, docId, and docMeta.');
