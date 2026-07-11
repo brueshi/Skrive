@@ -10,13 +10,15 @@
 // (Stage 2) the sidebar desk render, so the lists can never diverge —
 // then pinned documents, then everything else. The live doc leads but is
 // disabled, so the first *selectable* row is the previous document and
-// ⌘P ⏎ = "back to the last doc" (the Obsidian pattern).
+// ⌘P ⏎ = "back to the last doc" (the Obsidian pattern). A further ⌘P
+// while open steps the highlight down (see CommandModal.cycleChord).
 
 import { Command as Cmd } from 'cmdk';
 import { useEffect, useState } from 'react';
 import type { FileEntry } from '@skrive/shared';
 import { CommandModal } from './CommandModal';
 import { logProjectError, useProjectStore } from '../../stores/project';
+import { focusEditorSoon } from '../editor/active-surface';
 import { DocIcon } from '../icons/DocIcon';
 import { stripFolioExtension } from '../../lib/title';
 import { notify } from '../../lib/notify';
@@ -25,6 +27,10 @@ type Props = {
   open: boolean;
   onClose: () => void;
 };
+
+/** Chord for the step-down gesture: the same ⌘P that opened the switcher
+ *  advances the highlight while it's open (quick-open convention). */
+const CYCLE_CHORD = { code: 'KeyP', mod: true } as const;
 
 function displayName(p: string): string {
   const i = p.lastIndexOf('/');
@@ -96,10 +102,12 @@ export function FileSwitcher({ open, onClose }: Props) {
 
   function handleSelect(path: string) {
     onClose();
-    void openDoc(path).catch((err) => {
-      logProjectError('openDoc (switcher)', err);
-      notify.error(`Couldn't open ${path}`, err);
-    });
+    void openDoc(path)
+      .then(() => focusEditorSoon())
+      .catch((err) => {
+        logProjectError('openDoc (switcher)', err);
+        notify.error(`Couldn't open ${path}`, err);
+      });
   }
 
   return (
@@ -111,6 +119,14 @@ export function FileSwitcher({ open, onClose }: Props) {
       query={query}
       onQueryChange={setQuery}
       emptyState={<span>No matching files.</span>}
+      cycleChord={CYCLE_CHORD}
+      // The editor owns the caret when the switcher closes — on a switch
+      // the new surface mounts a frame later (handleSelect covers it); on
+      // a dismiss the mounted surface refocuses here.
+      onCloseAutoFocus={(e) => {
+        e.preventDefault();
+        focusEditorSoon();
+      }}
     >
       {curated && workingRows.length > 0 && (
         <Cmd.Group heading="Recent" className="cmdk-group">
