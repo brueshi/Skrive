@@ -468,6 +468,13 @@ body {
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
+  transition: transform var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+/* The press is the click's down-beat: with the hover fill gone, this is
+   the only acknowledgment between mousedown and the sheet's entrance. */
+.front-title:active {
+  transform: scale(0.98);
 }
 
 /* The chevron is the whole affordance (the macOS document-title
@@ -525,6 +532,45 @@ body {
   font-size: 13px;
   color: var(--skrive-fg);
   z-index: var(--skrive-z-context-menu);
+  /* The sheet grows out of the title it was summoned from (Radix hands
+     us the trigger-anchored origin), never from its own center. */
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin, top);
+}
+
+/* One gesture, three layers: the chevron turns (160ms), the sheet
+   unfurls from the title (200ms, below), the rows land inside it with
+   the stagger. The sheet's rise is the beat the rows land against —
+   without it the panel pops in at full size and the stagger reads as
+   cards falling into an empty box. */
+@media (prefers-reduced-motion: no-preference) {
+  .fan[data-state='open'] {
+    animation: skrive-fan-in 200ms var(--skrive-easing-out);
+  }
+
+  /* Dismissal completes rather than snapping: same path back, faster
+     (exits read ~20% quicker than entrances), gentle standard easing.
+     Radix holds the portal open until this finishes. */
+  .fan[data-state='closed'] {
+    animation: skrive-fan-out 140ms var(--skrive-easing) forwards;
+  }
+}
+
+@keyframes skrive-fan-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes skrive-fan-out {
+  to {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.98);
+  }
 }
 
 .fan-row {
