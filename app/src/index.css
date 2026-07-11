@@ -348,6 +348,8 @@ body {
   height: 40px;
   box-sizing: border-box;
   border-bottom: 1px solid var(--skrive-rule);
+  /* Anchor for the centered front-title slot (SKR-243). */
+  position: relative;
 }
 
 /* Clear the macOS traffic-light cluster. With titleBarStyle:
@@ -532,6 +534,178 @@ body {
   align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
+}
+
+/* ===================== Front-title + summon fan (SKR-243) =====================
+   The centered document name in the band tabs vacated, and the anchored
+   working-set panel it summons. Sheet voice for the fan — the shipped
+   toast's lift (--skrive-shadow-sheet, --skrive-radius-xl), not the
+   ctx-menu's dropdown tier. Reference: the Stage 0 mock, frames 1-2. */
+
+/* True centering over the whole band, immune to the left/right cluster
+   widths. The slot itself is pointer-transparent so it never eats the
+   header's drag lane; only the title button takes clicks. */
+.front-title-slot {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.front-title {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 40rem;
+  padding: 4px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--skrive-radius-sm);
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.front-title:hover,
+.front-title[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--skrive-fg) 6%, transparent);
+}
+
+/* The chevron says "I open" — visible only on hover / while summoned. */
+.front-title-chev {
+  flex-shrink: 0;
+  color: var(--skrive-muted);
+  opacity: 0;
+  transition: opacity var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.front-title:hover .front-title-chev,
+.front-title[aria-expanded='true'] .front-title-chev {
+  opacity: 1;
+}
+
+/* No document open: dimmed project name + the keyboard path as the hint. */
+.front-title-empty {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.625rem;
+  font-size: 13px;
+  color: var(--skrive-muted);
+  white-space: nowrap;
+}
+
+.front-title-empty-name {
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+.front-title-empty-hint {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+/* The fan: the working set as an anchored sheet under the title. */
+.fan {
+  width: 330px;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-card-border);
+  border-radius: var(--skrive-radius-xl);
+  box-shadow: var(--skrive-shadow-sheet);
+  padding: 6px;
+  font-family: var(--skrive-ui-font);
+  font-size: 13px;
+  color: var(--skrive-fg);
+  z-index: var(--skrive-z-context-menu);
+}
+
+.fan-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: var(--skrive-radius-md);
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+
+/* Rows land like cards laid on a desk: a short fall with a per-row
+   stagger (--fan-i set inline). Backwards fill keeps late rows hidden
+   until their delay elapses. */
+@media (prefers-reduced-motion: no-preference) {
+  .fan-row {
+    animation: skrive-fan-land 240ms var(--skrive-easing-out) backwards;
+    animation-delay: calc(var(--fan-i, 0) * 24ms);
+  }
+}
+
+@keyframes skrive-fan-land {
+  from {
+    opacity: 0;
+    transform: translateY(-7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fan-row[data-highlighted] {
+  background: color-mix(in srgb, var(--skrive-fg) 7%, transparent);
+}
+
+/* The live doc: marked as where you are, not clickable-to-switch. */
+.fan-row.current {
+  background: var(--skrive-selection);
+  cursor: default;
+}
+
+.fan-row.current .fan-name {
+  font-weight: 600;
+}
+
+.fan-glyph {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--skrive-muted);
+}
+
+.fan-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Dimmed parent folder, right-aligned — enough origin to disambiguate
+   without reading as a path. */
+.fan-where {
+  margin-left: auto;
+  padding-left: 24px;
+  flex-shrink: 0;
+  color: var(--skrive-muted);
+  font-size: 12px;
+}
+
+.fan-sep {
+  height: 1px;
+  margin: 5px 8px;
+  background: color-mix(in srgb, var(--skrive-rule) 70%, transparent);
+}
+
+.fan-foot .fan-name {
+  color: var(--skrive-muted);
+}
+
+.fan-foot[data-highlighted] .fan-name {
+  color: var(--skrive-fg);
 }
 
 /* ---- Custom window controls (frameless Windows host only, B3) ----

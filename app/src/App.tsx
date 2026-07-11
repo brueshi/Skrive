@@ -451,7 +451,7 @@ export function App() {
 
   return (
     <div className="app-root">
-      <Header />
+      <Header onOpenSwitcher={() => commandDeps.toggleFileSwitcher()} />
 
       <main className="app-body">
         {activeView === 'settings' ? (

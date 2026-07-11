@@ -19,6 +19,7 @@ import {
 } from '../../stores/project';
 import { IconSidebarToggle } from '../icons/IconSidebarToggle';
 import { Tooltip } from '../ui/Tooltip';
+import { FrontTitle } from './FrontTitle';
 import { PanelMenu } from './PanelMenu';
 import { TabBar } from './TabBar';
 import { WindowControls } from './WindowControls';
@@ -33,7 +34,13 @@ const isMacOS =
 const isFrameless =
   typeof window !== 'undefined' && window.__SKRIVE_FRAMELESS__ === true;
 
-export function Header() {
+type HeaderProps = {
+  /** Opens the ⌘P switcher — threaded to the front-title fan's footer
+   *  row (the switcher modal lives in App). */
+  onOpenSwitcher: () => void;
+};
+
+export function Header({ onOpenSwitcher }: HeaderProps) {
   const activeTab = useProjectStore(selectLiveDoc);
   const sidebarVisible = useProjectStore((s) => s.sidebarVisible);
   const toggleSidebar = useProjectStore((s) => s.toggleSidebar);
@@ -119,6 +126,12 @@ export function Header() {
       <div className="header-tabs">
         <TabBar />
       </div>
+
+      {/* The front-title (SKR-243): centered over the whole band so the
+          left/right cluster widths can't skew it. The slot is pointer-
+          transparent; only the title button itself takes clicks (and opts
+          out of window dragging). */}
+      <FrontTitle onOpenSwitcher={onOpenSwitcher} />
 
       {activeTab && (
         <div className="header-right" {...noDragProps}>

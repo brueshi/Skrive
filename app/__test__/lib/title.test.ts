@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { FileEntry } from '@skrive/shared';
-import { resolveTitle, stripFolioExtension } from '../../src/lib/title';
+import { middleTruncate, resolveTitle, stripFolioExtension } from '../../src/lib/title';
 
 function entry(name: string, frontmatter: Record<string, unknown> = {}): FileEntry {
   return { path: name, name, sizeBytes: 0, modifiedMs: 0, frontmatter, outgoingLinks: [] };
@@ -33,5 +33,21 @@ describe('resolveTitle', () => {
       primary: 'My Trip',
       secondary: 'notes'
     });
+  });
+});
+
+describe('middleTruncate', () => {
+  it('leaves short names alone', () => {
+    expect(middleTruncate('notes.md')).toBe('notes.md');
+    expect(middleTruncate('x'.repeat(40))).toBe('x'.repeat(40));
+  });
+
+  it('keeps both ends of a long name', () => {
+    const name = 'A very long manuscript title — part two, chapter eleven.md';
+    const out = middleTruncate(name);
+    expect(out).toHaveLength(40);
+    expect(out).toContain('…');
+    expect(name.startsWith(out.split('…')[0]!)).toBe(true);
+    expect(name.endsWith(out.split('…')[1]!)).toBe(true);
   });
 });

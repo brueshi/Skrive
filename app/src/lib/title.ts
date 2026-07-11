@@ -28,6 +28,16 @@ export function stripFolioExtension(name: string): string {
   return name.replace(/\.folio$/i, '');
 }
 
+/** Middle-truncate a display name past `max` chars, keeping both ends —
+ *  a long filename's distinguishing part is often its tail (chapter
+ *  numbers, dates), so end-ellipsis would hide exactly what matters.
+ *  Used by the front-title (SKR-243). */
+export function middleTruncate(name: string, max = 40): string {
+  if (name.length <= max) return name;
+  const half = Math.floor((max - 1) / 2);
+  return `${name.slice(0, max - 1 - half)}…${name.slice(name.length - half)}`;
+}
+
 export function resolveTitle(file: FileEntry): ResolvedTitle {
   const name = stripFolioExtension(file.name);
   const fm = file.frontmatter['title'];
