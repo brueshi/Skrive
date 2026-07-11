@@ -1,21 +1,25 @@
 // The project store — zustand, single source of truth for the open
-// project, the open tabs, the active tab, and sidebar visibility/width.
+// project, the live document, the working set, and sidebar visibility/width.
 //
-// Phase 4 swaps the single-active-file model from Phase 3 for the tabs
-// layer. Each tab carries its own cursor/scroll so switching files restores
-// the view the user last had on that file. (layoutMode/splitDividerRatio are
-// vestigial post-cutover — see DEFAULT_LAYOUT_MODE.)
+// SKR-243 retires the tabs layer for the working-set model
+// (planning/chrome-navigation-model.md): exactly one fully-hydrated live
+// document, a bounded LRU working set of recently open documents (entry 0 =
+// the live doc; each entry keeps only path + cheap view state), and a
+// browser-style trail of document visits behind ⌘⇧[ / ⌘⇧]. Switching
+// flushes + autosaves the live doc (the old closeTab save path), demotes it
+// to its working-set entry, and hydrates the target.
 //
-// Phase 9 wires per-project persistence: the tab set, cursor/scroll
-// state, layout mode, and sidebar visibility/width are reloaded from
-// `{userData}/projects/{hash}.json` on open and written back via three
-// tiers — immediate (open/close/reorder, layout, sidebar visibility),
+// Per-project persistence (Phase 9; schemaVersion 2 since SKR-243): the
+// working set, per-entry cursor/scroll/layout, and sidebar visibility/width
+// are reloaded from `{userData}/projects/{hash}.json` on open and written
+// back via three tiers — immediate (switch, layout, sidebar visibility),
 // debounced 1s (scroll, split-divider drag, sidebar width drag), and
 // blur/quit (cursor position).
 
 import { create } from 'zustand';
 import {
   defaultProjectUiState,
+  migrateProjectUiState,
   type FileEntry,
   type FrontmatterMap,
   type HistoryEntry,
@@ -25,9 +29,19 @@ import {
   type ProjectLintReport,
   type ProjectManifest,
   type ProjectUiState,
-  type TabState
+  type ProjectUiStateV1,
+  type WorkingSetEntryState
 } from '@skrive/shared';
 import type { LayoutMode, SidebarSortKey } from '@skrive/shared';
+import {
+  EMPTY_TRAIL,
+  peekVisit,
+  promoteEntry,
+  pruneTrail,
+  pushVisit,
+  renameInTrail,
+  type NavTrail
+} from './working-set';
 import { computeLineDiff } from '../lib/diff/line-diff';
 import { parseFrontmatter } from '../lib/frontmatter';
 import { buildSavePayload, fileMode, type EditorMode } from './save';
@@ -114,10 +128,10 @@ export type DiffSide = {
   source: 'git' | 'checkpoint' | 'current';
 };
 
-/** Active diff state on a tab. Diff lives at the tab level so
- *  switching tabs preserves it; closing the diff (Escape / X) returns to the
- *  editor. Not persisted — diff is an ephemeral overlay. */
-export type TabDiffState = {
+/** Active diff overlay on the live document. Closing the diff (Escape / X)
+ *  returns to the editor; switching documents discards it (diff is an
+ *  ephemeral overlay, never persisted). */
+export type DiffState = {
   before: DiffSide;
   after: DiffSide;
   rows: LineDiffRow[];
@@ -126,7 +140,10 @@ export type TabDiffState = {
   diffMode: 'diff-raw' | 'diff-preview';
 };
 
-export type Tab = {
+/** The one fully-hydrated document (model, undo history, panels feed off
+ *  it). Everything else the session remembers is a WorkingSetEntryState —
+ *  path + cheap view state — hydrated back into this shape on switch. */
+export type LiveDoc = {
   path: string;
   /** The editing path this tab routes through, decided once at open from the
    *  file extension (SKR-196). `markdown` edits text and saves text -> text;
@@ -135,33 +152,35 @@ export type Tab = {
   /** Body without the leading frontmatter block. The editor reads/writes
    *  this; the full file is reassembled at save time. Markdown mode only. */
   body: string;
-  /** Parsed YAML frontmatter for the file. Populated on openTab; mutated
+  /** Parsed YAML frontmatter for the file. Populated on open; mutated
    *  by the FrontmatterPanel; auto-stamped fields refreshed on save. */
   frontmatter: FrontmatterMap;
-  /** The canonical block model for a `rich` (`.folio`) tab — the model-mode
-   *  analogue of `body`. Absent on markdown tabs. Set on open, synced from the
-   *  surface on edit, serialized to `.folio` on save. */
+  /** The canonical block model for a `rich` (`.folio`) document — the
+   *  model-mode analogue of `body`. Absent in markdown mode. Set on open,
+   *  synced from the surface on edit, serialized to `.folio` on save. */
   model?: Document;
-  /** Document identity for a `rich` tab (folio schema §3): read from the file on
-   *  open, minted once on create, written back unchanged. Absent on markdown. */
+  /** Document identity for a `rich` document (folio schema §3): read from the
+   *  file on open, minted once on create, written back unchanged. Absent on
+   *  markdown. */
   docId?: string;
-  /** Document metadata for a `rich` tab (title, createdAt, preserved unknowns).
-   *  Absent on markdown tabs. */
+  /** Document metadata for a `rich` document (title, createdAt, preserved
+   *  unknowns). Absent in markdown mode. */
   docMeta?: FolioMeta;
-  /** Session-scoped undo history for a `rich` tab (SKR-179). BlockEditor remounts
-   *  per tab switch (`key` per path) and rebuilds its surface, so the history
-   *  lives here — same lifetime as `model`, whose snapshots it references — and
-   *  is handed to each new surface. In-memory only, never persisted; a project
-   *  reopen re-parses the model, so it correctly starts a fresh history too. */
+  /** Session-scoped undo history for a `rich` document (SKR-179). BlockEditor
+   *  remounts per document switch (`key` per path) and rebuilds its surface, so
+   *  the history lives here — same lifetime as `model`, whose snapshots it
+   *  references — and is handed to each new surface. In-memory only, never
+   *  persisted; demote-then-rehydrate re-parses the model, so a document
+   *  correctly starts a fresh history when it comes back. */
   history?: DocHistory;
   dirty: boolean;
   /** SHA-256 of the file as last loaded or saved. Baseline for external-change
    *  detection — compared against the on-disk file before an auto-save so we
    *  don't silently clobber an edit made outside Skrive. Not persisted. */
   diskHash: string;
-  /** Set when an auto-save found the file changed on disk. Auto-save then skips
-   *  this tab (keeping it dirty) until the writer resolves it via Overwrite or
-   *  an explicit ⌘S. Not persisted. */
+  /** Set when an auto-save found the file changed on disk. Auto-save then
+   *  skips the document (keeping it dirty) until the writer resolves it via
+   *  Overwrite or an explicit ⌘S. Not persisted. */
   conflict: boolean;
   layoutMode: LayoutMode;
   splitDividerRatio: number;
@@ -175,14 +194,25 @@ export type Tab = {
    *  effect; cleared after apply. Not persisted. */
   pendingSelection: PendingSelection | null;
   /** Active history-driven diff overlay. When non-null, the workspace
-   *  area renders DiffView in place of SplitView for this tab. */
-  diff: TabDiffState | null;
+   *  area renders DiffView in place of the editor. */
+  diff: DiffState | null;
 };
 
 type State = {
   manifest: ProjectManifest | null;
-  tabs: Tab[];
-  activeTabIndex: number;
+  /** The one hydrated document, or null when the working set is empty.
+   *  Invariant: `liveDoc` is non-null iff `workingSet` is non-empty, and
+   *  `liveDoc.path === workingSet[0].path`. */
+  liveDoc: LiveDoc | null;
+  /** Bounded LRU of recently open documents, most recent first; entry 0
+   *  mirrors the live doc (its view-state fields there refresh on demote
+   *  and on persistence snapshots — while live, the LiveDoc is canonical).
+   *  One array, three views: the summon fan, the switcher's empty state,
+   *  and (Stage 2) the sidebar desk. */
+  workingSet: WorkingSetEntryState[];
+  /** Browser-style trail of document visits behind ⌘⇧[ / ⌘⇧]. A trail,
+   *  not a state: separate from the working set on purpose. Session-only. */
+  trail: NavTrail;
   loading: boolean;
 
   sidebarVisible: boolean;
@@ -252,38 +282,58 @@ type Actions = {
   openProject(path: string): Promise<void>;
   closeProject(): Promise<void>;
 
-  openTab(path: string, hydrate?: HydrateTab): Promise<void>;
-  /** Open `path` (or focus the existing tab) and request a selection
-   *  spanning `length` UTF-16 code units starting at (`line`, `column`).
-   *  Used by the search modal and any "jump to here" surface. */
-  openTabAtLine(
+  /** Switch to `path`: flush + autosave the live doc, demote it to its
+   *  working-set entry, hydrate the target (restoring its remembered view
+   *  state), promote it to entry 0, and record the visit on the trail.
+   *  No-op when `path` is already live. Calls serialize — a switch that
+   *  lands mid-switch queues behind it, so rapid switching never
+   *  interleaves saves and hydrations. */
+  openDoc(path: string, opts?: OpenDocOptions): Promise<void>;
+  /** Open `path` and request a selection spanning `length` UTF-16 code
+   *  units starting at (`line`, `column`). Used by the search modal and
+   *  any "jump to here" surface. */
+  openDocAtLine(
     path: string,
     line: number,
     column: number,
     length: number
   ): Promise<void>;
-  closeTab(index: number): Promise<void>;
-  switchTab(index: number): void;
+  /** Walk the trail one visit back / forward (⌘⇧[ / ⌘⇧]). */
+  historyBack(): Promise<void>;
+  historyForward(): Promise<void>;
+  /** COMPAT (dies with TabBar in the SKR-243 Stage 1 cleanup): remove a
+   *  document from the working set. Removing the live doc saves it and
+   *  hydrates the next entry. The final model has no close affordance —
+   *  eviction is LRU-only. */
+  dropFromWorkingSet(path: string): Promise<void>;
   /** Cleared from the editor after the selection has been applied so a
    *  subsequent re-render with the same nonce doesn't re-apply. */
-  clearPendingSelection(index: number): void;
+  clearPendingSelection(): void;
 
-  setTabBody(index: number, next: string): void;
-  /** Sync the edited block model back onto a rich (`.folio`) tab. The
-   *  model-mode analogue of setTabBody; marks dirty, skips Markdown lint. */
-  setTabModel(index: number, next: Document): void;
-  /** Set the Markdown-mode layout (raw / split / preview). Persisted per tab. */
-  setTabLayoutMode(index: number, mode: LayoutMode): void;
+  // Live-doc mutators. Each takes the document's path and no-ops on a
+  // mismatch, so a stale editor callback that outlives a switch can never
+  // write another document's state.
+  setLiveDocBody(path: string, next: string): void;
+  /** Sync the edited block model back onto a rich (`.folio`) live doc. The
+   *  model-mode analogue of setLiveDocBody; marks dirty, skips Markdown lint. */
+  setLiveDocModel(path: string, next: Document): void;
+  /** Set the Markdown-mode layout (raw / split / preview). Persisted. */
+  setLiveDocLayoutMode(path: string, mode: LayoutMode): void;
   /** Set the split-view divider ratio (raw | preview). Debounced-persisted. */
-  setTabSplitDividerRatio(index: number, ratio: number): void;
-  setTabCursor(index: number, line: number, column: number): void;
-  setTabScrollTop(index: number, top: number): void;
+  setLiveDocSplitDividerRatio(path: string, ratio: number): void;
+  setLiveDocCursor(path: string, line: number, column: number): void;
+  setLiveDocScrollTop(path: string, top: number): void;
 
-  saveActiveTab(): Promise<void>;
-  saveAllDirty(): Promise<void>;
+  /** Explicit ⌘S save of the live doc. Overwrites without the external-
+   *  change guard and clears any standing conflict. */
+  saveLiveDoc(): Promise<void>;
+  /** The auto-save path: write the live doc if dirty, with the external-
+   *  change guard (conflicts surface an Overwrite prompt instead of
+   *  clobbering). Demoted documents are already flushed on switch. */
+  saveDirty(): Promise<void>;
   /** Overwrite the on-disk file with the editor's version, resolving an
    *  external-change conflict. Invoked from the Overwrite prompt. */
-  forceSaveTab(path: string): Promise<void>;
+  forceSaveLiveDoc(path: string): Promise<void>;
 
   createFile(relPath: string): Promise<void>;
   /** Create a fresh, empty `.txt` plain-text file (extension appended if absent),
@@ -344,9 +394,9 @@ type Actions = {
   openRenameModal(path: string): void;
   closeRenameModal(): void;
   /** Commit a rename through linkGraph.renameWithReferences. Renames
-   *  the file, rewrites every reference, and walks open tabs to point
-   *  the renamed one at its new path. Refreshes the manifest from the
-   *  watcher event afterwards. */
+   *  the file, rewrites every reference, and repoints the live doc, its
+   *  working-set entry, and the trail at the new path. Refreshes the
+   *  manifest from the watcher event afterwards. */
   commitRename(oldPath: string, newPath: string): Promise<void>;
 
   setHistoryPanelOpen(v: boolean): void;
@@ -371,39 +421,36 @@ type Actions = {
   ): Promise<void>;
   /** Close the diff overlay; restore the editor mode it replaced. */
   closeDiff(): void;
-  setTabDiffMode(index: number, mode: 'diff-raw' | 'diff-preview'): void;
-  setTabDiffDividerRatio(index: number, ratio: number): void;
-  /** Pin the active tab's current contents as a manual checkpoint.
+  setDiffMode(mode: 'diff-raw' | 'diff-preview'): void;
+  setDiffDividerRatio(ratio: number): void;
+  /** Pin the live doc's current contents as a manual checkpoint.
    *  No-op in git mode (the panel hides the action). */
   createManualCheckpoint(name: string): Promise<void>;
 
-  /** Re-run the lint engine against the current manifest + open tabs.
+  /** Re-run the lint engine against the current manifest + live doc.
    *  Pulls deadLinks + orphanedFiles fresh from IPC. Safe to call when
    *  no project is open (no-op). */
   refreshLint(): Promise<void>;
 
-  /** Replace the value of a frontmatter field on the active tab. New
+  /** Replace the value of a frontmatter field on the live doc. New
    *  fields are inserted at the end of the map; existing fields are
    *  updated in place (preserving order on the wire). */
-  updateActiveTabFrontmatter(key: string, value: unknown): void;
-  /** Remove a frontmatter field from the active tab. */
-  removeActiveTabFrontmatter(key: string): void;
-  /** Rename a frontmatter key on the active tab. Silently no-ops on
+  updateLiveDocFrontmatter(key: string, value: unknown): void;
+  /** Remove a frontmatter field from the live doc. */
+  removeLiveDocFrontmatter(key: string): void;
+  /** Rename a frontmatter key on the live doc. Silently no-ops on
    *  conflict — the panel's commitKey detects the no-op and reverts the
    *  input back to the original key. */
-  renameActiveTabFrontmatterKey(oldKey: string, newKey: string): void;
+  renameLiveDocFrontmatterKey(oldKey: string, newKey: string): void;
 };
 
-type HydrateTab = {
-  cursorLine: number;
-  cursorColumn: number;
-  scrollTop: number;
-  layoutMode: LayoutMode;
-  splitDividerRatio: number;
-  /** When true, openTab will not overwrite the layout/ratio with the
-   *  defaults — it sets them from this object. Used during the
-   *  per-project state restore on `openProject`. */
-  applyOverrides: true;
+type OpenDocOptions = {
+  /** 'none' skips recording the visit on the trail — the back/forward
+   *  walkers use it so walking doesn't rewrite the trail. Default 'push'. */
+  nav?: 'push' | 'none';
+  /** False for session restore, so restoring the last live doc doesn't
+   *  count as a "recent file" visit in the app-wide LRU. Default true. */
+  recordRecent?: boolean;
 };
 
 function clampSidebarWidth(w: number): number {
@@ -414,10 +461,10 @@ function clampSidebarWidth(w: number): number {
 // ============================ Persistence pipeline ============================
 //
 // Three save tiers per A3:
-//   - Immediate: tab open/close, layout-mode, sidebar visibility.
+//   - Immediate: document switch, layout-mode, sidebar visibility.
 //   - Debounced 1s: scroll, split-divider drag, sidebar width drag.
-//   - Blur/quit: cursor position (saves on tab switch, tab close,
-//     project close, beforeunload).
+//   - Blur/quit: cursor position (saves on document switch, project
+//     close, beforeunload).
 //
 // The renderer doesn't track "dirty" per tier; it just schedules a
 // timer and any incoming save before the timer fires resets it. The
@@ -608,11 +655,24 @@ function handleLintResult(msg: LintWorkerResponse): void {
 // re-fire because the nonce always advances.
 let pendingSelectionCounter = 0;
 
+/** The live doc's working-set entry, rebuilt from its current view state.
+ *  Entry 0 in the persisted array (and after a demote) always comes through
+ *  here so the LiveDoc stays canonical while hydrated. */
+function entryFromLiveDoc(doc: LiveDoc): WorkingSetEntryState {
+  return {
+    path: doc.path,
+    layoutMode: doc.layoutMode,
+    cursor: { line: doc.cursorLine, column: doc.cursorColumn },
+    scrollTop: doc.scrollTop,
+    splitDividerRatio: doc.splitDividerRatio
+  };
+}
+
 function snapshotProjectState(state: State): ProjectUiState | null {
   if (!state.manifest) return null;
   const config = state.manifest.config;
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     projectPath: state.manifest.root,
     projectName:
       config.project.name ??
@@ -625,16 +685,11 @@ function snapshotProjectState(state: State): ProjectUiState | null {
       pinned: state.pinned,
       sortKey: state.sortKey
     },
-    tabs: state.tabs.map(
-      (tab): TabState => ({
-        path: tab.path,
-        layoutMode: tab.layoutMode,
-        cursor: { line: tab.cursorLine, column: tab.cursorColumn },
-        scrollTop: tab.scrollTop,
-        splitDividerRatio: tab.splitDividerRatio
-      })
-    ),
-    activeTabIndex: state.activeTabIndex
+    workingSet: state.workingSet.map((entry) =>
+      state.liveDoc && entry.path === state.liveDoc.path
+        ? entryFromLiveDoc(state.liveDoc)
+        : entry
+    )
   };
 }
 
@@ -722,8 +777,9 @@ function cancelWatchRefresh(): void {
   pendingWatchPaths.clear();
 }
 
-/** Commit a worker-delivered manifest into the store: swap it in and
- *  drop tabs whose files vanished. The worker only delivers on a
+/** Commit a worker-delivered manifest into the store: swap it in and drop
+ *  vanished files from the working set and the trail (the model rule:
+ *  deleted files drop out of both lists). The worker only delivers on a
  *  version bump, so every call here is a real structural change —
  *  content-only edits never reach this (and never re-render). */
 function applyModelUpdate(
@@ -734,22 +790,36 @@ function applyModelUpdate(
   lastManifestVersion = update.version;
   const next = update.manifest;
   set({ manifest: next });
-  const { tabs, activeTabIndex } = get();
-  const survivingTabs = tabs.filter((t) =>
-    next.files.some((f) => f.path === t.path)
+  pruneVanishedDocs(get, set, (path) =>
+    next.files.some((f) => f.path === path)
   );
-  if (survivingTabs.length !== tabs.length) {
-    let nextActive = activeTabIndex;
-    // If the active tab survived, find its new index. Otherwise step
-    // back to the previous tab (or to -1 when none left).
-    const wasActive = tabs[activeTabIndex];
-    if (wasActive) {
-      const i = survivingTabs.findIndex((t) => t.path === wasActive.path);
-      nextActive = i;
-    } else {
-      nextActive = Math.min(activeTabIndex, survivingTabs.length - 1);
+}
+
+/** Drop working-set + trail entries whose file no longer exists. If the
+ *  live doc itself vanished, fall back to hydrating the most recent
+ *  survivor (or the empty state). Shared by the watcher path
+ *  (applyModelUpdate) and the in-app delete actions. */
+function pruneVanishedDocs(
+  get: () => State & Actions,
+  set: (partial: Partial<State>) => void,
+  exists: (path: string) => boolean
+): void {
+  const { liveDoc, workingSet, trail } = get();
+  const survivors = workingSet.filter((e) => exists(e.path));
+  if (survivors.length !== workingSet.length) {
+    set({ workingSet: survivors, trail: pruneTrail(trail, exists) });
+  }
+  if (liveDoc && !exists(liveDoc.path)) {
+    // The live doc's file is gone: drop the hydrated state, then bring up
+    // the next most recent document. The visit isn't re-pushed — the trail
+    // already reflects where the writer has been.
+    set({ liveDoc: null });
+    const fallback = survivors[0];
+    if (fallback) {
+      void get()
+        .openDoc(fallback.path, { nav: 'none', recordRecent: false })
+        .catch((err) => logProjectError('openDoc (vanished fallback)', err));
     }
-    set({ tabs: survivingTabs, activeTabIndex: nextActive });
   }
 }
 
@@ -802,11 +872,11 @@ async function resolveDiffSide(
 }
 
 /** "Current" side of the diff — the live, possibly-dirty body of the
- *  active tab, exactly the bytes a save would emit. We re-stamp
+ *  live doc, exactly the bytes a save would emit. We re-stamp
  *  frontmatter on the fly via buildSavePayload so the diff matches
  *  what the next save writes. */
-function resolveCurrentSide(tab: Tab): DiffSide {
-  const writable: Tab = { ...tab, frontmatter: { ...tab.frontmatter } };
+function resolveCurrentSide(doc: LiveDoc): DiffSide {
+  const writable: LiveDoc = { ...doc, frontmatter: { ...doc.frontmatter } };
   return {
     content: buildSavePayload(writable),
     timestampMs: Date.now(),
@@ -839,13 +909,180 @@ async function writeFolioAndOpen(
   await window.skrive.fs.newFile(manifestRoot, relPath);
   await window.skrive.fs.writeFile(manifestRoot, relPath, serializeFolio(doc));
   await projectModel()?.upsert(relPath, '');
-  await get().openTab(relPath);
+  await get().openDoc(relPath);
+}
+
+// ============================ Document switch ============================
+
+// openDoc calls chain onto this promise so switches never interleave.
+let switchChain: Promise<void> = Promise.resolve();
+
+type SetState = (partial: Partial<State>) => void;
+
+/** The actual switch: flush + save the outgoing live doc, demote it to its
+ *  working-set entry, hydrate the target (restoring remembered view state),
+ *  promote it to entry 0, record the visit. Runs inside `switchChain`. */
+async function performOpenDoc(
+  get: () => State & Actions,
+  set: SetState,
+  path: string,
+  opts?: OpenDocOptions
+): Promise<void> {
+  const manifest = get().manifest;
+  if (!manifest) return;
+  if (get().liveDoc?.path === path) return;
+  if (!findEntry(manifest, path)) return;
+  const start = perfNow();
+
+  // Drain the active surface's pending snapshot into the store before the
+  // demote-save reads the body. The disk write below runs before the editor
+  // unmounts, so its own cleanup flush would be too late — without this an
+  // edit made inside the debounce/idle window is persisted stale on switch
+  // (SKR-154 / F02). flush() is idempotent, so the unmount flush no-ops.
+  flushActiveEditor();
+  const outgoing = get().liveDoc;
+  let workingSet = get().workingSet;
+  if (outgoing) {
+    if (outgoing.dirty) {
+      // Best-effort flush before demote — the old closeTab save path.
+      // Errors are logged, not fatal: the switch proceeds so the writer
+      // isn't trapped in a document that can't save.
+      try {
+        const writable: LiveDoc = {
+          ...outgoing,
+          frontmatter: { ...outgoing.frontmatter }
+        };
+        const payload = buildSavePayload(writable);
+        await window.skrive.fs.writeFile(manifest.root, outgoing.path, payload);
+        void projectModel()?.upsert(
+          outgoing.path,
+          modelSyncBody(outgoing.mode, payload)
+        );
+      } catch (err) {
+        console.error('[skrive] save-on-switch failed', err);
+      }
+    }
+    // Demote: the hydrated state is dropped, the entry keeps the view state.
+    const demoted = entryFromLiveDoc(outgoing);
+    const i = workingSet.findIndex((e) => e.path === outgoing.path);
+    workingSet = workingSet.slice();
+    if (i >= 0) workingSet[i] = demoted;
+    else workingSet.unshift(demoted);
+  }
+
+  // Read the target fresh from disk. A markdown file parses its leading
+  // frontmatter so the editor sees the body sans-fence; a rich `.folio`
+  // parses the native JSON into the block model and carries its identity
+  // (docId / docMeta) alongside. The full file is reassembled at save time
+  // by the mode's save path (stores/save).
+  const mode = fileMode(path);
+  const content = await window.skrive.fs.readFile(manifest.root, path);
+
+  let contentFields: Pick<
+    LiveDoc,
+    'body' | 'frontmatter' | 'model' | 'docId' | 'docMeta' | 'history'
+  >;
+  if (mode === 'rich') {
+    let folio: FolioDocument;
+    try {
+      folio = parseFolio(content.body);
+    } catch (err) {
+      // Never open a partial document. A forward-version / zip file is "made
+      // by a newer Skrive"; anything else is a malformed file. Surface and
+      // abort — the outgoing doc (already saved) stays live.
+      const name = path.split('/').pop() ?? path;
+      if (err instanceof FolioForwardError) {
+        notify.warn(
+          `"${name}" was made by a newer version of Skrive and can't be opened here.`
+        );
+      } else {
+        notify.error(
+          `"${name}" could not be opened: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+      return;
+    }
+    contentFields = {
+      body: '',
+      frontmatter: {},
+      model: folioToModel(folio),
+      docId: folio.docId,
+      docMeta: folio.docMeta,
+      history: new DocHistory()
+    };
+  } else if (mode === 'text' || mode === 'view') {
+    // Plain text (`.txt`, SKR-204) and the read-only HTML viewer (`.html`,
+    // SKR-205): the whole file is the body verbatim — no frontmatter parse
+    // (a `.txt`'s leading `---` is content, not metadata; an `.html`'s bytes
+    // are rendered as-is) and no block model. A view doc's body is never
+    // edited or saved; it only feeds the viewer.
+    contentFields = { body: content.body, frontmatter: {} };
+  } else {
+    const parsed = parseFrontmatter(content.body);
+    contentFields = { body: parsed.body, frontmatter: parsed.frontmatter };
+  }
+
+  // Restore the document's remembered view state, if it still has an entry.
+  const remembered = workingSet.find((e) => e.path === path);
+  const liveDoc: LiveDoc = {
+    path,
+    mode,
+    ...contentFields,
+    dirty: false,
+    diskHash: content.hash,
+    conflict: false,
+    layoutMode: remembered?.layoutMode ?? DEFAULT_LAYOUT_MODE,
+    splitDividerRatio: remembered
+      ? clampRatio(remembered.splitDividerRatio)
+      : DEFAULT_SPLIT_RATIO,
+    cursorLine: remembered?.cursor.line ?? 1,
+    cursorColumn: remembered?.cursor.column ?? 0,
+    scrollTop: remembered?.scrollTop ?? 0,
+    pendingSelection: null,
+    diff: null
+  };
+
+  set({
+    liveDoc,
+    workingSet: promoteEntry(workingSet, entryFromLiveDoc(liveDoc), get().pinned),
+    ...(opts?.nav === 'none'
+      ? {}
+      : { trail: pushVisit(get().trail, path) })
+  });
+  scheduleImmediateSave(get);
+  if (opts?.recordRecent !== false) {
+    // App-wide LRU (the sidebar's Recents section reads it until the
+    // Stage 2 desk replaces that section). Skipped on session restore so
+    // reopening the app doesn't count as a visit.
+    usePreferencesStore.getState().recordRecentFile(manifest.root, path);
+  }
+  logDuration(`file-switch ${path}`, start);
+}
+
+/** ⌘⇧[ / ⌘⇧]: move the trail cursor and hydrate that visit without
+ *  re-recording it. The trail holds only existing files (pruned on every
+ *  manifest change), so the peek is already the destination. */
+async function walkTrail(
+  get: () => State & Actions,
+  set: SetState,
+  dir: -1 | 1
+): Promise<void> {
+  const target = peekVisit(get().trail, dir);
+  if (target === null) return;
+  const index = get().trail.index + dir;
+  await get().openDoc(target, { nav: 'none' });
+  // Commit the cursor move only if the switch landed (a vanished file or
+  // parse failure leaves the trail where it was).
+  if (get().liveDoc?.path === target) {
+    set({ trail: { ...get().trail, index } });
+  }
 }
 
 export const useProjectStore = create<State & Actions>((set, get) => ({
   manifest: null,
-  tabs: [],
-  activeTabIndex: -1,
+  liveDoc: null,
+  workingSet: [],
+  trail: EMPTY_TRAIL,
   loading: false,
 
   sidebarVisible: true,
@@ -954,8 +1191,9 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
       set({
         manifest,
-        tabs: [],
-        activeTabIndex: -1,
+        liveDoc: null,
+        workingSet: [],
+        trail: EMPTY_TRAIL,
         sidebarVisible: sidebarState.visible,
         sidebarWidth: clampSidebarWidth(sidebarState.width),
         pinned: sidebarState.pinned ?? [],
@@ -970,27 +1208,24 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         loading: false
       });
 
-      // Re-open every tab the user had last time, in order. Each tab
-      // hydrates with its persisted layout/cursor/scroll/ratio.
-      if (persisted) {
-        for (const t of persisted.tabs) {
-          const exists = manifest.files.some((f) => f.path === t.path);
-          if (!exists) continue;
-          await get().openTab(t.path, {
-            cursorLine: t.cursor.line,
-            cursorColumn: t.cursor.column,
-            scrollTop: t.scrollTop,
-            layoutMode: t.layoutMode,
-            splitDividerRatio: clampRatio(t.splitDividerRatio),
-            applyOverrides: true
-          });
+      // Restore the persisted working set, then hydrate only entry 0 (the
+      // last live doc) — the other entries stay cold until visited, which
+      // is the whole point of the working-set model. `migrated` may come
+      // off disk as a v1 (tabs-era) file; the migration keeps the active
+      // tab as entry 0.
+      const migrated = migrateProjectUiState(
+        // The shells return the state file opaquely, so a pre-SKR-243 file
+        // arrives in the v1 (tabs) shape despite the wire type.
+        persisted as ProjectUiState | ProjectUiStateV1 | null
+      );
+      if (migrated) {
+        const entries = migrated.workingSet
+          .filter((e) => manifest.files.some((f) => f.path === e.path))
+          .map((e) => ({ ...e, splitDividerRatio: clampRatio(e.splitDividerRatio) }));
+        set({ workingSet: entries });
+        if (entries[0]) {
+          await get().openDoc(entries[0].path, { recordRecent: false });
         }
-        const tabsAfter = get().tabs;
-        const target = Math.min(
-          Math.max(persisted.activeTabIndex, -1),
-          tabsAfter.length - 1
-        );
-        if (target >= 0) set({ activeTabIndex: target });
       }
 
       // Recent-projects + last-opened bookkeeping. Survives writes
@@ -1023,14 +1258,15 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     resetLintReadCache();
     resetLintPipeline();
     terminateProjectModel();
-    // Flush dirty tabs + persist project UI state before clearing.
-    await get().saveAllDirty();
+    // Flush the live doc + persist project UI state before clearing.
+    await get().saveDirty();
     await get().persistProjectStateNow();
     usePreferencesStore.getState().setLastOpenedProject(null);
     set({
       manifest: null,
-      tabs: [],
-      activeTabIndex: -1,
+      liveDoc: null,
+      workingSet: [],
+      trail: EMPTY_TRAIL,
       activeView: 'editor',
       lintReport: null,
       historyMode: null,
@@ -1041,154 +1277,26 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     });
   },
 
-  // ============================ Tabs ============================
+  // ============================ Working set ============================
 
-  async openTab(path: string, hydrate?: HydrateTab) {
-    const manifest = get().manifest;
-    if (!manifest) return;
-    const entry = findEntry(manifest, path);
-    if (!entry) return;
-    const tabs = get().tabs;
-    const existingIndex = tabs.findIndex((t) => t.path === path);
-    if (existingIndex !== -1) {
-      // Bare switch (file already open) — measured separately because
-      // it skips the disk read and is the much faster path.
-      const start = perfNow();
-      set({ activeTabIndex: existingIndex });
-      logDuration(`file-switch (cached) ${path}`, start);
-      return;
-    }
-    const mode = fileMode(path);
-    // Read the file fresh from disk. A markdown file parses its leading
-    // frontmatter so the editor sees the body sans-fence; a rich `.folio` parses
-    // the native JSON into the block model and carries its identity (docId /
-    // docMeta) alongside. The full file is reassembled at save time by the mode's
-    // save path (stores/save).
-    const start = perfNow();
-    const content = await window.skrive.fs.readFile(manifest.root, path);
-
-    let contentFields: Pick<
-      Tab,
-      'body' | 'frontmatter' | 'model' | 'docId' | 'docMeta' | 'history'
-    >;
-    if (mode === 'rich') {
-      let folio: FolioDocument;
-      try {
-        folio = parseFolio(content.body);
-      } catch (err) {
-        // Never open a partial document. A forward-version / zip file is "made by
-        // a newer Skrive"; anything else is a malformed file. Surface and abort.
-        const name = path.split('/').pop() ?? path;
-        if (err instanceof FolioForwardError) {
-          notify.warn(`"${name}" was made by a newer version of Skrive and can't be opened here.`);
-        } else {
-          notify.error(
-            `"${name}" could not be opened: ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
-        return;
-      }
-      contentFields = {
-        body: '',
-        frontmatter: {},
-        model: folioToModel(folio),
-        docId: folio.docId,
-        docMeta: folio.docMeta,
-        history: new DocHistory()
-      };
-    } else if (mode === 'text' || mode === 'view') {
-      // Plain text (`.txt`, SKR-204) and the read-only HTML viewer (`.html`,
-      // SKR-205): the whole file is the body verbatim — no frontmatter parse (a
-      // `.txt`'s leading `---` is content, not metadata; an `.html`'s bytes are
-      // rendered as-is) and no block model. A view tab's body is never edited or
-      // saved; it only feeds the viewer.
-      contentFields = { body: content.body, frontmatter: {} };
-    } else {
-      const parsed = parseFrontmatter(content.body);
-      contentFields = { body: parsed.body, frontmatter: parsed.frontmatter };
-    }
-
-    const newTab: Tab = {
-      path,
-      mode,
-      ...contentFields,
-      dirty: false,
-      diskHash: content.hash,
-      conflict: false,
-      layoutMode: hydrate?.applyOverrides
-        ? hydrate.layoutMode
-        : DEFAULT_LAYOUT_MODE,
-      splitDividerRatio: hydrate?.applyOverrides
-        ? hydrate.splitDividerRatio
-        : DEFAULT_SPLIT_RATIO,
-      cursorLine: hydrate?.applyOverrides ? hydrate.cursorLine : 1,
-      cursorColumn: hydrate?.applyOverrides ? hydrate.cursorColumn : 0,
-      scrollTop: hydrate?.applyOverrides ? hydrate.scrollTop : 0,
-      pendingSelection: null,
-      diff: null
-    };
-    const nextTabs = [...tabs, newTab];
-    set({ tabs: nextTabs, activeTabIndex: nextTabs.length - 1 });
-    if (!hydrate?.applyOverrides) {
-      scheduleImmediateSave(get);
-      // Record in the LRU only on user-driven opens (not session
-      // restore). The switcher reads this list as the empty-query
-      // default; including session-restore openings would noise it up.
-      usePreferencesStore.getState().recordRecentFile(manifest.root, path);
-    }
-    logDuration(`file-switch (cold) ${path}`, start);
+  async openDoc(path: string, opts?: OpenDocOptions) {
+    // Serialize switches: a second openDoc that lands while one is mid-
+    // flight (rapid fan/switcher/history use during a pending autosave)
+    // queues behind it instead of interleaving the demote-save and the
+    // hydration reads.
+    const run = () => performOpenDoc(get, set, path, opts);
+    const chained = switchChain.then(run, run);
+    switchChain = chained.then(
+      () => undefined,
+      () => undefined
+    );
+    return chained;
   },
 
-  async closeTab(index: number) {
-    // Drain the active surface's pending snapshot into the store before we read
-    // the body for the best-effort save. The disk write below runs before the
-    // BlockEditor unmounts, so its own cleanup flush is too late — without this
-    // an edit made inside the debounce/idle window is persisted stale on close
-    // (SKR-154 / F02). flush() is idempotent, so the later unmount flush no-ops.
-    flushActiveEditor();
-    const { tabs, activeTabIndex } = get();
-    const tab = tabs[index];
-    if (!tab) return;
-    if (tab.dirty) {
-      // Best-effort flush before discard. Errors surface via the caller's
-      // error path; the close still proceeds so the user isn't trapped.
-      try {
-        const writableTab: Tab = { ...tab, frontmatter: { ...tab.frontmatter } };
-        const payload = buildSavePayload(writableTab);
-        await window.skrive.fs.writeFile(
-          get().manifest!.root,
-          tab.path,
-          payload
-        );
-      } catch (err) {
-        console.error('[skrive] save-on-close failed', err);
-      }
-    }
-    const nextTabs = tabs.slice(0, index).concat(tabs.slice(index + 1));
-    let nextActive = activeTabIndex;
-    if (nextTabs.length === 0) {
-      nextActive = -1;
-    } else if (index < activeTabIndex) {
-      nextActive = activeTabIndex - 1;
-    } else if (index === activeTabIndex) {
-      nextActive = Math.min(activeTabIndex, nextTabs.length - 1);
-    }
-    set({ tabs: nextTabs, activeTabIndex: nextActive });
-    scheduleImmediateSave(get);
-  },
-
-  switchTab(index: number) {
-    const { tabs } = get();
-    if (index < 0 || index >= tabs.length) return;
-    set({ activeTabIndex: index });
-    scheduleImmediateSave(get);
-  },
-
-  async openTabAtLine(path, line, column, length) {
-    await get().openTab(path);
-    const { tabs } = get();
-    const i = tabs.findIndex((t) => t.path === path);
-    if (i < 0) return;
+  async openDocAtLine(path, line, column, length) {
+    await get().openDoc(path);
+    const doc = get().liveDoc;
+    if (!doc || doc.path !== path) return;
     pendingSelectionCounter += 1;
     const sel: PendingSelection = {
       line: Math.max(line, 1),
@@ -1196,187 +1304,233 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       length: Math.max(length, 0),
       nonce: pendingSelectionCounter
     };
-    const nextTabs = tabs.slice();
-    nextTabs[i] = { ...tabs[i]!, pendingSelection: sel };
-    set({ tabs: nextTabs, activeTabIndex: i, activeView: 'editor' });
+    set({ liveDoc: { ...doc, pendingSelection: sel }, activeView: 'editor' });
   },
 
-  clearPendingSelection(index) {
-    const { tabs } = get();
-    const tab = tabs[index];
-    if (!tab || !tab.pendingSelection) return;
-    const nextTabs = tabs.slice();
-    nextTabs[index] = { ...tab, pendingSelection: null };
-    set({ tabs: nextTabs });
+  async historyBack() {
+    await walkTrail(get, set, -1);
   },
 
-  setTabBody(index: number, next: string) {
-    const { tabs } = get();
-    const tab = tabs[index];
-    if (!tab) return;
-    if (next === tab.body) return;
-    const updated = { ...tab, body: next, dirty: true };
-    const nextTabs = tabs.slice();
-    nextTabs[index] = updated;
-    set({ tabs: nextTabs });
+  async historyForward() {
+    await walkTrail(get, set, 1);
+  },
+
+  async dropFromWorkingSet(path: string) {
+    // COMPAT — the tab strip's close affordance during the SKR-243
+    // transition; deleted with TabBar. Dropping never touches the trail
+    // (only deleted files leave history).
+    const { liveDoc, workingSet } = get();
+    const remaining = workingSet.filter((e) => e.path !== path);
+    if (remaining.length === workingSet.length) return;
+    if (liveDoc?.path !== path) {
+      set({ workingSet: remaining });
+      scheduleImmediateSave(get);
+      return;
+    }
+    // Dropping the live doc: keep the old closeTab semantics — flush,
+    // best-effort save, then bring up the next most recent entry.
+    flushActiveEditor();
+    const doc = get().liveDoc;
+    if (doc?.dirty && get().manifest) {
+      try {
+        const writable: LiveDoc = {
+          ...doc,
+          frontmatter: { ...doc.frontmatter }
+        };
+        await window.skrive.fs.writeFile(
+          get().manifest!.root,
+          doc.path,
+          buildSavePayload(writable)
+        );
+      } catch (err) {
+        console.error('[skrive] save-on-close failed', err);
+      }
+    }
+    set({ liveDoc: null, workingSet: remaining });
+    scheduleImmediateSave(get);
+    if (remaining[0]) {
+      await get().openDoc(remaining[0].path, { nav: 'none' });
+    }
+  },
+
+  clearPendingSelection() {
+    const doc = get().liveDoc;
+    if (!doc || !doc.pendingSelection) return;
+    set({ liveDoc: { ...doc, pendingSelection: null } });
+  },
+
+  setLiveDocBody(path: string, next: string) {
+    const doc = get().liveDoc;
+    if (!doc || doc.path !== path) return;
+    if (next === doc.body) return;
+    set({ liveDoc: { ...doc, body: next, dirty: true } });
     // Drive lint off the edit (debounced, off-thread) rather than waiting for
     // autosave -> watcher -> manifest refresh — findings follow a typing pause
-    // directly, and the body is read live from this tab.
+    // directly, and the body is read live from the store.
     scheduleLint();
   },
 
-  setTabModel(index: number, next: Document) {
-    const { tabs } = get();
-    const tab = tabs[index];
-    if (!tab) return;
-    if (next === tab.model) return;
-    const nextTabs = tabs.slice();
-    nextTabs[index] = { ...tab, model: next, dirty: true };
-    set({ tabs: nextTabs });
+  setLiveDocModel(path: string, next: Document) {
+    const doc = get().liveDoc;
+    if (!doc || doc.path !== path) return;
+    if (next === doc.model) return;
+    set({ liveDoc: { ...doc, model: next, dirty: true } });
     // No scheduleLint: a `.folio` document is not Markdown, so the Markdown
     // lint/link engine does not apply to it.
   },
 
-  setTabLayoutMode(index: number, mode: LayoutMode) {
-    const { tabs } = get();
-    const tab = tabs[index];
-    if (!tab || tab.layoutMode === mode) return;
-    const nextTabs = tabs.slice();
-    nextTabs[index] = { ...tab, layoutMode: mode };
-    set({ tabs: nextTabs });
+  setLiveDocLayoutMode(path: string, mode: LayoutMode) {
+    const doc = get().liveDoc;
+    if (!doc || doc.path !== path || doc.layoutMode === mode) return;
+    set({ liveDoc: { ...doc, layoutMode: mode } });
     // A layout choice is a deliberate, immediate-tier preference.
     scheduleImmediateSave(get);
   },
 
-  setTabSplitDividerRatio(index: number, ratio: number) {
-    const { tabs } = get();
-    const tab = tabs[index];
-    if (!tab) return;
+  setLiveDocSplitDividerRatio(path: string, ratio: number) {
+    const doc = get().liveDoc;
+    if (!doc || doc.path !== path) return;
     const clamped = clampRatio(ratio);
-    if (tab.splitDividerRatio === clamped) return;
-    const nextTabs = tabs.slice();
-    nextTabs[index] = { ...tab, splitDividerRatio: clamped };
-    set({ tabs: nextTabs });
+    if (doc.splitDividerRatio === clamped) return;
+    set({ liveDoc: { ...doc, splitDividerRatio: clamped } });
     // Drag: debounced tier, same as scroll/sidebar-width.
     scheduleDebouncedSave(get);
   },
 
-  setTabCursor(index: number, line: number, column: number) {
-    const { tabs } = get();
-    const tab = tabs[index];
-    if (!tab) return;
-    if (tab.cursorLine === line && tab.cursorColumn === column) return;
-    const nextTabs = tabs.slice();
-    nextTabs[index] = { ...tab, cursorLine: line, cursorColumn: column };
-    set({ tabs: nextTabs });
+  setLiveDocCursor(path: string, line: number, column: number) {
+    const doc = get().liveDoc;
+    if (!doc || doc.path !== path) return;
+    if (doc.cursorLine === line && doc.cursorColumn === column) return;
+    set({ liveDoc: { ...doc, cursorLine: line, cursorColumn: column } });
     // Cursor is the blur/quit tier — don't schedule a write per
-    // keystroke. Persistence flushes on tab close, project close,
-    // and beforeunload.
+    // keystroke. Persistence flushes on switch, project close, and
+    // beforeunload.
   },
 
-  setTabScrollTop(index: number, top: number) {
-    const { tabs } = get();
-    const tab = tabs[index];
-    if (!tab) return;
+  setLiveDocScrollTop(path: string, top: number) {
+    const doc = get().liveDoc;
+    if (!doc || doc.path !== path) return;
     const clamped = top < 0 ? 0 : Math.round(top);
-    if (tab.scrollTop === clamped) return;
-    const nextTabs = tabs.slice();
-    nextTabs[index] = { ...tab, scrollTop: clamped };
-    set({ tabs: nextTabs });
+    if (doc.scrollTop === clamped) return;
+    set({ liveDoc: { ...doc, scrollTop: clamped } });
     scheduleDebouncedSave(get);
   },
 
-  async saveActiveTab() {
+  async saveLiveDoc() {
     // The explicit-save path (⌘S). Explicit intent overwrites: it does not
     // run the external-change guard, and it clears any standing conflict.
-    const { manifest, tabs, activeTabIndex } = get();
-    const tab = tabs[activeTabIndex];
-    if (!manifest || !tab || !tab.dirty) return;
-    // Clone before stamping so the live tab object isn't mutated mid-render.
-    const writable: Tab = { ...tab, frontmatter: { ...tab.frontmatter } };
-    const payload = buildSavePayload(writable);
-    const hash = await window.skrive.fs.writeFile(manifest.root, tab.path, payload);
-    void projectModel()?.upsert(tab.path, modelSyncBody(tab.mode, payload));
-    const nextTabs = tabs.slice();
-    nextTabs[activeTabIndex] = {
-      ...writable,
-      dirty: false,
-      conflict: false,
-      diskHash: hash
+    const { manifest, liveDoc } = get();
+    if (!manifest || !liveDoc || !liveDoc.dirty) return;
+    // Clone before stamping so the live object isn't mutated mid-render.
+    const writable: LiveDoc = {
+      ...liveDoc,
+      frontmatter: { ...liveDoc.frontmatter }
     };
-    set({ tabs: nextTabs });
+    const payload = buildSavePayload(writable);
+    const hash = await window.skrive.fs.writeFile(
+      manifest.root,
+      liveDoc.path,
+      payload
+    );
+    void projectModel()?.upsert(
+      liveDoc.path,
+      modelSyncBody(liveDoc.mode, payload)
+    );
+    // The doc may have advanced (or switched) while the write was in
+    // flight; only commit the saved state onto the same document, and only
+    // clear dirty when no newer content edit landed mid-write.
+    const after = get().liveDoc;
+    if (!after || after.path !== liveDoc.path) return;
+    const advanced =
+      after.body !== liveDoc.body || after.model !== liveDoc.model;
+    set({
+      liveDoc: {
+        ...after,
+        frontmatter: writable.frontmatter,
+        dirty: advanced,
+        conflict: false,
+        diskHash: hash
+      }
+    });
   },
 
-  async saveAllDirty() {
-    // The auto-save path. Non-destructive: before writing a tab it checks
-    // whether the on-disk file drifted from our baseline and, if so, marks the
-    // tab conflicted and surfaces an Overwrite prompt instead of clobbering.
-    const { manifest, tabs } = get();
-    if (!manifest) return;
-    const writes: Array<Promise<void>> = [];
-    const updatedTabs = tabs.slice();
-    const conflicted: Tab[] = [];
-    for (let i = 0; i < tabs.length; i++) {
-      const t = tabs[i];
-      if (!t || !t.dirty || t.conflict) continue;
-      const changed = await window.skrive.fs.detectExternalChange(
-        manifest.root,
-        t.path,
-        t.diskHash
-      );
-      if (changed) {
-        updatedTabs[i] = { ...t, conflict: true };
-        conflicted.push(t);
-        continue;
-      }
-      const writable: Tab = { ...t, frontmatter: { ...t.frontmatter } };
-      const payload = buildSavePayload(writable);
-      const idx = i;
-      writes.push(
-        window.skrive.fs.writeFile(manifest.root, t.path, payload).then((hash) => {
-          void projectModel()?.upsert(t.path, modelSyncBody(t.mode, payload));
-          updatedTabs[idx] = { ...writable, dirty: false, diskHash: hash };
-        })
-      );
-    }
-    if (writes.length === 0 && conflicted.length === 0) return;
-    await Promise.all(writes);
-    set({ tabs: updatedTabs });
-    for (const t of conflicted) {
-      const name = t.path.split('/').pop() ?? t.path;
+  async saveDirty() {
+    // The auto-save path. Non-destructive: before writing it checks whether
+    // the on-disk file drifted from our baseline and, if so, marks the doc
+    // conflicted and surfaces an Overwrite prompt instead of clobbering.
+    const { manifest, liveDoc } = get();
+    if (!manifest || !liveDoc || !liveDoc.dirty || liveDoc.conflict) return;
+    const changed = await window.skrive.fs.detectExternalChange(
+      manifest.root,
+      liveDoc.path,
+      liveDoc.diskHash
+    );
+    const current = get().liveDoc;
+    if (!current || current.path !== liveDoc.path) return;
+    if (changed) {
+      set({ liveDoc: { ...current, conflict: true } });
+      const name = liveDoc.path.split('/').pop() ?? liveDoc.path;
       notify.prompt(
         `"${name}" changed on disk outside Skrive — your edits are kept here.`,
         'Overwrite',
-        () => useProjectStore.getState().forceSaveTab(t.path)
+        () => useProjectStore.getState().forceSaveLiveDoc(liveDoc.path)
       );
+      return;
     }
+    const writable: LiveDoc = {
+      ...current,
+      frontmatter: { ...current.frontmatter }
+    };
+    const payload = buildSavePayload(writable);
+    const hash = await window.skrive.fs.writeFile(
+      manifest.root,
+      current.path,
+      payload
+    );
+    void projectModel()?.upsert(
+      current.path,
+      modelSyncBody(current.mode, payload)
+    );
+    const after = get().liveDoc;
+    if (!after || after.path !== current.path) return;
+    const advanced =
+      after.body !== current.body || after.model !== current.model;
+    set({
+      liveDoc: {
+        ...after,
+        frontmatter: writable.frontmatter,
+        dirty: advanced,
+        diskHash: hash
+      }
+    });
   },
 
-  async forceSaveTab(path: string) {
+  async forceSaveLiveDoc(path: string) {
     // Overwrite the on-disk file with the editor's version, resolving a
-    // conflict. Invoked from the Overwrite prompt.
-    const { manifest, tabs } = get();
-    if (!manifest) return;
-    const tab = tabs.find((t) => t.path === path);
-    if (!tab) return;
-    const writable: Tab = { ...tab, frontmatter: { ...tab.frontmatter } };
+    // conflict. Invoked from the Overwrite prompt. If the writer switched
+    // away since the conflict surfaced, the demote already flushed the doc
+    // — nothing left to force.
+    const { manifest, liveDoc } = get();
+    if (!manifest || !liveDoc || liveDoc.path !== path) return;
+    const writable: LiveDoc = {
+      ...liveDoc,
+      frontmatter: { ...liveDoc.frontmatter }
+    };
     const payload = buildSavePayload(writable);
     const hash = await window.skrive.fs.writeFile(manifest.root, path, payload);
-    void projectModel()?.upsert(path, modelSyncBody(tab.mode, payload));
-    const nextTabs = get().tabs.slice();
-    const j = nextTabs.findIndex((t) => t.path === path);
-    const existing = nextTabs[j];
-    if (existing) {
-      nextTabs[j] = {
-        ...existing,
+    void projectModel()?.upsert(path, modelSyncBody(liveDoc.mode, payload));
+    const after = get().liveDoc;
+    if (!after || after.path !== path) return;
+    set({
+      liveDoc: {
+        ...after,
         body: writable.body,
         frontmatter: writable.frontmatter,
         dirty: false,
         conflict: false,
         diskHash: hash
-      };
-      set({ tabs: nextTabs });
-    }
+      }
+    });
   },
 
   // ============================ File CRUD ============================
@@ -1386,10 +1540,10 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     if (!manifest) return;
     const normalized = relPath.endsWith('.md') ? relPath : `${relPath}.md`;
     await window.skrive.fs.newFile(manifest.root, normalized);
-    // Awaited: openTab needs the new entry in the manifest, and the
+    // Awaited: openDoc needs the new entry in the manifest, and the
     // client guarantees the model update lands before this resolves.
     await projectModel()?.upsert(normalized, '');
-    await get().openTab(normalized);
+    await get().openDoc(normalized);
   },
 
   async createTextFile(relPath: string) {
@@ -1398,9 +1552,9 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const normalized = relPath.endsWith('.txt') ? relPath : `${relPath}.txt`;
     await window.skrive.fs.newFile(manifest.root, normalized);
     // Registers an openable non-Markdown entry (see ProjectModel.upsertOpenable);
-    // awaited so openTab finds it. Opens empty in plain-text mode.
+    // awaited so openDoc finds it. Opens empty in plain-text mode.
     await projectModel()?.upsert(normalized, '');
-    await get().openTab(normalized);
+    await get().openDoc(normalized);
   },
 
   async createFolioDocument(relPath: string) {
@@ -1500,21 +1654,11 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const { manifest } = get();
     if (!manifest) return;
     await window.skrive.fs.trash(manifest.root, relPath);
-    // Close any tab pointing at the deleted file. The watcher's unlink
-    // event will also fire and sync the model, but explicitly
-    // closing here keeps the tab list responsive.
-    const tabs = get().tabs;
-    const i = tabs.findIndex((t) => t.path === relPath);
-    if (i !== -1) {
-      const next = tabs.slice(0, i).concat(tabs.slice(i + 1));
-      const { activeTabIndex } = get();
-      let nextActive = activeTabIndex;
-      if (next.length === 0) nextActive = -1;
-      else if (i < activeTabIndex) nextActive = activeTabIndex - 1;
-      else if (i === activeTabIndex)
-        nextActive = Math.min(activeTabIndex, next.length - 1);
-      set({ tabs: next, activeTabIndex: nextActive });
-    }
+    // Drop the deleted file from the working set + trail right away (and
+    // fall back off it if it was live). The watcher's unlink event will
+    // also fire and sync the model, but pruning here keeps the chrome
+    // responsive.
+    pruneVanishedDocs(get, set, (p) => p !== relPath);
     const pins = get().pinned;
     if (pins.includes(relPath)) {
       set({ pinned: pins.filter((p) => p !== relPath) });
@@ -1527,20 +1671,9 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const { manifest } = get();
     if (!manifest) return;
     await window.skrive.fs.trash(manifest.root, relPath);
-    // Drop any tabs inside the deleted directory.
+    // Drop every document inside the deleted directory.
     const prefix = relPath.endsWith('/') ? relPath : `${relPath}/`;
-    const tabs = get().tabs;
-    const survivors = tabs.filter((t) => !t.path.startsWith(prefix));
-    if (survivors.length !== tabs.length) {
-      const { activeTabIndex } = get();
-      const wasActive = tabs[activeTabIndex];
-      let nextActive = activeTabIndex;
-      if (wasActive) {
-        const i = survivors.findIndex((t) => t.path === wasActive.path);
-        nextActive = i === -1 ? Math.min(activeTabIndex, survivors.length - 1) : i;
-      }
-      set({ tabs: survivors, activeTabIndex: nextActive });
-    }
+    pruneVanishedDocs(get, set, (p) => !p.startsWith(prefix));
     const pins = get().pinned;
     const prunedPins = pins.filter((p) => !p.startsWith(prefix));
     if (prunedPins.length !== pins.length) {
@@ -1719,29 +1852,25 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const manifest = get().manifest;
     if (!manifest) return;
     if (oldPath === newPath) return;
-    // Flush dirty state on the renamed tab first so an in-flight
+    // Flush dirty state on the renamed doc first so an in-flight
     // edit doesn't get clobbered when the renderer reopens it under
     // the new path. Best-effort — a failed flush is noisier than a
     // failed rename and the user can retry.
-    const { tabs } = get();
-    const renamedIndex = tabs.findIndex((t) => t.path === oldPath);
-    if (renamedIndex >= 0) {
-      const renamed = tabs[renamedIndex];
-      if (renamed?.dirty) {
-        try {
-          const writable: Tab = {
-            ...renamed,
-            frontmatter: { ...renamed.frontmatter }
-          };
-          const payload = buildSavePayload(writable);
-          await window.skrive.fs.writeFile(manifest.root, oldPath, payload);
-          // The rename plan is computed from the worker's bodies — the
-          // flushed content must be in the model before planning, or
-          // the rewrite would resurrect the stale body.
-          await projectModel()?.upsert(oldPath, payload);
-        } catch (err) {
-          logProjectError('flush before rename', err);
-        }
+    const renamed = get().liveDoc;
+    if (renamed?.path === oldPath && renamed.dirty) {
+      try {
+        const writable: LiveDoc = {
+          ...renamed,
+          frontmatter: { ...renamed.frontmatter }
+        };
+        const payload = buildSavePayload(writable);
+        await window.skrive.fs.writeFile(manifest.root, oldPath, payload);
+        // The rename plan is computed from the worker's bodies — the
+        // flushed content must be in the model before planning, or
+        // the rewrite would resurrect the stale body.
+        await projectModel()?.upsert(oldPath, payload);
+      } catch (err) {
+        logProjectError('flush before rename', err);
       }
     }
     // Worker computes the rewrites; the store applies them through
@@ -1764,21 +1893,23 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     await client.upsert(newPath, renamedBody.body, {
       modifiedMs: renamedBody.modifiedMs
     });
-    // The watcher's add+unlink events refresh the manifest, but we
-    // also need to repoint the open tab at its new path so the
-    // editor doesn't try to load from the gone-away `oldPath`.
+    // The watcher's add+unlink events refresh the manifest, but we also
+    // need every path the chrome remembers to follow the rename: the live
+    // doc (so the editor doesn't try to load the gone-away `oldPath`), its
+    // working-set entry, and every trail visit.
     {
-      const { tabs: latest, activeTabIndex } = get();
-      const i = latest.findIndex((t) => t.path === oldPath);
-      if (i >= 0) {
-        const next = latest.slice();
-        const renamed = latest[i]!;
-        next[i] = { ...renamed, path: newPath };
-        set({ tabs: next });
-        // If the renamed file was the active tab, focus stays on it
-        // — activeTabIndex doesn't move because we mutated in place.
-        void activeTabIndex;
+      const { liveDoc, workingSet, trail } = get();
+      const patch: Partial<State> = {};
+      if (liveDoc?.path === oldPath) {
+        patch.liveDoc = { ...liveDoc, path: newPath };
       }
+      if (workingSet.some((e) => e.path === oldPath)) {
+        patch.workingSet = workingSet.map((e) =>
+          e.path === oldPath ? { ...e, path: newPath } : e
+        );
+      }
+      patch.trail = renameInTrail(trail, oldPath, newPath);
+      set(patch);
     }
     // Repoint a pin at the renamed file so Favorites survives a rename.
     {
@@ -1831,16 +1962,16 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   },
 
   async refreshHistory() {
-    const tab = selectActiveTab(get());
-    if (!tab) {
+    const doc = get().liveDoc;
+    if (!doc) {
       set({ historyOfActive: [] });
       return;
     }
     try {
-      const rows = await window.skrive.history.listForFile(tab.path);
-      // Drop the result if the active tab changed mid-fetch.
-      const after = selectActiveTab(get());
-      if (!after || after.path !== tab.path) return;
+      const rows = await window.skrive.history.listForFile(doc.path);
+      // Drop the result if the live doc changed mid-fetch.
+      const after = get().liveDoc;
+      if (!after || after.path !== doc.path) return;
       set({ historyOfActive: rows });
     } catch (err) {
       logProjectError('history:listForFile', err);
@@ -1863,14 +1994,13 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   },
 
   async openDiffForEntry(entry, baseline) {
-    const { tabs, activeTabIndex } = get();
-    const tab = tabs[activeTabIndex];
-    if (!tab) return;
-    // The diff pane mirrors how the tab is being viewed: a raw-text diff when
-    // Markdown source is on screen (source or split layout), a rendered diff
-    // otherwise (preview layout, or a rich `.folio` tab).
+    const doc = get().liveDoc;
+    if (!doc) return;
+    // The diff pane mirrors how the document is being viewed: a raw-text
+    // diff when Markdown source is on screen (source or split layout), a
+    // rendered diff otherwise (preview layout, or a rich `.folio` doc).
     const showingSource =
-      tab.mode === 'markdown' && tab.layoutMode !== 'preview';
+      doc.mode === 'markdown' && doc.layoutMode !== 'preview';
     const diffMode: 'diff-raw' | 'diff-preview' = showingSource
       ? 'diff-raw'
       : 'diff-preview';
@@ -1878,31 +2008,28 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       const beforeEntry: HistoryEntry = baseline ?? entry;
       const afterEntry: HistoryEntry | null = baseline ? entry : null;
       const [first, second] = await Promise.all([
-        resolveDiffSide(tab.path, beforeEntry),
-        afterEntry ? resolveDiffSide(tab.path, afterEntry) : resolveCurrentSide(tab)
+        resolveDiffSide(doc.path, beforeEntry),
+        afterEntry ? resolveDiffSide(doc.path, afterEntry) : resolveCurrentSide(doc)
       ]);
       const [left, right] =
         first.timestampMs <= second.timestampMs
           ? [first, second]
           : [second, first];
       const rows = await computeLineDiff(left.content, right.content);
-      // Re-check active tab in case it changed mid-fetch.
-      const stateAfter = get();
-      const current = stateAfter.tabs[stateAfter.activeTabIndex];
-      if (!current || current.path !== tab.path) return;
-      const nextTabs = stateAfter.tabs.slice();
-      nextTabs[stateAfter.activeTabIndex] = {
-        ...current,
-        diff: {
-          before: left,
-          after: right,
-          rows,
-          dividerRatio: 0.5,
-          diffMode
-        }
-      };
+      // Re-check the live doc in case it changed mid-fetch.
+      const current = get().liveDoc;
+      if (!current || current.path !== doc.path) return;
       set({
-        tabs: nextTabs,
+        liveDoc: {
+          ...current,
+          diff: {
+            before: left,
+            after: right,
+            rows,
+            dividerRatio: 0.5,
+            diffMode
+          }
+        },
         historyPairBaseId: null,
         historyPanelOpen: false
       });
@@ -1912,43 +2039,36 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   },
 
   closeDiff() {
-    const { tabs, activeTabIndex } = get();
-    const tab = tabs[activeTabIndex];
-    if (!tab || !tab.diff) return;
-    const nextTabs = tabs.slice();
-    nextTabs[activeTabIndex] = { ...tab, diff: null };
-    set({ tabs: nextTabs });
+    const doc = get().liveDoc;
+    if (!doc || !doc.diff) return;
+    set({ liveDoc: { ...doc, diff: null } });
   },
 
-  setTabDiffMode(index, mode) {
-    const { tabs } = get();
-    const tab = tabs[index];
-    if (!tab || !tab.diff || tab.diff.diffMode === mode) return;
-    const nextTabs = tabs.slice();
-    nextTabs[index] = { ...tab, diff: { ...tab.diff, diffMode: mode } };
-    set({ tabs: nextTabs });
+  setDiffMode(mode) {
+    const doc = get().liveDoc;
+    if (!doc || !doc.diff || doc.diff.diffMode === mode) return;
+    set({ liveDoc: { ...doc, diff: { ...doc.diff, diffMode: mode } } });
   },
 
-  setTabDiffDividerRatio(index, ratio) {
-    const { tabs } = get();
-    const tab = tabs[index];
-    if (!tab || !tab.diff) return;
+  setDiffDividerRatio(ratio) {
+    const doc = get().liveDoc;
+    if (!doc || !doc.diff) return;
     const clamped = clampRatio(ratio);
-    if (tab.diff.dividerRatio === clamped) return;
-    const nextTabs = tabs.slice();
-    nextTabs[index] = { ...tab, diff: { ...tab.diff, dividerRatio: clamped } };
-    set({ tabs: nextTabs });
+    if (doc.diff.dividerRatio === clamped) return;
+    set({ liveDoc: { ...doc, diff: { ...doc.diff, dividerRatio: clamped } } });
   },
 
   async createManualCheckpoint(name) {
-    const { manifest, tabs, activeTabIndex } = get();
-    const tab = tabs[activeTabIndex];
-    if (!manifest || !tab) return;
+    const { manifest, liveDoc } = get();
+    if (!manifest || !liveDoc) return;
     if (get().historyMode !== 'checkpoint') return;
-    const writable: Tab = { ...tab, frontmatter: { ...tab.frontmatter } };
+    const writable: LiveDoc = {
+      ...liveDoc,
+      frontmatter: { ...liveDoc.frontmatter }
+    };
     const payload = buildSavePayload(writable);
     await window.skrive.history.createManualCheckpoint(
-      tab.path,
+      liveDoc.path,
       name,
       payload
     );
@@ -1984,16 +2104,13 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
           ])
         : [[], []];
       logDuration('lint model (deadlinks+orphans)', ipcStart);
-      // Build the body map from open tabs so unsaved edits are linted
-      // against the editor content, not the on-disk version. Files not
-      // currently open fall back to disk during the engine's per-file
-      // pass — the engine treats missing entries as empty bodies, which
-      // is a no-op for the single-file rules. Cross-file rules don't
-      // depend on bodies here (links + orphans come from IPC).
+      // Seed the body map with the live doc so unsaved edits are linted
+      // against the editor content, not the on-disk version. Every other
+      // file reads from the closed-body cache / disk below — demoted
+      // documents were flushed on switch, so disk is current for them.
       const bodies = new Map<string, string>();
-      for (const tab of get().tabs) {
-        bodies.set(tab.path, tab.body);
-      }
+      const live = get().liveDoc;
+      if (live) bodies.set(live.path, live.body);
       // Drop cached bodies for paths the watcher flagged dirty since the last
       // pass, so an externally-changed (or just-saved-then-closed) file re-reads.
       for (const p of watchDirtyPaths) closedBodyCache.delete(p);
@@ -2115,61 +2232,49 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   // ============================ Frontmatter mutations ============================
 
-  updateActiveTabFrontmatter(key: string, value: unknown) {
-    const { tabs, activeTabIndex } = get();
-    const tab = tabs[activeTabIndex];
-    if (!tab) return;
-    const next = { ...tab.frontmatter };
+  updateLiveDocFrontmatter(key: string, value: unknown) {
+    const doc = get().liveDoc;
+    if (!doc) return;
+    const next = { ...doc.frontmatter };
     next[key] = value;
-    const nextTabs = tabs.slice();
-    nextTabs[activeTabIndex] = { ...tab, frontmatter: next, dirty: true };
-    set({ tabs: nextTabs });
+    set({ liveDoc: { ...doc, frontmatter: next, dirty: true } });
   },
 
-  removeActiveTabFrontmatter(key: string) {
-    const { tabs, activeTabIndex } = get();
-    const tab = tabs[activeTabIndex];
-    if (!tab || !(key in tab.frontmatter)) return;
-    const next = { ...tab.frontmatter };
+  removeLiveDocFrontmatter(key: string) {
+    const doc = get().liveDoc;
+    if (!doc || !(key in doc.frontmatter)) return;
+    const next = { ...doc.frontmatter };
     delete next[key];
-    const nextTabs = tabs.slice();
-    nextTabs[activeTabIndex] = { ...tab, frontmatter: next, dirty: true };
-    set({ tabs: nextTabs });
+    set({ liveDoc: { ...doc, frontmatter: next, dirty: true } });
   },
 
-  renameActiveTabFrontmatterKey(oldKey: string, newKey: string) {
-    const { tabs, activeTabIndex } = get();
-    const tab = tabs[activeTabIndex];
-    if (!tab) return;
+  renameLiveDocFrontmatterKey(oldKey: string, newKey: string) {
+    const doc = get().liveDoc;
+    if (!doc) return;
     if (oldKey === newKey) return;
-    if (!(oldKey in tab.frontmatter)) return;
-    if (newKey in tab.frontmatter) return; // Conflict — silently no-op.
+    if (!(oldKey in doc.frontmatter)) return;
+    if (newKey in doc.frontmatter) return; // Conflict — silently no-op.
     // Rebuild the map preserving original key order, swapping oldKey→newKey
     // in place so the panel rows don't reorder unexpectedly.
     const next: FrontmatterMap = {};
-    for (const [k, v] of Object.entries(tab.frontmatter)) {
+    for (const [k, v] of Object.entries(doc.frontmatter)) {
       if (k === oldKey) next[newKey] = v;
       else next[k] = v;
     }
-    const nextTabs = tabs.slice();
-    nextTabs[activeTabIndex] = { ...tab, frontmatter: next, dirty: true };
-    set({ tabs: nextTabs });
+    set({ liveDoc: { ...doc, frontmatter: next, dirty: true } });
   }
 }));
 
 // ============================ Selectors ============================
 //
 // Stable selectors for components that only need derived state. Using
-// these keeps re-renders tight — a tab body change shouldn't re-render
-// the sidebar, etc.
+// these keeps re-renders tight — a live-doc body change shouldn't
+// re-render the sidebar, etc.
 
-export const selectActiveTab = (s: State): Tab | null => {
-  if (s.activeTabIndex < 0) return null;
-  return s.tabs[s.activeTabIndex] ?? null;
-};
+export const selectLiveDoc = (s: State): LiveDoc | null => s.liveDoc;
 
-export const selectActivePath = (s: State): string | null =>
-  selectActiveTab(s)?.path ?? null;
+export const selectLiveDocPath = (s: State): string | null =>
+  s.liveDoc?.path ?? null;
 
 // ============================ Error logging ============================
 

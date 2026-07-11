@@ -33,7 +33,7 @@ import type { FileEntry, SidebarSortKey } from '@skrive/shared';
 import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
-  selectActivePath,
+  selectLiveDocPath,
   useProjectStore
 } from '../../stores/project';
 import { usePreferencesStore } from '../../stores/preferences';
@@ -192,8 +192,8 @@ function FileRow({
   onExport,
   onConvert
 }: FileRowProps) {
-  const activePath = useProjectStore(selectActivePath);
-  const openTab = useProjectStore((s) => s.openTab);
+  const activePath = useProjectStore(selectLiveDocPath);
+  const openDoc = useProjectStore((s) => s.openDoc);
   const spineDepths = useMemo(
     () => spineFromChain(parentChain, lastChild, depth),
     [parentChain, lastChild, depth]
@@ -222,7 +222,7 @@ function FileRow({
             className={`file${activePath === file.path ? ' active' : ''}`}
             style={style}
             onClick={() => {
-              void openTab(file.path);
+              void openDoc(file.path);
             }}
             onKeyDown={handleKey}
             title={file.path}

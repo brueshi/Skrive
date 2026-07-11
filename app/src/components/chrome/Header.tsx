@@ -14,7 +14,7 @@
 import { type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import { IconButton } from '../ui/IconButton';
 import {
-  selectActiveTab,
+  selectLiveDoc,
   useProjectStore
 } from '../../stores/project';
 import { IconSidebarToggle } from '../icons/IconSidebarToggle';
@@ -34,7 +34,7 @@ const isFrameless =
   typeof window !== 'undefined' && window.__SKRIVE_FRAMELESS__ === true;
 
 export function Header() {
-  const activeTab = useProjectStore(selectActiveTab);
+  const activeTab = useProjectStore(selectLiveDoc);
   const sidebarVisible = useProjectStore((s) => s.sidebarVisible);
   const toggleSidebar = useProjectStore((s) => s.toggleSidebar);
   const activeView = useProjectStore((s) => s.activeView);

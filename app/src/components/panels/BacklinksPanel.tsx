@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconButton } from '../ui/IconButton';
 import { Tooltip } from '../ui/Tooltip';
-import { selectActiveTab, useProjectStore } from '../../stores/project';
+import { selectLiveDoc, useProjectStore } from '../../stores/project';
 import type { Backlink, OutgoingLink } from '@skrive/shared';
 import { PanelShell } from './PanelShell';
 import { projectModel } from '../../lib/project-model/client';
@@ -119,8 +119,8 @@ function FolderPill({ folder }: { folder: string }) {
 export function BacklinksPanel() {
   const open = useProjectStore((s) => s.backlinksPanelOpen);
   const setOpen = useProjectStore((s) => s.setBacklinksPanelOpen);
-  const activeTab = useProjectStore(selectActiveTab);
-  const openTabAtLine = useProjectStore((s) => s.openTabAtLine);
+  const activeTab = useProjectStore(selectLiveDoc);
+  const openDocAtLine = useProjectStore((s) => s.openDocAtLine);
 
   const [inbound, setInbound] = useState<Backlink[]>([]);
   const [outbound, setOutbound] = useState<OutgoingLink[]>([]);
@@ -179,15 +179,15 @@ export function BacklinksPanel() {
 
   function openSource(group: SourceGroup, ref: RefItem) {
     setOpen(false);
-    void openTabAtLine(group.key, ref.line + 1, ref.column, 0);
+    void openDocAtLine(group.key, ref.line + 1, ref.column, 0);
   }
 
   function openTarget(target: Target) {
     setOpen(false);
     if (target.resolved && !target.isWiki) {
-      void openTabAtLine(target.key, 1, 0, 0);
+      void openDocAtLine(target.key, 1, 0, 0);
     } else {
-      void openTabAtLine(activePath, target.firstRef.line + 1, target.firstRef.column, 0);
+      void openDocAtLine(activePath, target.firstRef.line + 1, target.firstRef.column, 0);
     }
   }
 

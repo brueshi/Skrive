@@ -1,19 +1,10 @@
-// Notion-style tab strip. Pulled out of Header so it can render in two
-// places driven by the tabsLocation preference:
-//
-//   - 'shell' → inside the topbar, between the project menu and the
-//               right cluster (current default)
-//   - 'card'  → attached to the top of the editor card, like Arc
-//
-// Same component, different parent. The CSS variant on the tab strip
-// itself is set via the parent's `data-tabs-location` attribute on the
-// app-root.
+// COMPAT (SKR-243 Stage 1): the tab strip rendered over the working-set
+// model while the front-title + fan land. Pills are the working set in LRU
+// order — entry 0 (the live doc) is the active pill, clicking switches,
+// the close X drops the entry. Deleted at the end of the stage along with
+// the header-tabs slot and the tabs.* commands.
 
-import { useMemo } from 'react';
-import {
-  useProjectStore,
-  type Tab
-} from '../../stores/project';
+import { useProjectStore } from '../../stores/project';
 import { noDragProps } from './windowDrag';
 import { DocIcon } from '../icons/DocIcon';
 import { IconDotUnsaved } from '../icons/IconDotUnsaved';
@@ -29,44 +20,46 @@ function leafName(p: string): string {
 }
 
 export function TabBar() {
-  const tabs = useProjectStore((s) => s.tabs);
-  const activeTabIndex = useProjectStore((s) => s.activeTabIndex);
-  const switchTab = useProjectStore((s) => s.switchTab);
-  const closeTab = useProjectStore((s) => s.closeTab);
+  const workingSet = useProjectStore((s) => s.workingSet);
+  const liveDoc = useProjectStore((s) => s.liveDoc);
+  const openDoc = useProjectStore((s) => s.openDoc);
+  const dropFromWorkingSet = useProjectStore((s) => s.dropFromWorkingSet);
 
-  function handleCloseTab(e: React.MouseEvent, i: number) {
-    e.stopPropagation();
-    void closeTab(i);
-  }
-
-  if (tabs.length === 0) return null;
+  if (workingSet.length === 0) return null;
 
   return (
     <div className="tabs" role="tablist">
-      {tabs.map((tab, i) => (
-        <TabPill
-          key={tab.path}
-          tab={tab}
-          active={i === activeTabIndex}
-          onSelect={() => switchTab(i)}
-          onClose={(e) => handleCloseTab(e, i)}
-        />
-      ))}
+      {workingSet.map((entry) => {
+        const active = entry.path === liveDoc?.path;
+        return (
+          <TabPill
+            key={entry.path}
+            path={entry.path}
+            active={active}
+            dirty={active && (liveDoc?.dirty ?? false)}
+            onSelect={() => void openDoc(entry.path)}
+            onClose={(e) => {
+              e.stopPropagation();
+              void dropFromWorkingSet(entry.path);
+            }}
+          />
+        );
+      })}
     </div>
   );
 }
 
 type TabPillProps = {
-  tab: Tab;
+  path: string;
   active: boolean;
+  dirty: boolean;
   onSelect: () => void;
   onClose: (e: React.MouseEvent) => void;
 };
 
 // The TAB opts out of window dragging, not the strip that holds it. The strip is
 // `flex: 1` and marking IT no-drag swallowed the entire topbar's drag lane (SKR-240).
-function TabPill({ tab, active, onSelect, onClose }: TabPillProps) {
-  const name = useMemo(() => leafName(tab.path), [tab.path]);
+function TabPill({ path, active, dirty, onSelect, onClose }: TabPillProps) {
   return (
     <button
       type="button"
@@ -74,14 +67,14 @@ function TabPill({ tab, active, onSelect, onClose }: TabPillProps) {
       className={`tab${active ? ' active' : ''}`}
       aria-selected={active}
       onClick={onSelect}
-      title={tab.path}
+      title={path}
       {...noDragProps}
     >
       <span className="tab-icon" aria-hidden="true">
-        <DocIcon path={tab.path} size={16} />
+        <DocIcon path={path} size={16} />
       </span>
-      <span className="tab-name">{name}</span>
-      {tab.dirty && (
+      <span className="tab-name">{leafName(path)}</span>
+      {dirty && (
         <span className="tab-dirty" aria-label="unsaved changes">
           <IconDotUnsaved size={16} />
         </span>

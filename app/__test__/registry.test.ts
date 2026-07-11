@@ -12,7 +12,7 @@ import {
   matchWindowBinding,
   type CommandDeps
 } from '../src/lib/commands/registry';
-import { useProjectStore, type Tab } from '../src/stores/project';
+import { useProjectStore, type LiveDoc } from '../src/stores/project';
 
 const noop = () => {};
 const STUB_DEPS: CommandDeps = {
@@ -127,39 +127,41 @@ describe('source toggle (⌘⇧E)', () => {
     expect(command?.shortcut).toBe('⌘⇧E');
   });
 
-  it('is runnable only when a tab is open', () => {
-    useProjectStore.setState({ activeTabIndex: 0 });
+  it('is runnable only when a document is live', () => {
+    useProjectStore.setState({
+      liveDoc: { path: 'a.md' } as unknown as LiveDoc
+    });
     expect(binding?.when?.()).toBe(true);
 
-    // No active tab → nothing to view as source.
-    useProjectStore.setState({ activeTabIndex: -1 });
+    // No live doc → nothing to view as source.
+    useProjectStore.setState({ liveDoc: null });
     expect(binding?.when?.()).toBe(false);
   });
 
-  it("cycles the active markdown tab's layout (raw -> split -> preview) when run", () => {
-    const tab = {
+  it("cycles the live markdown doc's layout (raw -> split -> preview) when run", () => {
+    const doc = {
       path: 'a.md',
       mode: 'markdown',
       layoutMode: 'split'
-    } as unknown as Tab;
-    useProjectStore.setState({ tabs: [tab], activeTabIndex: 0 });
+    } as unknown as LiveDoc;
+    useProjectStore.setState({ liveDoc: doc });
     binding?.run?.();
-    expect(useProjectStore.getState().tabs[0]?.layoutMode).toBe('preview');
+    expect(useProjectStore.getState().liveDoc?.layoutMode).toBe('preview');
     binding?.run?.();
-    expect(useProjectStore.getState().tabs[0]?.layoutMode).toBe('raw');
+    expect(useProjectStore.getState().liveDoc?.layoutMode).toBe('raw');
     binding?.run?.();
-    expect(useProjectStore.getState().tabs[0]?.layoutMode).toBe('split');
+    expect(useProjectStore.getState().liveDoc?.layoutMode).toBe('split');
   });
 
-  it('is a no-op on a rich (.folio) tab', () => {
-    const tab = {
+  it('is a no-op on a rich (.folio) doc', () => {
+    const doc = {
       path: 'a.folio',
       mode: 'rich',
       layoutMode: 'split'
-    } as unknown as Tab;
-    useProjectStore.setState({ tabs: [tab], activeTabIndex: 0 });
+    } as unknown as LiveDoc;
+    useProjectStore.setState({ liveDoc: doc });
     binding?.run?.();
-    expect(useProjectStore.getState().tabs[0]?.layoutMode).toBe('split');
+    expect(useProjectStore.getState().liveDoc?.layoutMode).toBe('split');
   });
 });
 
@@ -220,15 +222,16 @@ describe('dispatchKey defers to an upstream preventDefault', () => {
   const { bindings } = buildRegistry(STUB_DEPS);
 
   it('skips a chord that arrives already defaultPrevented', () => {
-    useProjectStore.setState({ tabs: [{ path: 'a.md' } as unknown as Tab], activeTabIndex: 0 });
+    useProjectStore.setState({
+      liveDoc: { path: 'a.md' } as unknown as LiveDoc
+    });
     const ev = fakeEvent({ code: 'KeyB', meta: true, shift: true, defaultPrevented: true });
     expect(dispatchKey(ev, bindings)).toBe(false);
   });
 
   it('still dispatches a matching chord that was not consumed upstream', () => {
     useProjectStore.setState({
-      tabs: [{ path: 'a.md' } as unknown as Tab],
-      activeTabIndex: 0,
+      liveDoc: { path: 'a.md' } as unknown as LiveDoc,
       backlinksPanelOpen: false
     });
     const ev = fakeEvent({ code: 'KeyB', meta: true, shift: true });

@@ -20,7 +20,7 @@
 // New fields default to string because there's no way to disambiguate
 // intent from text alone.
 //
-// Key rename conflict: the store's renameActiveTabFrontmatterKey silently
+// Key rename conflict: the store's renameLiveDocFrontmatterKey silently
 // no-ops when the target key already exists. The panel re-reads the map
 // after the rename attempt, so a no-op naturally shows the old key in
 // the UI with no modal needed.
@@ -30,7 +30,7 @@ import { IconButton } from '../ui/IconButton';
 import { Tooltip } from '../ui/Tooltip';
 import { Input } from '../ui/Input';
 import {
-  selectActiveTab,
+  selectLiveDoc,
   useProjectStore
 } from '../../stores/project';
 import {
@@ -64,11 +64,11 @@ function lowerStartsWith(haystack: string, needle: string): boolean {
 export function FrontmatterPanel() {
   const open = useProjectStore((s) => s.frontmatterPanelOpen);
   const close = useProjectStore((s) => s.closeFrontmatterPanel);
-  const activeTab = useProjectStore(selectActiveTab);
+  const activeTab = useProjectStore(selectLiveDoc);
   const manifest = useProjectStore((s) => s.manifest);
-  const updateField = useProjectStore((s) => s.updateActiveTabFrontmatter);
-  const removeField = useProjectStore((s) => s.removeActiveTabFrontmatter);
-  const renameKey = useProjectStore((s) => s.renameActiveTabFrontmatterKey);
+  const updateField = useProjectStore((s) => s.updateLiveDocFrontmatter);
+  const removeField = useProjectStore((s) => s.removeLiveDocFrontmatter);
+  const renameKey = useProjectStore((s) => s.renameLiveDocFrontmatterKey);
 
   const panelRef = useRef<HTMLDivElement | null>(null);
 

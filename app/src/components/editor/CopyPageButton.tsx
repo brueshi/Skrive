@@ -16,7 +16,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { selectActiveTab, useProjectStore } from '../../stores/project';
+import { selectLiveDoc, useProjectStore } from '../../stores/project';
 import { flushActiveEditor } from './active-editor';
 import { stripLeadingFrontmatter } from '../../lib/preview/markdown';
 import { parseDocument, documentToPlainText } from '../../lib/blockmodel';
@@ -45,7 +45,7 @@ const COPIED_FEEDBACK_MS = 1600;
 // is stripped to match what the document shows.
 function currentBody(): string {
   flushActiveEditor();
-  const tab = selectActiveTab(useProjectStore.getState());
+  const tab = selectLiveDoc(useProjectStore.getState());
   return tab ? stripLeadingFrontmatter(tab.body).trim() : '';
 }
 
@@ -54,7 +54,7 @@ function currentBody(): string {
 // fully-loaded rich document.
 function currentFolio(): { folio: FolioDocument; title: string } | null {
   flushActiveEditor();
-  const tab = selectActiveTab(useProjectStore.getState());
+  const tab = selectLiveDoc(useProjectStore.getState());
   if (!tab || tab.mode !== 'rich' || !tab.model || !tab.docId || !tab.docMeta) {
     return null;
   }
@@ -65,7 +65,7 @@ function currentFolio(): { folio: FolioDocument; title: string } | null {
 }
 
 export function CopyPageButton() {
-  const activeTab = useProjectStore(selectActiveTab);
+  const activeTab = useProjectStore(selectLiveDoc);
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 

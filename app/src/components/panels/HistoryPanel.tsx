@@ -16,7 +16,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { HistoryEntry } from '@skrive/shared';
 import {
-  selectActiveTab,
+  selectLiveDoc,
   useProjectStore
 } from '../../stores/project';
 import { PanelShell } from './PanelShell';
@@ -73,7 +73,7 @@ export function HistoryPanel() {
   const open = useProjectStore((s) => s.historyPanelOpen);
   const setOpen = useProjectStore((s) => s.setHistoryPanelOpen);
   const closePanel = useProjectStore((s) => s.closeHistoryPanel);
-  const activeTab = useProjectStore(selectActiveTab);
+  const activeTab = useProjectStore(selectLiveDoc);
   const rows = useProjectStore((s) => s.historyOfActive);
   const mode = useProjectStore((s) => s.historyMode);
   const baseId = useProjectStore((s) => s.historyPairBaseId);

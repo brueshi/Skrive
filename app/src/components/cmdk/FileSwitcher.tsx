@@ -34,7 +34,7 @@ function dirOf(p: string): string {
 
 export function FileSwitcher({ open, onClose }: Props) {
   const manifest = useProjectStore((s) => s.manifest);
-  const openTab = useProjectStore((s) => s.openTab);
+  const openDoc = useProjectStore((s) => s.openDoc);
   const recentFiles = usePreferencesStore((s) => s.recentFiles);
 
   const [query, setQuery] = useState('');
@@ -59,8 +59,8 @@ export function FileSwitcher({ open, onClose }: Props) {
 
   function handleSelect(path: string) {
     onClose();
-    void openTab(path).catch((err) => {
-      logProjectError('openTab (switcher)', err);
+    void openDoc(path).catch((err) => {
+      logProjectError('openDoc (switcher)', err);
       notify.error(`Couldn't open ${path}`, err);
     });
   }
