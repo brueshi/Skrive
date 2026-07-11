@@ -16,7 +16,7 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useState } from 'react';
 import { useProjectStore, logProjectError } from '../../stores/project';
-import { getActiveBlockMenu } from '../editor/active-surface';
+import { focusEditorSoon, getActiveBlockMenu } from '../editor/active-surface';
 import { DocIcon } from '../icons/DocIcon';
 import { middleTruncate, stripFolioExtension } from '../../lib/title';
 import { platformShortcut } from '../../lib/commands/shortcut-display';
@@ -46,14 +46,6 @@ function parentName(p: string): string {
 function basename(p: string): string {
   const parts = p.split(/[/\\]/).filter(Boolean);
   return parts[parts.length - 1] ?? p;
-}
-
-/** Refocus the editing surface once the switched-to document's surface has
- *  mounted (two frames: React commit, then the surface's own wiring). */
-function focusEditorSoon(): void {
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => getActiveBlockMenu()?.focusEditor());
-  });
 }
 
 export function FrontTitle({ onOpenSwitcher }: Props) {
