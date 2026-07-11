@@ -29,7 +29,6 @@ import { notify } from '../notify';
 
 export type CommandGroup =
   | 'File'
-  | 'Tabs'
   | 'View'
   | 'Insert'
   | 'Project'
@@ -96,7 +95,6 @@ export type CommandDeps = {
 
 export const COMMAND_GROUP_ORDER: CommandGroup[] = [
   'File',
-  'Tabs',
   'View',
   'Insert',
   'Project',
@@ -269,40 +267,30 @@ export function buildRegistry(deps: CommandDeps): {
       }
     },
 
-    // ============ Tabs (COMPAT — replaced by history.back/forward in the
-    // SKR-243 keybinding commit) ============
+    // ⌘⇧[ / ⌘⇧] — the chords tabs vacated (SKR-243): document history
+    // back / forward, so the old prev/next-tab muscle memory transfers to
+    // the trail with zero displacement. ⌘W is deliberately unbound — the
+    // platform default (close window) takes over; there is nothing to
+    // "close" in the working-set model.
     {
-      chord: { code: 'KeyW', mod: true },
-      display: '⌘W',
+      chord: { code: 'BracketLeft', mod: true, shift: true },
+      display: '⌘⇧[',
       scope: 'window',
-      group: 'Tabs',
-      label: 'Close tab',
-      commandId: 'tabs.close',
-      when: whenLiveDoc,
-      run: () => {
-        const s = useProjectStore.getState();
-        if (s.liveDoc) void s.dropFromWorkingSet(s.liveDoc.path);
-      }
+      group: 'File',
+      label: 'Previous document',
+      commandId: 'history.back',
+      when: whenTrailBack,
+      run: () => void useProjectStore.getState().historyBack()
     },
     {
       chord: { code: 'BracketRight', mod: true, shift: true },
       display: '⌘⇧]',
       scope: 'window',
-      group: 'Tabs',
-      label: 'Next tab',
-      commandId: 'tabs.next',
+      group: 'File',
+      label: 'Next document',
+      commandId: 'history.forward',
       when: whenTrailForward,
       run: () => void useProjectStore.getState().historyForward()
-    },
-    {
-      chord: { code: 'BracketLeft', mod: true, shift: true },
-      display: '⌘⇧[',
-      scope: 'window',
-      group: 'Tabs',
-      label: 'Previous tab',
-      commandId: 'tabs.prev',
-      when: whenTrailBack,
-      run: () => void useProjectStore.getState().historyBack()
     },
 
     // ============ View ============
@@ -545,33 +533,21 @@ export function buildRegistry(deps: CommandDeps): {
       }
     },
 
-    // ============ Tabs (COMPAT — see the bindings note) ============
     {
-      id: 'tabs.close',
-      label: 'Close tab',
-      group: 'Tabs',
-      shortcut: get('tabs.close'),
-      when: whenLiveDoc,
-      run: () => {
-        const s = useProjectStore.getState();
-        if (s.liveDoc) void s.dropFromWorkingSet(s.liveDoc.path);
-      }
-    },
-    {
-      id: 'tabs.next',
-      label: 'Next tab',
-      group: 'Tabs',
-      shortcut: get('tabs.next'),
-      when: whenTrailForward,
-      run: () => void useProjectStore.getState().historyForward()
-    },
-    {
-      id: 'tabs.prev',
-      label: 'Previous tab',
-      group: 'Tabs',
-      shortcut: get('tabs.prev'),
+      id: 'history.back',
+      label: 'Previous document',
+      group: 'File',
+      shortcut: get('history.back'),
       when: whenTrailBack,
       run: () => void useProjectStore.getState().historyBack()
+    },
+    {
+      id: 'history.forward',
+      label: 'Next document',
+      group: 'File',
+      shortcut: get('history.forward'),
+      when: whenTrailForward,
+      run: () => void useProjectStore.getState().historyForward()
     },
 
     // ============ View ============

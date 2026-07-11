@@ -49,7 +49,6 @@ export function CommandPalette({ open, onClose, deps }: Props) {
 
   const grouped: Record<CommandGroup, Command[]> = {
     File: [],
-    Tabs: [],
     View: [],
     Insert: [],
     Project: [],

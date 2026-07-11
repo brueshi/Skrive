@@ -4567,6 +4567,18 @@ body {
   font-size: 0.75rem;
 }
 
+/* The live doc's row in the empty-state working set (SKR-243): marked as
+   where you are (the fan's selection tint), disabled so the first
+   selectable row is the previous document and ⌘P ⏎ jumps back to it. */
+.cmdk-file-row.cmdk-current {
+  background: var(--skrive-selection);
+}
+
+.cmdk-file-row.cmdk-current .cmdk-file-dir {
+  text-align: right;
+  font-style: italic;
+}
+
 /* ===================== History panel (Phase 10) ===================== */
 
 .hi-panel-header {

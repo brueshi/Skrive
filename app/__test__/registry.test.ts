@@ -211,6 +211,26 @@ describe('matchWindowBinding', () => {
     const ev = fakeEvent({ code: 'KeyZ', meta: true, alt: true });
     expect(matchWindowBinding(ev, bindings)).toBeNull();
   });
+
+  // SKR-243: tabs retired. ⌘W reverts to the platform default (close
+  // window) and the freed cycling chords become document history.
+  it('⌘W is unbound (platform close-window takes over)', () => {
+    const ev = fakeEvent({ code: 'KeyW', meta: true });
+    expect(matchWindowBinding(ev, bindings)).toBeNull();
+  });
+
+  it('⌘⇧[ / ⌘⇧] walk document history', () => {
+    const back = matchWindowBinding(
+      fakeEvent({ code: 'BracketLeft', meta: true, shift: true }),
+      bindings
+    );
+    const fwd = matchWindowBinding(
+      fakeEvent({ code: 'BracketRight', meta: true, shift: true }),
+      bindings
+    );
+    expect(back?.commandId).toBe('history.back');
+    expect(fwd?.commandId).toBe('history.forward');
+  });
 });
 
 // SKR-171: the surface's own mark chord (⌘B) and the app-level ⌘⇧B binding
