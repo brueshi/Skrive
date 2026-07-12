@@ -18,7 +18,6 @@ import {
   type LineMeasure,
   type NewFileLocation,
   type NewFileNaming,
-  type RecentFile,
   type RecentProject,
   type SlugFormat,
   type ThemeId,
@@ -26,7 +25,6 @@ import {
 } from '@skrive/shared';
 
 const SAVE_DEBOUNCE_MS = 300;
-const RECENT_FILES_CAP = 30;
 
 /** Autosave idle-delay bounds (ms). The Settings stepper steps within
  *  this range; the setter clamps to it so a stored or stepped value can
@@ -80,13 +78,6 @@ type PreferencesActions = {
   recordRecentProject(path: string, name: string): void;
   removeRecentProject(path: string): void;
 
-  /** App-wide recent-files LRU. Since SKR-243 the switcher reads the
-   *  working set instead; the sidebar's Recents section is the last
-   *  reader and dies with the Stage 2 desk (this bookkeeping goes with
-   *  it). Most recent open lives at index 0; entries dedupe by
-   *  `(projectPath, filePath)` and the list caps at RECENT_FILES_CAP. */
-  recordRecentFile(projectPath: string, filePath: string): void;
-
   resetEditorDefaults(): void;
 };
 
@@ -104,6 +95,11 @@ function snapshot(state: PreferencesState): AppUiState {
     seenFeedbackPrompt: state.seenFeedbackPrompt,
     personalDictionary: state.personalDictionary,
     skipDeleteConfirmation: state.skipDeleteConfirmation,
+    // Legacy since SKR-243 Stage 2: the recent-files LRU is no longer
+    // written (the desk + ⌘P switcher read the working set instead). The
+    // persisted field is kept and round-tripped verbatim for cross-shell
+    // stability — an older shell reading this state still finds it intact
+    // (the LayoutMode precedent).
     recentFiles: state.recentFiles,
     editorFont: state.editorFont,
     editorCustomFontFamily: state.editorCustomFontFamily,
@@ -359,18 +355,6 @@ export const usePreferencesStore = create<
     scheduleSave(get);
   },
 
-  recordRecentFile(projectPath, filePath) {
-    const now = Date.now();
-    const existing = get().recentFiles.filter(
-      (r) => !(r.projectPath === projectPath && r.filePath === filePath)
-    );
-    const next: RecentFile[] = [
-      { projectPath, filePath, openedMs: now },
-      ...existing
-    ].slice(0, RECENT_FILES_CAP);
-    set({ recentFiles: next });
-    scheduleSave(get);
-  },
 
   resetEditorDefaults() {
     set({

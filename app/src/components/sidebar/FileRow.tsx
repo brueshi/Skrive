@@ -1,6 +1,12 @@
-// A single document row in the sidebar (used by both the flat special
-// groups and the recursive folder tree). Owns its own right-click context
-// menu: pin, rename, export/convert, delete.
+// A single document row in the sidebar (used by the desk, the Inbox, and
+// the recursive library tree). Owns its own right-click context menu (pin,
+// rename, export/convert, delete) and an inline pin affordance: a quiet
+// pushpin that appears on hover to pin, and stays put to unpin once pinned.
+//
+// The row is a role="button" div (mirroring the folder disclosure row) so a
+// real pin <button> can nest inside it without invalid button-in-button
+// markup. Activation is bound to `click`, never pointerup — WKWebView drops
+// pointerup on a motionless press (see memory).
 
 import { useMemo, type KeyboardEvent } from 'react';
 import type { FileEntry } from '@skrive/shared';
@@ -11,7 +17,7 @@ import { fileMode } from '../../stores/save';
 import { EXPORT_FORMATS, type ExportFormatId } from '../../lib/export';
 import { importKind } from '../../lib/import';
 import { DocIcon } from '../icons/DocIcon';
-import { IconStar } from '../icons/IconStar';
+import { IconPin } from '../icons/IconPin';
 import { buildSpineStyle, spineFromChain } from './tree';
 
 export type FileRowProps = {
@@ -53,8 +59,11 @@ export function FileRow({
   const isFolio = fileMode(file.path) === 'rich';
   const canConvert = importKind(file.path) !== null;
 
-  function handleKey(e: KeyboardEvent<HTMLButtonElement>) {
-    if (e.key === 'Delete' || e.key === 'Backspace') {
+  function handleKey(e: KeyboardEvent<HTMLDivElement>) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      void openDoc(file.path);
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
       onDelete(file);
     }
@@ -64,9 +73,12 @@ export function FileRow({
     <li>
       <ContextMenu.Root>
         <ContextMenu.Trigger asChild>
-          <button
-            type="button"
-            className={`file${activePath === file.path ? ' active' : ''}`}
+          <div
+            role="button"
+            tabIndex={0}
+            className={`file${activePath === file.path ? ' active' : ''}${
+              pinned ? ' pinned' : ''
+            }`}
             style={style}
             onClick={() => {
               void openDoc(file.path);
@@ -83,12 +95,25 @@ export function FileRow({
                 <span className="file-filename">{resolved.secondary}</span>
               )}
             </span>
-            {pinned && (
-              <span className="file-pin-marker" aria-hidden="true">
-                <IconStar size={16} filled />
-              </span>
-            )}
-          </button>
+            <button
+              type="button"
+              className="file-pin-btn"
+              aria-label={pinned ? 'Unpin' : 'Pin'}
+              aria-pressed={pinned}
+              title={pinned ? 'Unpin' : 'Pin'}
+              onClick={(e) => {
+                e.stopPropagation();
+                onTogglePin(file);
+              }}
+              onKeyDown={(e) => {
+                // Keep Enter/Space on the pin from bubbling to the row's
+                // open handler.
+                if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+              }}
+            >
+              <IconPin size={16} />
+            </button>
+          </div>
         </ContextMenu.Trigger>
         <ContextMenu.Portal>
           <ContextMenu.Content className="ctx-menu">
@@ -96,9 +121,7 @@ export function FileRow({
               className="ctx-item"
               onSelect={() => onTogglePin(file)}
             >
-              <span className="ctx-label">
-                {pinned ? 'Remove from Favorites' : 'Pin to Favorites'}
-              </span>
+              <span className="ctx-label">{pinned ? 'Unpin' : 'Pin'}</span>
             </ContextMenu.Item>
             <ContextMenu.Item
               className="ctx-item"
