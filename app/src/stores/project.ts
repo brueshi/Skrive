@@ -444,9 +444,6 @@ type OpenDocOptions = {
   /** 'none' skips recording the visit on the trail — the back/forward
    *  walkers use it so walking doesn't rewrite the trail. Default 'push'. */
   nav?: 'push' | 'none';
-  /** False for session restore, so restoring the last live doc doesn't
-   *  count as a "recent file" visit in the app-wide LRU. Default true. */
-  recordRecent?: boolean;
 };
 
 function clampSidebarWidth(w: number): number {
@@ -814,7 +811,7 @@ function pruneVanishedDocs(
     const fallback = survivors[0];
     if (fallback) {
       void get()
-        .openDoc(fallback.path, { nav: 'none', recordRecent: false })
+        .openDoc(fallback.path, { nav: 'none' })
         .catch((err) => logProjectError('openDoc (vanished fallback)', err));
     }
   }
@@ -1058,12 +1055,6 @@ async function performOpenDoc(
       : { trail: pushVisit(get().trail, path) })
   });
   scheduleImmediateSave(get);
-  if (opts?.recordRecent !== false) {
-    // App-wide LRU (the sidebar's Recents section reads it until the
-    // Stage 2 desk replaces that section). Skipped on session restore so
-    // reopening the app doesn't count as a visit.
-    usePreferencesStore.getState().recordRecentFile(manifest.root, path);
-  }
   logDuration(`file-switch ${path}`, start);
 }
 
@@ -1239,7 +1230,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
           .map((e) => ({ ...e, splitDividerRatio: clampRatio(e.splitDividerRatio) }));
         set({ workingSet: entries });
         if (entries[0]) {
-          await get().openDoc(entries[0].path, { recordRecent: false });
+          await get().openDoc(entries[0].path);
         }
       }
 

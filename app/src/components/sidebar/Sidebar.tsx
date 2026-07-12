@@ -32,18 +32,13 @@ import { platformShortcut } from '../../lib/commands/shortcut-display';
 import { notify } from '../../lib/notify';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { DeleteConfirmModal } from '../modals/DeleteConfirmModal';
-import { IconClock } from '../icons/IconClock';
 import { IconPlus } from '../icons/IconPlus';
-import { IconStar } from '../icons/IconStar';
 import { FolderTree } from './FolderTree';
 import { FileRow } from './FileRow';
-import { SpecialGroup } from './SpecialGroup';
+import { Desk } from './Desk';
 import { SortMenu } from './SortMenu';
 import { buildTree, fileComparator, projectName } from './tree';
 import { useSidebarResize } from './useSidebarResize';
-
-/** How many recently-opened files the Recents zone shows. */
-const RECENT_DISPLAY_CAP = 5;
 
 type DeleteTarget = { kind: 'file' | 'directory'; path: string; name: string };
 
@@ -68,7 +63,7 @@ export function Sidebar() {
   const togglePin = useProjectStore((s) => s.togglePin);
   const sortKey = useProjectStore((s) => s.sortKey);
   const setSortKey = useProjectStore((s) => s.setSortKey);
-  const recentFiles = usePreferencesStore((s) => s.recentFiles);
+  const workingSet = useProjectStore((s) => s.workingSet);
 
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
     () => new Set()
@@ -87,19 +82,6 @@ export function Sidebar() {
 
   const pinnedPaths = useMemo(() => new Set(pinned), [pinned]);
 
-  // Recently-opened files for this project, most-recent first, resolved to
-  // live files (skipping any that have since gone away) and capped. Same
-  // source + filtering as the command-palette switcher.
-  const recentEntries = useMemo(() => {
-    if (!manifest) return [];
-    const byPath = new Map(manifest.files.map((f) => [f.path, f]));
-    return recentFiles
-      .filter((r) => r.projectPath === manifest.root)
-      .map((r) => byPath.get(r.filePath))
-      .filter((f): f is FileEntry => f !== undefined)
-      .slice(0, RECENT_DISPLAY_CAP);
-  }, [recentFiles, manifest]);
-
   // Resolve pins to live files in pin order, skipping any whose file has
   // gone away. Deletes/renames prune the stored list, so a miss here is
   // only a transient window between a watcher event and the store catching
@@ -110,6 +92,27 @@ export function Sidebar() {
       .map((p) => byPath.get(p))
       .filter((f): f is FileEntry => f !== undefined);
   }, [pinned, manifest?.files]);
+
+  // The desk's Recent tier: the working set (LRU, entry 0 = live doc),
+  // resolved to live files and deduped against the pins — a doc that is
+  // both pinned and recent renders once, under Pinned. This is the same
+  // array the summon fan and the ⌘P switcher read; never a copy.
+  const recentFiles = useMemo(() => {
+    const byPath = new Map((manifest?.files ?? []).map((f) => [f.path, f]));
+    return workingSet
+      .filter((e) => !pinnedPaths.has(e.path))
+      .map((e) => byPath.get(e.path))
+      .filter((f): f is FileEntry => f !== undefined);
+  }, [workingSet, pinnedPaths, manifest?.files]);
+
+  // The Inbox: unfiled documents, i.e. root-level loose files. A derived
+  // view, not a folder — the desk/inbox/library tiers partition the project
+  // (the library treatment lands in step 3 and drops these root docs, since
+  // by definition they are the Inbox). Independent of desk membership.
+  const inboxFiles = useMemo(
+    () => (manifest?.files ?? []).filter((f) => !f.path.includes('/')),
+    [manifest?.files]
+  );
 
   const toggleFilePin = useCallback(
     (file: FileEntry) => togglePin(file.path),
@@ -413,21 +416,10 @@ export function Sidebar() {
           </p>
         )}
 
-        <SpecialGroup
-          title="Favorites"
-          icon={<IconStar size={16} filled />}
-          files={pinnedFiles}
-          pinnedPaths={pinnedPaths}
-          onRename={renameFile}
-          onDelete={requestDeleteFile}
-          onTogglePin={toggleFilePin}
-          onExport={handleExport}
-          onConvert={handleConvert}
-        />
-        <SpecialGroup
-          title="Recents"
-          icon={<IconClock size={16} />}
-          files={recentEntries}
+        <Desk
+          pinnedFiles={pinnedFiles}
+          recentFiles={recentFiles}
+          inboxFiles={inboxFiles}
           pinnedPaths={pinnedPaths}
           onRename={renameFile}
           onDelete={requestDeleteFile}

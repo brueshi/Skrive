@@ -1523,28 +1523,119 @@ body {
   margin-block: -0.25rem;
 }
 
-/* Pinned-state marker on a tree file row: a small dimmed star at the
-   trailing edge, ambient status rather than an action. Redundant inside
-   the Favorites zone (every row is pinned there), so hidden in it. */
-.sidebar .file-pin-marker {
+/* The pin affordance at a row's trailing edge (SKR-243). A quiet pushpin
+   that occupies a fixed slot so the row never shifts as it appears: hidden
+   until the row is hovered/focused (an invitation to pin), and kept lit on
+   a pinned row as an ambient marker you can click to unpin. */
+.sidebar .file-pin-btn {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 0.75rem;
-  height: 0.75rem;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-right: -0.25rem;
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--skrive-muted);
-  opacity: 0.7;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--skrive-duration-quick) var(--skrive-easing);
 }
 
-.sidebar .file-pin-marker svg {
-  width: 100%;
-  height: 100%;
+.sidebar .file-pin-btn svg {
+  width: 0.875rem;
+  height: 0.875rem;
   display: block;
 }
 
-.sidebar .sidebar-pins .file-pin-marker {
-  display: none;
+/* Reveal on row hover/focus as a faint invitation. */
+.sidebar .file:hover .file-pin-btn,
+.sidebar .file:focus-visible .file-pin-btn,
+.sidebar .file-pin-btn:focus-visible {
+  opacity: 0.5;
+}
+
+/* A pinned row keeps it lit — ambient status rather than an action. */
+.sidebar .file.pinned .file-pin-btn {
+  opacity: 0.75;
+}
+
+/* Direct hover on the pin itself: full-strength feedback. */
+.sidebar .file-pin-btn:hover {
+  opacity: 1;
+  color: var(--skrive-fg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar .file-pin-btn {
+    transition: none;
+  }
+}
+
+/* ---- The writer's desk (SKR-243 Stage 2) ---- */
+
+/* The desk tier: Pinned + Recent, one zone set apart from the library
+   below by a hairline (inheriting the retired Favorites zone's rhythm). */
+.sidebar .desk {
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--skrive-rule);
+}
+
+/* Two labelled sub-groups (Pinned / Recent) with no internal border, so
+   the desk reads as one list under two labels. */
+.sidebar .desk-group + .desk-group {
+  margin-top: 0.125rem;
+}
+
+.sidebar .desk-group__header,
+.sidebar .sidebar-inbox__header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 1rem;
+  color: var(--skrive-muted);
+}
+
+.sidebar .desk-group__label {
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Quiet count at the trailing edge — a neutral tabular number, not a badge. */
+.sidebar .desk-group__count {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--skrive-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The Inbox: a separate thin strip under the desk — a filing queue, a
+   different job than the desk, so its own zone with a tray icon. */
+.sidebar .sidebar-inbox {
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--skrive-rule);
+}
+
+.sidebar .sidebar-inbox__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+.sidebar .sidebar-inbox__icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 /* Ancestor spines are inline-styled per row by `buildSpineStyle()` in
