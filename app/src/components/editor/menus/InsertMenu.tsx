@@ -15,6 +15,7 @@
 
 import {
   Fragment,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -71,13 +72,13 @@ export function InsertMenu({
 
   // Anchor under the trigger; re-measure live on scroll/resize (the button is
   // always mounted, so its rect is the source of truth) and as the list resizes.
-  const { ref: panelRef, pos } = useAnchoredRect(
-    null,
-    open,
-    items.length,
-    'below',
-    () => triggerRef.current?.getBoundingClientRect() ?? null
+  // liveRect MUST be a stable reference: useAnchoredRect rebuilds its reposition
+  // from it and calls setPos, so a fresh arrow each render would loop forever.
+  const liveRect = useCallback(
+    () => triggerRef.current?.getBoundingClientRect() ?? null,
+    []
   );
+  const { ref: panelRef, pos } = useAnchoredRect(null, open, items.length, 'below', liveRect);
 
   // Dismiss on a pointer press outside the panel and trigger. Bound while open;
   // the opening click has already fired before this attaches.
