@@ -2,6 +2,11 @@
 // scalable icon overhaul (SKR-243): drawn on its own grid rather than the
 // legacy 24×24 set. Colour is inherited (currentColor) so the row conveys
 // pinnable-vs-pinned through opacity/tint, not two glyphs.
+//
+// The viewBox is cropped to the glyph's stroke-inclusive bounds (measured
+// bbox 38.6,21.9 38.7x70.2, padded to a centred square) — the source art
+// left ~two-thirds of its box empty, which rendered the pin tiny in the
+// row slot.
 
 type Props = {
   size?: 16 | 24;
@@ -13,7 +18,7 @@ export function IconPin({ size = 24, className = '' }: Props) {
     <svg
       width={size}
       height={size}
-      viewBox="0 0 115.8 114"
+      viewBox="14 13 88 88"
       fill="none"
       stroke="currentColor"
       strokeWidth={5.369}
