@@ -97,7 +97,7 @@
 }
 
 /* A short hairline that floats centred in the bar, with generous flanks, so the
-   three control clusters (marks | lists + quote | insert) read as groups. */
+   permanent set's three clusters (Turn into | marks | Insert) read as groups. */
 .rich-toolbar-sep {
   width: 1px;
   height: 16px;
@@ -108,6 +108,56 @@
 
 .rich-blocktype-menu {
   min-width: 9rem;
+}
+
+/* The Insert trigger reuses the labelled-pill styling so it reads as a matched
+   pair with "Turn into", bracketing the marks. It gains an open/active state the
+   block-type trigger doesn't need. */
+.rich-toolbar-insert.active {
+  color: var(--skrive-fg);
+  background: var(--rich-tool-active);
+}
+
+/* The toolbar Insert dropdown: the discoverable catalog. A portalled panel under
+   the trigger, carrying the shipped toast's soft lift (the grammar aligns floating
+   surfaces to the toast, not the transient slash menu's flat float). A search input
+   is pinned at top; the rows below reuse the slash menu's row anatomy so the two
+   catalog surfaces read identically. */
+.rich-insert-menu {
+  position: fixed;
+  z-index: calc(var(--skrive-z-context-menu) + 1);
+  min-width: 16rem;
+  max-width: 22rem;
+  padding: 0.3rem;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-xl);
+  box-shadow: var(--skrive-shadow-sheet);
+}
+
+.rich-insert-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--skrive-rule);
+  border-radius: 0;
+  outline: none;
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 0.9em;
+  padding: 0.4rem 0.55rem;
+  margin-bottom: 0.15rem;
+}
+
+.rich-insert-input::placeholder {
+  color: var(--skrive-muted);
+}
+
+.rich-insert-list {
+  max-height: 17rem;
+  overflow-y: auto;
+  padding-top: 0.15rem;
 }
 
 /* The floating selection bubble. Portalled to <body> and fixed-positioned from

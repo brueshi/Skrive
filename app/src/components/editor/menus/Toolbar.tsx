@@ -9,19 +9,9 @@
 import { useSyncExternalStore } from 'react';
 import type { MenuController } from './controller';
 import { BlockTypeDropdown } from './BlockTypeDropdown';
+import { InsertMenu } from './InsertMenu';
 import { Tooltip } from '../../ui/Tooltip';
-import {
-  IconBold,
-  IconItalic,
-  IconInlineCode,
-  IconLink,
-  IconQuote,
-  IconBulletList,
-  IconOrderedList,
-  IconCodeBlock,
-  IconDivider,
-  IconTable
-} from './toolbar-icons';
+import { IconBold, IconItalic, IconInlineCode } from './toolbar-icons';
 import './menus.css';
 
 function ToolbarButton({
@@ -61,15 +51,17 @@ export function Toolbar({ controller }: { controller: MenuController }) {
   const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const s = snap.selection;
 
+  // The permanent set, fixed forever by the affordance grammar (SKR-243):
+  //   [ Turn into ▾ ] | B  I  ⌍code⌎ | [ Insert ▾ ]
+  // Turn into absorbs every block transformation; the marks are B / I / inline
+  // code (Link is bubble-only, resolved call 1); Insert is the discoverable
+  // catalog. Adding a button here is forbidden — see chrome-affordance-grammar.md
+  // rule 7. Divider / Table and the list/quote/code conversions that used to have
+  // standalone buttons now live in Turn into and Insert.
   return (
     <div className="rich-toolbar">
       <div className="rich-toolbar-inner" role="toolbar" aria-label="Formatting">
-        <BlockTypeDropdown
-          controller={controller}
-          blockType={s.blockType}
-          headingLevel={s.headingLevel}
-          disabled={s.inTable}
-        />
+        <BlockTypeDropdown controller={controller} selection={s} disabled={s.inTable} />
 
         <span className="rich-toolbar-sep" aria-hidden="true" />
 
@@ -79,66 +71,13 @@ export function Toolbar({ controller }: { controller: MenuController }) {
         <ToolbarButton label="Italic" shortcut="⌘I" active={s.em} onRun={() => controller.toggleMark('em')}>
           <IconItalic />
         </ToolbarButton>
-        <ToolbarButton
-          label="Link"
-          active={s.link}
-          disabled={s.empty && !s.link}
-          onRun={() => controller.openLinkEditor()}
-        >
-          <IconLink />
-        </ToolbarButton>
-
-        <span className="rich-toolbar-sep" aria-hidden="true" />
-
-        {/* Bulleted/Numbered/Quote/Code/Divider/Table are all block-type
-            conversions, same as "Turn into" above: a table cell is
-            coordinate-addressed, not a leaf block, so none of them have anything
-            to act on there (SKR-219). Disabled together for the same reason. */}
-        <ToolbarButton
-          label="Bulleted list"
-          active={s.inBulletList}
-          disabled={s.inTable}
-          onRun={() => controller.toggleBulletList()}
-        >
-          <IconBulletList />
-        </ToolbarButton>
-        <ToolbarButton
-          label="Numbered list"
-          active={s.inOrderedList}
-          disabled={s.inTable}
-          onRun={() => controller.toggleOrderedList()}
-        >
-          <IconOrderedList />
-        </ToolbarButton>
-        <ToolbarButton label="Quote" active={s.inBlockquote} disabled={s.inTable} onRun={() => controller.toggleBlockquote()}>
-          <IconQuote />
-        </ToolbarButton>
-        {/* Inline code is a mark, not a block conversion — it sits here purely
-            to pair visually with the code block, and stays enabled in tables. */}
         <ToolbarButton label="Inline code" shortcut="⌘E" active={s.code} onRun={() => controller.toggleMark('code')}>
           <IconInlineCode />
         </ToolbarButton>
-        <ToolbarButton
-          label="Code block"
-          active={s.blockType === 'code_block'}
-          disabled={s.inTable}
-          onRun={() =>
-            s.blockType === 'code_block'
-              ? controller.setParagraph()
-              : controller.setCodeBlock()
-          }
-        >
-          <IconCodeBlock />
-        </ToolbarButton>
 
         <span className="rich-toolbar-sep" aria-hidden="true" />
 
-        <ToolbarButton label="Divider" disabled={s.inTable} onRun={() => controller.insertDivider()}>
-          <IconDivider />
-        </ToolbarButton>
-        <ToolbarButton label="Table" disabled={s.inTable} onRun={() => controller.insertTable()}>
-          <IconTable />
-        </ToolbarButton>
+        <InsertMenu controller={controller} disabled={s.inTable} />
       </div>
     </div>
   );
