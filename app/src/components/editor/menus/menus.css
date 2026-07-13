@@ -150,6 +150,13 @@
   margin-bottom: 0.15rem;
 }
 
+/* Opt out of the global :focus-visible ring (index.css) — the input is the only
+   focusable target in an open menu and its hairline underline + caret already
+   read as focused; the 2px ring boxed the whole search field. */
+.rich-insert-input:focus-visible {
+  outline: none;
+}
+
 .rich-insert-input::placeholder {
   color: var(--skrive-muted);
 }
