@@ -1172,6 +1172,9 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden auto;
+  /* Reserve the scrollbar's width so trailing row affordances (the pin) are
+     never cropped by an overlaid scrollbar in WKWebView. */
+  scrollbar-gutter: stable;
 }
 
 /* Fixed top-actions bar (SKR-245): project menu on the left, Search + New
@@ -1596,7 +1599,6 @@ body {
   justify-content: center;
   width: 1.125rem;
   height: 1.125rem;
-  margin-right: -0.25rem;
   padding: 0;
   border: none;
   background: transparent;
