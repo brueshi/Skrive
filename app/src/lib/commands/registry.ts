@@ -18,6 +18,7 @@
 
 import { flushActiveEditor } from '../../components/editor/active-editor';
 import { getActiveBlockMenu } from '../../components/editor/active-surface';
+import { INSERT_CATALOG, dispatchInsert } from '../../components/editor/menus/insert-catalog';
 import { useProjectStore, logProjectError } from '../../stores/project';
 import { peekVisit } from '../../stores/working-set';
 import { fileMode } from '../../stores/save';
@@ -601,72 +602,31 @@ export function buildRegistry(deps: CommandDeps): {
     },
 
     // ============ Insert (block surface affordances) ============
-    // Palette twins of the toolbar / slash menu, gated to the mounted block
-    // surface and dispatched through its MenuController. Block conversions act
-    // on the cursor's block; the divider/table insert relative to it.
-    ...[1, 2, 3].map<Command>((level) => ({
-      id: `insert.heading${level}`,
-      label: `Heading ${level}`,
+    // Generated from INSERT_CATALOG so the palette Insert group, the toolbar
+    // Insert dropdown, and the slash menu never drift (SKR-243 grammar §3).
+    // Gated to the mounted block surface and dispatched through its
+    // MenuController; block-type specs map 1:1 to its commands (dispatchInsert).
+    // Each entry's `when` is evaluated against the live selection so it gates
+    // identically to the other two renderers.
+    ...INSERT_CATALOG.map<Command>((entry) => ({
+      id: `insert.${entry.id}`,
+      label: entry.title,
       group: 'Insert',
-      when: whenBlockSurface,
+      when: () => {
+        const menu = getActiveBlockMenu();
+        if (!menu) return false;
+        return entry.when
+          ? entry.when({ inTable: menu.getSnapshot().selection.inTable })
+          : true;
+      },
       run: () => {
-        getActiveBlockMenu()?.setHeading(level);
+        const menu = getActiveBlockMenu();
+        if (menu) dispatchInsert(menu, entry.spec);
       }
     })),
-    {
-      id: 'insert.bulletList',
-      label: 'Bulleted list',
-      group: 'Insert',
-      when: whenBlockSurface,
-      run: () => {
-        getActiveBlockMenu()?.toggleBulletList();
-      }
-    },
-    {
-      id: 'insert.orderedList',
-      label: 'Numbered list',
-      group: 'Insert',
-      when: whenBlockSurface,
-      run: () => {
-        getActiveBlockMenu()?.toggleOrderedList();
-      }
-    },
-    {
-      id: 'insert.quote',
-      label: 'Quote',
-      group: 'Insert',
-      when: whenBlockSurface,
-      run: () => {
-        getActiveBlockMenu()?.toggleBlockquote();
-      }
-    },
-    {
-      id: 'insert.codeBlock',
-      label: 'Code block',
-      group: 'Insert',
-      when: whenBlockSurface,
-      run: () => {
-        getActiveBlockMenu()?.setCodeBlock();
-      }
-    },
-    {
-      id: 'insert.divider',
-      label: 'Divider',
-      group: 'Insert',
-      when: whenBlockSurface,
-      run: () => {
-        getActiveBlockMenu()?.insertDivider();
-      }
-    },
-    {
-      id: 'insert.table',
-      label: 'Table',
-      group: 'Insert',
-      when: whenBlockSurface,
-      run: () => {
-        getActiveBlockMenu()?.insertTable();
-      }
-    },
+    // Link is a bubble-owned formatting affordance (its toolbar button retired,
+    // grammar resolved call 1), not a catalog entry — but it keeps a palette
+    // command as a discoverable path, opening the same link editor.
     {
       id: 'insert.link',
       label: 'Link',

@@ -15,57 +15,14 @@
 // preventDefault-ing into `items[undefined]` no-ops; the session stays open so
 // deleting back to a matching query brings the list back live.
 
-import { Fragment, useEffect, useMemo, useState, type ComponentType, type MouseEvent } from 'react';
+import { Fragment, useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import type { BlockSurface, BlockTypeSpec, SlashMenuState } from '../../../lib/blocksurface';
+import type { BlockSurface, SlashMenuState } from '../../../lib/blocksurface';
 import { platformShortcut } from '../../../lib/commands/shortcut-display';
 import { useAnchoredRect } from './useAnchoredRect';
-import {
-  IconParagraph,
-  IconHeading1,
-  IconHeading2,
-  IconHeading3,
-  IconQuote,
-  IconBulletList,
-  IconOrderedList,
-  IconCodeBlock,
-  IconTable,
-  IconDivider
-} from './toolbar-icons';
+import { catalogHint, filterCatalog } from './insert-catalog';
 import './menus.css';
-
-type IconC = ComponentType<{ size?: number; className?: string }>;
-type Item = {
-  title: string;
-  keywords: string;
-  spec: BlockTypeSpec;
-  Icon: IconC;
-  /** Visual group; a hairline separates consecutive groups in the menu. */
-  group: 'text' | 'list' | 'block';
-  /** macOS-symbol shortcut hint, rendered via platformShortcut. Only present
-   *  where the surface actually binds one — an aspirational hint would lie. */
-  shortcut?: string;
-};
-
-const ITEMS: Item[] = [
-  { title: 'Text', keywords: 'text paragraph body plain', spec: { kind: 'paragraph' }, Icon: IconParagraph, group: 'text' },
-  { title: 'Heading 1', keywords: 'h1 heading title', spec: { kind: 'heading', level: 1 }, Icon: IconHeading1, group: 'text' },
-  { title: 'Heading 2', keywords: 'h2 heading subtitle', spec: { kind: 'heading', level: 2 }, Icon: IconHeading2, group: 'text' },
-  { title: 'Heading 3', keywords: 'h3 heading', spec: { kind: 'heading', level: 3 }, Icon: IconHeading3, group: 'text' },
-  { title: 'Bullet list', keywords: 'bullet list unordered ul', spec: { kind: 'bullet_list' }, Icon: IconBulletList, group: 'list', shortcut: '⌘⇧8' },
-  { title: 'Numbered list', keywords: 'numbered ordered list ol', spec: { kind: 'ordered_list' }, Icon: IconOrderedList, group: 'list', shortcut: '⌘⇧7' },
-  { title: 'Quote', keywords: 'quote blockquote', spec: { kind: 'blockquote' }, Icon: IconQuote, group: 'block' },
-  { title: 'Code', keywords: 'code monospace pre fenced', spec: { kind: 'code' }, Icon: IconCodeBlock, group: 'block' },
-  { title: 'Table', keywords: 'table grid rows columns', spec: { kind: 'table' }, Icon: IconTable, group: 'block' },
-  { title: 'Divider', keywords: 'divider rule separator hr line', spec: { kind: 'divider' }, Icon: IconDivider, group: 'block' }
-];
-
-function filterItems(query: string): Item[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return ITEMS;
-  return ITEMS.filter((it) => it.title.toLowerCase().includes(q) || it.keywords.includes(q));
-}
 
 export function BlockSlashMenu({ surface }: { surface: BlockSurface }) {
   const [state, setState] = useState<SlashMenuState | null>(null);
@@ -78,7 +35,14 @@ export function BlockSlashMenu({ surface }: { surface: BlockSurface }) {
     return () => surface.onSlashMenu(null);
   }, [surface]);
 
-  const items = useMemo(() => filterItems(state?.query ?? ''), [state?.query]);
+  // `when` is decided identically across renderers (grammar §3). A slash session
+  // is bound to one block, so its table-context can't flip mid-session — read it
+  // from the surface's live selection when filtering.
+  const inTable = state ? (surface.getSelectionInfo()?.inTable ?? false) : false;
+  const items = useMemo(
+    () => filterCatalog(state?.query ?? '', { inTable }),
+    [state?.query, inTable]
+  );
   const visible = isOpen;
 
   // A session opening (not a query narrowing within one that's already open)
@@ -148,8 +112,9 @@ export function BlockSlashMenu({ surface }: { surface: BlockSurface }) {
           {items.map((item, i) => {
             const isActive = i === active;
             const prev = items[i - 1];
+            const hint = catalogHint(item);
             return (
-              <Fragment key={item.title}>
+              <Fragment key={item.id}>
                 {prev && prev.group !== item.group && (
                   <div className="rich-slash-sep" aria-hidden="true" />
                 )}
@@ -168,9 +133,9 @@ export function BlockSlashMenu({ surface }: { surface: BlockSurface }) {
                     <item.Icon size={18} />
                   </span>
                   <span className="rich-slash-title">{item.title}</span>
-                  {item.shortcut && (
+                  {hint && (
                     <span className="rich-slash-shortcut" aria-hidden="true">
-                      {platformShortcut(item.shortcut)}
+                      {hint.kind === 'shortcut' ? platformShortcut(hint.text) : hint.text}
                     </span>
                   )}
                 </button>
