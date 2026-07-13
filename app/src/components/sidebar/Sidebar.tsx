@@ -10,6 +10,7 @@
 
 import {
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type CSSProperties,
@@ -36,7 +37,7 @@ import { IconHelp } from '../icons/IconHelp';
 import { IconSettings } from '../icons/IconSettings';
 import { Desk } from './Desk';
 import { AllList } from './AllList';
-import { fileComparator, projectName } from './tree';
+import { fileComparator, filesInFolder, folderList, projectName } from './tree';
 import { useSidebarResize } from './useSidebarResize';
 
 type DeleteTarget = { kind: 'file' | 'directory'; path: string; name: string };
@@ -71,6 +72,9 @@ export function Sidebar({ onOpenSwitcher, onOpenHelp }: SidebarProps) {
   const setSortKey = useProjectStore((s) => s.setSortKey);
   const workingSet = useProjectStore((s) => s.workingSet);
   const openSettings = useProjectStore((s) => s.openSettings);
+  const activeFilter = useProjectStore((s) => s.activeFilter);
+  const setFilter = useProjectStore((s) => s.setFilter);
+  const clearFilter = useProjectStore((s) => s.clearFilter);
 
   const [creating, setCreating] = useState<
     'folio' | 'markdown' | 'text' | 'folder' | null
@@ -104,12 +108,37 @@ export function Sidebar({ onOpenSwitcher, onOpenHelp }: SidebarProps) {
       .filter((f): f is FileEntry => f !== undefined);
   }, [workingSet, pinnedPaths, manifest?.files]);
 
-  // The All list: the whole project as one flat list, ordered by sortKey.
-  // (Folder scoping — the filter facet — lands in the next step.)
+  // The All list: the whole project as one flat list, ordered by sortKey,
+  // then scoped to the active folder filter (if any).
   const sortedFiles = useMemo(
     () => [...(manifest?.files ?? [])].sort(fileComparator(sortKey)),
     [manifest?.files, sortKey]
   );
+
+  // Folders derived from the file paths — the filter facet's menu.
+  const folders = useMemo(
+    () => folderList(manifest?.files ?? []),
+    [manifest?.files]
+  );
+
+  const scopedFiles = useMemo(
+    () =>
+      activeFilter?.kind === 'folder'
+        ? filesInFolder(sortedFiles, activeFilter.value)
+        : sortedFiles,
+    [sortedFiles, activeFilter]
+  );
+
+  // Drop a folder scope whose folder no longer exists (its last document was
+  // deleted or moved out) so the All list doesn't get stuck showing nothing.
+  useEffect(() => {
+    if (
+      activeFilter?.kind === 'folder' &&
+      !folders.some((f) => f.path === activeFilter.value)
+    ) {
+      clearFilter();
+    }
+  }, [activeFilter, folders, clearFilter]);
 
   const toggleFilePin = useCallback(
     (file: FileEntry) => togglePin(file.path),
@@ -421,10 +450,14 @@ export function Sidebar({ onOpenSwitcher, onOpenHelp }: SidebarProps) {
 
             {manifest && fileCount > 0 && (
               <AllList
-                files={sortedFiles}
+                files={scopedFiles}
                 totalCount={fileCount}
                 sortKey={sortKey}
                 onSortChange={setSortKey}
+                folders={folders}
+                activeFilter={activeFilter}
+                onFilterSelect={setFilter}
+                onFilterClear={clearFilter}
                 pinnedPaths={pinnedPaths}
                 onRename={renameFile}
                 onDelete={requestDeleteFile}

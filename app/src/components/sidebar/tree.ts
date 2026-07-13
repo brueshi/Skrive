@@ -121,3 +121,53 @@ export function spineFromChain(
   const chain = [...parentChain, lastChild];
   return chain.map((isLast, i) => (isLast ? -1 : i)).filter((d) => d >= 0);
 }
+
+// ===================== Folder facet (SKR-245) =====================
+//
+// Folders are no longer a docked tree — they are a filter facet on the flat
+// All list. These helpers derive the folder list for the filter menu and
+// scope the list to a chosen folder, both straight off the file paths.
+
+export type FolderInfo = {
+  /** Project-relative folder path (e.g. "Manuscript/Chapters"). */
+  path: string;
+  /** Last path segment, for display. */
+  name: string;
+  /** Documents anywhere under this folder (recursive). */
+  count: number;
+};
+
+/** Every folder that contains at least one document (at any depth), each
+ *  with a recursive document count, sorted by path so nested folders fall
+ *  under their parent. A document contributes to every one of its ancestor
+ *  folders. Root-level loose documents belong to no folder. */
+export function folderList(files: FileEntry[]): FolderInfo[] {
+  const counts = new Map<string, number>();
+  for (const f of files) {
+    const lastSep = f.path.lastIndexOf('/');
+    if (lastSep === -1) continue; // root-level doc — no folder
+    const parts = f.path.slice(0, lastSep).split('/');
+    let running = '';
+    for (const part of parts) {
+      running = running ? `${running}/${part}` : part;
+      counts.set(running, (counts.get(running) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .map(([path, count]) => ({
+      path,
+      name: path.slice(path.lastIndexOf('/') + 1),
+      count
+    }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/** Documents under `folder` (recursively). Preserves the input order, so
+ *  passing an already-sorted list keeps the sort. */
+export function filesInFolder(
+  files: FileEntry[],
+  folder: string
+): FileEntry[] {
+  const prefix = `${folder}/`;
+  return files.filter((f) => f.path.startsWith(prefix));
+}
