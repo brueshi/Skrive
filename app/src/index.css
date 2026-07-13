@@ -1159,8 +1159,73 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden auto;
+  /* The rail is a three-part layout: a fixed top-actions bar, a scrolling
+     middle (.sidebar-scroll owns the overflow now), and a fixed utility bar
+     at the bottom. */
+  overflow: hidden;
   transition: transform var(--skrive-duration-drawer) var(--skrive-easing-out);
+}
+
+/* The scrolling middle — desk + All list. Grows to fill between the fixed
+   top-actions and utility bars; only this region scrolls. */
+.sidebar-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden auto;
+  /* Reserve the scrollbar's width so trailing row affordances (the pin) are
+     never cropped by an overlaid scrollbar in WKWebView. */
+  scrollbar-gutter: stable;
+}
+
+/* Fixed top-actions bar (SKR-245): project menu on the left, Search + New
+   glyph buttons on the right. Reads as part of the grey rail. */
+.sidebar-topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.75rem 0.5rem 0.5rem;
+  flex-shrink: 0;
+  background: var(--skrive-shell-bg);
+}
+
+.sidebar-topbar__spacer {
+  flex: 1 1 auto;
+  min-width: 0.5rem;
+}
+
+.sidebar-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+.sidebar-topbar__actions .icon-button {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--skrive-radius-md);
+}
+
+/* Fixed utility bar at the bottom of the rail: Help + Settings, receded and
+   left-aligned, set off by a hairline. */
+.sidebar-utility {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem 0.625rem;
+  flex-shrink: 0;
+  border-top: 1px solid var(--skrive-rule);
+  background: var(--skrive-shell-bg);
+}
+
+.sidebar-utility .icon-button {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--skrive-radius-sm);
+  color: var(--skrive-muted);
+}
+
+.sidebar-utility .icon-button:hover {
+  color: var(--skrive-fg);
 }
 
 .sidebar.collapsed {
@@ -1236,20 +1301,6 @@ body {
   cursor: pointer;
 }
 
-.sidebar .section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem 1rem 0.5rem;
-  position: sticky;
-  top: 0;
-  /* Match the rail (shell bg), not the editor card — the sidebar is part
-     of the shell now, and a sticky header painted in the editor bg would
-     leave a pale block over the grey when the tree scrolls. */
-  background: var(--skrive-shell-bg);
-  z-index: var(--skrive-z-sticky);
-}
-
 .sidebar .title {
   font-weight: 600;
   font-size: 10px;
@@ -1257,17 +1308,6 @@ body {
   letter-spacing: 0.08em;
   color: var(--skrive-muted);
 }
-
-.section-header__actions {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-/* Sidebar glyph buttons are ui/IconButton size=sm (SKR-210); they keep the
-   icon-button class only as the hook for the sidebar-all-header placement
-   tweak further down. */
 
 .new-file-row {
   padding: 0.25rem 1rem 0.5rem;
@@ -1293,11 +1333,6 @@ body {
 .sidebar .empty-hint strong {
   color: var(--skrive-fg);
   font-weight: 600;
-}
-
-.sidebar .file-groups {
-  flex: 1;
-  min-height: 0;
 }
 
 /* Folder rows. The morphing folder glyph (open/closed pocket line)
@@ -1362,6 +1397,9 @@ body {
   flex-direction: row;
   align-items: center;
   gap: 0.375rem;
+  /* width:100% + padding must fit the rail, or the trailing pin lands on the
+     sidebar's overflow-clip edge and WebKit crops it (SKR-245). */
+  box-sizing: border-box;
   width: 100%;
   text-align: left;
   background: transparent;
@@ -1473,56 +1511,6 @@ body {
   background: var(--skrive-fg);
 }
 
-/* Favorites — pinned files surfaced above the folder tree. A flat list
-   (pins render at depth 0, no spine guides), separated from the tree by a
-   hairline so the curated zone reads apart from containment. */
-.sidebar .sidebar-pins {
-  padding-bottom: 0.5rem;
-  margin-bottom: 0.25rem;
-  border-bottom: 1px solid var(--skrive-rule);
-}
-
-.sidebar .sidebar-pins__header {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.25rem 1rem;
-  color: var(--skrive-muted);
-}
-
-.sidebar .sidebar-pins__title {
-  font-weight: 600;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-/* Quiet count at the trailing edge of a special-group header — a neutral
-   tabular number, not a coloured badge. */
-.sidebar .sidebar-pins__count {
-  margin-left: auto;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--skrive-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-/* "All" section header — the folder tree's heading. No leading icon, so its
-   title is indented to align with the iconned Favorites/Recents titles; it
-   also carries the sort control. */
-.sidebar .sidebar-all-header {
-  margin-top: 0.25rem;
-}
-
-.sidebar .sidebar-all-header .sidebar-pins__title {
-  margin-left: calc(16px + 0.375rem);
-}
-
-/* Keep the 22px sort button from inflating the header row height. */
-.sidebar .sidebar-all-header .icon-button {
-  margin-block: -0.25rem;
-}
-
 /* The pin affordance at a row's trailing edge (SKR-243). A quiet pushpin
    that occupies a fixed slot so the row never shifts as it appears: hidden
    until the row is hovered/focused (an invitation to pin), and kept lit on
@@ -1534,7 +1522,6 @@ body {
   justify-content: center;
   width: 1.125rem;
   height: 1.125rem;
-  margin-right: -0.25rem;
   padding: 0;
   border: none;
   background: transparent;
@@ -1545,8 +1532,8 @@ body {
 }
 
 .sidebar .file-pin-btn svg {
-  width: 0.875rem;
-  height: 0.875rem;
+  width: 1rem;
+  height: 1rem;
   display: block;
 }
 
@@ -1576,12 +1563,348 @@ body {
 
 /* ---- The writer's desk (SKR-243 Stage 2) ---- */
 
-/* The desk tier: Pinned + Recent, one zone set apart from the library
-   below by a hairline (inheriting the retired Favorites zone's rhythm). */
+/* The desk tier: Pinned + Recents. Flows into the All list below, which
+   carries the separating hairline on its own top border (no double rule). */
 .sidebar .desk {
-  padding-bottom: 0.5rem;
-  margin-bottom: 0.25rem;
-  border-bottom: 1px solid var(--skrive-rule);
+  padding-bottom: 0.25rem;
+}
+
+/* The All list (SKR-245) — the flat browsable document list, set off from
+   the desk above by a hairline. Header carries the count + Sort (+ Filter). */
+.sidebar .sidebar-browse {
+  border-top: 1px solid var(--skrive-rule);
+  margin-top: 0.375rem;
+  padding: 0.625rem 0.5rem 0.375rem;
+}
+
+.sidebar .sidebar-browse__header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.25rem 0.5rem 0.375rem;
+}
+
+.sidebar .sidebar-browse__label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--skrive-muted);
+}
+
+.sidebar .sidebar-browse__count {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--skrive-muted);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.sidebar .sidebar-browse__spacer {
+  flex: 1 1 auto;
+}
+
+.sidebar .sidebar-browse__header .icon-button {
+  width: 26px;
+  height: 26px;
+}
+
+/* Active filter (funnel) — the single accent hit: accent glyph on a faint
+   accent-tinted fill. */
+.sidebar .sidebar-browse__header .icon-button.active {
+  color: var(--skrive-accent);
+  background: var(--skrive-selection);
+}
+
+/* The active-scope chip row: a removable chip plus the sort summary. */
+.sidebar .sidebar-browse__chiprow {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0 0.375rem 0.5rem;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  padding: 0.1875rem 0.375rem 0.1875rem 0.5rem;
+  border: none;
+  border-radius: var(--skrive-radius-sm);
+  background: var(--skrive-selection);
+  color: var(--skrive-accent);
+  cursor: pointer;
+  font: inherit;
+}
+
+.filter-chip__icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.filter-chip__name {
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-chip__count {
+  flex-shrink: 0;
+  font-size: 10px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-chip__x {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 0.6875rem;
+  height: 0.6875rem;
+  opacity: 0.65;
+}
+
+.filter-chip:hover .filter-chip__x {
+  opacity: 1;
+}
+
+.filter-chip__sort {
+  flex-shrink: 1;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--skrive-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The folder filter menu (SKR-245) — a soft-lifted panel with a live search
+   field and folder rows, on the DropdownMenu content. */
+.filter-menu {
+  width: 236px;
+  max-height: 60vh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: var(--skrive-bg);
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-lg);
+  box-shadow: var(--skrive-shadow-sheet);
+  font-family: var(--skrive-ui-font);
+  z-index: var(--skrive-z-context-menu);
+}
+
+.filter-menu__search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem 0.5rem;
+}
+
+.filter-menu__search-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--skrive-muted);
+}
+
+.filter-menu__input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.filter-menu__input::placeholder {
+  color: var(--skrive-muted);
+}
+
+.filter-menu__scroll {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden auto;
+}
+
+.filter-menu__group-label {
+  padding: 0.375rem 0.5625rem 0.25rem;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--skrive-muted);
+}
+
+.filter-menu__empty {
+  padding: 0.5rem 0.5625rem;
+  font-size: 12px;
+  color: var(--skrive-muted);
+}
+
+.filter-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 0.5625rem;
+  width: 100%;
+  padding: 0.4375rem 0.5625rem;
+  border: none;
+  border-radius: var(--skrive-radius-sm);
+  background: transparent;
+  color: var(--skrive-fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.filter-menu__item:hover {
+  background: var(--skrive-rule);
+}
+
+.filter-menu__item.active {
+  background: var(--skrive-selection);
+}
+
+.filter-menu__item-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--skrive-muted);
+}
+
+.filter-menu__item.active .filter-menu__item-icon {
+  color: var(--skrive-accent);
+}
+
+.filter-menu__item-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-menu__item.active .filter-menu__item-name {
+  font-weight: 500;
+}
+
+.filter-menu__item-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--skrive-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-menu__check {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--skrive-accent);
+}
+
+/* Segmented flat/folders switch for the All list (SKR-245): a subtle track
+   holding two icon segments; the active view is raised and inked so it's
+   always clear which view you're in and what the other one is. */
+.sidebar .sidebar-browse__seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--skrive-radius-sm);
+  background: var(--skrive-rule);
+}
+
+.sidebar .sidebar-browse__seg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: calc(var(--skrive-radius-sm) - 1px);
+  background: transparent;
+  color: var(--skrive-muted);
+  cursor: pointer;
+  transition:
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
+}
+
+.sidebar .sidebar-browse__seg-btn:hover {
+  color: var(--skrive-fg);
+}
+
+.sidebar .sidebar-browse__seg-btn.active {
+  background: var(--skrive-bg);
+  color: var(--skrive-fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar .sidebar-browse__seg-btn {
+    transition: none;
+  }
+}
+
+/* Folder shelf-tree (treatment D): top-level folders as flat uppercase
+   section headers that collapse on click (no chevron — the header is the
+   affordance). Nested folders reuse the .dir-label disclosure rows + spine. */
+.sidebar .shelf-section + .shelf-section {
+  margin-top: 0.125rem;
+}
+
+.sidebar .shelf-section__header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  /* Left pad matches the file-row icon column so the folder glyph lines up
+     with the document icons nested under it. */
+  padding: 0.3125rem 1rem 0.25rem 0.5rem;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.sidebar .shelf-section__icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+}
+
+.sidebar .shelf-section__header:hover,
+.sidebar .shelf-section__header:focus-visible {
+  background-color: var(--skrive-rule);
+}
+
+.sidebar .shelf-section__label {
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--skrive-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar .shelf-section__count {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--skrive-muted);
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Two labelled sub-groups (Pinned / Recent) with no internal border, so
@@ -1590,8 +1913,7 @@ body {
   margin-top: 0.125rem;
 }
 
-.sidebar .desk-group__header,
-.sidebar .sidebar-inbox__header {
+.sidebar .desk-group__header {
   display: flex;
   align-items: center;
   gap: 0.375rem;
@@ -1613,29 +1935,6 @@ body {
   font-weight: 600;
   color: var(--skrive-muted);
   font-variant-numeric: tabular-nums;
-}
-
-/* The Inbox: a separate thin strip under the desk — a filing queue, a
-   different job than the desk, so its own zone with a tray icon. */
-.sidebar .sidebar-inbox {
-  padding-bottom: 0.5rem;
-  margin-bottom: 0.25rem;
-  border-bottom: 1px solid var(--skrive-rule);
-}
-
-.sidebar .sidebar-inbox__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1rem;
-  height: 1rem;
-  flex-shrink: 0;
-}
-
-.sidebar .sidebar-inbox__icon svg {
-  width: 100%;
-  height: 100%;
-  display: block;
 }
 
 /* Ancestor spines are inline-styled per row by `buildSpineStyle()` in

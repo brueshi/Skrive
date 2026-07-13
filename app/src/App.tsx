@@ -462,7 +462,10 @@ export function App() {
           />
         ) : manifest ? (
           <>
-            <Sidebar />
+            <Sidebar
+              onOpenSwitcher={() => commandDeps.toggleFileSwitcher()}
+              onOpenHelp={() => commandDeps.toggleCheatSheet()}
+            />
             <section className="workspace">
               {activeTab && activeTab.diff ? (
                 <DiffView

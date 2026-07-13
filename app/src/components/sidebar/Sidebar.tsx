@@ -1,17 +1,16 @@
-// The sidebar. Orchestrates the project header, create flow, the Favorites
-// and Recents special groups, and the recursive "All" directory tree.
+// The sidebar (SKR-245 — reimagined). A three-part rail: a fixed top-actions
+// bar (project menu · Search · New), a scrolling middle (the desk — Pinned +
+// Recents — then the flat All list), and a fixed utility bar at the bottom
+// (Help · Settings).
 //
-// Row/tree/menu presentation lives in siblings — FileRow, FolderTree,
-// SpecialGroup, SortMenu, and the tree/spine helpers in tree.ts. The
-// drag-to-resize gesture lives in useSidebarResize.
-//
-// Phase 4 wires the right-click context menu (delete only — rename modal
-// with reference rewriting lands in Phase 6 with the link graph) and the
-// delete-confirm modal. Per-project sidebar width persistence wires through
-// Phase 9.
+// Folders are no longer a docked tree; they become a filter facet on the one
+// All list (the funnel + chip land in a later step). Row/menu presentation
+// lives in siblings — FileRow, Desk, AllList, SortMenu, and the path helpers
+// in tree.ts. The drag-to-resize gesture lives in useSidebarResize.
 
 import {
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type CSSProperties,
@@ -27,22 +26,30 @@ import {
   useProjectStore
 } from '../../stores/project';
 import { usePreferencesStore } from '../../stores/preferences';
-import { EXPORT_FORMATS, type ExportFormatId } from '../../lib/export';
+import type { ExportFormatId } from '../../lib/export';
 import { platformShortcut } from '../../lib/commands/shortcut-display';
 import { notify } from '../../lib/notify';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { DeleteConfirmModal } from '../modals/DeleteConfirmModal';
 import { IconPlus } from '../icons/IconPlus';
-import { FolderTree } from './FolderTree';
-import { FileRow } from './FileRow';
+import { IconSearch } from '../icons/IconSearch';
+import { IconHelp } from '../icons/IconHelp';
+import { IconSettings } from '../icons/IconSettings';
 import { Desk } from './Desk';
-import { SortMenu } from './SortMenu';
-import { buildTree, fileComparator, projectName } from './tree';
+import { AllList } from './AllList';
+import { fileComparator, filesInFolder, folderList, projectName } from './tree';
 import { useSidebarResize } from './useSidebarResize';
 
 type DeleteTarget = { kind: 'file' | 'directory'; path: string; name: string };
 
-export function Sidebar() {
+type SidebarProps = {
+  /** Open the ⌘P quick-open switcher (the Search affordance). */
+  onOpenSwitcher: () => void;
+  /** Open the keyboard-shortcuts cheat sheet (the Help affordance). */
+  onOpenHelp: () => void;
+};
+
+export function Sidebar({ onOpenSwitcher, onOpenHelp }: SidebarProps) {
   const manifest = useProjectStore((s) => s.manifest);
   const openProjectFromDialog = useProjectStore(
     (s) => s.openProjectFromDialog
@@ -64,21 +71,19 @@ export function Sidebar() {
   const sortKey = useProjectStore((s) => s.sortKey);
   const setSortKey = useProjectStore((s) => s.setSortKey);
   const workingSet = useProjectStore((s) => s.workingSet);
+  const openSettings = useProjectStore((s) => s.openSettings);
+  const activeFilter = useProjectStore((s) => s.activeFilter);
+  const setFilter = useProjectStore((s) => s.setFilter);
+  const clearFilter = useProjectStore((s) => s.clearFilter);
+  const allView = useProjectStore((s) => s.allView);
+  const setAllView = useProjectStore((s) => s.setAllView);
 
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
-    () => new Set()
-  );
   const [creating, setCreating] = useState<
     'folio' | 'markdown' | 'text' | 'folder' | null
   >(null);
   const [newName, setNewName] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<DeleteTarget | null>(null);
-
-  const tree = useMemo(
-    () => buildTree(manifest?.files ?? [], fileComparator(sortKey)),
-    [manifest?.files, sortKey]
-  );
 
   const pinnedPaths = useMemo(() => new Set(pinned), [pinned]);
 
@@ -93,7 +98,7 @@ export function Sidebar() {
       .filter((f): f is FileEntry => f !== undefined);
   }, [pinned, manifest?.files]);
 
-  // The desk's Recent tier: the working set (LRU, entry 0 = live doc),
+  // The desk's Recents tier: the working set (LRU, entry 0 = live doc),
   // resolved to live files and deduped against the pins — a doc that is
   // both pinned and recent renders once, under Pinned. This is the same
   // array the summon fan and the ⌘P switcher read; never a copy.
@@ -105,14 +110,37 @@ export function Sidebar() {
       .filter((f): f is FileEntry => f !== undefined);
   }, [workingSet, pinnedPaths, manifest?.files]);
 
-  // The Inbox: unfiled documents, i.e. root-level loose files. A derived
-  // view, not a folder — the desk/inbox/library tiers partition the project
-  // (the library treatment lands in step 3 and drops these root docs, since
-  // by definition they are the Inbox). Independent of desk membership.
-  const inboxFiles = useMemo(
-    () => (manifest?.files ?? []).filter((f) => !f.path.includes('/')),
+  // The All list: the whole project as one flat list, ordered by sortKey,
+  // then scoped to the active folder filter (if any).
+  const sortedFiles = useMemo(
+    () => [...(manifest?.files ?? [])].sort(fileComparator(sortKey)),
+    [manifest?.files, sortKey]
+  );
+
+  // Folders derived from the file paths — the filter facet's menu.
+  const folders = useMemo(
+    () => folderList(manifest?.files ?? []),
     [manifest?.files]
   );
+
+  const scopedFiles = useMemo(
+    () =>
+      activeFilter?.kind === 'folder'
+        ? filesInFolder(sortedFiles, activeFilter.value)
+        : sortedFiles,
+    [sortedFiles, activeFilter]
+  );
+
+  // Drop a folder scope whose folder no longer exists (its last document was
+  // deleted or moved out) so the All list doesn't get stuck showing nothing.
+  useEffect(() => {
+    if (
+      activeFilter?.kind === 'folder' &&
+      !folders.some((f) => f.path === activeFilter.value)
+    ) {
+      clearFilter();
+    }
+  }, [activeFilter, folders, clearFilter]);
 
   const toggleFilePin = useCallback(
     (file: FileEntry) => togglePin(file.path),
@@ -132,15 +160,6 @@ export function Sidebar() {
     },
     [convertToFolio]
   );
-
-  const toggleCollapse = useCallback((p: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(p)) next.delete(p);
-      else next.add(p);
-      return next;
-    });
-  }, []);
 
   // ---------- Create flow ----------
 
@@ -223,21 +242,6 @@ export function Sidebar() {
     [skipDeleteConfirm, deleteFile]
   );
 
-  const requestDeleteDirectory = useCallback(
-    (dir: string) => {
-      const lastSep = dir.lastIndexOf('/');
-      const name = lastSep === -1 ? dir : dir.slice(lastSep + 1);
-      if (skipDeleteConfirm) {
-        void deleteDirectory(dir).catch((e) =>
-          notify.error(`Couldn't delete ${name}`, e)
-        );
-        return;
-      }
-      setPendingDelete({ kind: 'directory', path: dir, name });
-    },
-    [skipDeleteConfirm, deleteDirectory]
-  );
-
   const openRenameModal = useProjectStore((s) => s.openRenameModal);
 
   const renameFile = useCallback(
@@ -286,199 +290,211 @@ export function Sidebar() {
         {/* Inner keeps its full width as the rail collapses and slides out
             via translateX, so rows glide off rather than squishing to fit. */}
         <div className="sidebar-inner">
-        <header className="section-header">
-          {manifest ? (
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger asChild>
-                <button
-                  type="button"
-                  className="project-name"
-                  title={manifest.root}
-                >
-                  <span className="project-name-text">
-                    {projectName(manifest.root)}
-                  </span>
-                  <span className="project-name-caret" aria-hidden="true">
-                    ▾
-                  </span>
-                </button>
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Portal>
-                <DropdownMenu.Content
-                  className="ctx-menu"
-                  align="start"
-                  sideOffset={4}
-                >
-                  <DropdownMenu.Item
-                    className="ctx-item"
-                    onSelect={() => void openProjectFromDialog()}
-                  >
-                    <span className="ctx-label">Open project…</span>
-                    <span className="ctx-shortcut">{platformShortcut('⌘O')}</span>
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item
-                    className="ctx-item"
-                    onSelect={() => void closeProject()}
-                  >
-                    <span className="ctx-label">Close project</span>
-                    <span className="ctx-shortcut">{platformShortcut('⌘⇧W')}</span>
-                  </DropdownMenu.Item>
-                </DropdownMenu.Content>
-              </DropdownMenu.Portal>
-            </DropdownMenu.Root>
-          ) : (
-            <span className="title">Files</span>
-          )}
-          <div className="section-header__actions">
-            <DropdownMenu.Root>
-              <Tooltip label="New file or folder">
+          {/* Fixed top: project menu · Search · New. */}
+          <header className="sidebar-topbar">
+            {manifest ? (
+              <DropdownMenu.Root>
                 <DropdownMenu.Trigger asChild>
-                  <IconButton
-                    size="sm"
-                    className="icon-button"
-                    aria-label="New file or folder"
-                    disabled={creating !== null || !manifest}
+                  <button
+                    type="button"
+                    className="project-name"
+                    title={manifest.root}
                   >
-                    <IconPlus size={16} />
-                  </IconButton>
+                    <span className="project-name-text">
+                      {projectName(manifest.root)}
+                    </span>
+                    <span className="project-name-caret" aria-hidden="true">
+                      ▾
+                    </span>
+                  </button>
                 </DropdownMenu.Trigger>
-              </Tooltip>
-              <DropdownMenu.Portal>
-                <DropdownMenu.Content
-                  className="ctx-menu"
-                  align="end"
-                  sideOffset={4}
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content
+                    className="ctx-menu"
+                    align="start"
+                    sideOffset={4}
+                  >
+                    <DropdownMenu.Item
+                      className="ctx-item"
+                      onSelect={() => void openProjectFromDialog()}
+                    >
+                      <span className="ctx-label">Open project…</span>
+                      <span className="ctx-shortcut">
+                        {platformShortcut('⌘O')}
+                      </span>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                      className="ctx-item"
+                      onSelect={() => void closeProject()}
+                    >
+                      <span className="ctx-label">Close project</span>
+                      <span className="ctx-shortcut">
+                        {platformShortcut('⌘⇧W')}
+                      </span>
+                    </DropdownMenu.Item>
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
+            ) : (
+              <span className="title">Files</span>
+            )}
+            <div className="sidebar-topbar__spacer" />
+            <div className="sidebar-topbar__actions">
+              <Tooltip label="Quick open">
+                <IconButton
+                  size="md"
+                  className="icon-button"
+                  aria-label="Quick open"
+                  disabled={!manifest}
+                  onClick={onOpenSwitcher}
                 >
-                  <DropdownMenu.Item
-                    className="ctx-item"
-                    onSelect={() => startCreate('folio')}
+                  <IconSearch size={16} />
+                </IconButton>
+              </Tooltip>
+              <DropdownMenu.Root>
+                <Tooltip label="New file or folder">
+                  <DropdownMenu.Trigger asChild>
+                    <IconButton
+                      size="md"
+                      className="icon-button"
+                      aria-label="New file or folder"
+                      disabled={creating !== null || !manifest}
+                    >
+                      <IconPlus size={16} />
+                    </IconButton>
+                  </DropdownMenu.Trigger>
+                </Tooltip>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content
+                    className="ctx-menu"
+                    align="end"
+                    sideOffset={4}
                   >
-                    <span className="ctx-label">New file</span>
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item
-                    className="ctx-item"
-                    onSelect={() => startCreate('markdown')}
-                  >
-                    <span className="ctx-label">New Markdown file</span>
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item
-                    className="ctx-item"
-                    onSelect={() => startCreate('text')}
-                  >
-                    <span className="ctx-label">New text file</span>
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item
-                    className="ctx-item"
-                    onSelect={() => startCreate('folder')}
-                  >
-                    <span className="ctx-label">New folder</span>
-                  </DropdownMenu.Item>
-                </DropdownMenu.Content>
-              </DropdownMenu.Portal>
-            </DropdownMenu.Root>
-          </div>
-        </header>
-
-        {creating !== null && (
-          <div className="new-file-row">
-            <Input
-              type="text"
-              autoFocus
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={handleNewKey}
-              onBlur={() => void confirmCreate()}
-              placeholder={
-                creating === 'folio'
-                  ? 'document name'
-                  : creating === 'markdown'
-                    ? 'filename.md'
-                    : creating === 'text'
-                      ? 'filename.txt'
-                      : 'folder-name'
-              }
-            />
-            {createError && <p className="create-error">{createError}</p>}
-          </div>
-        )}
-
-        {fileCount === 0 && creating === null && manifest && (
-          <p className="empty-hint">
-            This project has no markdown files yet. Click <strong>+</strong> to
-            create one.
-          </p>
-        )}
-
-        {!manifest && (
-          <p className="empty-hint">
-            No project open. Use <strong>{platformShortcut('⌘O')}</strong> to
-            open a folder.
-          </p>
-        )}
-
-        <Desk
-          pinnedFiles={pinnedFiles}
-          recentFiles={recentFiles}
-          inboxFiles={inboxFiles}
-          pinnedPaths={pinnedPaths}
-          onRename={renameFile}
-          onDelete={requestDeleteFile}
-          onTogglePin={toggleFilePin}
-          onExport={handleExport}
-          onConvert={handleConvert}
-        />
-
-        {manifest && fileCount > 0 && (
-          <>
-            <div className="sidebar-pins__header sidebar-all-header">
-              <span className="sidebar-pins__title">All</span>
-              <span className="sidebar-pins__count">{fileCount}</span>
-              <SortMenu sortKey={sortKey} onChange={setSortKey} />
+                    <DropdownMenu.Item
+                      className="ctx-item"
+                      onSelect={() => startCreate('folio')}
+                    >
+                      <span className="ctx-label">New file</span>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                      className="ctx-item"
+                      onSelect={() => startCreate('markdown')}
+                    >
+                      <span className="ctx-label">New Markdown file</span>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                      className="ctx-item"
+                      onSelect={() => startCreate('text')}
+                    >
+                      <span className="ctx-label">New text file</span>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                      className="ctx-item"
+                      onSelect={() => startCreate('folder')}
+                    >
+                      <span className="ctx-label">New folder</span>
+                    </DropdownMenu.Item>
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
             </div>
-            <div className="file-groups">
-              {tree.files.length > 0 && (
-                <ul className="files">
-                  {tree.files.map((file, i) => (
-                    <FileRow
-                      key={file.path}
-                      file={file}
-                      depth={0}
-                      lastChild={
-                        i === tree.files.length - 1 &&
-                        tree.folders.length === 0
-                      }
-                      parentChain={[]}
-                      pinned={pinnedPaths.has(file.path)}
-                      onRename={renameFile}
-                      onDelete={requestDeleteFile}
-                      onTogglePin={toggleFilePin}
-                      onExport={handleExport}
-                      onConvert={handleConvert}
-                    />
-                  ))}
-                </ul>
-              )}
-              {tree.folders.map((folder, i) => (
-                <FolderTree
-                  key={folder.path}
-                  folder={folder}
-                  depth={0}
-                  lastChild={i === tree.folders.length - 1}
-                  parentChain={[]}
-                  collapsed={collapsed}
-                  pinnedPaths={pinnedPaths}
-                  onToggle={toggleCollapse}
-                  onFileRename={renameFile}
-                  onFileDelete={requestDeleteFile}
-                  onFileTogglePin={toggleFilePin}
-                  onFileExport={handleExport}
-                  onFileConvert={handleConvert}
-                  onDirDelete={requestDeleteDirectory}
+          </header>
+
+          {/* Scrolling middle: create input, hints, desk, All list. */}
+          <div className="sidebar-scroll">
+            {creating !== null && (
+              <div className="new-file-row">
+                <Input
+                  type="text"
+                  autoFocus
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  onKeyDown={handleNewKey}
+                  onBlur={() => void confirmCreate()}
+                  placeholder={
+                    creating === 'folio'
+                      ? 'document name'
+                      : creating === 'markdown'
+                        ? 'filename.md'
+                        : creating === 'text'
+                          ? 'filename.txt'
+                          : 'folder-name'
+                  }
                 />
-              ))}
-            </div>
-          </>
-        )}
+                {createError && <p className="create-error">{createError}</p>}
+              </div>
+            )}
+
+            {fileCount === 0 && creating === null && manifest && (
+              <p className="empty-hint">
+                This project has no markdown files yet. Click{' '}
+                <strong>+</strong> to create one.
+              </p>
+            )}
+
+            {!manifest && (
+              <p className="empty-hint">
+                No project open. Use{' '}
+                <strong>{platformShortcut('⌘O')}</strong> to open a folder.
+              </p>
+            )}
+
+            <Desk
+              pinnedFiles={pinnedFiles}
+              recentFiles={recentFiles}
+              pinnedPaths={pinnedPaths}
+              onRename={renameFile}
+              onDelete={requestDeleteFile}
+              onTogglePin={toggleFilePin}
+              onExport={handleExport}
+              onConvert={handleConvert}
+            />
+
+            {manifest && fileCount > 0 && (
+              <AllList
+                files={scopedFiles}
+                totalCount={fileCount}
+                sortKey={sortKey}
+                onSortChange={setSortKey}
+                folders={folders}
+                activeFilter={activeFilter}
+                onFilterSelect={setFilter}
+                onFilterClear={clearFilter}
+                allView={allView}
+                onSetView={setAllView}
+                pinnedPaths={pinnedPaths}
+                onRename={renameFile}
+                onDelete={requestDeleteFile}
+                onTogglePin={toggleFilePin}
+                onExport={handleExport}
+                onConvert={handleConvert}
+              />
+            )}
+          </div>
+
+          {/* Fixed bottom utility bar: Help · Settings. */}
+          <div className="sidebar-utility">
+            <Tooltip label="Keyboard shortcuts">
+              <IconButton
+                size="sm"
+                className="icon-button"
+                aria-label="Keyboard shortcuts"
+                onClick={onOpenHelp}
+              >
+                <IconHelp size={16} />
+              </IconButton>
+            </Tooltip>
+            <Tooltip label="Settings">
+              <IconButton
+                size="sm"
+                className="icon-button"
+                aria-label="Settings"
+                onClick={() => openSettings()}
+              >
+                <IconSettings size={16} />
+              </IconButton>
+            </Tooltip>
+          </div>
         </div>
       </aside>
 
