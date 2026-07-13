@@ -104,6 +104,7 @@ export type {
   ProjectUiStateV1,
   RecentFile,
   RecentProject,
+  SidebarAllView,
   SidebarFilter,
   SidebarSortKey,
   SidebarState,

@@ -65,7 +65,14 @@ export type SidebarState = {
   /** Active scope on the All list (SKR-245). One facet at a time. Optional
    *  for back-compat; absent reads as unscoped. */
   activeFilter?: SidebarFilter;
+  /** How the All list is presented: a flat sorted list, or a browsable
+   *  folder shelf-tree (SKR-245). Optional for back-compat; absent reads as
+   *  'flat'. */
+  allView?: SidebarAllView;
 };
+
+/** All-list presentation: the flat sorted list, or the folder shelf-tree. */
+export type SidebarAllView = 'flat' | 'tree';
 
 export type ProjectUiState = {
   schemaVersion: 2;

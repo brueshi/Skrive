@@ -1884,6 +1884,89 @@ body {
   color: var(--skrive-accent);
 }
 
+/* The "All" label doubles as the flat <-> folder-tree toggle (SKR-245). The
+   chevron echoes the front-title's: muted, fades in on hover, and holds
+   rotated (pointing down) while the tree is unfurled. Its slot is always
+   reserved so revealing it never shifts the label. */
+.sidebar .sidebar-browse__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sidebar .sidebar-browse__chev {
+  flex-shrink: 0;
+  color: var(--skrive-muted);
+  opacity: 0;
+  transition:
+    opacity var(--skrive-duration-quick) var(--skrive-easing),
+    transform 160ms var(--skrive-easing-out);
+}
+
+.sidebar .sidebar-browse__toggle:hover .sidebar-browse__chev,
+.sidebar .sidebar-browse__toggle:focus-visible .sidebar-browse__chev {
+  opacity: 1;
+}
+
+.sidebar .sidebar-browse__toggle[aria-expanded='true'] .sidebar-browse__chev {
+  opacity: 1;
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar .sidebar-browse__chev {
+    transition: opacity var(--skrive-duration-quick) var(--skrive-easing);
+  }
+}
+
+/* Folder shelf-tree (treatment D): top-level folders as flat uppercase
+   section headers that collapse on click (no chevron — the header is the
+   affordance). Nested folders reuse the .dir-label disclosure rows + spine. */
+.sidebar .shelf-section + .shelf-section {
+  margin-top: 0.125rem;
+}
+
+.sidebar .shelf-section__header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3125rem 1rem 0.25rem;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.sidebar .shelf-section__header:hover,
+.sidebar .shelf-section__header:focus-visible {
+  background-color: var(--skrive-rule);
+}
+
+.sidebar .shelf-section__label {
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--skrive-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar .shelf-section__count {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--skrive-muted);
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Two labelled sub-groups (Pinned / Recent) with no internal border, so
    the desk reads as one list under two labels. */
 .sidebar .desk-group + .desk-group {

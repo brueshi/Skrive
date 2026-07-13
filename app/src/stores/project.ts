@@ -32,7 +32,12 @@ import {
   type ProjectUiStateV1,
   type WorkingSetEntryState
 } from '@skrive/shared';
-import type { LayoutMode, SidebarFilter, SidebarSortKey } from '@skrive/shared';
+import type {
+  LayoutMode,
+  SidebarAllView,
+  SidebarFilter,
+  SidebarSortKey
+} from '@skrive/shared';
 import {
   EMPTY_TRAIL,
   peekVisit,
@@ -230,6 +235,10 @@ type State = {
    *  Null when unscoped. Persisted per-project. */
   activeFilter: SidebarFilter | null;
 
+  /** How the "All" list is presented — flat sorted list or folder shelf-tree
+   *  (SKR-245). Persisted per-project. */
+  allView: SidebarAllView;
+
   /** Floating top-right backlinks panel (phase 6). Toggled from the
    *  Header; reads `linkGraph.getBacklinks(activeTab.path)` on open. */
   backlinksPanelOpen: boolean;
@@ -375,6 +384,8 @@ type Actions = {
   setFilter(filter: SidebarFilter): void;
   /** Clear the active All-list scope. */
   clearFilter(): void;
+  /** Flip the "All" list between the flat list and the folder shelf-tree. */
+  toggleAllView(): void;
 
   setActiveView(view: WorkspaceView): void;
   toggleSettings(): void;
@@ -686,7 +697,8 @@ function snapshotProjectState(state: State): ProjectUiState | null {
       width: state.sidebarWidth,
       pinned: state.pinned,
       sortKey: state.sortKey,
-      activeFilter: state.activeFilter ?? undefined
+      activeFilter: state.activeFilter ?? undefined,
+      allView: state.allView
     },
     workingSet: state.workingSet.map((entry) =>
       state.liveDoc && entry.path === state.liveDoc.path
@@ -1105,6 +1117,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   pinned: [],
   sortKey: 'name',
   activeFilter: null,
+  allView: 'flat',
 
   backlinksPanelOpen: false,
   frontmatterPanelOpen: false,
@@ -1186,7 +1199,8 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         width: SIDEBAR_DEFAULT_WIDTH,
         pinned: [],
         sortKey: 'name' as SidebarSortKey,
-        activeFilter: null
+        activeFilter: null,
+        allView: 'flat' as SidebarAllView
       };
 
       // Phase 10: pull the project's history mode (git vs checkpoint)
@@ -1216,6 +1230,7 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         pinned: sidebarState.pinned ?? [],
         sortKey: sidebarState.sortKey ?? 'name',
         activeFilter: sidebarState.activeFilter ?? null,
+        allView: sidebarState.allView ?? 'flat',
         activeView: 'editor',
         lintReport: null,
         historyMode,
@@ -1717,6 +1732,11 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   clearFilter() {
     if (get().activeFilter === null) return;
     set({ activeFilter: null });
+    scheduleImmediateSave(get);
+  },
+
+  toggleAllView() {
+    set({ allView: get().allView === 'tree' ? 'flat' : 'tree' });
     scheduleImmediateSave(get);
   },
 
