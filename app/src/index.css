@@ -1427,6 +1427,9 @@ body {
   flex-direction: row;
   align-items: center;
   gap: 0.375rem;
+  /* width:100% + padding must fit the rail, or the trailing pin lands on the
+     sidebar's overflow-clip edge and WebKit crops it (SKR-245). */
+  box-sizing: border-box;
   width: 100%;
   text-align: left;
   background: transparent;
