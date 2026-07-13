@@ -47,6 +47,12 @@ export type TabState = WorkingSetEntryState;
  *  manifest already carries. */
 export type SidebarSortKey = 'name' | 'modified' | 'created';
 
+/** An active scope on the "All" document list. Folders are the V1 facet;
+ *  the union is the seam for tags — add `| { kind: 'tag'; value: string }`
+ *  when the Tags facet lands (SKR-245 leaves it deferred). `value` is a
+ *  project-relative folder path for `kind: 'folder'`. */
+export type SidebarFilter = { kind: 'folder'; value: string };
+
 export type SidebarState = {
   visible: boolean;
   width: number;
@@ -56,6 +62,9 @@ export type SidebarState = {
   pinned?: string[];
   /** File-tree ordering. Optional for back-compat; absent reads as 'name'. */
   sortKey?: SidebarSortKey;
+  /** Active scope on the All list (SKR-245). One facet at a time. Optional
+   *  for back-compat; absent reads as unscoped. */
+  activeFilter?: SidebarFilter;
 };
 
 export type ProjectUiState = {
