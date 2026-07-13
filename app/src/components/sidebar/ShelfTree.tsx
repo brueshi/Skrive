@@ -196,6 +196,9 @@ function ShelfSection({
           }
         }}
       >
+        <span className="shelf-section__icon">
+          <IconFolder size={16} open={isExpanded} />
+        </span>
         <span className="shelf-section__label">{folder.name}</span>
         <span className="shelf-section__count">{subtreeCount(folder)}</span>
       </div>
