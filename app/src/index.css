@@ -1301,20 +1301,6 @@ body {
   cursor: pointer;
 }
 
-.sidebar .section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem 1rem 0.5rem;
-  position: sticky;
-  top: 0;
-  /* Match the rail (shell bg), not the editor card — the sidebar is part
-     of the shell now, and a sticky header painted in the editor bg would
-     leave a pale block over the grey when the tree scrolls. */
-  background: var(--skrive-shell-bg);
-  z-index: var(--skrive-z-sticky);
-}
-
 .sidebar .title {
   font-weight: 600;
   font-size: 10px;
@@ -1322,17 +1308,6 @@ body {
   letter-spacing: 0.08em;
   color: var(--skrive-muted);
 }
-
-.section-header__actions {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-/* Sidebar glyph buttons are ui/IconButton size=sm (SKR-210); they keep the
-   icon-button class only as the hook for the sidebar-all-header placement
-   tweak further down. */
 
 .new-file-row {
   padding: 0.25rem 1rem 0.5rem;
@@ -1358,11 +1333,6 @@ body {
 .sidebar .empty-hint strong {
   color: var(--skrive-fg);
   font-weight: 600;
-}
-
-.sidebar .file-groups {
-  flex: 1;
-  min-height: 0;
 }
 
 /* Folder rows. The morphing folder glyph (open/closed pocket line)
@@ -1539,56 +1509,6 @@ body {
   width: 2px;
   border-radius: 1px;
   background: var(--skrive-fg);
-}
-
-/* Favorites — pinned files surfaced above the folder tree. A flat list
-   (pins render at depth 0, no spine guides), separated from the tree by a
-   hairline so the curated zone reads apart from containment. */
-.sidebar .sidebar-pins {
-  padding-bottom: 0.5rem;
-  margin-bottom: 0.25rem;
-  border-bottom: 1px solid var(--skrive-rule);
-}
-
-.sidebar .sidebar-pins__header {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.25rem 1rem;
-  color: var(--skrive-muted);
-}
-
-.sidebar .sidebar-pins__title {
-  font-weight: 600;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-/* Quiet count at the trailing edge of a special-group header — a neutral
-   tabular number, not a coloured badge. */
-.sidebar .sidebar-pins__count {
-  margin-left: auto;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--skrive-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-/* "All" section header — the folder tree's heading. No leading icon, so its
-   title is indented to align with the iconned Favorites/Recents titles; it
-   also carries the sort control. */
-.sidebar .sidebar-all-header {
-  margin-top: 0.25rem;
-}
-
-.sidebar .sidebar-all-header .sidebar-pins__title {
-  margin-left: calc(16px + 0.375rem);
-}
-
-/* Keep the 22px sort button from inflating the header row height. */
-.sidebar .sidebar-all-header .icon-button {
-  margin-block: -0.25rem;
 }
 
 /* The pin affordance at a row's trailing edge (SKR-243). A quiet pushpin
@@ -1993,8 +1913,7 @@ body {
   margin-top: 0.125rem;
 }
 
-.sidebar .desk-group__header,
-.sidebar .sidebar-inbox__header {
+.sidebar .desk-group__header {
   display: flex;
   align-items: center;
   gap: 0.375rem;
@@ -2016,29 +1935,6 @@ body {
   font-weight: 600;
   color: var(--skrive-muted);
   font-variant-numeric: tabular-nums;
-}
-
-/* The Inbox: a separate thin strip under the desk — a filing queue, a
-   different job than the desk, so its own zone with a tray icon. */
-.sidebar .sidebar-inbox {
-  padding-bottom: 0.5rem;
-  margin-bottom: 0.25rem;
-  border-bottom: 1px solid var(--skrive-rule);
-}
-
-.sidebar .sidebar-inbox__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1rem;
-  height: 1rem;
-  flex-shrink: 0;
-}
-
-.sidebar .sidebar-inbox__icon svg {
-  width: 100%;
-  height: 100%;
-  display: block;
 }
 
 /* Ancestor spines are inline-styled per row by `buildSpineStyle()` in
