@@ -2,13 +2,18 @@
 // menu).
 //
 // The set is one unified, monochrome family (SKR-246): each glyph is drawn as
-// an illustration inside a rounded-square frame (inline code is the one bare
-// mark), all ink riding `currentColor` — no accent/sheet tokens, no duotone.
+// an illustration inside a rounded-square frame, all ink riding `currentColor`
+// — no accent/sheet tokens, no duotone.
 // That keeps every icon theme- and state-correct for free (the toolbar drives
 // inactive/active by color) and, crucially, sustainable: each icon is a
 // self-contained near-origin viewBox rather than an offset window into a
 // shared source strip. Filled paths inherit the wrapper's currentColor;
 // stroked paths carry `fill="none" stroke="currentColor"`.
+//
+// IconBold, IconItalic, and IconInlineCode take an `active` prop: the glyph
+// inside the frame is a fillable outline that strokes when off and fills solid
+// when the mark is applied — the fill is the on-state cue, drawn at matched frame
+// sizes so the marks read as an even set.
 //
 // IconChevronDown stays a line glyph (a disclosure affordance, not a
 // formatting mark), and IconStrikethrough is drawn but not yet wired (the
@@ -36,35 +41,41 @@ function Glyph({
   );
 }
 
-export function IconBold(p: IconProps) {
-  // Framed "B" — a stroked letterform inside the ring.
+export function IconBold({ active = false, ...p }: IconProps & { active?: boolean }) {
+  // Framed "B" inside the ring. The letterform is drawn as a fillable outline:
+  // inactive it is stroked (a hollow B); active (bold applied) it fills solid —
+  // the fill IS the on-state indicator. Sized to match IconItalic's frame.
   return (
-    <Glyph {...p} viewBox="0 0 100 99.4">
-      <path d="m67.7 13.3h-34.7c-10.8 0-19.6 8.4-19.6 19v34.7c0 10.5 8.8 19 19.6 19h34.7c10.9 0.1 19.4-8 19.4-19v-34.7c0-10.6-8.5-19-19.4-19zm13 53.5c0 6.8-5.3 13.1-12.7 13.1h-35.1c-7.2 0-12.9-5.5-13.3-12.9v-34.7c0-6.6 5.8-13 13.3-13h35.1c6.5 0 12.7 5.2 12.7 12.7v34.8z" />
+    <Glyph {...p} viewBox="0 0 113.4 113.4">
+      <path d="m85.9 10c9.6 0 17.5 7.5 17.5 17.6v59.7c0 9.3-6.9 16.4-17.5 16.4h-58.4c-10.5 0-17.8-7.1-17.8-16.4v-59.7c0-9.6 7.8-17.5 17.7-17.5l58.5-0.1m0-4.7h-58.5c-11.8 0-22.7 10-22.7 22.3v58.8c0 11.5 8.3 21.6 22.8 21.6h58.4c12.7 0 22.7-8.8 22.7-21.1v-59.3c0-11.7-10.2-22.3-22.7-22.3z" />
       <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={6}
+        d="m75.7 55.5c4.1-2.2 8.1-6.2 8.2-13.9 0-6.6-4-16.8-20.4-16.8h-29.9c-3.1 0.2-5.6 2.5-6.1 5.4v52.7c0 1-0.2 2.9 1.2 4.7s3.2 1.5 4.9 1.4h27.7c12.1 0 24.3-3.3 24.4-18.9 0-8.4-5.2-12.7-10-14.6zm-33.3-19.9h19c5.9-0.2 7.9 4.1 8 7.6 0 2.5-0.9 8-9.3 8h-17.7v-15.6zm18.2 42.2h-18.2v-16.1h18.9c8.4-0.1 9.9 4.9 9.9 7.7 0 4.4-2.6 8.3-10.6 8.4z"
+        fill={active ? 'currentColor' : 'none'}
+        fillRule={active ? 'evenodd' : undefined}
+        stroke={active ? undefined : 'currentColor'}
+        strokeWidth={active ? undefined : 5}
         strokeLinecap="round"
         strokeLinejoin="round"
-        d="m35.3 30.3v38.6h18.7c6.4 0.1 11.3-3.8 11.3-9.9s-3.5-10.1-11.3-10.1c6.4-1.3 8.7-4.4 8.7-8.9 0-5.8-4.5-9.9-9.7-9.9h-17.7v0.2zm0 18.6h18.4"
+        strokeMiterlimit={10}
       />
     </Glyph>
   );
 }
 
-export function IconItalic(p: IconProps) {
-  // Framed serif "I", stroked.
+export function IconItalic({ active = false, ...p }: IconProps & { active?: boolean }) {
+  // Framed serif "I". Inactive: a stroked outline; active (italic applied): the
+  // letterform fills solid — the fill is the on-state indicator (matches Bold).
   return (
     <Glyph {...p} viewBox="0 0 116.4 115">
       <path d="m87.8 10h-58.8c-9.7 0-18.3 7.5-18.3 18v60c0 8.9 6.4 17.7 18.5 17.7h58.4c10.5 0 18.4-7.7 18.2-17.7l0.1-59.9c0-9.7-7.6-18.1-18.1-18.1m-0.4-5.3c12.3 0 23.8 10.3 23.9 22.8v60.6c0.1 12.2-10.2 22.3-23.8 22.3h-58.5c-14.5 0-23.6-11-23.6-23.3v-59.6c0-11.7 10.4-22.8 24-22.8h58z" />
       <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={5.391}
+        d="m65.7 82.4h-1.8c-2.1-0.1-3.5-1.2-2.9-3.9l8.6-41.7c0.5-1.7 2.1-4.1 5.2-4.2l2.1-0.1c2.2 0.1 3.8-1.6 3.7-3.6 0-2.6-1.8-3.7-4.1-3.7h-25.5c-2 0.1-4.2 1.1-4.1 3.6 0 1.9 1.3 3.8 3.6 3.8l1.8 0.1c1.7 0 3.9 1.3 3.3 4.2l-8.6 42.1c-0.9 2.5-3.4 3.3-4.3 3.4h-2.7c-1.7 0-4.2 1.1-4.2 4.2 0.2 2.4 2.1 3.8 3.7 3.7h26.4c2.1 0 3.8-1.4 3.9-3.4 0-2.8-2-4.6-4.1-4.5z"
+        fill={active ? 'currentColor' : 'none'}
+        fillRule={active ? 'evenodd' : undefined}
+        stroke={active ? undefined : 'currentColor'}
+        strokeWidth={active ? undefined : 5.391}
         strokeLinecap="round"
         strokeLinejoin="round"
-        d="m65.7 82.4h-1.8c-2.1-0.1-3.5-1.2-2.9-3.9l8.6-41.7c0.5-1.7 2.1-4.1 5.2-4.2l2.1-0.1c2.2 0.1 3.8-1.6 3.7-3.6 0-2.6-1.8-3.7-4.1-3.7h-25.5c-2 0.1-4.2 1.1-4.1 3.6 0 1.9 1.3 3.8 3.6 3.8l1.8 0.1c1.7 0 3.9 1.3 3.3 4.2l-8.6 42.1c-0.9 2.5-3.4 3.3-4.3 3.4h-2.7c-1.7 0-4.2 1.1-4.2 4.2 0.2 2.4 2.1 3.8 3.7 3.7h26.4c2.1 0 3.8-1.4 3.9-3.4 0-2.8-2-4.6-4.1-4.5z"
       />
     </Glyph>
   );
@@ -80,12 +91,60 @@ export function IconStrikethrough(p: IconProps) {
   );
 }
 
-export function IconInlineCode(p: IconProps) {
-  // Bare `</>` — the one unframed mark (inline, not a block).
+export function IconInlineCode({ active = false, ...p }: IconProps & { active?: boolean }) {
+  // Framed `</>` (Joe's artwork) — in the family's rounded frame. The `</>` glyph
+  // (chevrons + centered slash capsule) is a fillable outline set: inactive it is
+  // stroked (hollow), active (inline code applied) it fills solid — the same
+  // outline→fill on-state as Bold / Italic. The frame stays constant. The two
+  // chevrons are pushed apart (±6) so the slash isn't crowded; the supplied paths
+  // are kept verbatim, only translated.
+  const glyphFill = active ? 'currentColor' : 'none';
+  const glyphStroke = active ? undefined : 'currentColor';
+  const glyphStrokeW = active ? undefined : 5.446;
+  const glyphFillRule = active ? 'evenodd' : undefined;
   return (
-    <Glyph {...p} viewBox="0 0 85.1 77.4">
-      <path d="m29.9 27.8-12.8 9.4c-1 0.7-1.1 2.5 0.2 3.3l12.7 8.9c0.8 0.7 2 0.5 2.6-0.2s0.5-1.9-0.3-2.4l-10.9-8v-0.3l10.9-7.7c1.6-1 0.7-3.7-1.4-3.5l-1 0.5zm38 9.3-12.6-9.5c-0.4-0.3-1.9-0.8-2.8 0.6-0.5 1.1 0 2.1 0.6 2.5l10.8 8v0.1l-10.8 7.7c-1.1 0.6-1.3 1.9-0.5 2.7s2.1 0.8 2.7 0.2l12.7-9.5c0.8 0.1 1.5-1.8-0.1-2.8z" />
-      <path d="m45.3 22.6-9 30.9c-0.3 1 0.3 2.1 1.3 2.4 0.7 0.2 1.9-0.2 2.3-1.3l9-30.9c0.3-1.1-0.4-2.2-1.4-2.4h-0.6c-0.7-0.1-1.3 0.5-1.6 1.3z" />
+    <Glyph {...p} viewBox="0 0 115.7 118">
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={5.446}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="m11 15.5c3.6-4.3 9-7.6 16.4-7.7h61.4c5.8-0.2 10.1 1.8 14.2 5.5 3.5 3.3 6.7 8.4 6.7 14.8v63.3c-0.1 9.4-7.7 18.6-19 18.6h-64.7c-10.9 0.2-18-8.5-18.9-17l-0.2-3.2v-63c0-3.9 1.7-8.1 4.1-11.3z"
+      />
+      <path
+        fill={glyphFill}
+        fillRule={glyphFillRule}
+        stroke={glyphStroke}
+        strokeWidth={glyphStrokeW}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        transform="translate(-6 0)"
+        d="m45 33.9c1.7-0.8 4.1-1 5.8 0.3s2.2 3.5 1.3 5.7c-0.8 1.7-17.7 18.2-17.8 19.1l16.8 17.5c0.8 0.6 1.5 1.9 0.9 4.7-0.7 2.4-2.7 3.7-5.1 3.5-1.7 0-3-1.3-4.3-2.7l-17.9-18.2c-2.4-2.2-3-6.7-0.4-9.3l19.2-19.2 1.5-1.4z"
+      />
+      <path
+        fill={glyphFill}
+        fillRule={glyphFillRule}
+        stroke={glyphStroke}
+        strokeWidth={glyphStrokeW}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        transform="translate(6 0)"
+        d="m80.9 59.1-16.1 16.5c-1.3 1.4-2.2 2.4-1.8 4.8 0.5 2.7 3.9 5.7 7.6 3.6 1.1-0.6 2.4-2.1 3.4-3l16.7-17.1c2.1-1.9 3.2-6.8 0-9.8l-18.7-19c-1.3-1.3-2.2-2-4.6-2-2.6 0-4.8 2.4-4.6 4.4-0.2 2.6 1.1 3.5 2.4 4.8l15.7 16.8z"
+      />
+      <rect
+        x="54.2"
+        y="29"
+        width="8"
+        height="54"
+        rx="4"
+        transform="rotate(12 58.2 56)"
+        fill={glyphFill}
+        stroke={glyphStroke}
+        strokeWidth={glyphStrokeW}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </Glyph>
   );
 }

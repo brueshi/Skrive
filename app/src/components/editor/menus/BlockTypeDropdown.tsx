@@ -99,7 +99,7 @@ export function BlockTypeDropdown({ controller, selection, disabled = false }: P
           disabled={disabled}
           onMouseDown={(e) => e.preventDefault()}
         >
-          <StateIcon size={16} />
+          <StateIcon size={20} />
           <span>{blockTypeLabel(selection)}</span>
           <IconChevronDown size={14} />
         </button>

@@ -23,7 +23,7 @@
    to keep the chrome calm. The active fill is a clear notch above hover so an
    engaged mark is unmistakable at a glance. */
 .rich-toolbar {
-  --rich-tool-ink: color-mix(in srgb, var(--skrive-fg) 68%, var(--skrive-bg));
+  --rich-tool-ink: color-mix(in srgb, var(--skrive-fg) 78%, var(--skrive-bg));
   --rich-tool-hover: color-mix(in srgb, var(--skrive-fg) 6%, transparent);
   --rich-tool-active: color-mix(in srgb, var(--skrive-fg) 12%, transparent);
 }

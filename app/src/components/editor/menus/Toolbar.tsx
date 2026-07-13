@@ -66,13 +66,13 @@ export function Toolbar({ controller }: { controller: MenuController }) {
         <span className="rich-toolbar-sep" aria-hidden="true" />
 
         <ToolbarButton label="Bold" shortcut="⌘B" active={s.strong} onRun={() => controller.toggleMark('strong')}>
-          <IconBold />
+          <IconBold size={20} active={s.strong} />
         </ToolbarButton>
         <ToolbarButton label="Italic" shortcut="⌘I" active={s.em} onRun={() => controller.toggleMark('em')}>
-          <IconItalic />
+          <IconItalic size={20} active={s.em} />
         </ToolbarButton>
         <ToolbarButton label="Inline code" shortcut="⌘E" active={s.code} onRun={() => controller.toggleMark('code')}>
-          <IconInlineCode />
+          <IconInlineCode size={20} active={s.code} />
         </ToolbarButton>
 
         <span className="rich-toolbar-sep" aria-hidden="true" />
