@@ -3512,16 +3512,16 @@ body {
   color: var(--skrive-fg);
 }
 
-/* ===================== Panel menu ===================== */
-/* The single "Panels" trigger that replaces FM/Backlinks/HI in the
-   collapsed topbar. A small dot in the corner tells you at least one
-   panel is open. */
+/* ===================== View menu ===================== */
+/* The single "View" trigger holding the FM/Backlinks/History toggles in
+   the topbar (SKR-243: PanelMenu generalized). A small dot in the corner
+   tells you at least one panel is open. */
 
-.panel-menu-trigger {
+.view-menu-trigger {
   position: relative;
 }
 
-.panel-menu-dot {
+.view-menu-dot {
   position: absolute;
   top: 4px;
   right: 4px;
@@ -3534,17 +3534,17 @@ body {
 
 /* Wider than a default context menu — checkbox items + meta labels +
    shortcut hints all need room without crowding the border. */
-.panel-menu {
+.view-menu {
   min-width: 15rem;
   padding: 0.375rem 0;
 }
 
-.panel-menu .ctx-item {
+.view-menu .ctx-item {
   padding: 0.5rem 1rem;
   gap: 1.25rem;
 }
 
-/* Meta text on a panel-menu row (e.g. "· git", "· 3"). Sits between
+/* Meta text on a view-menu row (e.g. "· git", "· 3"). Sits between
    the label and the shortcut, in muted weight. */
 .ctx-meta {
   color: var(--skrive-muted);

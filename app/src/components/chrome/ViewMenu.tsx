@@ -1,10 +1,12 @@
-// Collapsed panel-toggles affordance (topbarLayout = 'collapsed').
-// A single icon-button trigger opens a Radix DropdownMenu with one
-// checkbox item per panel: Frontmatter, Backlinks, History.
+// The View menu (SKR-243, chrome-affordance-grammar §1 home 4 + rule 5): the
+// standing home for view toggles. A single icon-button trigger opens a Radix
+// DropdownMenu with one checkbox per panel — Frontmatter, Backlinks, History.
 //
-// Designed for Option B of the topbar redesign. The mode toggle (Raw /
-// Split / Preview) is intentionally not folded in here — it's high
-// frequency and stays inline next to this trigger.
+// This generalizes the old collapsed-topbar PanelMenu: the grammar routes every
+// mode/panel toggle here (mirrored by a palette command + hotkey), so Focus mode
+// (SKR-52) and future view toggles join this list rather than growing the toolbar.
+// The Raw / Split / Preview mode cycle stays inline next to this trigger — it is
+// high-frequency and layout-specific, not a checkbox toggle.
 
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { IconButton } from '../ui/IconButton';
@@ -13,7 +15,7 @@ import { IconPanels } from '../icons/IconPanels';
 import { platformShortcut } from '../../lib/commands/shortcut-display';
 import { Tooltip } from '../ui/Tooltip';
 
-export function PanelMenu() {
+export function ViewMenu() {
   const activeTab = useProjectStore(selectLiveDoc);
   const backlinksPanelOpen = useProjectStore((s) => s.backlinksPanelOpen);
   const toggleBacklinksPanel = useProjectStore(
@@ -39,24 +41,24 @@ export function PanelMenu() {
 
   return (
     <DropdownMenu.Root>
-      <Tooltip label="Panels" side="bottom">
+      <Tooltip label="View" side="bottom">
         <DropdownMenu.Trigger asChild>
           <IconButton
             size="lg"
-            className="panel-menu-trigger"
-            aria-label="Toggle panels"
+            className="view-menu-trigger"
+            aria-label="View options"
             aria-pressed={openCount > 0}
           >
             <IconPanels size={16} />
             {openCount > 0 && (
-              <span className="panel-menu-dot" aria-hidden="true" />
+              <span className="view-menu-dot" aria-hidden="true" />
             )}
           </IconButton>
         </DropdownMenu.Trigger>
       </Tooltip>
       <DropdownMenu.Portal>
         <DropdownMenu.Content
-          className="ctx-menu panel-menu"
+          className="ctx-menu view-menu"
           align="end"
           sideOffset={4}
         >

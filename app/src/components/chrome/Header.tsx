@@ -20,7 +20,7 @@ import {
 import { IconSidebarToggle } from '../icons/IconSidebarToggle';
 import { Tooltip } from '../ui/Tooltip';
 import { FrontTitle } from './FrontTitle';
-import { PanelMenu } from './PanelMenu';
+import { ViewMenu } from './ViewMenu';
 import { WindowControls } from './WindowControls';
 import { DRAG_REGION_ATTR, handleChromeMouseDown, noDragProps } from './windowDrag';
 
@@ -133,8 +133,8 @@ export function Header({ onOpenSwitcher }: HeaderProps) {
         <div className="header-right" {...noDragProps}>
           {/* Save status lives in the editor toolbar band (EditorBar, SKR-123);
               the rendered/source switch was retired to the command palette
-              (SKR-126). The panel popover stays in the topbar. */}
-          <PanelMenu />
+              (SKR-126). The View menu (panel/mode toggles) stays in the topbar. */}
+          <ViewMenu />
         </div>
       )}
 
