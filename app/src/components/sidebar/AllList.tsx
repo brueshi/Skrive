@@ -15,7 +15,9 @@ import { FileRow } from './FileRow';
 import { ShelfTree } from './ShelfTree';
 import { SortMenu, SORT_LABELS } from './SortMenu';
 import { FilterMenu } from './FilterMenu';
+import { Tooltip } from '../ui/Tooltip';
 import { IconFolder } from '../icons/IconFolder';
+import { IconList } from '../icons/IconList';
 import { IconX } from '../icons/IconX';
 import type { FolderInfo } from './tree';
 
@@ -31,7 +33,7 @@ type Props = {
   onFilterSelect: (filter: SidebarFilter) => void;
   onFilterClear: () => void;
   allView: SidebarAllView;
-  onToggleView: () => void;
+  onSetView: (view: SidebarAllView) => void;
   pinnedPaths: ReadonlySet<string>;
   onRename: (file: FileEntry) => void;
   onDelete: (file: FileEntry) => void;
@@ -50,7 +52,7 @@ export function AllList({
   onFilterSelect,
   onFilterClear,
   allView,
-  onToggleView,
+  onSetView,
   pinnedPaths,
   onRename,
   onDelete,
@@ -78,38 +80,41 @@ export function AllList({
   return (
     <div className="sidebar-browse">
       <div className="sidebar-browse__header">
-        {canBrowseTree ? (
-          // The "All" label doubles as the flat ⇄ tree toggle. The chevron
-          // echoes the front-title's: it fades in on hover and holds,
-          // rotated, while the folder tree is unfurled.
-          <button
-            type="button"
-            className="sidebar-browse__toggle"
-            aria-expanded={isTree}
-            aria-label={isTree ? 'Show flat list' : 'Show folder tree'}
-            onClick={onToggleView}
-          >
-            <svg
-              className="sidebar-browse__chev"
-              width="9"
-              height="9"
-              viewBox="0 0 10 10"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M3.5 2 L6.5 5 L3.5 8" />
-            </svg>
-            <span className="sidebar-browse__label">All</span>
-          </button>
-        ) : (
-          <span className="sidebar-browse__label">All</span>
-        )}
+        <span className="sidebar-browse__label">All</span>
         <span className="sidebar-browse__count">{totalCount}</span>
         <span className="sidebar-browse__spacer" />
+        {canBrowseTree && (
+          // Segmented flat/folders switch — both views always visible, the
+          // active one filled, one click to switch.
+          <div
+            className="sidebar-browse__seg"
+            role="group"
+            aria-label="All view"
+          >
+            <Tooltip label="Flat list">
+              <button
+                type="button"
+                className={`sidebar-browse__seg-btn${!isTree ? ' active' : ''}`}
+                aria-pressed={!isTree}
+                aria-label="Flat list"
+                onClick={() => onSetView('flat')}
+              >
+                <IconList size={16} />
+              </button>
+            </Tooltip>
+            <Tooltip label="Folders">
+              <button
+                type="button"
+                className={`sidebar-browse__seg-btn${isTree ? ' active' : ''}`}
+                aria-pressed={isTree}
+                aria-label="Folders"
+                onClick={() => onSetView('tree')}
+              >
+                <IconFolder size={16} />
+              </button>
+            </Tooltip>
+          </div>
+        )}
         <SortMenu sortKey={sortKey} onChange={onSortChange} />
         <FilterMenu
           folders={folders}

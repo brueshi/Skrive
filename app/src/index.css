@@ -1889,44 +1889,48 @@ body {
   color: var(--skrive-accent);
 }
 
-/* The "All" label doubles as the flat <-> folder-tree toggle (SKR-245). The
-   chevron echoes the front-title's: muted, fades in on hover, and holds
-   rotated (pointing down) while the tree is unfurled. Its slot is always
-   reserved so revealing it never shifts the label. */
-.sidebar .sidebar-browse__toggle {
+/* Segmented flat/folders switch for the All list (SKR-245): a subtle track
+   holding two icon segments; the active view is raised and inked so it's
+   always clear which view you're in and what the other one is. */
+.sidebar .sidebar-browse__seg {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--skrive-radius-sm);
+  background: var(--skrive-rule);
+}
+
+.sidebar .sidebar-browse__seg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: none;
+  border-radius: calc(var(--skrive-radius-sm) - 1px);
   background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-.sidebar .sidebar-browse__chev {
-  flex-shrink: 0;
   color: var(--skrive-muted);
-  opacity: 0;
+  cursor: pointer;
   transition:
-    opacity var(--skrive-duration-quick) var(--skrive-easing),
-    transform 160ms var(--skrive-easing-out);
+    color var(--skrive-duration-quick) var(--skrive-easing),
+    background-color var(--skrive-duration-quick) var(--skrive-easing);
 }
 
-.sidebar .sidebar-browse__toggle:hover .sidebar-browse__chev,
-.sidebar .sidebar-browse__toggle:focus-visible .sidebar-browse__chev {
-  opacity: 1;
+.sidebar .sidebar-browse__seg-btn:hover {
+  color: var(--skrive-fg);
 }
 
-.sidebar .sidebar-browse__toggle[aria-expanded='true'] .sidebar-browse__chev {
-  opacity: 1;
-  transform: rotate(90deg);
+.sidebar .sidebar-browse__seg-btn.active {
+  background: var(--skrive-bg);
+  color: var(--skrive-fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar .sidebar-browse__chev {
-    transition: opacity var(--skrive-duration-quick) var(--skrive-easing);
+  .sidebar .sidebar-browse__seg-btn {
+    transition: none;
   }
 }
 

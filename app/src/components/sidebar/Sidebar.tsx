@@ -76,7 +76,7 @@ export function Sidebar({ onOpenSwitcher, onOpenHelp }: SidebarProps) {
   const setFilter = useProjectStore((s) => s.setFilter);
   const clearFilter = useProjectStore((s) => s.clearFilter);
   const allView = useProjectStore((s) => s.allView);
-  const toggleAllView = useProjectStore((s) => s.toggleAllView);
+  const setAllView = useProjectStore((s) => s.setAllView);
 
   const [creating, setCreating] = useState<
     'folio' | 'markdown' | 'text' | 'folder' | null
@@ -461,7 +461,7 @@ export function Sidebar({ onOpenSwitcher, onOpenHelp }: SidebarProps) {
                 onFilterSelect={setFilter}
                 onFilterClear={clearFilter}
                 allView={allView}
-                onToggleView={toggleAllView}
+                onSetView={setAllView}
                 pinnedPaths={pinnedPaths}
                 onRename={renameFile}
                 onDelete={requestDeleteFile}

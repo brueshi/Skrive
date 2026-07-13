@@ -384,8 +384,8 @@ type Actions = {
   setFilter(filter: SidebarFilter): void;
   /** Clear the active All-list scope. */
   clearFilter(): void;
-  /** Flip the "All" list between the flat list and the folder shelf-tree. */
-  toggleAllView(): void;
+  /** Set how the "All" list is presented (flat list or folder shelf-tree). */
+  setAllView(view: SidebarAllView): void;
 
   setActiveView(view: WorkspaceView): void;
   toggleSettings(): void;
@@ -1735,8 +1735,9 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     scheduleImmediateSave(get);
   },
 
-  toggleAllView() {
-    set({ allView: get().allView === 'tree' ? 'flat' : 'tree' });
+  setAllView(view: SidebarAllView) {
+    if (get().allView === view) return;
+    set({ allView: view });
     scheduleImmediateSave(get);
   },
 
