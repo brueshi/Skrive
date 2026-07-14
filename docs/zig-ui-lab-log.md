@@ -204,3 +204,173 @@ Isolation: pass (repo-wide grep clean, `bun run typecheck` untouched).
 R8 shelf-packed glyph atlas (`gfx/atlas.zig`), textured-quad mode in the
 batcher (the `flush()` seam is ready), `draw.text` + `measureText`, the
 settings-page demo composition, and real text in the toast taste test.
+
+---
+
+## 2026-07-13 — Stage 2: text — stb_truetype, the glyph atlas, and draw.text
+
+**Branch:** `joe/skr-233-zig-ui-lab-hand-drawn-interface-research`
+**Commit:** `d09b5a7602961a9a347f71c0559af07bb971b95e`
+
+**Toolchain.**
+- Zig 0.16.0, sokol-zig `54776d6`, sokol-shdc `87a6914` — all pins unchanged.
+- New vendored code: `stb_truetype.h` v1.26 (public domain, single header,
+  fetched at nothings/stb `6e9f34d`) in `vendor/stb/`, with one marked local
+  patch (see kerning, below). Implementation compiled as its own C TU
+  (`stb_truetype.c`) so the Zig side only @cImports declarations.
+- Fonts: Inter Regular + Medium 4.1 static TTFs in `assets/`, vendored under
+  the SIL OFL 1.1 (license file alongside; OFL permits redistribution, so the
+  FSL source-zip question is a non-issue). The optional serif was skipped —
+  Fraunces ships variable-only TTFs in easy reach, stb does not do variations,
+  and no Stage 2 composition needed it.
+- `@cImport` under Zig 0.16: works unchanged (needs `link_libc = true` and an
+  include path on the module). `stbtt_fontinfo` comes through as a real
+  160-byte struct. No translate-c fight; the incantation is three lines in
+  `build.zig`. Fonts embed via `addAnonymousImport` + `@embedFile`.
+
+**What was built.**
+- `gfx/text.zig` — the stb wrapper: load, scaled line metrics, glyph index,
+  advance, kern, rasterize-to-tight-bitmap. One deliberate scale decision:
+  sizes map through `stbtt_ScaleForMappingEmToPixels`, not
+  `ScaleForPixelHeight` — em mapping is what CSS font-size means, and for
+  Inter (hhea ascent−descent ≈ 1.21 em) the pixel-height scale would render
+  ~17% smaller than the same nominal size in a browser, poisoning every
+  side-by-side.
+- `gfx/atlas.zig` — single-channel R8, shelf packing with 1px padding, cache
+  keyed (font id, glyph, device px). 1024² to start, doubles by reallocation
+  (CPU pixels are the source of truth; packed coordinates survive growth; the
+  GPU image + view are recreated). sokol has no partial image updates and
+  allows one updateImage per image per frame, so a dirty flag re-uploads the
+  whole atlas once per frame at most — 1 MB when it happens, and it happens
+  only on frames that rasterized a new glyph. Nearest sampling: glyph quads
+  are texel-aligned by construction, so there is nothing to interpolate.
+- Batcher: glyph mode (2) in the existing mode flag; the uv attribute carried
+  since Stage 1 finally does its job. The atlas binds unconditionally — with
+  exactly one texture there is never a mid-frame texture change, so the
+  flush() seam stays in reserve and **shapes + glyphs are one draw call, not
+  the budgeted two**. (This shdc pin generates view-based bindings —
+  `VIEW_atlas_tex` — so the atlas exposes an `sg.View`.)
+- `ui/draw.zig` — `text(pos, str, style)` (UTF-8 decode via std.unicode,
+  kerning, float pen advance, per-glyph origin snap to integer device
+  pixels), `measureText` (same pen math, no atlas), `textWrapped` (greedy
+  break at spaces, `\n` forced). Positions are line-box top-left, CSS mental
+  model. Letter-spacing supported (the shipped toast title is -0.01em).
+- Scenes: settings page (key 5: 20px heading, card, 12px section label, two
+  14px/21 paragraphs, hairline, three label rows), text wall (key 6, 2,338
+  glyph quads), toast with real text per the shipped CSS. HUD is now
+  on-screen text (bottom-left, 11px, once-per-second refresh; deliberately
+  does not mark the frame dirty — that would repaint 1/s forever and break
+  frame-on-demand). `--bench` keeps terminal prints and gains settings,
+  text-wall, and idle-settings phases, plus an atlas census on clean exit.
+
+**The kerning fight (the session's one real excavation).** stb's
+`GetGlyphKernAdvance` returned 0 for every classic pair (AV, To, LT) in
+Inter. Diagnosis by walking Inter's GPOS by hand: the `kern` feature routes
+its class-based pair kerning through a **lookup type 9 (Extension
+Positioning) wrapping the type 2 pair subtable**, and stb's "basic GPOS
+kerning" iterates only direct type-2 lookups — extension-wrapped kerning is
+silently invisible. Large fonts wrap their GPOS in extensions as a matter of
+course, so this likely bites most modern fonts, not just Inter. Fixed with a
+~15-line marked patch in the vendored header ([zig-ui lab patch] comments):
+unwrap ExtensionPosFormat1, then process the wrapped subtable as before.
+After the patch: AV −140 units (−1.91 px at 14px/2x), To −160, LT −197.
+Worth knowing forever: stb + a modern font can *look* fine while kerning is
+entirely dead — measure a pair before trusting it.
+
+**One shader regression, caught and reversed.** First cut sampled the atlas
+unconditionally at the top of main() (to keep control flow uniform for the
+implicit-derivative rule). That texture fetch per fragment cost the
+100x-overdraw stress scene ~28%: 14.3 → 19.9 ms. Moved into the mode branch:
+back to 14.49 ms. Safe because mode is constant per quad, so flow is uniform
+per primitive. UI-plausible scenes never noticed either way (8.35 ms both
+ways) — fill-rate-bound regimes punish per-fragment costs that real UI
+frames absorb.
+
+**Measurements (macOS daily driver, ReleaseFast, 1200x800 @ 2x, window
+frontmost, via --bench).**
+- toast: 74 quads, **1 draw call**, build 57 us, 8.36 ms avg (119.6 fps).
+- settings: 394 quads, **1 draw call**, build 293 us, 8.39 ms (119.2 fps).
+  GPU cross-check via `ioreg` during the phase: ~21% (machine in use;
+  ambient was ~4% in Stage 1 — the scene costs a few ms of GPU, not more).
+- text-wall: 2,338 quads, **1 draw call**, build 1.38 ms, 8.44 ms (118.4
+  fps). The build cost is the immediate-mode text tax: every frame re-walks
+  UTF-8, kerning (a full GPOS walk per pair in stb — no cache yet), atlas
+  hash lookups, and quad pushes for ~2.3k glyphs. Still holds 120 Hz with
+  the frame budget at 8.33 ms, but this line item is the one to watch when
+  Stage 3+ adds real compositions; a kern-pair cache is the obvious first
+  lever if it ever matters.
+- Stage 1 baselines re-run, unchanged: stress-large 14.48 ms (was 14.3),
+  shadows 23.34 (was 23.3), stress-small 8.35 (was 8.36).
+- Idle with text on screen: **0 presents over 15 s** in both idle phases,
+  CPU 1.2% (`ps` during the phase) — the Stage 0/1 baseline holds.
+- Atlas census after all phases: **1024x1024, 89 glyphs cached, 3.6%
+  occupied, 0 growth events.** The growth path exists but nothing at lab
+  scale exercises it; one font family x four UI sizes barely dents 1024².
+- Cold-start cost: first settings frame rasterizes its ~80 glyphs; visible
+  as the phase's worst-frame outlier only. Steady state never rasterizes.
+
+**The text-quality verdict (the stage's whole point).** Screenshots in
+`docs/zig-ui-lab/`: lab settings at 2x and 1x, lab toast, and Chromium
+references at dpr 2 in two flavors — the shipped system stack
+(product-honest) and the *same Inter TTFs* via @font-face with
+font-synthesis off (isolates rasterizer from typeface).
+- **Against Chromium rendering the same Inter files: near-parity at 2x.** In
+  3x-magnified crops of the 15px toast title and the 14px paragraphs, stems,
+  spacing, and kerning are pixel-comparable; Chromium renders a touch
+  heavier (gamma-aware blending), the lab a hair lighter and slightly
+  crisper. At reading distance they are hard to tell apart. The 14px
+  paragraphs produced **identical line breaks** to Chromium at the same
+  width — the measure math agrees with a real engine to sub-pixel totals.
+- **Against the shipped app (system stack): the visible delta is the
+  typeface, not the rasterizer.** SF Pro at weight 600 vs our Inter Medium
+  500 reads as a different, slightly heavier voice. The lab also lacks
+  weight 450/600 (only Regular/Medium vendored), so the toast eyebrow/title
+  sit one notch light of spec. Fixable by vendoring more weights; not a
+  rendering problem.
+- **1x is where lab-tier text pays its tax**: readable but visibly rougher —
+  unhinted stems wobble between 1 and 2 pixels. Expected (plan 4.3 defers
+  hinting); the daily driver is 2x everywhere, so the wall the lab feared
+  did not materialize where it matters.
+- **Shimmer: verified zero, empirically.** Captured the window at two
+  positions and pixel-diffed the content: 0 of 3.55M pixels differ beyond
+  capture noise (max delta 6/255). Glyph origins are snapped to device
+  pixels and window-relative, so there is no mechanism for drag shimmer —
+  and now that is measured, not argued.
+- Honest bottom line: **text did not kill the lab.** stb grayscale AA at
+  retina 2x is within squinting distance of Chromium on identical font
+  files; the true gaps are typeface/weight inventory and 1x hinting, both
+  understood and both out of lab scope by design.
+
+**What fought back (beyond kerning).**
+- The GPOS extension-lookup gap (above) — half the session's debugging.
+- zsh does not word-split unquoted parameters: a screenshot helper passed
+  `"--settings --dpi1"` as one argument, which the app ignored, and the "1x
+  settings" screenshot silently captured the default demo scene at 2x.
+  Caught on inspection; re-shot. Lab args now always passed explicitly.
+- The on-screen HUD wanted to mark the frame dirty on its once-per-second
+  refresh; that would have made idle render at 1 fps forever. The HUD line
+  now rides the next natural repaint instead (numbers freeze when idle,
+  which is honest).
+- Nothing else in Zig 0.16 bit: `std.mem.trimRight` is now `trimEnd`, and
+  this sokol pin wants `ImageData.mip_levels` + view-based texture bindings
+  (`sg.makeView`) rather than the older subimage/images API.
+
+**Exit criteria.** 14px paragraph comfortably readable at 2x: pass. Glyphs
+on pixel boundaries, no shimmer on window move: pass (pixel-diff zero).
+Atlas + text ≤ 1 extra draw call: pass, with margin — the whole frame is
+still **1 draw call** (unconditional atlas bind; flush() seam still unused).
+Frame-on-demand with text resident: pass (0 presents / 15 s, ~1.2% CPU).
+Screenshots + verdict in docs/zig-ui-lab/: pass. Isolation: pass (repo grep
+clean outside labs/, `bun run typecheck` untouched).
+
+**Deviations from the plan.** None of record: the vendored-header patch is a
+bug fix within decision 4.3's "stb_truetype first" (kerned text is an
+explicit Stage 2 deliverable), not a text-engine change. The serif font was
+optional and skipped. Draw calls landed under budget, not over.
+
+**Next session (Stage 3, input + identity + the first button).**
+`ui/context.zig` (input snapshot, hot/active/focus IDs), hit testing,
+`widgets.button` with the canonical press/cancel state machine, keyboard
+focus + Space/Enter activation, pointer cursor, and a demo row of buttons
+with visible effects. The renderer is ready for it: measureText exists for
+sizing, and text-in-a-button costs nothing the bench hasn't already priced.
