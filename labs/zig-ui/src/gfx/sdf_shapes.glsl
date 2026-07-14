@@ -1,8 +1,8 @@
 //------------------------------------------------------------------------------
-//  sdf_shapes.glsl — the Stage 1 shape shader (annotated sokol-shdc GLSL).
+//  sdf_shapes.glsl — the shape + glyph shader (annotated sokol-shdc GLSL).
 //
-//  One shader covers every Stage 1 primitive. Each quad carries its target
-//  rounded rect (center + half-size, logical px) and a mode flag:
+//  One shader covers every primitive. Each quad carries its target rounded
+//  rect (center + half-size, logical px) and a mode flag:
 //
 //    mode 0 — fill + border: signed distance to the rounded-rect boundary,
 //             smoothstep AA half a device pixel wide; a border (drawn inside
@@ -13,6 +13,13 @@
 //             exact 1D convolution along x via an erf approximation, four
 //             Gaussian samples along y. The quad must be the target rect
 //             expanded by 3*sigma.
+//    mode 2 — glyph: the R8 atlas sampled as coverage, tinted by the vertex
+//             color. The atlas is bound unconditionally (there is exactly
+//             one), which is what keeps the whole frame at one draw call.
+//
+//  The atlas sample happens before the mode branch: mode is uniform within
+//  a quad but not across the batch, and sampling in uniform control flow
+//  sidesteps any divergent-derivative question for free at this scale.
 //
 //  Regenerate the checked-in .zig artifact with `zig build shaders`.
 //------------------------------------------------------------------------------
@@ -52,6 +59,9 @@ void main() {
 @end
 
 @fs fs
+layout(binding=0) uniform texture2D atlas_tex;
+layout(binding=0) uniform sampler atlas_smp;
+
 in vec2 pos;
 in vec4 rect;
 in vec2 uv;
@@ -121,8 +131,15 @@ void main() {
         }
         float cover = 1.0 - smoothstep(-aa, aa, d);
         frag_color = vec4(c.rgb, c.a * cover);
-    } else {
+    } else if (mode < 1.5) {
         frag_color = vec4(color.rgb, color.a * rounded_shadow(p, rect.zw, geom.y, geom.x));
+    } else {
+        // Sampling inside the branch is safe here: mode is constant across
+        // each quad's triangles, so control flow is uniform per primitive
+        // and the implicit-derivative rule is not violated in practice.
+        // Sampling unconditionally at the top of main cost ~28% frame time
+        // in the 100x-overdraw stress scene (measured; see the Stage 2 log).
+        frag_color = vec4(color.rgb, color.a * texture(sampler2D(atlas_tex, atlas_smp), uv).r);
     }
 }
 @end

@@ -26,16 +26,27 @@ pub fn build(b: *std.Build) !void {
         },
     }));
 
+    const root_module = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true, // stb_truetype uses libc (malloc, math)
+        .imports = &.{
+            .{ .name = "sokol", .module = dep_sokol.module("sokol") },
+        },
+    });
+    // stb_truetype: vendored single header. Declarations come in via
+    // @cImport in gfx/text.zig; the implementation is its own C TU.
+    root_module.addIncludePath(b.path("vendor/stb"));
+    root_module.addCSourceFile(.{ .file = b.path("vendor/stb/stb_truetype.c") });
+    // Fonts are embedded (@embedFile by module name); assets/ sits outside
+    // the src/ module root, so they arrive as anonymous imports.
+    root_module.addAnonymousImport("Inter-Regular.ttf", .{ .root_source_file = b.path("assets/Inter-Regular.ttf") });
+    root_module.addAnonymousImport("Inter-Medium.ttf", .{ .root_source_file = b.path("assets/Inter-Medium.ttf") });
+
     const exe = b.addExecutable(.{
         .name = "zig-ui",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "sokol", .module = dep_sokol.module("sokol") },
-            },
-        }),
+        .root_module = root_module,
     });
     b.installArtifact(exe);
 

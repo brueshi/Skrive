@@ -33,6 +33,7 @@ pub const Vertex = extern struct {
 pub const Mode = enum(u8) {
     shape = 0, // fill + optional border
     shadow = 1,
+    glyph = 2, // uv samples the atlas as coverage, tinted by color
 };
 
 /// One rasterized quad. `x y w h` is the geometry actually covered by the
@@ -155,12 +156,18 @@ pub const Batch = struct {
         sg.updateBuffer(self.buf, sg.asRange(self.verts.items));
     }
 
-    /// Issue the frame's draw calls. Call inside the render pass.
-    pub fn draw(self: *Batch, fb_size: [2]f32, dpi_scale: f32) void {
+    /// Issue the frame's draw calls. Call inside the render pass. The glyph
+    /// atlas is bound unconditionally: with exactly one texture in the
+    /// renderer there is never a texture change mid-frame, so shapes and
+    /// glyphs share one draw call and the flush() seam stays in reserve for
+    /// a second texture (images/icons) that Stage 2 deliberately lacks.
+    pub fn draw(self: *Batch, fb_size: [2]f32, dpi_scale: f32, atlas_view: sg.View, atlas_smp: sg.Sampler) void {
         if (self.ranges.items.len == 0) return;
         sg.applyPipeline(self.pip);
         var bindings: sg.Bindings = .{};
         bindings.vertex_buffers[0] = self.buf;
+        bindings.views[shd.VIEW_atlas_tex] = atlas_view;
+        bindings.samplers[shd.SMP_atlas_smp] = atlas_smp;
         sg.applyBindings(bindings);
         const params: shd.VsParams = .{ .fb_size = fb_size, .dpi_scale = dpi_scale };
         sg.applyUniforms(shd.UB_vs_params, sg.asRange(&params));

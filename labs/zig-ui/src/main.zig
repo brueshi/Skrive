@@ -1,18 +1,20 @@
 //------------------------------------------------------------------------------
-//  Skrive Zig UI Lab — Stage 1: rect batcher, SDF shape shader, draw API.
+//  Skrive Zig UI Lab — Stage 2: text. stb_truetype, the glyph atlas, and
+//  draw.text on top of the Stage 1 batcher.
 //
 //  Renders on demand (see the Stage 0 note: sokol_app has no public
 //  frame-on-demand mode at the pinned commit, so clean frames early-out of
 //  all GPU work instead). Space toggles continuous rendering for
-//  benchmarking. HUD is terminal prints only: per-frame CPU timings, quad
-//  and draw-call counts, at most once per second.
+//  benchmarking. The HUD is on-screen text (bottom-left, once-per-second
+//  refresh); --bench keeps the parseable terminal prints instead.
 //
 //  Scenes (number keys):
 //    1 — demo: fills, radii, borders, shadows for AA eyeballing (default)
 //    2 — toast taste test: the Skrive toast-card composed by hand, exact
-//        light-theme token values; left = shipped spec (no border), right =
-//        the plan's variant (warm surface + 1px hairline)
+//        light-theme token values and real text per the shipped CSS
 //    3 — stress: 10,000 randomized rounded rects; S toggles shadows on 10%
+//    5 — settings: heading + paragraphs + labels over Stage 1 surfaces
+//    6 — text wall: the window filled with wrapped 14px paragraphs
 //------------------------------------------------------------------------------
 const std = @import("std");
 const sokol = @import("sokol");
@@ -23,7 +25,12 @@ const sglue = sokol.glue;
 const stime = sokol.time;
 
 const batch_mod = @import("gfx/batch.zig");
+const atlas_mod = @import("gfx/atlas.zig");
+const text_mod = @import("gfx/text.zig");
 const draw = @import("ui/draw.zig");
+
+const inter_regular_ttf = @embedFile("Inter-Regular.ttf");
+const inter_medium_ttf = @embedFile("Inter-Medium.ttf");
 
 const hud_print_interval_sec: f64 = 1.0;
 // Base clear color: neutral warm grey, placeholder until Stage 5 tokens.
@@ -46,7 +53,7 @@ const skrive = struct {
     };
 };
 
-const Scene = enum { demo, toast, stress };
+const Scene = enum { demo, toast, stress, settings, text_wall };
 
 const stress_count = 10_000;
 const StressRect = struct {
@@ -94,7 +101,10 @@ const bench = struct {
         .{ .name = "stress-large-shadows", .scene = .stress, .shadows = true },
         .{ .name = "stress-small", .scene = .stress, .stress_size = .small },
         .{ .name = "toast", .scene = .toast },
+        .{ .name = "settings", .scene = .settings },
+        .{ .name = "text-wall", .scene = .text_wall },
         .{ .name = "idle-stress-on-demand", .scene = .stress, .continuous = false, .warmup_sec = 1, .measure_sec = 15 },
+        .{ .name = "idle-settings-on-demand", .scene = .settings, .continuous = false, .warmup_sec = 1, .measure_sec = 15 },
     };
 
     var active: bool = false;
@@ -175,6 +185,9 @@ const bench = struct {
 const state = struct {
     var pass_action: sg.PassAction = .{};
     var batch: batch_mod.Batch = undefined;
+    var atlas: atlas_mod.Atlas = undefined;
+    var font_regular: text_mod.Font = undefined;
+    var font_medium: text_mod.Font = undefined;
     var scene: Scene = .demo;
     var stress_shadows: bool = false;
     var stress_size: StressSize = .large;
@@ -183,13 +196,19 @@ const state = struct {
     var continuous: bool = false;
     var present_count: u64 = 0;
     var pulse_phase: f32 = 0.0;
-    // HUD accumulators, reset on each print
+    // HUD accumulators, reset on each refresh of the on-screen line
     var hud_last_print_ticks: u64 = 0;
     var hud_presents: u64 = 0;
     var hud_build_ticks: u64 = 0;
     var hud_upload_ticks: u64 = 0;
     var hud_encode_ticks: u64 = 0;
     var hud_frame_dur_sec: f64 = 0.0;
+    // The rendered HUD line. Refreshed at most once per second at frame end,
+    // so what is on screen lags the live numbers by up to a second and the
+    // quad/draw counts include the HUD's own glyphs — accepted, and honest
+    // about what a frame actually costs.
+    var hud_text_buf: [160]u8 = undefined;
+    var hud_text_len: usize = 0;
 };
 
 fn initStressRects() void {
@@ -237,6 +256,9 @@ export fn init() void {
         .clear_value = .{ .r = clear_r, .g = clear_g, .b = clear_b, .a = 1 },
     };
     state.batch = batch_mod.Batch.init(std.heap.page_allocator);
+    state.atlas = atlas_mod.Atlas.init(std.heap.page_allocator);
+    state.font_regular = text_mod.Font.init(0, inter_regular_ttf) catch @panic("zig-ui: Inter Regular failed to parse");
+    state.font_medium = text_mod.Font.init(1, inter_medium_ttf) catch @panic("zig-ui: Inter Medium failed to parse");
     initStressRects();
     std.debug.print("backend: {t}\n", .{sg.queryBackend()});
     std.debug.print("device pixel ratio: {d}\n", .{sapp.dpiScale()});
@@ -246,7 +268,7 @@ export fn init() void {
         @as(f32, @floatFromInt(sapp.width())) / sapp.dpiScale(),
         @as(f32, @floatFromInt(sapp.height())) / sapp.dpiScale(),
     });
-    std.debug.print("keys: 1 demo | 2 toast | 3 stress | 4 stress small | S stress shadows | space continuous\n", .{});
+    std.debug.print("keys: 1 demo | 2 toast | 3 stress | 4 stress small | 5 settings | 6 text wall | S stress shadows | space continuous\n", .{});
     if (bench.active) bench.enterPhase(0);
 }
 
@@ -290,14 +312,36 @@ fn buildDemoScene(b: *batch_mod.Batch) void {
     draw.rect(b, .{ .x = 60, .y = 640, .w = 500, .h = 1 }, .{ .fill = skrive.rule });
 }
 
-fn buildToastGreeking(b: *batch_mod.Batch, x: f32, y: f32, w: f32) void {
-    // Text placeholders at the .toast-card text positions (padding 15/17,
-    // eyebrow 12px + 4 gap, title 15px/1.3). Real text is Stage 2.
-    draw.rect(b, .{ .x = x + 17, .y = y + 17, .w = 64, .h = 8 }, .{ .fill = skrive.muted.withAlpha(0.7), .radius = 4 });
-    draw.rect(b, .{ .x = x + 17, .y = y + 35, .w = 176, .h = 11 }, .{ .fill = skrive.fg, .radius = 4 });
-    // In-card dismiss: 20x20 hit area at top 8 / right 8; greek the glyph
-    // as a small dot at its center.
-    draw.rect(b, .{ .x = x + w - 22, .y = y + 14, .w = 8, .h = 8 }, .{ .fill = skrive.muted.withAlpha(0.55), .radius = 2 });
+fn buildToastText(b: *batch_mod.Batch, x: f32, y: f32, w: f32) void {
+    const dpi = sapp.dpiScale();
+    // The shipped .toast-card text spec: padding 15/17; eyebrow 12px weight
+    // 450 muted with a 4px margin below; title 15px weight 600, letter
+    // spacing -0.01em. The lab carries Regular(400) and Medium(500), so the
+    // eyebrow rounds down to Regular and the title down to Medium — the
+    // closest honest approximations, noted in the log.
+    _ = draw.text(b, &state.atlas, dpi, .{ x + 17, y + 15 }, "Update", .{
+        .font = &state.font_regular,
+        .size = 12,
+        .color = skrive.muted,
+    });
+    _ = draw.text(b, &state.atlas, dpi, .{ x + 17, y + 31 }, "Skrive 1.8.7 is ready to install", .{
+        .font = &state.font_medium,
+        .size = 15,
+        .color = skrive.fg,
+        .letter_spacing = -0.15, // -0.01em at 15px
+    });
+    // In-card dismiss: a 15px multiplication sign centered in the 20x20
+    // hit area at top 8 / right 8, muted at 0.55 opacity per the CSS.
+    const cross = "\u{00d7}";
+    const m = draw.measureText(&state.font_regular, 15, dpi, cross, 0);
+    _ = draw.text(b, &state.atlas, dpi, .{
+        x + w - 28 + (20 - m.width) / 2,
+        y + 8 + (20 - m.lineHeight()) / 2,
+    }, cross, .{
+        .font = &state.font_regular,
+        .size = 15,
+        .color = skrive.muted.withAlpha(0.55),
+    });
 }
 
 fn buildToastScene(b: *batch_mod.Batch) void {
@@ -312,7 +356,7 @@ fn buildToastScene(b: *batch_mod.Batch) void {
         .radius = skrive.radius_xl,
         .shadows = &skrive.shadow_sheet,
     });
-    buildToastGreeking(b, 180, y, w);
+    buildToastText(b, 180, y, w);
 
     // Right: the plan 7/Stage-1 variant — warm surface, 1px hairline,
     // large radius, the same soft low shadow.
@@ -322,7 +366,102 @@ fn buildToastScene(b: *batch_mod.Batch) void {
         .border = .{ .width = 1, .color = skrive.rule },
         .shadows = &skrive.shadow_sheet,
     });
-    buildToastGreeking(b, 664, y, w);
+    buildToastText(b, 664, y, w);
+}
+
+// Settings-page copy: plausible prose, not lorem, so kerning pairs and
+// word shapes read like the real app would.
+const settings_copy = struct {
+    const para1 = "Skrive keeps your writing in plain files on disk, and the window chrome stays out of their way. The theme follows the system by default; every surface in the app reads from one set of design tokens, so a change here lands everywhere at once.";
+    const para2 = "Changes apply immediately and persist across sessions. Appearance is chrome, and chrome never touches a document: switching themes repaints pixels, not files.";
+};
+
+fn buildSettingsScene(b: *batch_mod.Batch) void {
+    const dpi = sapp.dpiScale();
+    const fg = skrive.fg;
+    const muted = skrive.muted;
+
+    _ = draw.text(b, &state.atlas, dpi, .{ 80, 56 }, "Settings", .{
+        .font = &state.font_medium,
+        .size = 20,
+        .color = fg,
+    });
+
+    // The card: white surface, hairline border, small radius, quiet shadow.
+    // Height hand-tuned to the content below (layout arrives in Stage 4).
+    const card: draw.Rect = .{ .x = 80, .y = 108, .w = 640, .h = 314 };
+    draw.rect(b, card, .{
+        .fill = skrive.bg,
+        .radius = 12,
+        .border = .{ .width = 1, .color = skrive.rule },
+        .shadows = &.{.{ .offset = .{ 0, 2 }, .sigma = 4, .color = draw.Color.hex(0x000000).withAlpha(0.05) }},
+    });
+
+    const pad: f32 = 24;
+    const cx = card.x + pad;
+    const cw = card.w - 2 * pad;
+    var y: f32 = card.y + pad;
+
+    _ = draw.text(b, &state.atlas, dpi, .{ cx, y }, "Appearance", .{
+        .font = &state.font_medium,
+        .size = 12,
+        .color = muted,
+    });
+    y += 30;
+
+    const para_style: draw.TextStyle = .{ .font = &state.font_regular, .size = 14, .color = fg };
+    y += draw.textWrapped(b, &state.atlas, dpi, .{ cx, y }, cw, 21, settings_copy.para1, para_style);
+    y += 12;
+    y += draw.textWrapped(b, &state.atlas, dpi, .{ cx, y }, cw, 21, settings_copy.para2, para_style);
+    y += 20;
+
+    draw.rect(b, .{ .x = cx, .y = y, .w = cw, .h = 1 }, .{ .fill = skrive.rule });
+    y += 20;
+
+    // Labeled value rows at 12px.
+    const rows = [_][2][]const u8{
+        .{ "Theme", "System" },
+        .{ "Accent", "Slate indigo" },
+        .{ "UI font", "Inter" },
+    };
+    for (rows) |row| {
+        _ = draw.text(b, &state.atlas, dpi, .{ cx, y }, row[0], .{
+            .font = &state.font_regular,
+            .size = 12,
+            .color = muted,
+        });
+        _ = draw.text(b, &state.atlas, dpi, .{ cx + 420, y }, row[1], .{
+            .font = &state.font_regular,
+            .size = 12,
+            .color = fg,
+        });
+        y += 26;
+    }
+}
+
+// A window full of wrapped body text — the text-heavy bench phase. Repeats
+// the settings prose until the window is full; quad count lands in the HUD
+// and the bench summary.
+fn buildTextWallScene(b: *batch_mod.Batch) void {
+    const dpi = sapp.dpiScale();
+    const style: draw.TextStyle = .{ .font = &state.font_regular, .size = 14, .color = skrive.fg };
+    var y: f32 = 40;
+    while (y < 760) {
+        y += draw.textWrapped(b, &state.atlas, dpi, .{ 80, y }, 1040, 21, settings_copy.para1, style);
+        y += 12;
+        if (y >= 760) break;
+        y += draw.textWrapped(b, &state.atlas, dpi, .{ 80, y }, 1040, 21, settings_copy.para2, style);
+        y += 12;
+    }
+}
+
+fn buildHud(b: *batch_mod.Batch) void {
+    if (state.hud_text_len == 0) return;
+    _ = draw.text(b, &state.atlas, sapp.dpiScale(), .{ 12, 778 }, state.hud_text_buf[0..state.hud_text_len], .{
+        .font = &state.font_regular,
+        .size = 11,
+        .color = skrive.muted,
+    });
 }
 
 fn buildStressScene(b: *batch_mod.Batch) void {
@@ -361,8 +500,13 @@ export fn frame() void {
         .demo => buildDemoScene(&state.batch),
         .toast => buildToastScene(&state.batch),
         .stress => buildStressScene(&state.batch),
+        .settings => buildSettingsScene(&state.batch),
+        .text_wall => buildTextWallScene(&state.batch),
     }
+    // Bench runs keep the terminal HUD so scene quad counts stay pure.
+    if (!bench.active) buildHud(&state.batch);
     const t_upload = stime.now();
+    state.atlas.commit();
     state.batch.upload();
     const t_uploaded = stime.now();
 
@@ -375,6 +519,8 @@ export fn frame() void {
     state.batch.draw(
         .{ @floatFromInt(sapp.width()), @floatFromInt(sapp.height()) },
         sapp.dpiScale(),
+        state.atlas.view,
+        state.atlas.smp,
     );
     sg.endPass();
     sg.commit();
@@ -399,19 +545,23 @@ export fn frame() void {
     if (!bench.active and stime.sec(stime.diff(now, state.hud_last_print_ticks)) >= hud_print_interval_sec) {
         const presents_f: f64 = @floatFromInt(state.hud_presents);
         const avg_frame_ms = state.hud_frame_dur_sec / presents_f * std.time.ms_per_s;
-        std.debug.print("presents: {d} total (+{d}) | quads: {d} | draw calls: {d} | cpu avg us: build {d:.0} upload {d:.0} encode {d:.0} | frame avg: {d:.2} ms ({d:.1} fps) | {s}{s}\n", .{
-            state.present_count,
-            state.hud_presents,
-            state.batch.stats.quads,
-            state.batch.stats.draw_calls,
-            stime.us(state.hud_build_ticks) / presents_f,
-            stime.us(state.hud_upload_ticks) / presents_f,
-            stime.us(state.hud_encode_ticks) / presents_f,
+        // Refreshes the on-screen HUD line (the Stage 0/1 terminal print,
+        // now rendered by the renderer it measures). Deliberately does NOT
+        // mark the frame dirty — that would repaint once a second forever
+        // and break frame-on-demand; the line rides the next natural
+        // repaint instead, so idle numbers freeze with the frame.
+        const hud_line = std.fmt.bufPrint(&state.hud_text_buf, "{d:.2} ms ({d:.0} fps) | build {d:.0} us | quads {d} | draws {d} | atlas {d} px {d:.0}% | {s}{s}", .{
             avg_frame_ms,
             1000.0 / avg_frame_ms,
+            stime.us(state.hud_build_ticks) / presents_f,
+            state.batch.stats.quads,
+            state.batch.stats.draw_calls,
+            state.atlas.size,
+            state.atlas.occupancy() * 100,
             @tagName(state.scene),
             if (state.continuous) ", continuous" else ", on-demand",
-        });
+        }) catch state.hud_text_buf[0..0];
+        state.hud_text_len = hud_line.len;
         state.hud_last_print_ticks = now;
         state.hud_presents = 0;
         state.hud_build_ticks = 0;
@@ -447,6 +597,8 @@ export fn event(ev: ?*const sapp.Event) void {
                     initStressRects();
                 }
             },
+            ._5 => state.scene = .settings,
+            ._6 => state.scene = .text_wall,
             .S => {
                 state.stress_shadows = !state.stress_shadows;
                 std.debug.print("stress shadows: {s}\n", .{if (state.stress_shadows) "on (10% of rects)" else "off"});
@@ -460,12 +612,24 @@ export fn event(ev: ?*const sapp.Event) void {
 }
 
 export fn cleanup() void {
+    // Atlas census on clean exit (--bench quits through here), so every
+    // bench log ends with the stage-2 atlas numbers.
+    std.debug.print("atlas: {d}x{d} px | {d} glyphs cached | {d:.1}% occupied | {d} growth events\n", .{
+        state.atlas.size,
+        state.atlas.size,
+        state.atlas.cache.count(),
+        state.atlas.occupancy() * 100,
+        state.atlas.growth_count,
+    });
     sg.shutdown();
 }
 
 pub fn main(process: std.process.Init.Minimal) void {
     // --continuous starts in continuous mode, so benchmark runs don't need
-    // a keypress in the window; --stress starts in the stress scene.
+    // a keypress in the window; scene flags start in that scene. --dpi1
+    // opens a non-high-DPI window: glyphs rasterize at 1x, which is the
+    // honest way to shoot the "text at 1x" screenshot on a retina display.
+    var high_dpi = true;
     var args = std.process.Args.Iterator.init(process.args);
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--continuous")) {
@@ -477,6 +641,12 @@ pub fn main(process: std.process.Init.Minimal) void {
             state.stress_size = .small;
         } else if (std.mem.eql(u8, arg, "--toast")) {
             state.scene = .toast;
+        } else if (std.mem.eql(u8, arg, "--settings")) {
+            state.scene = .settings;
+        } else if (std.mem.eql(u8, arg, "--text-wall")) {
+            state.scene = .text_wall;
+        } else if (std.mem.eql(u8, arg, "--dpi1")) {
+            high_dpi = false;
         } else if (std.mem.eql(u8, arg, "--bench")) {
             bench.active = true;
         }
@@ -488,7 +658,7 @@ pub fn main(process: std.process.Init.Minimal) void {
         .cleanup_cb = cleanup,
         .width = 1200,
         .height = 800,
-        .high_dpi = true,
+        .high_dpi = high_dpi,
         .window_title = "Skrive Zig UI Lab",
         .icon = .{ .sokol_default = true },
         .logger = .{ .func = slog.func },
