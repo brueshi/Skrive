@@ -99,7 +99,7 @@ taste test against the shipped reference.
 
 **Branch:** `joe/skr-233-zig-ui-lab-hand-drawn-interface-research`
 (recreated off `main` — the Stage 0 branch had been merged and deleted).
-**Commit:** `01f8bfdd0b0242cf65860679771c1e9ed689c0cf`
+**Commit:** `d3a83692ef065f22d1f60a3bc4fec923f687a0a6` (originally `01f8bfd`; rebased onto main at Stage 2 merge)
 
 **Toolchain.**
 - Zig 0.16.0, sokol-zig `54776d6` — both pins unchanged from Stage 0.
@@ -210,7 +210,7 @@ settings-page demo composition, and real text in the toast taste test.
 ## 2026-07-13 — Stage 2: text — stb_truetype, the glyph atlas, and draw.text
 
 **Branch:** `joe/skr-233-zig-ui-lab-hand-drawn-interface-research`
-**Commit:** `d09b5a7602961a9a347f71c0559af07bb971b95e`
+**Commit:** `2a672c4482085bbb47e8511e0d51602f4c4f15b8` (originally `d09b5a7`; rebased onto main at merge)
 
 **Toolchain.**
 - Zig 0.16.0, sokol-zig `54776d6`, sokol-shdc `87a6914` — all pins unchanged.
