@@ -39,8 +39,20 @@ export type InlineImage = {
 };
 /** A within-block hard line break (Shift-Enter / CommonMark backslash break). */
 export type InlineBreak = { kind: 'break'; marks: InlineMarks };
+/** An inline tag leaf: `#name` or nested `#parent/child`. `name` holds the text
+ *  after the `#` (segments joined by `/`, no leading `#`). A distinct `kind`,
+ *  deliberately NOT a mark, so every `switch (node.kind)` is forced to handle it.
+ *  In `.md` it serializes back to the literal `#name` body text and round-trips;
+ *  in `.folio` it persists natively as this leaf.
+ *
+ *  Offset space: a tag is a MULTI-CELL ATOM. It occupies exactly
+ *  `('#' + name).length` cells — the width of its rendered `#name` text — so the
+ *  DOM<->offset map (which counts the characters inside the `sk-tag` span) stays
+ *  aligned; but it is indivisible, like an image/break atom: a delete touching any
+ *  part removes the whole tag, and marks apply to it as a unit. */
+export type InlineTag = { kind: 'tag'; name: string; marks: InlineMarks };
 
-export type InlineNode = InlineText | InlineImage | InlineBreak;
+export type InlineNode = InlineText | InlineImage | InlineBreak | InlineTag;
 
 /** Column alignment for a GFM table, from the delimiter row. */
 export type TableAlign = 'left' | 'right' | 'center' | null;

@@ -24,6 +24,13 @@ export const HARD_BREAK_ATTR = 'data-hard-break';
 // so the filler gives the caret a real text position to sit in. It is zero-width to
 // the offset map and stripped on readback, so the model never sees it.
 export const CARET_FILLER = '\u200b';
+// An inline tag leaf renders as a `<span class="sk-tag" data-tag="name">#name</span>`.
+// The class carries the chip styling; the attribute holds the authoritative name so
+// a DOM readback (readInlineFromDOM) reconstructs the tag exactly instead of
+// re-scanning the `#name` text. The span holds a real `#name` text node, so the
+// offset map counts it as `('#'+name).length` cells \u2014 the tag's width in the model.
+export const TAG_CLASS = 'sk-tag';
+export const TAG_ATTR = 'data-tag';
 
 /**
  * Maps a Markdown image URL (as it lives in the model, e.g. the document-relative
@@ -57,6 +64,12 @@ function renderInlineNode(node: InlineNode, resolveAsset: AssetResolver): Node {
   let dom: Node;
   if (node.kind === 'text') {
     dom = document.createTextNode(node.text);
+  } else if (node.kind === 'tag') {
+    const span = document.createElement('span');
+    span.className = TAG_CLASS;
+    span.setAttribute(TAG_ATTR, node.name);
+    span.textContent = `#${node.name}`;
+    dom = span;
   } else if (node.kind === 'image') {
     const img = document.createElement('img');
     // Checked on the MODEL url, before resolveAsset rewrites a relative path to

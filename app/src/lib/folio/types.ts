@@ -38,8 +38,12 @@ export type FolioImage = {
 };
 /** A hard line break within a block. */
 export type FolioBreak = { kind: 'break'; marks: FolioMarks };
+/** An inline tag (`#name`, nested `#parent/child`). `name` is the text after the
+ *  `#`. Native to `.folio`: unlike `.md`, where a tag is literal `#name` body text,
+ *  here it persists as its own leaf. */
+export type FolioTag = { kind: 'tag'; name: string; marks: FolioMarks };
 
-export type FolioInline = FolioText | FolioImage | FolioBreak;
+export type FolioInline = FolioText | FolioImage | FolioBreak | FolioTag;
 
 /** Column alignment for a table, from the header row. */
 export type FolioAlign = 'left' | 'right' | 'center' | null;

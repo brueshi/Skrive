@@ -92,7 +92,8 @@ function renderInline(nodes: InlineNode[]): string {
       open += '\\f1 ';
       close = '\\f0 ' + close;
     }
-    const run = open + escapeText(node.text) + close;
+    const text = node.kind === 'tag' ? `#${node.name}` : node.text;
+    const run = open + escapeText(text) + close;
     if (m.link) {
       out += `{\\field{\\*\\fldinst HYPERLINK "${escapeText(m.link.href)}"}{\\fldrslt \\ul ${run}\\ul0 }}`;
     } else {
