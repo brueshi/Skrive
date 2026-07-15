@@ -92,7 +92,7 @@ export const INSERT_CATALOG: InsertEntry[] = [
  *  substring→fuzzy upgrade the grammar calls for — order-preserving (no scoring),
  *  so the grouped presentation is untouched and "nl" still finds "Numbered list".
  *  `q` and `haystack` are expected pre-lowercased by the caller. */
-function fuzzyMatch(q: string, haystack: string): boolean {
+export function fuzzyMatch(q: string, haystack: string): boolean {
   let i = 0;
   for (let j = 0; j < haystack.length && i < q.length; j++) {
     if (haystack[j] === q[i]) i++;

@@ -12,6 +12,7 @@ import {
   deleteRangeInInline,
   inlineLength,
   inlinePlainText,
+  insertTagInInline,
   insertTextInInline
 } from '../../../src/lib/blocksurface/inline-ops';
 import { modelToFolio, folioToModel } from '../../../src/lib/folio/convert';
@@ -159,5 +160,27 @@ describe('offset math (multi-cell atom)', () => {
 
   it('inserts text before a tag at its leading boundary', () => {
     expect(insertTextInInline([text('a '), tag('todo')], 2, 'X')).toEqual([text('a X'), tag('todo')]);
+  });
+});
+
+describe('insertTagInInline', () => {
+  it('splices a tag leaf at a flat offset between text runs', () => {
+    expect(insertTagInInline([text('a '), text('b')], 2, 'todo', {})).toEqual([
+      text('a '),
+      tag('todo'),
+      text('b')
+    ]);
+  });
+
+  it('splices at the end of the content', () => {
+    expect(insertTagInInline([text('note ')], 5, 'todo', {})).toEqual([text('note '), tag('todo')]);
+  });
+
+  it('splits a text run and inherits the given marks', () => {
+    expect(insertTagInInline([text('abcd', { strong: true })], 2, 'x', { strong: true })).toEqual([
+      text('ab', { strong: true }),
+      tag('x', { strong: true }),
+      text('cd', { strong: true })
+    ]);
   });
 });

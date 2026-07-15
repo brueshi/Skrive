@@ -32,6 +32,7 @@ import {
   inlineLength,
   inlinePlainText,
   insertBreakInInline,
+  insertTagInInline,
   insertTextInInline,
   linkHrefInRange,
   linkRunAt,
@@ -61,6 +62,12 @@ export type BlockTypeSpec =
 /** What the insert (slash) menu needs: where to anchor, and the query typed after
  *  the `/`. Null when the menu is closed. */
 export type SlashMenuState = { rect: DOMRect; query: string };
+
+/** What the inline-tag (`#`) autocomplete needs: where to anchor and the query
+ *  typed after the `#`. Null when the popover is closed. Same shape as the slash
+ *  menu — the two share the anchoring machinery, differing only in trigger and
+ *  what a commit does. */
+export type TagMenuState = { rect: DOMRect; query: string };
 
 /** The paste-image write seam (SKR-175). The surface can pull an image off the
  *  clipboard/drop and read its bytes, but knows neither the active document's
@@ -282,6 +289,11 @@ export class BlockSurface {
   private lastSelection: SavedSelection | null = null;
   private slash: { blockId: string; slashOffset: number } | null = null;
   private slashCb: ((state: SlashMenuState | null) => void) | null = null;
+  // The inline-tag (`#`) autocomplete session: the block and the flat offset of the
+  // `#` that opened it. Null when closed. Mirrors `slash`, but a tag session opens
+  // mid-text at a word boundary rather than only on a whole-block `/`.
+  private tagSession: { blockId: string; hashOffset: number } | null = null;
+  private tagCb: ((state: TagMenuState | null) => void) | null = null;
   // The registered paste-image write delegate (SKR-175); see ImagePasteDelegate.
   // Null until the editor component registers one, and on the harness/tests that
   // never do — an image paste with no delegate toasts and declines rather than
@@ -457,6 +469,36 @@ export class BlockSurface {
    *  the menu on an empty block, as its query changes, and when it closes (null). */
   onSlashMenu(cb: ((state: SlashMenuState | null) => void) | null): void {
     this.slashCb = cb;
+  }
+
+  /** Register (or clear) the inline-tag (`#`) autocomplete observer. Fired when a
+   *  `#` opens the popover at a word boundary, as its query changes, and when it
+   *  closes (null). */
+  onTagMenu(cb: ((state: TagMenuState | null) => void) | null): void {
+    this.tagCb = cb;
+  }
+
+  /** The distinct tag names used in the current document (inline `#tag` leaves),
+   *  sorted, for the `#` autocomplete to suggest. Project-wide tags arrive with the
+   *  manifest tag index (Part B); until then the current document is the source. */
+  allTagNames(): string[] {
+    const names = new Set<string>();
+    const fromInline = (nodes: InlineNode[]): void => {
+      for (const n of nodes) if (n.kind === 'tag') names.add(n.name);
+    };
+    const walk = (blocks: BlockNode[]): void => {
+      for (const b of blocks) {
+        if (b.type === 'paragraph' || b.type === 'heading') fromInline(b.inline);
+        else if (b.type === 'blockquote') walk(b.children);
+        else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
+          for (const item of b.items) walk(item.children);
+        } else if (b.type === 'table') {
+          for (const row of b.rows) for (const cell of row) fromInline(cell);
+        }
+      }
+    };
+    walk(this.doc.blocks);
+    return [...names].sort((a, b) => a.localeCompare(b));
   }
 
   /** Register (or clear) the ⌘K handler that opens the link editor (SKR-177). The
@@ -656,7 +698,7 @@ export class BlockSurface {
     // focus off the surface; the guard is belt-and-suspenders for its saved
     // selection. Escape in prose keeps its (currently inert) native behaviour.
     if (e.key === 'Escape') {
-      if (this.slash || this.savedLink) return;
+      if (this.slash || this.tagSession || this.savedLink) return;
       const id = this.currentBarrierBlockId();
       if (id) {
         e.preventDefault();
@@ -1785,6 +1827,96 @@ export class BlockSurface {
     this.slashCb?.({ rect, query });
   }
 
+  // --- the inline-tag (`#`) autocomplete -----------------------------------
+  //
+  // Mirrors the slash session, differing in two ways: it opens mid-text at a WORD
+  // BOUNDARY (the same rule the parser recognizes a tag by — run start or after
+  // whitespace), not only on a whole-block trigger; and a commit splices an
+  // InlineTag leaf rather than converting the block. The heading input rule owns
+  // `# ` (fired on space before this runs), so a hash + space never opens a tag.
+
+  // Characters that may follow the `#` while the session stays open — the tag-name
+  // class (letters, numbers, `_`, `-`, and `/` for nesting). Anything else (a
+  // space, punctuation) makes the `#` literal and closes the session.
+  private static readonly TAG_QUERY_RE = /^[\p{L}\p{N}_\-/]*$/u;
+
+  private handleTagAfterInsert(text: string): void {
+    if (!this.tagSession && text === '#') {
+      const cur = this.currentInlineLeaf();
+      if (cur) {
+        const plain = inlinePlainText(cur.block.inline);
+        const hashOffset = cur.caret - 1; // the `#` just typed
+        const atBoundary = hashOffset === 0 || /\s/.test(plain[hashOffset - 1] ?? '');
+        if (atBoundary && plain[hashOffset] === '#') {
+          this.tagSession = { blockId: cur.block.id, hashOffset };
+        }
+      }
+    }
+    this.refreshTag();
+  }
+
+  private refreshTag(): void {
+    if (!this.tagSession) return;
+    const cur = this.currentInlineLeaf();
+    if (!this.tagCaretIntact(cur)) return this.closeTag();
+    if (cur.caret <= this.tagSession.hashOffset) return this.closeTag(); // caret moved before the `#`
+    const text = inlinePlainText(cur.block.inline);
+    if (text[this.tagSession.hashOffset] !== '#') return this.closeTag();
+    const query = text.slice(this.tagSession.hashOffset + 1, cur.caret);
+    if (!BlockSurface.TAG_QUERY_RE.test(query)) return this.closeTag();
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return this.closeTag();
+    let rect = sel.getRangeAt(0).getBoundingClientRect();
+    if (rect.height === 0 && rect.width === 0) rect = cur.blockEl.getBoundingClientRect();
+    this.tagCb?.({ rect, query });
+  }
+
+  /** Commit a tag: replace the typed `#query` with an InlineTag leaf named `name`
+   *  (an existing suggestion or the query itself), then a trailing space unless one
+   *  already follows, so writing continues naturally. One undo step. */
+  applyTagCommand(name: string): void {
+    const session = this.tagSession;
+    if (!session) return;
+    const cur = this.currentInlineLeaf();
+    if (!this.tagCaretIntact(cur) || cur.caret <= session.hashOffset) {
+      this.closeTag();
+      return;
+    }
+    this.compoundEdit(() => {
+      const start = session.hashOffset;
+      const marks = marksAtOffset(cur.block.inline, start); // inherit the context at the `#`
+      let inline = deleteRangeInInline(cur.block.inline, start, cur.caret);
+      inline = insertTagInInline(inline, start, name, marks);
+      let caret = start + 1 + name.length; // just after the chip
+      const after = inlinePlainText(inline)[caret] ?? '';
+      if (after !== ' ') {
+        inline = insertTextInInline(inline, caret, ' ');
+        caret += 1;
+      }
+      this.commitInline(cur.block.id, inline, cur.blockEl, caret);
+      this.closeTag();
+    });
+  }
+
+  closeTag(): void {
+    if (!this.tagSession) return;
+    this.tagSession = null;
+    this.tagCb?.(null);
+  }
+
+  /** True while `cur` is a collapsed caret still in the tag session's block — the
+   *  only state in which the session may continue. Mirrors `slashCaretIntact`. */
+  private tagCaretIntact(cur: SlashLeaf | null): cur is SlashLeaf {
+    return !!cur && !!this.tagSession && cur.block.id === this.tagSession.blockId && cur.collapsed;
+  }
+
+  /** Close an open tag session when the selection moves out from under it — the
+   *  pure-selection-move counterpart to refreshTag's after-edit close. */
+  private closeTagOnSelectionMove(): void {
+    if (!this.tagSession) return;
+    if (!this.tagCaretIntact(this.currentInlineLeaf())) this.closeTag();
+  }
+
   // --- the select->bubble observer -----------------------------------------
 
   private onDocSelectionChange = (): void => {
@@ -1794,6 +1926,7 @@ export class BlockSurface {
       this.selScheduled = false;
       this.dissolveOnUserSelection();
       this.closeSlashOnSelectionMove();
+      this.closeTagOnSelectionMove();
       this.emitSelection();
     });
   };
@@ -3131,8 +3264,15 @@ export class BlockSurface {
     // A typed space at the start of a paragraph may fire a marker input rule (list
     // or heading — the marker is consumed, never persisted as syntax). It owns the
     // rest of the gesture, so skip slash handling when it fires.
-    if (text === ' ' && this.tryBlockInputRule()) return;
+    if (text === ' ' && this.tryBlockInputRule()) {
+      // The marker rule consumed the gesture (e.g. `# ` -> heading). Close any menu
+      // the marker's own `#` / `/` opened a beat earlier, so it can't linger stale.
+      this.closeSlash();
+      this.closeTag();
+      return;
+    }
     this.handleSlashAfterInsert(text);
+    this.handleTagAfterInsert(text);
   }
 
   private applyDeleteBackward(): void {
