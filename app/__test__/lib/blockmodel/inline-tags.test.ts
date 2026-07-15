@@ -15,6 +15,7 @@ import {
   insertTagInInline,
   insertTextInInline
 } from '../../../src/lib/blocksurface/inline-ops';
+import { tagHue } from '../../../src/lib/blocksurface/render';
 import { modelToFolio, folioToModel } from '../../../src/lib/folio/convert';
 import { serializeFolio } from '../../../src/lib/folio/serialize';
 import { parseFolio } from '../../../src/lib/folio/parse';
@@ -160,6 +161,24 @@ describe('offset math (multi-cell atom)', () => {
 
   it('inserts text before a tag at its leading boundary', () => {
     expect(insertTextInInline([text('a '), tag('todo')], 2, 'X')).toEqual([text('a X'), tag('todo')]);
+  });
+});
+
+describe('tagHue (family-scoped auto-color)', () => {
+  it('is deterministic for a given name', () => {
+    expect(tagHue('todo')).toBe(tagHue('todo'));
+  });
+
+  it('shares one hue across a tag family (by root segment)', () => {
+    expect(tagHue('project/q3')).toBe(tagHue('project/q4'));
+    expect(tagHue('project/q3')).toBe(tagHue('project'));
+  });
+
+  it('returns a hue from the palette', () => {
+    const palette = [214, 190, 152, 32, 344, 268];
+    for (const name of ['todo', 'idea', 'project/x', 'bug', 'reading', 'zzz']) {
+      expect(palette).toContain(tagHue(name));
+    }
   });
 });
 

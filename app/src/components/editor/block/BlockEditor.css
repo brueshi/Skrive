@@ -131,11 +131,15 @@
    never character by character. Accent-tinted through tokens, so it adapts to both
    themes. */
 .block-editor-surface .sk-tag {
+  /* Family hue (set per chip from the tag's root segment), muted toward the theme
+     neutrals so a tag-heavy document reads calm, not rainbow. Falls back to the
+     app accent when no hue is set. */
+  --sk-tag-color: hsl(var(--sk-tag-hue, 214) 45% 50%);
   display: inline;
   padding: 0.06em 0.5em 0.06em 0.42em;
   border-radius: 0.7em;
-  background: color-mix(in srgb, var(--skrive-accent) 12%, var(--skrive-bg));
-  color: color-mix(in srgb, var(--skrive-accent) 82%, var(--skrive-fg));
+  background: color-mix(in srgb, var(--sk-tag-color) 13%, var(--skrive-bg));
+  color: color-mix(in srgb, var(--sk-tag-color) 78%, var(--skrive-fg));
   font-size: 0.9em;
   font-weight: 500;
   white-space: nowrap;
@@ -145,7 +149,7 @@
 }
 
 .block-editor-surface .sk-tag:hover {
-  background: color-mix(in srgb, var(--skrive-accent) 20%, var(--skrive-bg));
+  background: color-mix(in srgb, var(--sk-tag-color) 22%, var(--skrive-bg));
 }
 
 .block-editor-surface .sk-tag::before {
