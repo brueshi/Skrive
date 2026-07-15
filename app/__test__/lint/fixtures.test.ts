@@ -71,7 +71,8 @@ function loadFixture(name: string) {
       sizeBytes: body.length,
       modifiedMs: 0,
       frontmatter: parseFrontmatter(body).frontmatter,
-      outgoingLinks: []
+      outgoingLinks: [],
+      tags: []
     });
   }
   files.sort((a, b) => a.path.localeCompare(b.path));

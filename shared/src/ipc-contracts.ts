@@ -138,6 +138,10 @@ export type FileEntry = {
    *  leading frontmatter block, or when parsing falls back leniently. */
   frontmatter: FrontmatterMap;
   outgoingLinks: string[];
+  /** Distinct inline tags (`#tag`, nested `#parent/child`) in the file, sorted.
+   *  Populated for `.folio` files (read from the native block model); empty for
+   *  Markdown and other types — the tag facet indexes the native format. */
+  tags: string[];
 };
 
 export type ProjectManifest = {

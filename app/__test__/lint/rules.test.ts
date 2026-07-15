@@ -23,7 +23,8 @@ function makeFile(rel: string, body: string): FileEntry {
     sizeBytes: body.length,
     modifiedMs: 0,
     frontmatter: fm,
-    outgoingLinks: []
+    outgoingLinks: [],
+    tags: []
   };
 }
 

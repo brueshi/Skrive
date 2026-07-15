@@ -29,6 +29,7 @@ import {
 } from '@skrive/shared';
 import { extract } from './link-graph/extract';
 import { LinkGraph } from './link-graph/graph';
+import { folioTagNames } from '../folio';
 
 export const MARKDOWN_EXT = /\.(md|markdown)$/i;
 /** Native rich documents (SKR-196). Openable documents that carry a manifest
@@ -83,7 +84,8 @@ function basenameOf(relPath: string): string {
 function openableEntry(
   relPath: string,
   sizeBytes: number,
-  modifiedMs: number
+  modifiedMs: number,
+  tags: string[]
 ): FileEntry {
   return {
     path: relPath,
@@ -91,8 +93,21 @@ function openableEntry(
     sizeBytes,
     modifiedMs,
     frontmatter: {},
-    outgoingLinks: []
+    outgoingLinks: [],
+    tags
   };
+}
+
+/** The inline tags a `.folio` body carries (empty for other openable types, which
+ *  the snapshot leaves body-less). The tag facet indexes the native format only. */
+function openableTags(relPath: string, body: string | null): string[] {
+  return body && FOLIO_EXT.test(relPath) ? folioTagNames(body) : [];
+}
+
+/** Order-independent equality of two tag lists (both are sorted at the source, so
+ *  a positional compare suffices) — drives the version bump on a folio re-save. */
+function tagsEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((t, i) => t === b[i]);
 }
 
 /** Lowercase stem of a project-relative path, or null if it has none. */
@@ -244,15 +259,22 @@ export class ProjectModel {
           sizeBytes: file.sizeBytes,
           modifiedMs: file.modifiedMs,
           frontmatter: parseFrontmatter(file.body).frontmatter,
-          outgoingLinks: []
+          outgoingLinks: [],
+          tags: []
         });
       } else if (isOpenableNonMarkdown(file.path)) {
         // An openable non-Markdown file (`.folio`, `.txt`, `.html`): a manifest
         // entry (no Markdown body/links), plus tracked as a linkable file so a
-        // Markdown link to it resolves.
+        // Markdown link to it resolves. A `.folio` body (now carried in the
+        // snapshot) is read for its inline tags.
         this.nonMarkdown.add(file.path);
         this.entries.push(
-          openableEntry(file.path, file.sizeBytes ?? 0, file.modifiedMs ?? 0)
+          openableEntry(
+            file.path,
+            file.sizeBytes ?? 0,
+            file.modifiedMs ?? 0,
+            openableTags(file.path, file.body)
+          )
         );
       } else {
         this.nonMarkdown.add(file.path);
@@ -291,7 +313,7 @@ export class ProjectModel {
       return true;
     }
     if (isOpenableNonMarkdown(relPath)) {
-      return this.upsertOpenable(relPath, meta);
+      return this.upsertOpenable(relPath, body, meta);
     }
     if (!MARKDOWN_EXT.test(relPath)) {
       this.nonMarkdown.add(relPath);
@@ -307,7 +329,8 @@ export class ProjectModel {
       sizeBytes: meta.sizeBytes ?? body.length,
       modifiedMs: meta.modifiedMs ?? Date.now(),
       frontmatter: parseFrontmatter(body).frontmatter,
-      outgoingLinks: []
+      outgoingLinks: [],
+      tags: []
     };
 
     const existingIndex = this.entries.findIndex((f) => f.path === relPath);
@@ -328,12 +351,13 @@ export class ProjectModel {
    *  of an existing one is a no-op — these carry no frontmatter to change, so
    *  their content edits never churn the manifest (mirrors the Markdown
    *  content-only-save behavior). */
-  private upsertOpenable(relPath: string, meta: UpsertMeta): boolean {
+  private upsertOpenable(relPath: string, body: string, meta: UpsertMeta): boolean {
     this.nonMarkdown.add(relPath);
     const entry = openableEntry(
       relPath,
       meta.sizeBytes ?? 0,
-      meta.modifiedMs ?? Date.now()
+      meta.modifiedMs ?? Date.now(),
+      openableTags(relPath, body)
     );
     const existingIndex = this.entries.findIndex((f) => f.path === relPath);
     if (existingIndex === -1) {
@@ -341,8 +365,12 @@ export class ProjectModel {
       this.version++;
       return true;
     }
+    // A re-save whose tags changed must re-ship the manifest so the facet updates;
+    // a content-only edit that left the tags alone stays a no-op (as before).
+    const changed = !tagsEqual(this.entries[existingIndex]!.tags, entry.tags);
     this.entries[existingIndex] = entry;
-    return false;
+    if (changed) this.version++;
+    return changed;
   }
 
   /** Drop a file. Returns true when the manifest changed. */

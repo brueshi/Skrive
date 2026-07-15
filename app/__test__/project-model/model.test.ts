@@ -10,6 +10,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectSnapshot, SnapshotFile } from '@skrive/shared';
 import { ProjectModel } from '../../src/lib/project-model/model';
+import { serializeFolio } from '../../src/lib/folio/serialize';
+import type { FolioDocument } from '../../src/lib/folio/types';
 
 function file(path: string, body: string | null): SnapshotFile {
   return {
@@ -19,6 +21,18 @@ function file(path: string, body: string | null): SnapshotFile {
     hash: body === null ? null : 'h',
     sizeBytes: body?.length ?? 0
   };
+}
+
+// A `.folio` body string carrying the given blocks — the snapshot now reads these.
+const ftag = (name: string) => ({ kind: 'tag' as const, name, marks: {} });
+const ftext = (t: string) => ({ kind: 'text' as const, text: t, marks: {} });
+function folioBody(blocks: FolioDocument['blocks']): string {
+  return serializeFolio({
+    schemaVersion: 1,
+    docId: 'doc_test',
+    docMeta: { title: null, createdAt: '2026-01-01T00:00:00Z' },
+    blocks
+  });
 }
 
 function snapshot(files: SnapshotFile[]): ProjectSnapshot {
@@ -75,8 +89,8 @@ describe('manifest derivation', () => {
   });
 
   it('lists native .folio documents in the manifest (so they open + show)', () => {
-    // A .folio is listed with a null body in the snapshot, like an asset — but
-    // unlike an asset it is an openable document and must appear in the manifest.
+    // A .folio is an openable document (unlike a true asset) and must appear in the
+    // manifest even when its body wasn't read.
     const model = makeModel([
       file('notes.md', '# Notes'),
       file('doc.folio', null),
@@ -101,6 +115,32 @@ describe('manifest derivation', () => {
     expect(model.remove('doc.folio')).toBe(true);
     expect(model.currentVersion()).toBe(3);
     expect(model.manifest().files.map((f) => f.path)).toEqual(['a.md']);
+  });
+
+  it('indexes a .folio body inline tags (sorted); Markdown carries none', () => {
+    const body = folioBody([
+      { id: 'p', type: 'paragraph', inline: [ftag('todo'), ftext(' '), ftag('idea')] }
+    ]);
+    const model = makeModel([file('doc.folio', body), file('notes.md', '#nottagged here')]);
+    const entry = (p: string) => model.manifest().files.find((f) => f.path === p)!;
+
+    expect(entry('doc.folio').tags).toEqual(['idea', 'todo']);
+    expect(entry('notes.md').tags).toEqual([]); // the facet indexes .folio only
+  });
+
+  it('bumps the version when a .folio re-save changes its tags, not otherwise', () => {
+    const withTodo = folioBody([{ id: 'p', type: 'paragraph', inline: [ftag('todo')] }]);
+    const withIdea = folioBody([{ id: 'p', type: 'paragraph', inline: [ftag('idea')] }]);
+    const model = makeModel([file('doc.folio', withTodo)]);
+    expect(model.manifest().files[0]!.tags).toEqual(['todo']);
+    const v = model.currentVersion();
+
+    expect(model.upsert('doc.folio', withTodo)).toBe(false); // same tags: no churn
+    expect(model.currentVersion()).toBe(v);
+
+    expect(model.upsert('doc.folio', withIdea)).toBe(true); // tags changed: re-ship
+    expect(model.currentVersion()).toBe(v + 1);
+    expect(model.manifest().files[0]!.tags).toEqual(['idea']);
   });
 
   it('lists plain-text files in the manifest (so they open + show)', () => {

@@ -10,6 +10,7 @@ export * from './types';
 export { serializeFolio } from './serialize';
 export { parseFolio, FolioForwardError, FolioParseError } from './parse';
 export { modelToFolio, folioToModel } from './convert';
+export { folioTagNames } from './tags';
 export {
   generateDocId,
   makeDocIdGenerator,

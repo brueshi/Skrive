@@ -1,7 +1,7 @@
 //! The `project` namespace (Stage 2.3, minus watch).
 //!
 //! `project:snapshot` — the batched project read: one response with every
-//! file (bodies for markdown and `.skrive.toml`, `body:null` for assets),
+//! file (bodies for markdown, `.folio`, and `.skrive.toml`, `body:null` for assets),
 //! walking the tree with the exact noise-dir skip list from
 //! `shell/src/lib/snapshot.ts`. `project:create` — make `{parent}/{name}`
 //! with a starter README and an optional `git init`.
@@ -54,7 +54,7 @@ fn requireString(payload: std.json.Value, field: []const u8) ProjectError![]cons
 const Walked = struct {
     /// Project-relative, forward-slash separated.
     rel: []const u8,
-    /// Markdown (and `.skrive.toml`) carry their body + hash; assets don't.
+    /// Markdown, `.folio`, and `.skrive.toml` carry their body + hash; assets don't.
     with_body: bool,
 };
 
@@ -86,7 +86,7 @@ fn walkDir(io: Io, a: std.mem.Allocator, dir: Dir, rel_prefix: []const u8, out: 
             .file => {
                 if (entry.name.len > 0 and entry.name[0] == '.') continue;
                 const child_rel = try joinRel(a, rel_prefix, entry.name);
-                try out.append(a, .{ .rel = child_rel, .with_body = filter.isMarkdown(entry.name) });
+                try out.append(a, .{ .rel = child_rel, .with_body = filter.withBody(entry.name) });
             },
             else => {},
         }
