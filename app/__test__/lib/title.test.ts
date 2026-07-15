@@ -7,7 +7,7 @@ import type { FileEntry } from '@skrive/shared';
 import { middleTruncate, resolveTitle, stripFolioExtension } from '../../src/lib/title';
 
 function entry(name: string, frontmatter: Record<string, unknown> = {}): FileEntry {
-  return { path: name, name, sizeBytes: 0, modifiedMs: 0, frontmatter, outgoingLinks: [] };
+  return { path: name, name, sizeBytes: 0, modifiedMs: 0, frontmatter, outgoingLinks: [], tags: [] };
 }
 
 describe('stripFolioExtension', () => {
