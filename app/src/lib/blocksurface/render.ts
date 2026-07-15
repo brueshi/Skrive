@@ -32,6 +32,26 @@ export const CARET_FILLER = '\u200b';
 export const TAG_CLASS = 'sk-tag';
 export const TAG_ATTR = 'data-tag';
 
+// A small, deliberately calm hue palette for tag chips — spread around the wheel
+// but skipping the garish bands (pure yellow / lime) so every tag reads gently.
+// The chip's CSS mixes the chosen hue heavily toward the theme neutrals, so these
+// are anchors, not the final saturated colors.
+const TAG_HUES = [214, 190, 152, 32, 344, 268] as const; // blue, teal, green, amber, rose, violet
+
+function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0;
+  return h;
+}
+
+/** The hue (0-360) a tag chip wears, chosen from {@link TAG_HUES} by hashing the
+ *  tag's ROOT segment — so a family (`#project/q3`, `#project/q4`) shares one
+ *  color while unrelated tags separate. Deterministic and storage-free. */
+export function tagHue(name: string): number {
+  const root = name.split('/')[0] || name;
+  return TAG_HUES[Math.abs(hashString(root)) % TAG_HUES.length]!;
+}
+
 /**
  * Maps a Markdown image URL (as it lives in the model, e.g. the document-relative
  * `assets/foo.png` an image paste splices in — SKR-175) to a URL the webview can
@@ -73,6 +93,7 @@ function renderInlineNode(node: InlineNode, resolveAsset: AssetResolver): Node {
     const span = document.createElement('span');
     span.className = TAG_CLASS;
     span.setAttribute(TAG_ATTR, node.name);
+    span.style.setProperty('--sk-tag-hue', String(tagHue(node.name)));
     span.contentEditable = 'false';
     const hash = document.createElement('span');
     hash.className = 'sk-tag-hash';
