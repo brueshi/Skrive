@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import type { BlockSurface, TagMenuState } from '../../../lib/blocksurface';
+import { useProjectStore } from '../../../stores/project';
 import { fuzzyMatch } from './insert-catalog';
 import { useAnchoredRect } from './useAnchoredRect';
 import './menus.css';
@@ -52,10 +53,16 @@ export function BlockTagMenu({ surface }: { surface: BlockSurface }) {
     return () => surface.onTagMenu(null);
   }, [surface]);
 
-  // Snapshot the document's tags once per opening, not per keystroke: the walk is
-  // O(document), so it must not run on every character typed into the query.
+  // Snapshot the suggestion set once per opening, not per keystroke (the walks are
+  // O(document) / O(project)): the current document's tags unioned with the
+  // project-wide index (`.folio` tags from the manifest), sorted and de-duplicated.
   useEffect(() => {
-    if (isOpen) setAllTags(surface.allTagNames());
+    if (!isOpen) return;
+    const names = new Set(surface.allTagNames());
+    for (const f of useProjectStore.getState().manifest?.files ?? []) {
+      for (const t of f.tags) names.add(t);
+    }
+    setAllTags([...names].sort((a, b) => a.localeCompare(b)));
   }, [isOpen, surface]);
 
   const query = state?.query ?? '';
