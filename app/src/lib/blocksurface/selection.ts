@@ -11,7 +11,7 @@
 // atom is tagged HARD_BREAK_ATTR so it is distinguished from the bare <br> an empty
 // block carries for height (that placeholder is zero-width, like the empty model).
 
-import { BLOCK_ID_ATTR, CARET_FILLER, HARD_BREAK_ATTR } from './render';
+import { BLOCK_ID_ATTR, CARET_FILLER, HARD_BREAK_ATTR, TAG_CLASS } from './render';
 import type { BlockViewRegistry } from './render';
 import { isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
 
@@ -29,6 +29,16 @@ function isAtomEl(node: Node): boolean {
   const el = node as Element;
   const tag = el.tagName.toLowerCase();
   return tag === 'img' || (tag === 'br' && el.hasAttribute(HARD_BREAK_ATTR));
+}
+
+/** A tag chip: a `contenteditable=false` `.sk-tag` span. Unlike an image/break it is
+ *  a MULTI-cell atom — its `#name` text still counts toward the offset width — but
+ *  like an atom, a caret can only sit adjacent to it, never inside. `subtreeWidth`
+ *  already counts its text, so reads need no special case; only the write path
+ *  (placing a caret) must land beside it rather than descend into the non-editable
+ *  span. */
+function isChipEl(node: Node): boolean {
+  return node.nodeType === Node.ELEMENT_NODE && (node as Element).classList.contains(TAG_CLASS);
 }
 
 // Selects the atoms a block might contain. When a block has none — the
@@ -150,9 +160,21 @@ function atomPoint(atom: Node, side: 'before' | 'after'): { node: Node; offset: 
 export function domPointFromFlatOffset(blockEl: HTMLElement, target: number): { node: Node; offset: number } {
   let acc = 0;
   let last: { node: Node; offset: number } = { node: blockEl, offset: 0 };
-  const walker = document.createTreeWalker(blockEl, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+  // Skip everything INSIDE a tag chip: the chip is visited (and handled) as one
+  // atom below, so descending into its `#name` text would double-count it and try
+  // to plant the caret inside a non-editable span.
+  const walker = document.createTreeWalker(blockEl, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+    acceptNode: (n) =>
+      n.parentElement?.closest(`.${TAG_CLASS}`) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+  });
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-    if (n.nodeType === Node.TEXT_NODE) {
+    if (isChipEl(n)) {
+      // A boundary at or before the chip lands just before it; otherwise consume
+      // its full width and record the point just after it.
+      if (target <= acc) return atomPoint(n, 'before');
+      acc += subtreeWidth(n);
+      last = atomPoint(n, 'after');
+    } else if (n.nodeType === Node.TEXT_NODE) {
       const t = n as Text;
       // The zero-width caret filler on a trailing-break line: no width, but it IS
       // the landing spot for the caret after that break — a text anchor WKWebView

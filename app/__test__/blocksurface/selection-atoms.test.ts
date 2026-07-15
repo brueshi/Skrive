@@ -9,7 +9,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { flatOffsetFromDOM, domPointFromFlatOffset } from '../../src/lib/blocksurface/selection';
-import { HARD_BREAK_ATTR } from '../../src/lib/blocksurface/render';
+import { HARD_BREAK_ATTR, TAG_CLASS, renderBlock } from '../../src/lib/blocksurface/render';
+import type { InlineNode } from '../../src/lib/blockmodel/types';
 
 function block(...children: Node[]): HTMLElement {
   const p = document.createElement('p');
@@ -93,6 +94,66 @@ describe('domPointFromFlatOffset with atoms', () => {
     for (let off = 0; off <= 5; off++) {
       const p = domPointFromFlatOffset(b, off);
       expect(flatOffsetFromDOM(b, p.node, p.offset)).toBe(off);
+    }
+  });
+});
+
+// A tag chip is a MULTI-cell atom: contenteditable=false, so a caret can only sit
+// beside it, but its `#name` text still counts toward the offset width. The read
+// path counts the chip's text like any run; the write path must land the caret
+// adjacent to the chip, never inside the non-editable span (which WKWebView would
+// mishandle). Rendered through the real renderBlock so the DOM shape is the shipped
+// one (a `.sk-tag` span holding a suppressed `#` and the name).
+describe('the tag chip as a multi-cell atom', () => {
+  const text = (t: string): InlineNode => ({ kind: 'text', text: t, marks: {} });
+  const tag = (name: string): InlineNode => ({ kind: 'tag', name, marks: {} });
+  const para = (...inline: InlineNode[]): HTMLElement =>
+    renderBlock({ type: 'paragraph', id: 'b', durable: false, src: null, gapBefore: null, dirty: false, inline });
+  const insideChip = (node: Node): boolean =>
+    node.nodeType === Node.ELEMENT_NODE
+      ? (node as Element).closest(`.${TAG_CLASS}`) !== null
+      : (node.parentElement?.closest(`.${TAG_CLASS}`) ?? null) !== null;
+
+  it('counts the chip as (#+name).length cells', () => {
+    const p = para(text('a '), tag('todo'), text(' b'));
+    // Point after the chip (element boundary): 'a '(2) + '#todo'(5) = 7.
+    expect(flatOffsetFromDOM(p, p, 2)).toBe(7);
+  });
+
+  it('lands a caret before the chip, adjacent, not inside it', () => {
+    const p = para(text('a '), tag('todo'), text(' b'));
+    const point = domPointFromFlatOffset(p, 2); // the chip's leading boundary
+    expect(insideChip(point.node)).toBe(false);
+    expect(flatOffsetFromDOM(p, point.node, point.offset)).toBe(2);
+  });
+
+  it('lands a caret after the chip, adjacent, not inside it', () => {
+    const p = para(text('a '), tag('todo'), text(' b'));
+    const point = domPointFromFlatOffset(p, 7); // the chip's trailing boundary
+    expect(insideChip(point.node)).toBe(false);
+    expect(flatOffsetFromDOM(p, point.node, point.offset)).toBe(7);
+  });
+
+  it('snaps an offset landing inside the chip to just after it', () => {
+    const p = para(text('a '), tag('todo'), text(' b'));
+    const point = domPointFromFlatOffset(p, 4); // interior of the chip (cells 2..6)
+    expect(insideChip(point.node)).toBe(false);
+    expect(flatOffsetFromDOM(p, point.node, point.offset)).toBe(7);
+  });
+
+  it('places a caret before a leading chip at the block start', () => {
+    const p = para(tag('todo'), text(' b'));
+    const point = domPointFromFlatOffset(p, 0);
+    expect(insideChip(point.node)).toBe(false);
+    expect(flatOffsetFromDOM(p, point.node, point.offset)).toBe(0);
+  });
+
+  it('round-trips every boundary offset across the chip', () => {
+    const p = para(text('ab'), tag('x'), text('cd')); // widths 2 + 2 + 2 = 6
+    for (const off of [0, 1, 2, 4, 5, 6]) {
+      const point = domPointFromFlatOffset(p, off);
+      expect(insideChip(point.node)).toBe(false);
+      expect(flatOffsetFromDOM(p, point.node, point.offset)).toBe(off);
     }
   });
 });
