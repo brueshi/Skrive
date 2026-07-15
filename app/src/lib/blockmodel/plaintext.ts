@@ -16,6 +16,7 @@ function inlineToText(nodes: InlineNode[]): string {
   let out = '';
   for (const node of nodes) {
     if (node.kind === 'text') out += node.text;
+    else if (node.kind === 'tag') out += `#${node.name}`;
     else if (node.kind === 'image') out += node.alt;
     else if (node.kind === 'break') out += '\n';
   }

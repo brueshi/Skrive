@@ -84,6 +84,8 @@ function readInline(v: unknown, where: string): FolioInline {
   switch (v.kind) {
     case 'text':
       return { kind: 'text', text: requireString(v.text, `${where}.text`), marks };
+    case 'tag':
+      return { kind: 'tag', name: requireString(v.name, `${where}.name`), marks };
     case 'image':
       return {
         kind: 'image',

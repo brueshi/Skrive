@@ -13,16 +13,19 @@
 // array — blocks are immutable, so an edit replaces the one block object.
 
 import type { InlineMarks, InlineNode } from '../blockmodel';
-import { HARD_BREAK_ATTR } from './render';
+import { HARD_BREAK_ATTR, TAG_ATTR, TAG_CLASS } from './render';
 
 function isText(node: InlineNode): node is Extract<InlineNode, { kind: 'text' }> {
   return node.kind === 'text';
 }
 
-/** Width of a leaf in the flat offset space: a text run's length, or one unit for
- *  an atom (image / hard break). */
+/** Width of a leaf in the flat offset space: a text run's length; a tag its
+ *  rendered `('#'+name).length` (a multi-cell atom); one unit for a single-cell
+ *  atom (image / hard break). */
 function nodeWidth(node: InlineNode): number {
-  return isText(node) ? node.text.length : 1;
+  if (node.kind === 'text') return node.text.length;
+  if (node.kind === 'tag') return 1 + node.name.length;
+  return 1;
 }
 
 /** Structural equality of two mark sets. Boolean marks compare by truthiness —
@@ -74,16 +77,23 @@ export function insertTextInInline(nodes: InlineNode[], offset: number, text: st
       }
       acc += len;
     } else {
-      // Atom (width 1). A caret resting at or before its cell inserts a fresh text
-      // run in front of it, inheriting the atom's marks. An offset landing on the
-      // text|atom seam is consumed by the preceding text run first (offset <= acc +
-      // len above), so this only fires when nothing text precedes the point.
+      // Atom. A caret resting at or before its first cell inserts a fresh text run
+      // in front of it, inheriting the atom's marks. An offset on the text|atom seam
+      // is consumed by the preceding text run first (offset <= acc + len above), so
+      // this only fires when no text precedes the point. A multi-cell atom (a tag)
+      // has interior cells: an offset landing strictly inside it snaps to just after
+      // it (the second check), since a tag is indivisible.
+      const w = nodeWidth(node);
       if (!done && offset <= acc) {
         out.push({ kind: 'text', text, marks: node.marks });
         done = true;
       }
       out.push(node);
-      acc += 1;
+      acc += w;
+      if (!done && offset < acc) {
+        out.push({ kind: 'text', text, marks: node.marks });
+        done = true;
+      }
     }
   }
   if (!done) {
@@ -126,12 +136,18 @@ export function insertBreakInInline(nodes: InlineNode[], offset: number): Inline
       }
       acc += len;
     } else {
+      const w = nodeWidth(node);
       if (!done && offset <= acc) {
         out.push({ kind: 'break', marks: { ...node.marks } });
         done = true;
       }
       out.push(node);
-      acc += 1;
+      acc += w;
+      if (!done && offset < acc) {
+        // An offset strictly inside a multi-cell atom (a tag) snaps after it.
+        out.push({ kind: 'break', marks: { ...node.marks } });
+        done = true;
+      }
     }
   }
   if (!done) {
@@ -183,10 +199,14 @@ export function inlineLength(nodes: InlineNode[]): number {
 }
 
 /** Flat plain text of an inline run (no marks). Used to read the `/query` of the
- *  slash menu out of the focused block. */
+ *  slash menu out of the focused block. A tag contributes its `#name` text so the
+ *  plain text matches the characters the tag's cells occupy in offset space. */
 export function inlinePlainText(nodes: InlineNode[]): string {
   let s = '';
-  for (const node of nodes) if (isText(node)) s += node.text;
+  for (const node of nodes) {
+    if (node.kind === 'text') s += node.text;
+    else if (node.kind === 'tag') s += `#${node.name}`;
+  }
   return s;
 }
 
@@ -215,10 +235,10 @@ function mapRange(
   let acc = 0;
   for (const node of nodes) {
     if (!isText(node)) {
-      // Atoms carry no toggleable marks, but they hold a cell in the offset space,
-      // so advance past it or every offset after an atom would be misaligned.
+      // Atoms carry no toggleable marks, but they hold cells in the offset space,
+      // so advance past them or every offset after an atom would be misaligned.
       out.push(node);
-      acc += 1;
+      acc += nodeWidth(node);
       continue;
     }
     const s = acc;
@@ -248,7 +268,7 @@ export function rangeHasMark(nodes: InlineNode[], start: number, end: number, ma
   let any = false;
   for (const node of nodes) {
     if (!isText(node)) {
-      acc += 1; // atom holds a cell in the offset space; keep later offsets aligned
+      acc += nodeWidth(node); // atoms hold cells in the offset space; stay aligned
       continue;
     }
     const s = acc;
@@ -267,7 +287,7 @@ export function rangeHasLink(nodes: InlineNode[], start: number, end: number): b
   let any = false;
   for (const node of nodes) {
     if (!isText(node)) {
-      acc += 1;
+      acc += nodeWidth(node);
       continue;
     }
     const s = acc;
@@ -289,7 +309,7 @@ export function linkHrefInRange(nodes: InlineNode[], start: number, end: number)
   let any = false;
   for (const node of nodes) {
     if (!isText(node)) {
-      acc += 1;
+      acc += nodeWidth(node);
       continue;
     }
     const s = acc;
@@ -451,6 +471,12 @@ function walkDom(node: Node, marks: InlineMarks, out: InlineNode[]): void {
         });
       } else if (tag === 'a') {
         walkDom(el, { ...marks, link: { href: el.getAttribute('href') ?? '', title: el.getAttribute('title') } }, out);
+      } else if (tag === 'span' && el.classList.contains(TAG_CLASS)) {
+        // An inline-tag chip. Its name is authoritative in the attribute; the
+        // `#name` text inside is view-only, so read the attribute (falling back to
+        // stripping the leading `#`) and don't descend into the span.
+        const name = el.getAttribute(TAG_ATTR) ?? (el.textContent ?? '').replace(/^#/, '');
+        if (name) out.push({ kind: 'tag', name, marks: { ...marks } });
       } else {
         walkDom(el, markEl(tag, marks), out);
       }

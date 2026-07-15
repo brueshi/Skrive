@@ -48,6 +48,8 @@ function inlineToFolio(n: InlineNode): FolioInline {
   switch (n.kind) {
     case 'text':
       return { kind: 'text', text: n.text, marks: marksToFolio(n.marks) };
+    case 'tag':
+      return { kind: 'tag', name: n.name, marks: marksToFolio(n.marks) };
     case 'image':
       return { kind: 'image', url: n.url, alt: n.alt, title: n.title, marks: marksToFolio(n.marks) };
     case 'break':
@@ -69,6 +71,8 @@ function inlineToModel(n: FolioInline): InlineNode {
   switch (n.kind) {
     case 'text':
       return { kind: 'text', text: n.text, marks: marksToModel(n.marks) };
+    case 'tag':
+      return { kind: 'tag', name: n.name, marks: marksToModel(n.marks) };
     case 'image':
       return { kind: 'image', url: n.url, alt: n.alt, title: n.title, marks: marksToModel(n.marks) };
     case 'break':

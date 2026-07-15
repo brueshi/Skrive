@@ -38,6 +38,8 @@ function orderInline(n: FolioInline): Record<string, unknown> {
   switch (n.kind) {
     case 'text':
       return { kind: 'text', text: n.text, marks: orderMarks(n.marks) };
+    case 'tag':
+      return { kind: 'tag', name: n.name, marks: orderMarks(n.marks) };
     case 'image':
       return {
         kind: 'image',

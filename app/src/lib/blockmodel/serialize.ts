@@ -88,7 +88,12 @@ function collectInline(nodes: InlineNode[], breaks: 'keep' | 'space'): InlineIte
       link: m.link ? { href: m.link.href, title: m.link.title } : null
     };
     let item: InlineItem | null = null;
-    if (node.kind === 'text') {
+    if (node.kind === 'tag') {
+      // A tag serializes to its literal `#name` body text, so a `.md` file
+      // round-trips byte-for-byte and other tools see a plain hashtag. It rides
+      // the surrounding mark context and coalesces with adjacent text below.
+      item = { ...context, kind: 'text', text: `#${node.name}` };
+    } else if (node.kind === 'text') {
       // The serializer defends its own invariant (SKR-189 / F20). A newline is
       // never content in a text run — a line break is a `break` node — but a run
       // carrying one used to be emitted raw, and a raw newline inside a paragraph

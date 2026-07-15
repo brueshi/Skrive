@@ -70,6 +70,37 @@ function nestedBase(genId: () => string): BlockBaseInit {
   return { id: genId(), durable: false, src: null, gapBefore: null, dirty: false };
 }
 
+// A tag name after the `#`: a first char that is a letter/number/underscore
+// (so `# `, `#-`, `#/` never start a tag), then letters/numbers/underscore/hyphen,
+// with `/`-separated nested segments each opening on a letter/number/underscore
+// (`#parent/child`). Unicode-aware so non-ASCII tags work.
+const TAG_NAME_RE = /^[\p{L}\p{N}_][\p{L}\p{N}_-]*(?:\/[\p{L}\p{N}_][\p{L}\p{N}_-]*)*/u;
+
+// Split a plain-text run into text and inline-tag leaves. A `#` opens a tag only
+// at a WORD BOUNDARY — the start of the run or after whitespace — and only when a
+// valid name follows. That boundary is what excludes `C#`, a URL fragment like
+// `example.com/#frag`, and a mid-word `#`: in each the `#` follows a non-space, so
+// it stays literal text. Markdown's own grammar keeps `# ` (hash + space at block
+// start) a heading; a heading's marker never reaches inline mapping, and a bare
+// `#name` at line start is a paragraph in CommonMark, so it lands here as a tag.
+function splitInlineTags(text: string, marks: InlineMarks): InlineNode[] {
+  const out: InlineNode[] = [];
+  let last = 0; // start of the pending plain-text segment
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '#') continue;
+    if (i > 0 && !/\s/.test(text[i - 1]!)) continue; // not at a word boundary
+    const match = TAG_NAME_RE.exec(text.slice(i + 1));
+    if (!match) continue;
+    const name = match[0];
+    if (i > last) out.push({ kind: 'text', text: text.slice(last, i), marks: { ...marks } });
+    out.push({ kind: 'tag', name, marks: { ...marks } });
+    i += name.length; // skip the name; the loop's i++ steps to the char after it
+    last = i + 1;
+  }
+  if (last < text.length) out.push({ kind: 'text', text: text.slice(last), marks: { ...marks } });
+  return out;
+}
+
 // Map mdast phrasing content to the model's inline nodes. Returns null on the
 // first construct the model cannot canonically reproduce from the block alone —
 // raw inline HTML and reference-style links/images — telling the caller to freeze
@@ -84,7 +115,7 @@ function inlineToModel(
   for (const n of nodes) {
     switch (n.type) {
       case 'text':
-        if (n.value) out.push({ kind: 'text', text: n.value, marks: { ...marks } });
+        if (n.value) out.push(...splitInlineTags(n.value, marks));
         break;
       case 'inlineCode':
         if (n.value) out.push({ kind: 'text', text: n.value, marks: { ...marks, code: true } });
