@@ -17,26 +17,35 @@ import { IconFilter } from '../icons/IconFilter';
 import { IconFolder } from '../icons/IconFolder';
 import { IconSearch } from '../icons/IconSearch';
 import { IconCheck } from '../icons/IconCheck';
-import type { FolderInfo } from './tree';
+import { IconTag } from '../icons/IconTag';
+import type { FolderInfo, TagInfo } from './tree';
 
 type Props = {
   folders: FolderInfo[];
+  tags: TagInfo[];
   activeFilter: SidebarFilter | null;
   onSelect: (filter: SidebarFilter) => void;
   onClear: () => void;
 };
 
-export function FilterMenu({ folders, activeFilter, onSelect, onClear }: Props) {
+export function FilterMenu({ folders, tags, activeFilter, onSelect, onClear }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
-  const active = activeFilter?.kind === 'folder';
+  const anyActive = activeFilter != null;
+  const folderActive = activeFilter?.kind === 'folder';
+  const tagActive = activeFilter?.kind === 'tag';
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return folders;
     return folders.filter((f) => f.path.toLowerCase().includes(q));
   }, [folders, query]);
+  const filteredTags = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return tags;
+    return tags.filter((t) => t.name.toLowerCase().includes(q));
+  }, [tags, query]);
 
   // DropdownMenu focuses its content (no menu items to land on); move focus
   // to the search field once it's mounted so you can type immediately.
@@ -58,7 +67,7 @@ export function FilterMenu({ folders, activeFilter, onSelect, onClear }: Props) 
         <DropdownMenu.Trigger asChild>
           <IconButton
             size="sm"
-            className={`icon-button${active ? ' active' : ''}`}
+            className={`icon-button${anyActive ? ' active' : ''}`}
             aria-label="Filter documents"
           >
             <IconFilter size={16} />
@@ -75,7 +84,7 @@ export function FilterMenu({ folders, activeFilter, onSelect, onClear }: Props) 
               ref={inputRef}
               className="filter-menu__input"
               type="text"
-              placeholder="Filter by folder…"
+              placeholder="Filter by folder or tag…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -86,7 +95,7 @@ export function FilterMenu({ folders, activeFilter, onSelect, onClear }: Props) 
               <div className="filter-menu__empty">No folders</div>
             ) : (
               filtered.map((folder) => {
-                const isActive = active && activeFilter.value === folder.path;
+                const isActive = folderActive && activeFilter.value === folder.path;
                 return (
                   <button
                     key={folder.path}
@@ -116,9 +125,43 @@ export function FilterMenu({ folders, activeFilter, onSelect, onClear }: Props) 
                 );
               })
             )}
-            {/* Tags group — deferred (SKR-245). When the Tags facet lands, a
-                second labelled group renders here from the frontmatter tag
-                index, selecting into a { kind: 'tag' } filter. */}
+            {/* Tags group — the native (.folio) tag index. Folders and tags are
+                two facets on the one All list; only one scope is active at a time. */}
+            {tags.length > 0 && (
+              <>
+                <div className="filter-menu__group-label">Tags</div>
+                {filteredTags.length === 0 ? (
+                  <div className="filter-menu__empty">No tags</div>
+                ) : (
+                  filteredTags.map((tag) => {
+                    const isActive = tagActive && activeFilter.value === tag.name;
+                    return (
+                      <button
+                        key={tag.name}
+                        type="button"
+                        className={`filter-menu__item${isActive ? ' active' : ''}`}
+                        title={`#${tag.name}`}
+                        onClick={() =>
+                          isActive ? onClear() : onSelect({ kind: 'tag', value: tag.name })
+                        }
+                      >
+                        <span className="filter-menu__item-icon">
+                          <IconTag size={16} />
+                        </span>
+                        <span className="filter-menu__item-name">{tag.name}</span>
+                        {isActive ? (
+                          <span className="filter-menu__check">
+                            <IconCheck size={16} />
+                          </span>
+                        ) : (
+                          <span className="filter-menu__item-count">{tag.count}</span>
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+              </>
+            )}
           </div>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

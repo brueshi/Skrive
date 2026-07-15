@@ -37,7 +37,7 @@ import { IconHelp } from '../icons/IconHelp';
 import { IconSettings } from '../icons/IconSettings';
 import { Desk } from './Desk';
 import { AllList } from './AllList';
-import { fileComparator, filesInFolder, folderList, projectName } from './tree';
+import { fileComparator, filesInFolder, filesWithTag, folderList, tagList, projectName } from './tree';
 import { useSidebarResize } from './useSidebarResize';
 
 type DeleteTarget = { kind: 'file' | 'directory'; path: string; name: string };
@@ -117,30 +117,31 @@ export function Sidebar({ onOpenSwitcher, onOpenHelp }: SidebarProps) {
     [manifest?.files, sortKey]
   );
 
-  // Folders derived from the file paths — the filter facet's menu.
+  // Folders and tags derived from the manifest — the filter facet's two groups.
   const folders = useMemo(
     () => folderList(manifest?.files ?? []),
     [manifest?.files]
   );
-
-  const scopedFiles = useMemo(
-    () =>
-      activeFilter?.kind === 'folder'
-        ? filesInFolder(sortedFiles, activeFilter.value)
-        : sortedFiles,
-    [sortedFiles, activeFilter]
+  const tags = useMemo(
+    () => tagList(manifest?.files ?? []),
+    [manifest?.files]
   );
 
-  // Drop a folder scope whose folder no longer exists (its last document was
-  // deleted or moved out) so the All list doesn't get stuck showing nothing.
+  const scopedFiles = useMemo(() => {
+    if (activeFilter?.kind === 'folder') return filesInFolder(sortedFiles, activeFilter.value);
+    if (activeFilter?.kind === 'tag') return filesWithTag(sortedFiles, activeFilter.value);
+    return sortedFiles;
+  }, [sortedFiles, activeFilter]);
+
+  // Drop a scope whose facet no longer exists (a folder emptied, or the last
+  // document carrying a tag lost it) so the All list doesn't get stuck empty.
   useEffect(() => {
-    if (
-      activeFilter?.kind === 'folder' &&
-      !folders.some((f) => f.path === activeFilter.value)
-    ) {
+    if (activeFilter?.kind === 'folder' && !folders.some((f) => f.path === activeFilter.value)) {
+      clearFilter();
+    } else if (activeFilter?.kind === 'tag' && !tags.some((t) => t.name === activeFilter.value)) {
       clearFilter();
     }
-  }, [activeFilter, folders, clearFilter]);
+  }, [activeFilter, folders, tags, clearFilter]);
 
   const toggleFilePin = useCallback(
     (file: FileEntry) => togglePin(file.path),
@@ -457,6 +458,7 @@ export function Sidebar({ onOpenSwitcher, onOpenHelp }: SidebarProps) {
                 sortKey={sortKey}
                 onSortChange={setSortKey}
                 folders={folders}
+                tags={tags}
                 activeFilter={activeFilter}
                 onFilterSelect={setFilter}
                 onFilterClear={clearFilter}

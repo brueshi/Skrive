@@ -19,7 +19,8 @@ import { Tooltip } from '../ui/Tooltip';
 import { IconFolder } from '../icons/IconFolder';
 import { IconList } from '../icons/IconList';
 import { IconX } from '../icons/IconX';
-import type { FolderInfo } from './tree';
+import { IconTag } from '../icons/IconTag';
+import type { FolderInfo, TagInfo } from './tree';
 
 type Props = {
   /** The documents to show — scoped to the active filter, already sorted. */
@@ -29,6 +30,7 @@ type Props = {
   sortKey: SidebarSortKey;
   onSortChange: (key: SidebarSortKey) => void;
   folders: FolderInfo[];
+  tags: TagInfo[];
   activeFilter: SidebarFilter | null;
   onFilterSelect: (filter: SidebarFilter) => void;
   onFilterClear: () => void;
@@ -48,6 +50,7 @@ export function AllList({
   sortKey,
   onSortChange,
   folders,
+  tags,
   activeFilter,
   onFilterSelect,
   onFilterClear,
@@ -63,6 +66,10 @@ export function AllList({
   const activeFolder =
     activeFilter?.kind === 'folder'
       ? folders.find((f) => f.path === activeFilter.value)
+      : undefined;
+  const activeTag =
+    activeFilter?.kind === 'tag'
+      ? tags.find((t) => t.name === activeFilter.value)
       : undefined;
   const sortSummary = SORT_LABELS[sortKey].toLowerCase();
   const isTree = allView === 'tree';
@@ -118,6 +125,7 @@ export function AllList({
         <SortMenu sortKey={sortKey} onChange={onSortChange} />
         <FilterMenu
           folders={folders}
+          tags={tags}
           activeFilter={activeFilter}
           onSelect={onFilterSelect}
           onClear={onFilterClear}
@@ -138,6 +146,28 @@ export function AllList({
             </span>
             <span className="filter-chip__name">{activeFolder.name}</span>
             <span className="filter-chip__count">{activeFolder.count}</span>
+            <span className="filter-chip__x">
+              <IconX size={16} />
+            </span>
+          </button>
+          <span className="filter-chip__sort">· {sortSummary}</span>
+        </div>
+      )}
+
+      {activeTag && (
+        <div className="sidebar-browse__chiprow">
+          <button
+            type="button"
+            className="filter-chip"
+            aria-label={`Clear tag filter: ${activeTag.name}`}
+            title={`#${activeTag.name}`}
+            onClick={onFilterClear}
+          >
+            <span className="filter-chip__icon">
+              <IconTag size={16} />
+            </span>
+            <span className="filter-chip__name">{activeTag.name}</span>
+            <span className="filter-chip__count">{activeTag.count}</span>
             <span className="filter-chip__x">
               <IconX size={16} />
             </span>

@@ -16,7 +16,7 @@ import { literalParagraphs, plainTextParagraphs } from '../clipboard/plainText';
 import { buildClipboardPayload } from '../clipboard/copyOut';
 import { imageExtension, imageMarkdownLink, pastedImageFilename } from '../clipboard/pasteImage';
 import { notify } from '../notify';
-import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto, setCodeContent } from './render';
+import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto, setCodeContent, TAG_ATTR, TAG_CLASS } from './render';
 import type { AssetResolver } from './render';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
@@ -270,6 +270,9 @@ export class BlockSurface {
   // App hook to open the link editor from the ⌘K chord (SKR-177): the surface can't
   // render the editor, so it asks the menu controller (which then calls beginLink).
   private requestLinkEditor: (() => void) | null = null;
+  // Fired when an inline tag chip is clicked, with the tag name — the app scopes
+  // the sidebar to it (surface stays framework-free; the editor wires the store).
+  private tagClickCb: ((name: string) => void) | null = null;
   // True between a mousedown in the surface and its release — a drag-select in
   // progress. Gates the selection bubble so it doesn't chase the pointer (SKR-184).
   private pointerDown = false;
@@ -503,6 +506,12 @@ export class BlockSurface {
 
   /** Register (or clear) the ⌘K handler that opens the link editor (SKR-177). The
    *  surface owns the chord but the editor UI is the app's, so it delegates. */
+  /** Register (or clear) the inline-tag click handler. The surface fires it with
+   *  the clicked chip's tag name; the app scopes the sidebar to that tag. */
+  onTagClick(cb: ((name: string) => void) | null): void {
+    this.tagClickCb = cb;
+  }
+
   onRequestLinkEditor(cb: (() => void) | null): void {
     this.requestLinkEditor = cb;
   }
@@ -2975,6 +2984,17 @@ export class BlockSurface {
     }
     const target = e.target;
     const targetEl = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+    // A click on an inline tag chip scopes the sidebar to that tag (the chip is a
+    // contenteditable=false atom, so this never competes with caret placement).
+    const chip = targetEl?.closest<HTMLElement>(`.${TAG_CLASS}`);
+    if (chip && this.tagClickCb) {
+      const name = chip.getAttribute(TAG_ATTR);
+      if (name) {
+        this.onPointerUp();
+        this.tagClickCb(name);
+        return;
+      }
+    }
     const blockEl = targetEl?.closest<HTMLElement>(`[${BLOCK_ID_ATTR}]`) ?? null;
     const blockId = blockEl?.getAttribute(BLOCK_ID_ATTR) ?? null;
     const block = blockId ? findBlockById(this.doc.blocks, blockId) : null;

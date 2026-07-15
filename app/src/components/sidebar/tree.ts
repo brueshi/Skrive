@@ -171,3 +171,30 @@ export function filesInFolder(
   const prefix = `${folder}/`;
   return files.filter((f) => f.path.startsWith(prefix));
 }
+
+export type TagInfo = {
+  /** The tag name, e.g. "todo" or "project/q3". */
+  name: string;
+  /** Documents carrying this tag. */
+  count: number;
+};
+
+/** Every tag used across the project, with a document count, sorted by name.
+ *  Mirrors `folderList`; tags come from `FileEntry.tags` (`.folio` inline tags —
+ *  the manifest indexes the native format). A nested tag is one entry at its full
+ *  path; no parent rollup, matching how the chips read. */
+export function tagList(files: FileEntry[]): TagInfo[] {
+  const counts = new Map<string, number>();
+  for (const f of files) {
+    for (const tag of f.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Documents carrying `tag`. Preserves the input order, so passing an
+ *  already-sorted list keeps the sort. */
+export function filesWithTag(files: FileEntry[], tag: string): FileEntry[] {
+  return files.filter((f) => f.tags.includes(tag));
+}
