@@ -65,10 +65,20 @@ function renderInlineNode(node: InlineNode, resolveAsset: AssetResolver): Node {
   if (node.kind === 'text') {
     dom = document.createTextNode(node.text);
   } else if (node.kind === 'tag') {
+    // A tag chip is a true atom: contentEditable=false, so the caret jumps over it
+    // (WKWebView included) and a delete removes it as a unit. Its `#` lives in the
+    // DOM text (so the offset map counts the tag as `('#'+name).length` cells,
+    // matching the model) inside a `.sk-tag-hash` span the CSS suppresses, since the
+    // leading tag glyph already signifies the tag; the name text follows.
     const span = document.createElement('span');
     span.className = TAG_CLASS;
     span.setAttribute(TAG_ATTR, node.name);
-    span.textContent = `#${node.name}`;
+    span.contentEditable = 'false';
+    const hash = document.createElement('span');
+    hash.className = 'sk-tag-hash';
+    hash.textContent = '#';
+    span.appendChild(hash);
+    span.appendChild(document.createTextNode(node.name));
     dom = span;
   } else if (node.kind === 'image') {
     const img = document.createElement('img');
