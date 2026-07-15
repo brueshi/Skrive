@@ -102,6 +102,10 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
     surface.onImagePaste((bytes, _mimeType, filename) =>
       useProjectStore.getState().pasteImageAsset(docPath, filename, bytes)
     );
+    // Clicking an inline tag chip scopes the sidebar's All list to that tag.
+    surface.onTagClick((name) =>
+      useProjectStore.getState().setFilter({ kind: 'tag', value: name })
+    );
     setCtx({ surface, controller });
     setActiveEditorFlush(() => surface.flush());
     setActiveBlockMenu(controller);
