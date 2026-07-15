@@ -9,6 +9,7 @@ export {
   type SelectionInfo,
   type BlockTypeSpec,
   type SlashMenuState,
+  type TagMenuState,
   type ImagePasteDelegate
 } from './surface';
 export { renderDocument, renderBlock, renderInlineInto, BlockViewRegistry, BLOCK_ID_ATTR } from './render';

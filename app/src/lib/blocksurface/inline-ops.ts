@@ -220,6 +220,14 @@ export function splitInline(nodes: InlineNode[], offset: number): [InlineNode[],
   return [left, right];
 }
 
+/** Splice an inline tag leaf into `nodes` at a flat offset, inheriting `marks`
+ *  (the context at the insertion point). Built on splitInline so it obeys the same
+ *  offset rules as every other edit; the tag is its own node and never merges. */
+export function insertTagInInline(nodes: InlineNode[], offset: number, name: string, marks: InlineMarks): InlineNode[] {
+  const [left, right] = splitInline(nodes, offset);
+  return coalesceInline([...left, { kind: 'tag', name, marks: { ...marks } }, ...right]);
+}
+
 /** The toggleable boolean marks (link is set/cleared with a value, separately). */
 export type BooleanMark = 'strong' | 'em' | 'code';
 

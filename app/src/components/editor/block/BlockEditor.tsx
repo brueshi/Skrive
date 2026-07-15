@@ -21,6 +21,7 @@ import { BlockMenuController } from '../menus/BlockMenuController';
 import { SelectionBubble } from '../menus/SelectionBubble';
 import { LinkEditor } from '../menus/LinkEditor';
 import { BlockSlashMenu } from '../menus/BlockSlashMenu';
+import { BlockTagMenu } from '../menus/BlockTagMenu';
 import { OutlineRail } from '../OutlineRail';
 import { WordCountBadge } from '../WordCountBadge';
 import { attachLiveCounts, type LiveCounts } from '../../../lib/wordcount/live';
@@ -155,6 +156,7 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
       {ctx && <SelectionBubble controller={ctx.controller} />}
       {ctx && <LinkEditor controller={ctx.controller} />}
       {ctx && <BlockSlashMenu surface={ctx.surface} />}
+      {ctx && <BlockTagMenu surface={ctx.surface} />}
     </div>
   );
 }
