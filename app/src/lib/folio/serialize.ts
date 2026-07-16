@@ -11,8 +11,8 @@
 //
 // Key order (spec §9): envelope (schemaVersion, docId, docMeta, blocks); block
 // (id, type, then type-specific); inline (kind, then fields, marks last); marks
-// (em, strong, code, strikethrough, link); link (href, title); docMeta (title,
-// createdAt, then preserved unknown keys in first-seen order).
+// (em, strong, code, strikethrough, underline, link); link (href, title); docMeta
+// (title, createdAt, then preserved unknown keys in first-seen order).
 
 import type {
   FolioBlock,
@@ -30,6 +30,7 @@ function orderMarks(m: FolioMarks): Record<string, unknown> {
   if (m.strong === true) out.strong = true;
   if (m.code === true) out.code = true;
   if (m.strikethrough === true) out.strikethrough = true;
+  if (m.underline === true) out.underline = true;
   if (m.link) out.link = { href: m.link.href, title: m.link.title ?? null };
   return out;
 }

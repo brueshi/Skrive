@@ -93,7 +93,7 @@ export type SelectionInfo = {
    *  hidden until release — chasing the growing selection is jarring (SKR-184 / F73;
    *  Docs/Notion show nothing until mouseup). The toolbar ignores it. */
   dragging: boolean;
-  marks: { strong: boolean; em: boolean; code: boolean; strikethrough: boolean; link: boolean };
+  marks: { strong: boolean; em: boolean; code: boolean; strikethrough: boolean; underline: boolean; link: boolean };
   /** The href shared across the selection, when it is uniformly one link. */
   linkHref: string | null;
   /** The focused leaf's block type, for the "Turn into" control. */
@@ -123,6 +123,7 @@ function summariesEqual(a: SelectionInfo | null, b: SelectionInfo | null): boole
     a.marks.em === b.marks.em &&
     a.marks.code === b.marks.code &&
     a.marks.strikethrough === b.marks.strikethrough &&
+    a.marks.underline === b.marks.underline &&
     a.marks.link === b.marks.link &&
     a.linkHref === b.linkHref &&
     a.blockType === b.blockType &&
@@ -273,7 +274,13 @@ export class BlockSurface {
   // / F62): the toggled marks the NEXT typed text will carry, Docs-style. Consumed
   // by applyInsertText and cleared when the caret moves off `pendingCaretKey` (the
   // model position where it was armed) — recordSelection compares the two.
-  private pendingMarks: { strong?: boolean; em?: boolean; code?: boolean; strikethrough?: boolean } | null = null;
+  private pendingMarks: {
+    strong?: boolean;
+    em?: boolean;
+    code?: boolean;
+    strikethrough?: boolean;
+    underline?: boolean;
+  } | null = null;
   private pendingCaretKey: string | null = null;
   // App hook to open the link editor from the ⌘K chord (SKR-177): the surface can't
   // render the editor, so it asks the menu controller (which then calls beginLink).
@@ -843,6 +850,12 @@ export class BlockSurface {
     } else if (key === 'e') {
       e.preventDefault();
       this.toggleMark('code');
+    } else if (key === 'u') {
+      // ⌘U / Ctrl+U toggles underline. contenteditable natively maps ⌘U to
+      // underline, so preventDefault claims it before the browser inserts its own
+      // markup behind the model.
+      e.preventDefault();
+      this.toggleMark('underline');
     } else if (key === 'k') {
       // ⌘K / Ctrl+K — the universal link chord (SKR-177 / F64). The surface owns
       // the chord (so it survives WKWebView's focus quirks) and asks the app to
@@ -912,10 +925,10 @@ export class BlockSurface {
     inline: InlineNode[],
     start: number,
     end: number,
-    pending: { strong?: boolean; em?: boolean; code?: boolean; strikethrough?: boolean }
+    pending: { strong?: boolean; em?: boolean; code?: boolean; strikethrough?: boolean; underline?: boolean }
   ): InlineNode[] {
     let out = inline;
-    for (const mark of ['strong', 'em', 'code', 'strikethrough'] as const) {
+    for (const mark of ['strong', 'em', 'code', 'strikethrough', 'underline'] as const) {
       if (pending[mark] !== undefined) out = setMarkInInline(out, start, end, mark, pending[mark]!);
     }
     return out;
@@ -927,7 +940,15 @@ export class BlockSurface {
   private caretMarkState(
     inline: InlineNode[],
     offset: number
-  ): { strong: boolean; em: boolean; code: boolean; strikethrough: boolean; link: boolean; linkHref: string | null } {
+  ): {
+    strong: boolean;
+    em: boolean;
+    code: boolean;
+    strikethrough: boolean;
+    underline: boolean;
+    link: boolean;
+    linkHref: string | null;
+  } {
     const base = marksAtOffset(inline, offset);
     const has = (m: BooleanMark): boolean => this.pendingMarks?.[m] ?? base[m] === true;
     const run = linkRunAt(inline, offset);
@@ -936,6 +957,7 @@ export class BlockSurface {
       em: has('em'),
       code: has('code'),
       strikethrough: has('strikethrough'),
+      underline: has('underline'),
       link: run != null,
       linkHref: run?.href ?? null
     };
@@ -2156,6 +2178,9 @@ export class BlockSurface {
           strikethrough: caret
             ? caret.strikethrough
             : !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'strikethrough'),
+          underline: caret
+            ? caret.underline
+            : !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'underline'),
           link: caret ? caret.link : !empty && rangeHasLink(cell.inline, cell.start, cell.end)
         },
         linkHref: caret ? caret.linkHref : empty ? null : linkHrefInRange(cell.inline, cell.start, cell.end),
@@ -2207,6 +2232,7 @@ export class BlockSurface {
         em: caret ? caret.em : every('em'),
         code: caret ? caret.code : every('code'),
         strikethrough: caret ? caret.strikethrough : every('strikethrough'),
+        underline: caret ? caret.underline : every('underline'),
         link: caret ? caret.link : single ? rangeHasLink(single.leaf.inline, single.start, single.end) : false
       },
       linkHref: caret ? caret.linkHref : single ? linkHrefInRange(single.leaf.inline, single.start, single.end) : null,

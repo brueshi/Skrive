@@ -92,6 +92,29 @@ export function IconStrikethrough(p: IconProps) {
   );
 }
 
+export function IconUnderline(p: IconProps) {
+  // Framed "U" with an underline bar. INTERIM ARTWORK: the rounded-square frame is
+  // reused verbatim from IconStrikethrough (so it matches the hand-drawn family
+  // exactly), but the U letterform + bar are plain geometric primitives, not a
+  // traced letterform like the other marks — a functional placeholder to swap for
+  // house artwork. Static (no outline->fill active variant); the bubble/toolbar
+  // signals on-state through the button's active class, as Strikethrough / Link do.
+  return (
+    <Glyph {...p} viewBox="0 0 115.8 114">
+      <path d="m88.6 4.7h-61.6c-11.8 0-21.9 9.6-21.9 21.3v62c0 11.7 8.9 21.5 21.1 21.5h62c11.7 0 22.5-9.5 22.5-21.2v-62.3c0-10.6-9.2-21.3-22.1-21.3zm15.6 83.3c0 6.8-5.8 15-15.2 14.9h-62.4c-7.5 0.1-15.2-5.9-15.3-14.5l-0.1-61.8c0-8.3 7.5-15.8 15.7-15.8h62c7.8 0 15.3 5 15.3 15.2v62z" />
+      <path
+        d="M41 30 L41 52 A17 17 0 0 0 75 52 L75 30"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={7}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <rect x="39" y="79" width="38" height="6.5" rx="3.25" />
+    </Glyph>
+  );
+}
+
 export function IconInlineCode({ active = false, ...p }: IconProps & { active?: boolean }) {
   // Framed `</>` (Joe's artwork) — in the family's rounded frame. The `</>` glyph
   // (chevrons + centered slash capsule) is a fillable outline set: inactive it is

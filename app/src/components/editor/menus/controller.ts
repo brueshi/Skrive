@@ -25,6 +25,7 @@ export type MenuSelection = {
   em: boolean;
   code: boolean;
   strikethrough: boolean;
+  underline: boolean;
   link: boolean;
   linkHref: string | null;
   blockType: MenuBlockType;
@@ -60,6 +61,7 @@ export const EMPTY_MENU_SELECTION: MenuSelection = {
   em: false,
   code: false,
   strikethrough: false,
+  underline: false,
   link: false,
   linkHref: null,
   blockType: 'paragraph',
@@ -85,7 +87,7 @@ export interface MenuController {
   liveAnchorRect(): AnchorRect | null;
 
   // Inline marks.
-  toggleMark(mark: 'strong' | 'em' | 'code' | 'strikethrough'): void;
+  toggleMark(mark: 'strong' | 'em' | 'code' | 'strikethrough' | 'underline'): void;
 
   // Block type ("Turn into") and wrap toggles.
   setParagraph(): void;

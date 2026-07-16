@@ -127,6 +127,7 @@ function renderInlineNode(node: InlineNode, resolveAsset: AssetResolver): Node {
   if (marks.em) dom = wrap('em', dom);
   if (marks.strong) dom = wrap('strong', dom);
   if (marks.strikethrough) dom = wrap('s', dom);
+  if (marks.underline) dom = wrap('u', dom);
   if (marks.link) {
     const a = document.createElement('a');
     // The second, independent URL check (SKR-187 / F29). Paste sanitizes at

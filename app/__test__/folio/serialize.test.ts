@@ -22,6 +22,22 @@ describe('serializeFolio / parseFolio round-trip', () => {
     const text = serializeFolio(emptyFixture);
     expect(serializeFolio(parseFolio(text))).toBe(text);
   });
+
+  it('persists the underline mark natively (no Markdown equivalent exists)', () => {
+    const doc: FolioDocument = {
+      ...emptyFixture,
+      blocks: [
+        {
+          id: 'p1a2b3c4d5',
+          type: 'paragraph',
+          inline: [{ kind: 'text', text: 'noted', marks: { underline: true } }]
+        }
+      ]
+    };
+    const text = serializeFolio(doc);
+    expect(text).toContain('"underline": true');
+    expect(parseFolio(text)).toEqual(doc);
+  });
 });
 
 describe('serializeFolio determinism (spec §9)', () => {

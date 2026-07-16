@@ -23,6 +23,7 @@ export type FolioMarks = {
   strong?: boolean;
   code?: boolean;
   strikethrough?: boolean;
+  underline?: boolean;
   link?: { href: string; title: string | null };
 };
 

@@ -81,6 +81,10 @@ function collectInline(nodes: InlineNode[], breaks: 'keep' | 'space'): InlineIte
   const items: InlineItem[] = [];
   for (const node of nodes) {
     const m = node.marks;
+    // Underline is deliberately absent here: it has no Markdown syntax, so it is a
+    // `.folio`-native mark and degrades to plain text on this Markdown path (an
+    // `<u>` passthrough would freeze the whole block on re-parse, not restore the
+    // mark). `.folio` persists it natively via the folio serializer.
     const context = {
       em: m.em === true,
       strong: m.strong === true,

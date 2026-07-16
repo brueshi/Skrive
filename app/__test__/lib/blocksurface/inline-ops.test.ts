@@ -178,6 +178,12 @@ describe('toggleMarkInInline', () => {
     expect(struck).toEqual([text('done', { strikethrough: true }), text(' later')]);
     expect(toggleMarkInInline(struck, 0, 4, 'strikethrough')).toEqual([text('done later')]);
   });
+
+  it('toggles underline over a sub-range and clears it on a second toggle', () => {
+    const lined = toggleMarkInInline([text('read this')], 0, 4, 'underline');
+    expect(lined).toEqual([text('read', { underline: true }), text(' this')]);
+    expect(toggleMarkInInline(lined, 0, 4, 'underline')).toEqual([text('read this')]);
+  });
 });
 
 describe('setMarkInInline', () => {

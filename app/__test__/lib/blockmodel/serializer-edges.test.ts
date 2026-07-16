@@ -22,6 +22,22 @@ function paragraph(inline: InlineNode[]): Document {
 
 const types = (md: string): string[] => parseDocument(md).blocks.map((b) => b.type);
 
+// Underline has no Markdown syntax, so on the Markdown serialization path it
+// degrades to plain text (the mark is dropped, the text preserved) rather than
+// emitting an `<u>` passthrough that would freeze the block on re-parse. `.folio`
+// persists it natively; this only covers the Markdown path.
+describe('underline degrades to plain text on the Markdown path', () => {
+  it('emits the text without any wrapping syntax', () => {
+    const underlined: InlineNode = { kind: 'text', text: 'noted', marks: { underline: true } };
+    expect(serializeDocument(paragraph([underlined]))).toBe('noted\n');
+  });
+
+  it('keeps a co-occurring Markdown mark while dropping only underline', () => {
+    const both: InlineNode = { kind: 'text', text: 'noted', marks: { underline: true, strong: true } };
+    expect(serializeDocument(paragraph([both]))).toBe('**noted**\n');
+  });
+});
+
 // F20, and F14 through it. A newline is never content in a text run — a line
 // break is a `break` node — but a run carrying one was emitted raw, and a raw
 // newline inside a paragraph is BLOCK syntax to the parser on the way back.
