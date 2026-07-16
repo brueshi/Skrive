@@ -14,6 +14,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { BlockSurface, DocHistory } from '../../../lib/blocksurface';
 import { attachCustomCaret } from '../../../lib/blocksurface/caret';
+import { attachDecorationOverlay } from '../../../lib/blocksurface/decoration-overlay';
+import { installDecorationDevHarness } from '../../../lib/blocksurface/decoration-dev';
 import type { Document } from '../../../lib/blockmodel';
 import { setActiveEditorFlush } from '../active-editor';
 import { setActiveBlockMenu } from '../active-surface';
@@ -55,6 +57,7 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
   const hostRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const caretRef = useRef<HTMLDivElement>(null);
+  const decorationRef = useRef<HTMLDivElement>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const [ctx, setCtx] = useState<{ surface: BlockSurface; controller: BlockMenuController } | null>(null);
@@ -78,7 +81,8 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
     const host = hostRef.current;
     const scroller = bodyRef.current;
     const caretEl = caretRef.current;
-    if (!host || !scroller || !caretEl) return;
+    const decorationEl = decorationRef.current;
+    if (!host || !scroller || !caretEl || !decorationEl) return;
     const surface = new BlockSurface({
       container: host,
       doc,
@@ -94,6 +98,22 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
       resolveAsset: (rawUrl) => skriveAssetResolver(rawUrl, { projectRoot: '', filePath: docPath })
     });
     const caret = attachCustomCaret({ surface: host, scroller, caret: caretEl });
+    // The block decoration overlay (find-match highlights, spelling squiggles):
+    // paints the surface's decoration store over live text in the scroller's
+    // content space, alongside the caret. View-only; the store is empty until a
+    // feature adds a decoration, so it is inert until find/spellcheck arrive.
+    const decorations = attachDecorationOverlay({
+      surface: host,
+      scroller,
+      layer: decorationEl,
+      store: surface.decorations
+    });
+    // Dev-only console hook to seed decorations (window.__skrive.decorate), so the
+    // overlay is verifiable in the shell before its consumers exist. Stripped from
+    // production builds.
+    const teardownDevHarness = import.meta.env.DEV
+      ? installDecorationDevHarness(host, surface.decorations)
+      : null;
     const controller = new BlockMenuController(surface);
     // The write seam (SKR-175): the surface can read a pasted image's bytes but
     // owns neither docPath nor the shell bridge, so it hands both to the store
@@ -114,6 +134,8 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
       setActiveBlockMenu(null);
       controller.destroy();
       caret.destroy();
+      decorations.destroy();
+      teardownDevHarness?.();
       // Drain the pending snapshot before teardown so a tab switch / view
       // toggle within the debounce window doesn't drop the last edit — destroy()
       // only cancels, it never emits. RawSourceView does the same in its cleanup
@@ -142,6 +164,10 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
         }}
       >
         <div ref={hostRef} className="block-editor-surface" />
+        {/* Decoration overlay layer: highlights / squiggles painted over the text
+            in scroller-content space. Between the surface and the caret so boxes sit
+            over the text but under the caret; pointer-events:none. */}
+        <div ref={decorationRef} className="block-decoration-layer" aria-hidden="true" />
         <div ref={caretRef} className="skrive-caret" aria-hidden="true" />
       </div>
       {/* Document-structure rail (SKR-229), same component the Markdown preview

@@ -24,3 +24,5 @@ export {
 } from './selection';
 export { insertTextInInline, deleteRangeInInline, readInlineFromDOM } from './inline-ops';
 export { DocHistory } from './history';
+export { DecorationStore, type Decoration, type DecorationType } from './decorations';
+export { attachDecorationOverlay, type DecorationOverlayHandle } from './decoration-overlay';

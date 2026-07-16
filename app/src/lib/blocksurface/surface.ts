@@ -18,6 +18,7 @@ import { imageExtension, imageMarkdownLink, pastedImageFilename } from '../clipb
 import { notify } from '../notify';
 import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto, setCodeContent, TAG_ATTR, TAG_CLASS } from './render';
 import type { AssetResolver } from './render';
+import { DecorationStore } from './decorations';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
 import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
@@ -237,6 +238,12 @@ export class BlockSurface {
   private suppressHistory = false;
   private readonly container: HTMLElement;
   private readonly registry = new BlockViewRegistry();
+  // View-only decoration overlay data (highlights, squiggles) keyed by block id.
+  // The surface owns it so consumers reach it as `surface.decorations` and the
+  // re-render hooks below can invalidate the edited block directly; the DOM painter
+  // (attachDecorationOverlay) subscribes and repaints. Empty and inert until a
+  // feature adds a decoration, so the store adds no keystroke cost when idle.
+  private readonly _decorations = new DecorationStore();
   private readonly onDocChange?: (doc: Document) => void;
   private debounceTimer: number | null = null;
   // The deferred idle-callback handle for the cold path, and whether the doc has
@@ -376,6 +383,13 @@ export class BlockSurface {
     this.container.addEventListener('drop', this.onDrop, true);
     this.container.addEventListener('dragend', this.onDragEnd, true);
     document.addEventListener('selectionchange', this.onDocSelectionChange);
+  }
+
+  /** The view-only decoration overlay store (find-match highlights, spelling
+   *  squiggles). Consumers add/clear decorations by type; the overlay painter
+   *  wired in the editor subscribes and keeps them positioned over live text. */
+  get decorations(): DecorationStore {
+    return this._decorations;
   }
 
   // The document. Reads are plain; every assignment records a pre-edit snapshot
@@ -4542,6 +4556,10 @@ export class BlockSurface {
     const i = blockIndexOf(this.doc.blocks).get(leafId);
     const top = i === undefined ? undefined : this.doc.blocks[i];
     if (top) this.renderedFrom.set(top.id, top);
+    // renderInlineInto just rebuilt this leaf's DOM, so any decoration on it lost
+    // its boxes; the overlay recomputes them. O(1) when the leaf carries none —
+    // and free when nothing is decorated at all — so the hot path pays nothing.
+    this._decorations.invalidate(leafId);
   }
 
   private reconcile(): void {
@@ -4572,6 +4590,10 @@ export class BlockSurface {
       this.registry.delete(id);
       this.renderedFrom.delete(id);
     }
+    // A structural pass may have rebuilt or removed the elements decorations sit
+    // on, so reassess every decorated block (short-circuits when none exist). Not
+    // the keystroke path — typing re-renders in place and never reconciles.
+    this._decorations.invalidate(null);
   }
 
   private scheduleSerialize(): void {
