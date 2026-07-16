@@ -26,6 +26,10 @@ export type InlineMarks = {
   strong?: boolean;
   code?: boolean;
   strikethrough?: boolean;
+  /** Underline has no Markdown syntax, so it is a `.folio`-native mark: it
+   *  persists in `.folio` and degrades to plain text on the Markdown path
+   *  (`blockmodel/serialize.ts` never carries it into an InlineItem). */
+  underline?: boolean;
   link?: { href: string; title: string | null };
 };
 

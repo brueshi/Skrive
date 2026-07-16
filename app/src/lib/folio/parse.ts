@@ -68,6 +68,7 @@ function readMarks(v: unknown, where: string): FolioMarks {
   if (v.strong === true) marks.strong = true;
   if (v.code === true) marks.code = true;
   if (v.strikethrough === true) marks.strikethrough = true;
+  if (v.underline === true) marks.underline = true;
   if (v.link !== undefined) {
     if (!isObject(v.link)) throw new FolioParseError(`${where}.marks.link must be an object`);
     marks.link = {

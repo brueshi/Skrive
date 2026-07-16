@@ -28,6 +28,7 @@ import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
 import { changeListType, findImmediateList, indentItem, itemsHoldingLeaves, liftItemOut, outdentItem, splitListAround } from './list-ops';
 import {
   type BooleanMark,
+  clearMarksInInline,
   coalesceInline,
   deleteRangeInInline,
   inlineLength,
@@ -93,7 +94,7 @@ export type SelectionInfo = {
    *  hidden until release — chasing the growing selection is jarring (SKR-184 / F73;
    *  Docs/Notion show nothing until mouseup). The toolbar ignores it. */
   dragging: boolean;
-  marks: { strong: boolean; em: boolean; code: boolean; link: boolean };
+  marks: { strong: boolean; em: boolean; code: boolean; strikethrough: boolean; underline: boolean; link: boolean };
   /** The href shared across the selection, when it is uniformly one link. */
   linkHref: string | null;
   /** The focused leaf's block type, for the "Turn into" control. */
@@ -122,6 +123,8 @@ function summariesEqual(a: SelectionInfo | null, b: SelectionInfo | null): boole
     a.marks.strong === b.marks.strong &&
     a.marks.em === b.marks.em &&
     a.marks.code === b.marks.code &&
+    a.marks.strikethrough === b.marks.strikethrough &&
+    a.marks.underline === b.marks.underline &&
     a.marks.link === b.marks.link &&
     a.linkHref === b.linkHref &&
     a.blockType === b.blockType &&
@@ -272,7 +275,13 @@ export class BlockSurface {
   // / F62): the toggled marks the NEXT typed text will carry, Docs-style. Consumed
   // by applyInsertText and cleared when the caret moves off `pendingCaretKey` (the
   // model position where it was armed) — recordSelection compares the two.
-  private pendingMarks: { strong?: boolean; em?: boolean; code?: boolean } | null = null;
+  private pendingMarks: {
+    strong?: boolean;
+    em?: boolean;
+    code?: boolean;
+    strikethrough?: boolean;
+    underline?: boolean;
+  } | null = null;
   private pendingCaretKey: string | null = null;
   // App hook to open the link editor from the ⌘K chord (SKR-177): the surface can't
   // render the editor, so it asks the menu controller (which then calls beginLink).
@@ -460,6 +469,14 @@ export class BlockSurface {
     this.reconcile();
     if (restored.sel) writeSelection(this.container, restored.sel, 'undo');
     this.scheduleSerialize();
+  }
+
+  /** Whether there is an edit to undo / redo — feeds the palette's enabled state. */
+  get canUndo(): boolean {
+    return this.history.canUndo;
+  }
+  get canRedo(): boolean {
+    return this.history.canRedo;
   }
 
   /** Redo the last undone edit (Cmd/Ctrl+Shift+Z / Cmd+Y). */
@@ -819,6 +836,15 @@ export class BlockSurface {
       this.toggleList(e.code === 'Digit8' ? 'bullet_list' : 'ordered_list');
       return;
     }
+    // Cmd/Ctrl+Shift+X toggles strikethrough (Google-Docs parity). Keyed on e.code
+    // so it is layout-independent. ⌘⇧B / ⌘⇧E are claimed at the app level (backlinks
+    // panel, cycle layout); ⌘⇧X has no app binding, so the surface owns it here,
+    // ahead of the unshifted-mark section below.
+    if (e.shiftKey && e.code === 'KeyX') {
+      e.preventDefault();
+      this.toggleMark('strikethrough');
+      return;
+    }
     // Mark chords are unshifted (⌘B/⌘I/⌘E). ⌘⇧B and ⌘⇧E are separately bound at
     // the app level (backlinks panel, cycle layout — see registry.ts) and must
     // reach the window dispatcher untouched, not get eaten here too (SKR-171).
@@ -833,6 +859,12 @@ export class BlockSurface {
     } else if (key === 'e') {
       e.preventDefault();
       this.toggleMark('code');
+    } else if (key === 'u') {
+      // ⌘U / Ctrl+U toggles underline. contenteditable natively maps ⌘U to
+      // underline, so preventDefault claims it before the browser inserts its own
+      // markup behind the model.
+      e.preventDefault();
+      this.toggleMark('underline');
     } else if (key === 'k') {
       // ⌘K / Ctrl+K — the universal link chord (SKR-177 / F64). The surface owns
       // the chord (so it survives WKWebView's focus quirks) and asks the app to
@@ -861,6 +893,20 @@ export class BlockSurface {
     // No block-id leaf and no primeable caret means a table-cell range selection
     // (cells are addressed by coordinates, not a block id) — single-region path.
     this.applyToSelection((inline, start, end) => toggleMarkInInline(inline, start, end, mark));
+  }
+
+  /** Strip every character mark (bold / italic / code / strikethrough / underline)
+   *  from the selection, keeping links. A no-op at a collapsed caret — there is no
+   *  range to clear. Mirrors toggleMark's selection routing (SKR-145). */
+  clearMarks(): void {
+    const leaves = this.selectedLeaves();
+    if (leaves.length > 0) {
+      this.clearPendingMarks();
+      this.applyTransformToLeaves(leaves, (inline, start, end) => clearMarksInInline(inline, start, end));
+      return;
+    }
+    // Table-cell range (addressed by coordinates, not a block id).
+    this.applyToSelection((inline, start, end) => clearMarksInInline(inline, start, end));
   }
 
   private clearPendingMarks(): void {
@@ -902,10 +948,10 @@ export class BlockSurface {
     inline: InlineNode[],
     start: number,
     end: number,
-    pending: { strong?: boolean; em?: boolean; code?: boolean }
+    pending: { strong?: boolean; em?: boolean; code?: boolean; strikethrough?: boolean; underline?: boolean }
   ): InlineNode[] {
     let out = inline;
-    for (const mark of ['strong', 'em', 'code'] as const) {
+    for (const mark of ['strong', 'em', 'code', 'strikethrough', 'underline'] as const) {
       if (pending[mark] !== undefined) out = setMarkInInline(out, start, end, mark, pending[mark]!);
     }
     return out;
@@ -917,11 +963,27 @@ export class BlockSurface {
   private caretMarkState(
     inline: InlineNode[],
     offset: number
-  ): { strong: boolean; em: boolean; code: boolean; link: boolean; linkHref: string | null } {
+  ): {
+    strong: boolean;
+    em: boolean;
+    code: boolean;
+    strikethrough: boolean;
+    underline: boolean;
+    link: boolean;
+    linkHref: string | null;
+  } {
     const base = marksAtOffset(inline, offset);
     const has = (m: BooleanMark): boolean => this.pendingMarks?.[m] ?? base[m] === true;
     const run = linkRunAt(inline, offset);
-    return { strong: has('strong'), em: has('em'), code: has('code'), link: run != null, linkHref: run?.href ?? null };
+    return {
+      strong: has('strong'),
+      em: has('em'),
+      code: has('code'),
+      strikethrough: has('strikethrough'),
+      underline: has('underline'),
+      link: run != null,
+      linkHref: run?.href ?? null
+    };
   }
 
   /** Apply a mark uniformly across the covered leaves. The on/off decision is made
@@ -963,6 +1025,50 @@ export class BlockSurface {
     if (firstEl && lastEl) {
       // Swapped points restore a backward selection: setBaseAndExtent takes
       // base/extent, so base-after-extent IS the direction.
+      if (firstEl === lastEl) {
+        if (backward) setSelectionRange(firstEl, last.end, first.start);
+        else setSelectionRange(firstEl, first.start, last.end);
+      } else if (backward) {
+        setCrossBlockSelection(lastEl, last.end, firstEl, first.start);
+      } else {
+        setCrossBlockSelection(firstEl, first.start, lastEl, last.end);
+      }
+    }
+    this.scheduleSerialize();
+    this.emitSelection();
+  }
+
+  /** Apply an inline transform to every covered leaf's range as one history step,
+   *  re-rendering in place and restoring the selection (with drag direction). The
+   *  mark-agnostic sibling of applyMarkToLeaves, used by clear-formatting; it makes
+   *  no on/off decision, it just maps each leaf's range through `transform`. */
+  private applyTransformToLeaves(
+    leaves: ReadonlyArray<{ leaf: InlineTextBlock; start: number; end: number }>,
+    transform: (inline: InlineNode[], start: number, end: number) => InlineNode[]
+  ): void {
+    const liveSel = window.getSelection();
+    const backward = liveSel != null && isSelectionBackward(liveSel);
+    const index = blockIndexOf(this.doc.blocks);
+    const blocks = this.doc.blocks.slice();
+    for (const l of leaves) {
+      const i = index.get(l.leaf.id);
+      if (i === undefined) continue;
+      const inline = transform(l.leaf.inline, l.start, l.end);
+      blocks[i] = updateBlockInTop(blocks[i]!, l.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode);
+    }
+    this.doc = { ...this.doc, blocks };
+    for (const l of leaves) {
+      const el = this.leafElementById(l.leaf.id);
+      const updated = findBlockById(this.doc.blocks, l.leaf.id);
+      if (el && updated && isInlineText(updated)) renderInlineInto(el, updated.inline, this.resolveAsset);
+      this.markRenderedInPlace(l.leaf.id);
+    }
+    const first = leaves[0];
+    const last = leaves[leaves.length - 1];
+    if (!first || !last) return;
+    const firstEl = this.leafElementById(first.leaf.id);
+    const lastEl = this.leafElementById(last.leaf.id);
+    if (firstEl && lastEl) {
       if (firstEl === lastEl) {
         if (backward) setSelectionRange(firstEl, last.end, first.start);
         else setSelectionRange(firstEl, first.start, last.end);
@@ -2136,6 +2242,12 @@ export class BlockSurface {
           strong: caret ? caret.strong : !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'strong'),
           em: caret ? caret.em : !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'em'),
           code: caret ? caret.code : !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'code'),
+          strikethrough: caret
+            ? caret.strikethrough
+            : !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'strikethrough'),
+          underline: caret
+            ? caret.underline
+            : !empty && rangeHasMark(cell.inline, cell.start, cell.end, 'underline'),
           link: caret ? caret.link : !empty && rangeHasLink(cell.inline, cell.start, cell.end)
         },
         linkHref: caret ? caret.linkHref : empty ? null : linkHrefInRange(cell.inline, cell.start, cell.end),
@@ -2186,6 +2298,8 @@ export class BlockSurface {
         strong: caret ? caret.strong : every('strong'),
         em: caret ? caret.em : every('em'),
         code: caret ? caret.code : every('code'),
+        strikethrough: caret ? caret.strikethrough : every('strikethrough'),
+        underline: caret ? caret.underline : every('underline'),
         link: caret ? caret.link : single ? rangeHasLink(single.leaf.inline, single.start, single.end) : false
       },
       linkHref: caret ? caret.linkHref : single ? linkHrefInRange(single.leaf.inline, single.start, single.end) : null,

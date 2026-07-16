@@ -31,6 +31,7 @@ import { notify } from '../notify';
 
 export type CommandGroup =
   | 'File'
+  | 'Edit'
   | 'View'
   | 'Insert'
   | 'Project'
@@ -97,6 +98,7 @@ export type CommandDeps = {
 
 export const COMMAND_GROUP_ORDER: CommandGroup[] = [
   'File',
+  'Edit',
   'View',
   'Insert',
   'Project',
@@ -150,6 +152,11 @@ const whenActiveConvertible = () => {
  *  it's mounted — i.e. a document is open in the rendered (not raw / not diff)
  *  view. The active-surface slot is non-null exactly then. */
 const whenBlockSurface = () => getActiveBlockMenu() != null;
+
+/** Undo/redo are palette entries gated on the block surface's history depth (the
+ *  surface owns the ⌘Z chords; these reads mirror its enabled state). */
+const whenCanUndo = () => getActiveBlockMenu()?.canUndo() ?? false;
+const whenCanRedo = () => getActiveBlockMenu()?.canRedo() ?? false;
 
 /** Open the transient link affordance for the block surface's selection (or the
  *  link under its cursor). The controller no-ops when there's nothing to link. */
@@ -452,6 +459,22 @@ export function buildRegistry(deps: CommandDeps): {
     // Listed here so the cheat-sheet has one place to look. Their
     // `run`s are intentionally absent.
     {
+      chord: { code: 'KeyZ', mod: true },
+      display: '⌘Z',
+      scope: 'surface',
+      group: 'Edit',
+      label: 'Undo',
+      commandId: 'edit.undo'
+    },
+    {
+      chord: { code: 'KeyZ', mod: true, shift: true },
+      display: '⌘⇧Z',
+      scope: 'surface',
+      group: 'Edit',
+      label: 'Redo',
+      commandId: 'edit.redo'
+    },
+    {
       chord: { code: 'Escape' },
       display: 'Esc',
       scope: 'surface',
@@ -514,6 +537,30 @@ export function buildRegistry(deps: CommandDeps): {
       shortcut: get('edit.replace'),
       when: whenLiveDoc,
       run: () => useFindStore.getState().openReplace()
+    },
+    // ============ Edit ============
+    {
+      id: 'edit.undo',
+      label: 'Undo',
+      group: 'Edit',
+      shortcut: get('edit.undo'),
+      when: whenCanUndo,
+      run: () => getActiveBlockMenu()?.undo()
+    },
+    {
+      id: 'edit.redo',
+      label: 'Redo',
+      group: 'Edit',
+      shortcut: get('edit.redo'),
+      when: whenCanRedo,
+      run: () => getActiveBlockMenu()?.redo()
+    },
+    {
+      id: 'edit.clearFormatting',
+      label: 'Clear formatting',
+      group: 'Edit',
+      when: whenBlockSurface,
+      run: () => getActiveBlockMenu()?.clearFormatting()
     },
     {
       id: 'file.save',

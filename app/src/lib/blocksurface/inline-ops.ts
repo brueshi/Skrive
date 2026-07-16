@@ -31,7 +31,13 @@ function nodeWidth(node: InlineNode): number {
 /** Structural equality of two mark sets. Boolean marks compare by truthiness —
  *  absent and false are the same mark state — and links by href + title. */
 export function marksEqual(a: InlineMarks, b: InlineMarks): boolean {
-  if (!a.em !== !b.em || !a.strong !== !b.strong || !a.code !== !b.code || !a.strikethrough !== !b.strikethrough) {
+  if (
+    !a.em !== !b.em ||
+    !a.strong !== !b.strong ||
+    !a.code !== !b.code ||
+    !a.strikethrough !== !b.strikethrough ||
+    !a.underline !== !b.underline
+  ) {
     return false;
   }
   if (!a.link !== !b.link) return false;
@@ -229,7 +235,7 @@ export function insertTagInInline(nodes: InlineNode[], offset: number, name: str
 }
 
 /** The toggleable boolean marks (link is set/cleared with a value, separately). */
-export type BooleanMark = 'strong' | 'em' | 'code';
+export type BooleanMark = 'strong' | 'em' | 'code' | 'strikethrough' | 'underline';
 
 // Apply a mark transform to the text within the flat range [start, end), splitting
 // runs at the range boundaries so only the covered characters change.
@@ -435,6 +441,14 @@ export function setLinkInInline(
   );
 }
 
+/** Strip every character mark (bold / italic / code / strikethrough / underline)
+ *  from the range, keeping links. A link is content, not character formatting, so
+ *  "clear formatting" leaves it (Google-Docs semantics). No-op on an empty range. */
+export function clearMarksInInline(nodes: InlineNode[], start: number, end: number): InlineNode[] {
+  if (start >= end) return nodes;
+  return coalesceInline(mapRange(nodes, start, end, (m) => (m.link ? { link: m.link } : {})));
+}
+
 function markEl(tag: string, marks: InlineMarks): InlineMarks {
   switch (tag) {
     case 'strong':
@@ -449,6 +463,9 @@ function markEl(tag: string, marks: InlineMarks): InlineMarks {
     case 'del':
     case 'strike':
       return { ...marks, strikethrough: true };
+    case 'u':
+    case 'ins':
+      return { ...marks, underline: true };
     default:
       return marks;
   }

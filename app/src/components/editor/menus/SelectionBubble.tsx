@@ -13,7 +13,15 @@ import type { MenuController } from './controller';
 import { Tooltip } from '../../ui/Tooltip';
 import { useAnchoredRect } from './useAnchoredRect';
 import { BlockTypeDropdown } from './BlockTypeDropdown';
-import { IconBold, IconItalic, IconInlineCode, IconLink } from './toolbar-icons';
+import {
+  IconBold,
+  IconItalic,
+  IconUnderline,
+  IconStrikethrough,
+  IconInlineCode,
+  IconLink,
+  IconClearFormatting
+} from './toolbar-icons';
 import './menus.css';
 
 function BubbleButton({
@@ -78,11 +86,31 @@ export function SelectionBubble({ controller }: { controller: MenuController }) 
           <BubbleButton label="Italic" shortcut="⌘I" active={s.em} onRun={() => controller.toggleMark('em')}>
             <IconItalic size={20} active={s.em} />
           </BubbleButton>
+          <BubbleButton
+            label="Underline"
+            shortcut="⌘U"
+            active={s.underline}
+            onRun={() => controller.toggleMark('underline')}
+          >
+            <IconUnderline size={20} active={s.underline} />
+          </BubbleButton>
+          <BubbleButton
+            label="Strikethrough"
+            shortcut="⌘⇧X"
+            active={s.strikethrough}
+            onRun={() => controller.toggleMark('strikethrough')}
+          >
+            <IconStrikethrough size={20} active={s.strikethrough} />
+          </BubbleButton>
           <BubbleButton label="Inline code" shortcut="⌘E" active={s.code} onRun={() => controller.toggleMark('code')}>
             <IconInlineCode size={20} active={s.code} />
           </BubbleButton>
           <BubbleButton label="Link" active={s.link} onRun={() => controller.openLinkEditor()}>
             <IconLink size={20} />
+          </BubbleButton>
+          <span className="rich-toolbar-sep" aria-hidden="true" />
+          <BubbleButton label="Clear formatting" onRun={() => controller.clearFormatting()}>
+            <IconClearFormatting size={20} />
           </BubbleButton>
         </motion.div>
       )}

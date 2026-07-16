@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  clearMarksInInline,
   coalesceInline,
   deleteRangeInInline,
   inlineLength,
@@ -171,6 +172,39 @@ describe('toggleMarkInInline', () => {
   it('adds when only part of the range has the mark, coalescing the result', () => {
     const nodes = [text('ab', { em: true }), text('cd')];
     expect(toggleMarkInInline(nodes, 0, 4, 'em')).toEqual([text('abcd', { em: true })]);
+  });
+
+  it('toggles strikethrough over a sub-range and clears it on a second toggle', () => {
+    const struck = toggleMarkInInline([text('done later')], 0, 4, 'strikethrough');
+    expect(struck).toEqual([text('done', { strikethrough: true }), text(' later')]);
+    expect(toggleMarkInInline(struck, 0, 4, 'strikethrough')).toEqual([text('done later')]);
+  });
+
+  it('toggles underline over a sub-range and clears it on a second toggle', () => {
+    const lined = toggleMarkInInline([text('read this')], 0, 4, 'underline');
+    expect(lined).toEqual([text('read', { underline: true }), text(' this')]);
+    expect(toggleMarkInInline(lined, 0, 4, 'underline')).toEqual([text('read this')]);
+  });
+});
+
+describe('clearMarksInInline', () => {
+  it('strips every character mark over the range but keeps links', () => {
+    const link = { href: 'u', title: null };
+    const nodes = [text('bold', { strong: true, em: true }), text('link', { link }), text('u', { underline: true })];
+    expect(clearMarksInInline(nodes, 0, 9)).toEqual([text('bold'), text('link', { link }), text('u')]);
+  });
+
+  it('clears only the covered sub-range, splitting the run', () => {
+    expect(clearMarksInInline([text('abcd', { strong: true })], 1, 3)).toEqual([
+      text('a', { strong: true }),
+      text('bc'),
+      text('d', { strong: true })
+    ]);
+  });
+
+  it('is a no-op on an empty range', () => {
+    const nodes = [text('hi', { strong: true })];
+    expect(clearMarksInInline(nodes, 2, 2)).toBe(nodes);
   });
 });
 

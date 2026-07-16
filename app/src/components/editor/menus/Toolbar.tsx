@@ -11,7 +11,7 @@ import type { MenuController } from './controller';
 import { BlockTypeDropdown } from './BlockTypeDropdown';
 import { InsertMenu } from './InsertMenu';
 import { Tooltip } from '../../ui/Tooltip';
-import { IconBold, IconItalic, IconInlineCode } from './toolbar-icons';
+import { IconBold, IconItalic, IconUnderline, IconStrikethrough } from './toolbar-icons';
 import './menus.css';
 
 function ToolbarButton({
@@ -51,12 +51,14 @@ export function Toolbar({ controller }: { controller: MenuController }) {
   const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const s = snap.selection;
 
-  // The permanent set, fixed forever by the affordance grammar (SKR-243):
-  //   [ Turn into ▾ ] | B  I  ⌍code⌎ | [ Insert ▾ ]
-  // Turn into absorbs every block transformation; the marks are B / I / inline
-  // code (Link is bubble-only, resolved call 1); Insert is the discoverable
-  // catalog. Adding a button here is forbidden — see chrome-affordance-grammar.md
-  // rule 7. Divider / Table and the list/quote/code conversions that used to have
+  // The permanent set, fixed by the affordance grammar (SKR-243, amended resolved
+  // call 4):
+  //   [ Turn into ▾ ] | B  I  U  S | [ Insert ▾ ]
+  // Turn into absorbs every block transformation; the marks are the traditional
+  // prose cluster B / I / U / S (bold, italic, underline, strikethrough) — inline
+  // code and Link are bubble-only (+ ⌘E / ⌘K). Insert is the discoverable catalog.
+  // Adding a button here is forbidden — see chrome-affordance-grammar.md rule 7.
+  // Divider / Table and the list/quote/code conversions that used to have
   // standalone buttons now live in Turn into and Insert.
   return (
     <div className="rich-toolbar">
@@ -71,8 +73,16 @@ export function Toolbar({ controller }: { controller: MenuController }) {
         <ToolbarButton label="Italic" shortcut="⌘I" active={s.em} onRun={() => controller.toggleMark('em')}>
           <IconItalic size={20} active={s.em} />
         </ToolbarButton>
-        <ToolbarButton label="Inline code" shortcut="⌘E" active={s.code} onRun={() => controller.toggleMark('code')}>
-          <IconInlineCode size={20} active={s.code} />
+        <ToolbarButton label="Underline" shortcut="⌘U" active={s.underline} onRun={() => controller.toggleMark('underline')}>
+          <IconUnderline size={20} active={s.underline} />
+        </ToolbarButton>
+        <ToolbarButton
+          label="Strikethrough"
+          shortcut="⌘⇧X"
+          active={s.strikethrough}
+          onRun={() => controller.toggleMark('strikethrough')}
+        >
+          <IconStrikethrough size={20} active={s.strikethrough} />
         </ToolbarButton>
 
         <span className="rich-toolbar-sep" aria-hidden="true" />

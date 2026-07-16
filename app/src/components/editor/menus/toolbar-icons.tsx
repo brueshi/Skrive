@@ -10,14 +10,18 @@
 // shared source strip. Filled paths inherit the wrapper's currentColor;
 // stroked paths carry `fill="none" stroke="currentColor"`.
 //
-// IconBold, IconItalic, and IconInlineCode take an `active` prop: the glyph
-// inside the frame is a fillable outline that strokes when off and fills solid
-// when the mark is applied — the fill is the on-state cue, drawn at matched frame
-// sizes so the marks read as an even set.
+// The mark glyphs — IconBold, IconItalic, IconUnderline, IconStrikethrough, and
+// IconInlineCode — take an `active` prop and share one on-state language: outline
+// when off, solid fill when the mark is applied, drawn at matched frame sizes so
+// the marks read as an even set. Two techniques reach it. The simple letterforms
+// (Bold / Italic / inline code) stroke their outline when off and fill it when on.
+// The detailed bubble letters (Underline / Strikethrough) instead swap the glyph
+// PATH: off renders the full outline (outer edge + inner counter), on drops the
+// counter contour so the silhouette fills solid — stroking those dense outlines
+// would double their edges into a muddy blob.
 //
 // IconChevronDown stays a line glyph (a disclosure affordance, not a
-// formatting mark), and IconStrikethrough is drawn but not yet wired (the
-// strikethrough mark is a separate change).
+// formatting mark).
 
 type IconProps = { size?: number; className?: string };
 
@@ -81,12 +85,35 @@ export function IconItalic({ active = false, ...p }: IconProps & { active?: bool
   );
 }
 
-export function IconStrikethrough(p: IconProps) {
-  // Framed "S" with the strike bar carried through the letterform.
+export function IconStrikethrough({ active = false, ...p }: IconProps & { active?: boolean }) {
+  // Bubble letterform (Joe's artwork): the S is an outline — an outer edge and two
+  // inner counters. Off renders the full outline (empty); on drops the counter
+  // contours so the silhouette fills solid — the filled interior is the on-state
+  // cue, matching Bold / Italic. Both states are fills (no stroke).
+  const glyph = active
+    ? 'm118.4 69.5h-26.3c-2.6-2.4-7.8-4.3-15.7-7.2-10-3.7-12.8-6-12.8-10.5 0-3.8 2.7-7.6 8.7-7.6 7.2 0 11.4 3.6 12.8 11.1 1 3.3 3.5 5.7 7 5.8h2.4c3.4 0.1 6.5-2.6 6.5-6.3v-17.2c-0.1-3.2-2.5-6.8-7.2-6.9-3.1-0.1-4.9 0.3-6.3 1.5-3.8-2.2-8.3-3.5-15.6-3.5-17.4 0-30.3 10.2-30.4 25.3 0 5.4 1.8 11 5.2 15.5h-21.2c-1.5 0-3.1 1.4-3.1 3s1.2 3.4 2.7 3.4h29.5c4 2.2 8.8 3.9 13.4 5.6 8.8 3.2 13.7 4.8 13.7 10.8 0 3.3-2 7.6-9.6 7.6-8 0-12.8-2.6-14.7-11.6v-0.1c-0.7-3.1-3.2-5.5-6.4-5.5h-3.5c-3.8 0-6.9 2.7-6.9 6.4v18.7c0 3.1 2.6 6.7 6.5 6.7h3.1c2.1 0 3.4-0.6 4.6-1.5 3.9 2.1 9.7 3.8 17.1 3.8 18.6 0 32-10.3 32-26.8 0-4-1.2-9.1-3.9-14.1h18.6c2.3 0 3.3-1.6 3.3-3.1 0-1.4-0.5-3.3-3.5-3.3z'
+    : 'm118.4 69.5h-26.3c-2.6-2.4-7.8-4.3-15.7-7.2-10-3.7-12.8-6-12.8-10.5 0-3.8 2.7-7.6 8.7-7.6 7.2 0 11.4 3.6 12.8 11.1 1 3.3 3.5 5.7 7 5.8h2.4c3.4 0.1 6.5-2.6 6.5-6.3v-17.2c-0.1-3.2-2.5-6.8-7.2-6.9-3.1-0.1-4.9 0.3-6.3 1.5-3.8-2.2-8.3-3.5-15.6-3.5-17.4 0-30.3 10.2-30.4 25.3 0 5.4 1.8 11 5.2 15.5h-21.2c-1.5 0-3.1 1.4-3.1 3s1.2 3.4 2.7 3.4h29.5c4 2.2 8.8 3.9 13.4 5.6 8.8 3.2 13.7 4.8 13.7 10.8 0 3.3-2 7.6-9.6 7.6-8 0-12.8-2.6-14.7-11.6v-0.1c-0.7-3.1-3.2-5.5-6.4-5.5h-3.5c-3.8 0-6.9 2.7-6.9 6.4v18.7c0 3.1 2.6 6.7 6.5 6.7h3.1c2.1 0 3.4-0.6 4.6-1.5 3.9 2.1 9.7 3.8 17.1 3.8 18.6 0 32-10.3 32-26.8 0-4-1.2-9.1-3.9-14.1h18.6c2.3 0 3.3-1.6 3.3-3.1 0-1.4-0.5-3.3-3.5-3.3zm-46.1 41.4c-8.3 0-12.2-1.7-16.6-4.4-1.2-0.9-2.9-0.7-4.2 1.3l-0.9 1h-2.3c-0.9 0-1.4-0.2-1.4-1.4v-18c0-0.6 0.5-0.9 1-0.9h2c0.7 0 1.2 0.6 1.3 1.2 2.5 11.4 9.7 17.2 20.8 17.2 11.7 0 16.3-7 16.3-14.3-0.3-10-8.6-12.7-18.3-16.7h21.2c3.7 2.8 6.5 7.1 6.5 13.6 0 12.1-10.7 21-25.4 21.4zm-16.2-41.4c-5.2-3.5-8.2-8.6-8.2-15.1 0-10.4 7.4-19.5 23.7-19.5 6.1 0 10.7 1.3 14.9 3.6 1.3 0.9 3.2 0.6 4.1-1l0.6-0.6h2.6c0.6 0 1 0.6 1 1.1v15.6c0 0.6-0.1 1.1-0.8 1.1h-2c-0.5-0.2-1.1-0.8-1.3-2.2-1.7-7.6-7.8-14.1-18.2-14.1-9.4-0.3-15.2 5.5-15.2 13 0.2 8.1 6 11.6 14 14.9l6.6 2.7 0.1 0.5h-21.9z';
   return (
-    <Glyph {...p} viewBox="0 0 115.8 114">
-      <path d="m88.6 4.7h-61.6c-11.8 0-21.9 9.6-21.9 21.3v62c0 11.7 8.9 21.5 21.1 21.5h62c11.7 0 22.5-9.5 22.5-21.2v-62.3c0-10.6-9.2-21.3-22.1-21.3zm15.6 83.3c0 6.8-5.8 15-15.2 14.9h-62.4c-7.5 0.1-15.2-5.9-15.3-14.5l-0.1-61.8c0-8.3 7.5-15.8 15.7-15.8h62c7.8 0 15.3 5 15.3 15.2v62z" />
-      <path d="m87.7 53.6h-28.6l-0.1-0.1c-6.5-2-9.4-3.3-11.5-4.9-1.4-1.3-2.4-3.2-2.4-5.4 0-5.4 4.3-10.1 12.6-10.1 7.2 0 11.8 2.9 13.1 8.5l0.2 1.8c0.2 1 1.3 3.1 3.5 3.1 1.4 0 2-0.6 2.7-1.7 0.6-1.4-0.1-3.8-0.2-4.4-0.9-3.9-5.4-13.3-19.1-13.3-4.4 0-8.6 0.8-12.5 3.3-2.6 2-6.9 6-6.9 12.8 0 3.8 1.5 7.2 4.6 10.4h-15.1c-1.5 0-3.1 1.2-3.1 3.1s1.7 3.1 2.7 3.1h30.3c8.2 1.8 13.8 3.6 13.8 9.9 0 4.7-3.9 10.2-13.7 10.2-3.7 0-8.1-0.9-10.7-3.5-1.9-1.8-3-4.5-3.2-6.8-0.1-1-1.2-2.8-3.1-2.8-2.1-0.1-3 1.5-3.5 2.5-0.2 1.1 0.2 2.7 0.7 4.8 1.1 2.9 3.6 6.3 7.1 8.6 3.4 2.2 7.7 3.8 13.1 3.8 6.3 0 11.1-1.4 14.3-4.1 2.9-2.4 5.6-5.8 5.4-12.4 0-3.2-1.2-7.1-4.2-10l13.7-0.2c1.5 0 2.9-1.2 2.9-3.1-0.1-1.4-0.9-3-2.8-3.1z" />
+    <Glyph {...p} viewBox="0 0 144.6 145">
+      <path d="m110 6.6h-75c-16.1 0-29.1 12.9-29.1 28.4v75.8c0 15.6 10.7 28 26.4 28.6l77.7-1h0.2c15.1 0 28.7-10.8 28.7-27.4v-75.9c0-13.7-12.5-28.5-28.9-28.5zm22.2 104.9c0 10.9-8.2 21.2-22.2 21.4h-75.2c-11.8-0.1-22.6-7.9-22.6-22v-75.6c0-11.7 10.2-22.3 22.8-22.3h74.6c13.6 0 22.6 10.1 22.6 22.3v76.2z" />
+      <path d={glyph} />
+    </Glyph>
+  );
+}
+
+export function IconUnderline({ active = false, ...p }: IconProps & { active?: boolean }) {
+  // Bubble letterform (Joe's artwork): the U is drawn as an outline — an outer
+  // edge and an inner counter. Off renders the full outline (empty interior); on
+  // drops the counter contour so the outer silhouette fills solid — the filled
+  // interior is the on-state cue, matching Bold / Italic. Both states are fills;
+  // stroking this detailed outline would double its edges into a muddy blob.
+  const glyph = active
+    ? 'm77.7 85.9h-39.3c-1.3 0-2.8 1.1-2.8 2.6s1.2 2.5 2.3 2.5h39.7c1.3 0.2 2.9-0.8 2.9-2.5s-1.5-2.6-2.8-2.6zm-1.3-65.6h-4.9c-1.6 0.2-3 0.6-4.2 1.5-1.3 1.3-2.5 2.9-2.5 4.9v29.2c0 1.6-0.1 3.8-1.3 5.1-1.1 1.5-2.9 2.3-5.3 2.4-1.2 0-3.2-0.5-4.2-1-0.8-0.7-2-2.1-2.3-3.4-0.4-1.6-0.4-3.3-0.4-4.5v-27.8c-0.2-3.3-2.7-6.2-6.2-6.4h-5.3c-1.7 0.2-3.2 0.5-5 2.6-0.9 0.8-1.5 2.7-1.4 4v28.8c0 12.5 8.2 23.9 24.7 23.9 13.6 0 24.6-8.2 24.6-23.1v-29.6c-0.1-3.9-2.5-6.6-6.3-6.6z'
+    : 'm77.7 85.9h-39.3c-1.3 0-2.8 1.1-2.8 2.6s1.2 2.5 2.3 2.5h39.7c1.3 0.2 2.9-0.8 2.9-2.5s-1.5-2.6-2.8-2.6zm-1.3-65.6h-4.9c-1.6 0.2-3 0.6-4.2 1.5-1.3 1.3-2.5 2.9-2.5 4.9v29.2c0 1.6-0.1 3.8-1.3 5.1-1.1 1.5-2.9 2.3-5.3 2.4-1.2 0-3.2-0.5-4.2-1-0.8-0.7-2-2.1-2.3-3.4-0.4-1.6-0.4-3.3-0.4-4.5v-27.8c-0.2-3.3-2.7-6.2-6.2-6.4h-5.3c-1.7 0.2-3.2 0.5-5 2.6-0.9 0.8-1.5 2.7-1.4 4v28.8c0 12.5 8.2 23.9 24.7 23.9 13.6 0 24.6-8.2 24.6-23.1v-29.6c-0.1-3.9-2.5-6.6-6.3-6.6zm1.3 34.6c0 3.7-0.5 7.7-2.2 10.5-3.5 6-9.1 8.9-17.4 8.9-8.4 0-14.4-3-17.5-9.3-1.4-2.6-2.1-6.3-2.1-10.6v-27.5c0-0.6 0.4-1.5 1.3-1.5h4.8c1 0 1.6 0.7 1.6 1.5v28.5c0.1 5.8 2 9.1 5.9 11.3 1.7 0.8 3.6 1.4 6.1 1.4 2.6 0 5.2-0.5 7-1.7 1.9-1.2 3.2-2.7 4.1-5 0.7-1.6 0.7-4.4 0.7-6.6v-27.9c0-1 0.9-1.5 1.6-1.5h4.7c0.8 0 1.4 0.6 1.4 1.5v28z';
+  return (
+    <Glyph {...p} viewBox="0 0 116.4 111">
+      <path d="m88 2.4h-59.5c-12.7 0-23.6 10.2-23.6 22.6v61c0 12.2 8.4 22.6 22.8 22.6l59-0.1h4.9c10.2 0 20-9.3 20-22v-61.5c0-10.4-9.7-22.6-23.6-22.6zm18.2 84.4c0 8.6-6.8 17.1-17.7 17.1h-60.1c-10.3 0-18.5-6.6-18.5-17.3v-61c0-9.7 8.1-17.9 18.5-17.9h60.1c9.3 0 17.7 6.7 17.7 18.3v60.8z" />
+      <path d={glyph} />
     </Glyph>
   );
 }
@@ -145,6 +172,28 @@ export function IconInlineCode({ active = false, ...p }: IconProps & { active?: 
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </Glyph>
+  );
+}
+
+export function IconClearFormatting(p: IconProps) {
+  // Framed "A" in a window with an eraser sweeping it — the clear-formatting mark
+  // (Joe's artwork). An action, not a toggle, so it is a static glyph: the bubble
+  // signals the press through the button, as the Link control does. The outer frame
+  // is a stroke; the rest ride the wrapper's currentColor for theme correctness.
+  return (
+    <Glyph {...p} viewBox="0 0 144.9 156">
+      <path
+        d="m112 145.4h-79c-15.8 0-28.6-11.1-28.6-27.4v-80.5c0-15 12.7-27.3 28.6-27.3h80c15.9 0 28.6 12.2 28.6 27.2v81.9c-0.9 15.6-14 26.1-29.6 26.1z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={6.792}
+        strokeMiterlimit={10}
+      />
+      <path d="m110.8 30.9h-76.6c-5.7 0-11 4.6-11 10.7l-0.1 72.3c0.2 5 4.4 10.7 10.6 10.7l77-0.1h0.1c4.8 0 10.7-3.2 10.7-10.1v-72.8c0-5.2-4.5-10.7-10.7-10.7zm3.5 83.2c-0.2 2-2 4.4-4.3 4.2l-75.6-0.1c-1.9-0.2-3.9-2.3-4.1-4.7l0.1-72.3c0.2-1.8 1.9-3.9 4-3.9h76.4c1.7 0 3.5 2 3.5 3.3v73.5z" />
+      <path d="m64.8 44.1c-4.3 0-8.2 2.7-9.8 6.9l-18.6 47.6c-1.2 3.7 0.3 7.2 2.7 9.5 1.6 1.3 5.8 2.9 9.1 0.5 1.1-0.8 2.9-2.5 3.1-3.5l4.3-11.7 7.9-0.1c3.3 0 3.3-4.7 0-4.7h-9.5c-0.9 0.1-2 0.7-2.4 1.8l-5 12.6c-2.5 3.5-6.5 1-5.7-2.5l18.2-47.5c1.6-3.1 3.7-4.6 6.6-4.4s4.5 1.7 5.2 3.2l7 20.5c1.2 3 5.7 1.9 4.7-1.6l-7.1-19.1c-0.9-3-4.1-7.5-10-7.5h-0.7z" />
+      <path d="m67.6 57.6c-0.7-2.3-4-2.8-4.8 0l-7.7 22.2c-0.5 1.8 1 3.2 2 3.2h16c1.5 0 2.8-1.4 2-3.3l-7.5-22.1zm-6.6 20.5 4.3-12.3 4.1 12.3h-8.4z" />
+      <path d="m106.2 105.3h-13l13.7-15.2c2.7-2.6 3-7.4-0.4-10.2l-8.7-7.6c-2.7-2.1-6.9-2.2-9.8 0.4l-18.2 20.3c-2.2 2.3-2.2 6.9 1.6 9.6l5.6 5.4c1 0.9 2.4 2.5 5.5 2.5h23.7c3.4 0.3 3.9-5.2 0-5.2zm-14.8-29c0.8-0.8 2.2-0.9 3.2 0l8.1 7.3c1.2 0.8 1.6 2.5 0.1 3.8l-7.1 7.7-11.8-10.6 7.5-8.2zm-4.7 29h-5.1c-0.6-0.1-1.2-0.4-1.6-0.8l-6.2-5.9c-0.8-0.7-0.8-2.1-0.1-2.8l6.8-7.6 12 10.4-5.8 6.7z" />
     </Glyph>
   );
 }
