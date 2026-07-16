@@ -33,6 +33,27 @@ export type DecorationOverlayHandle = { destroy(): void };
 
 const BOX_CLASS = 'sk-decoration';
 
+/** A positioned box in the scroller's content coordinate space. */
+export type ContentBox = { x: number; y: number; width: number; height: number };
+
+/** Convert a viewport-space rect to the scroller's content coordinate space — the
+ *  same conversion the custom caret uses, so decorations and caret share one
+ *  coordinate system and both ride the scroll for free. Pure, so the mapping is
+ *  unit-tested without layout (jsdom does not implement getClientRects). */
+export function contentBox(
+  rect: { left: number; top: number; width: number; height: number },
+  hostRect: { left: number; top: number },
+  scrollLeft: number,
+  scrollTop: number
+): ContentBox {
+  return {
+    x: rect.left - hostRect.left + scrollLeft,
+    y: rect.top - hostRect.top + scrollTop,
+    width: rect.width,
+    height: rect.height
+  };
+}
+
 /** The client rects a decoration covers, in viewport coordinates: one per line box
  *  (a wrapped range yields several). Empty for a degenerate or unresolvable range. */
 function decorationRects(blockEl: HTMLElement, dec: Decoration): DOMRect[] {
@@ -95,11 +116,10 @@ export function attachDecorationOverlay({
         box.className = `${BOX_CLASS} ${BOX_CLASS}--${dec.type}`;
         // Viewport -> scroller-content coordinates: the box then rides the scroll,
         // exactly as the custom caret does.
-        const x = rect.left - hostRect.left + scroller.scrollLeft;
-        const y = rect.top - hostRect.top + scroller.scrollTop;
+        const { x, y, width, height } = contentBox(rect, hostRect, scroller.scrollLeft, scroller.scrollTop);
         box.style.transform = `translate(${x}px, ${y}px)`;
-        box.style.width = `${rect.width}px`;
-        box.style.height = `${rect.height}px`;
+        box.style.width = `${width}px`;
+        box.style.height = `${height}px`;
         layer.appendChild(box);
         created.push(box);
       }
