@@ -24,3 +24,16 @@ export {
 } from './selection';
 export { insertTextInInline, deleteRangeInInline, readInlineFromDOM } from './inline-ops';
 export { DocHistory } from './history';
+// Decoration overlay (view-only highlights / squiggles over live text). The frozen
+// consumer contract is small: a feature owns one decoration TYPE and drives it with
+// `surface.decorations.setType(type, decorations)` and `clearType(type)` (or the
+// finer `add`). Everything else — the overlay painter, the store's subscribe /
+// invalidate / forBlock / blockIds — is the internal wiring the editor and painter
+// use; consumers do not touch it.
+export { DecorationStore, type Decoration, type DecorationType } from './decorations';
+export {
+  attachDecorationOverlay,
+  contentBox,
+  type ContentBox,
+  type DecorationOverlayHandle
+} from './decoration-overlay';

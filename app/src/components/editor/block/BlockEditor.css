@@ -204,6 +204,49 @@
   caret-color: var(--skrive-fg);
 }
 
+/* Decoration overlay: the container is a zero-size anchor at the scroller's
+   content origin (same as .skrive-caret), and each box is absolutely
+   positioned within it via a transform in content coordinates, so decorations ride
+   the scroll for free. Never intercepts pointer input — clicks fall through to the
+   text and the caret. */
+.block-decoration-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.sk-decoration {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+/* Find-match: a translucent accent marker painted over the text (the text reads
+   through, highlighter-style). light-dark() holds the tint in both themes. */
+.sk-decoration--find-match {
+  background: color-mix(in srgb, var(--skrive-accent) 24%, transparent);
+  border-radius: var(--skrive-radius-sm, 3px);
+}
+
+/* Misspelling: a wavy underline along the bottom of the text line, visually
+   distinct from the filled find-match marker. The box is filled with the themed
+   danger colour and masked to a repeating wave, so the tint follows light/dark and
+   only the squiggle shows — the text is never covered. */
+.sk-decoration--misspelling {
+  background-color: var(--skrive-danger);
+  --sk-squiggle: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='3'><path d='M0 2.5 Q 1.5 0.5 3 2.5 T 6 2.5' fill='none' stroke='black' stroke-width='1'/></svg>");
+  -webkit-mask-image: var(--sk-squiggle);
+  mask-image: var(--sk-squiggle);
+  -webkit-mask-repeat: repeat-x;
+  mask-repeat: repeat-x;
+  -webkit-mask-position: left bottom;
+  mask-position: left bottom;
+  -webkit-mask-size: 6px 3px;
+  mask-size: 6px 3px;
+}
+
 .skrive-caret {
   position: absolute;
   top: 0;
