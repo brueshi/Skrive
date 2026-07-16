@@ -10,7 +10,8 @@
 // value). The bar treats hits opaquely and hands them back to the target.
 
 import type { BlockSurface } from '../../../lib/blocksurface';
-import { findInDocument, type FindFlags } from '../../../lib/find/engine';
+import { findInDocument, findRanges, replaceRangesInString, type FindFlags } from '../../../lib/find/engine';
+import type { TextareaHighlighter } from './TextareaHighlighter';
 
 export type FindHit = { blockId?: string; start: number; end: number };
 
@@ -87,5 +88,55 @@ export class BlockFindTarget implements FindTarget {
 
   restoreSelection(): void {
     if (this.saved) this.surface.applySelection(this.saved);
+  }
+}
+
+/** Find target over a raw `<textarea>` (`.md` / plain text): matches the raw value,
+ *  paints through a highlight backdrop (native selection is invisible while the
+ *  find bar holds focus), and edits with setRangeText so replacing never steals
+ *  focus from the bar. Offsets index the raw string, so hits carry no blockId. */
+export class TextareaFindTarget implements FindTarget {
+  private savedStart = 0;
+  private savedEnd = 0;
+
+  constructor(
+    private readonly textarea: HTMLTextAreaElement,
+    private readonly highlighter: TextareaHighlighter
+  ) {}
+
+  search(query: string, flags: FindFlags): FindHit[] {
+    return findRanges(this.textarea.value, query, flags).map((r) => ({ start: r.start, end: r.end }));
+  }
+
+  highlight(hits: FindHit[], activeIndex: number): void {
+    this.highlighter.render(hits, activeIndex);
+  }
+
+  clearHighlight(): void {
+    this.highlighter.clear();
+  }
+
+  replace(hit: FindHit, replacement: string): void {
+    this.textarea.setRangeText(replacement, hit.start, hit.end, 'preserve');
+    this.textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  replaceAll(hits: FindHit[], replacement: string): void {
+    if (hits.length === 0) return;
+    // Rebuild the whole value once and apply it as a single edit — one input event,
+    // one value change. Hits are already in ascending order.
+    const out = replaceRangesInString(this.textarea.value, hits, replacement);
+    this.textarea.setRangeText(out, 0, this.textarea.value.length, 'preserve');
+    this.textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  saveSelection(): void {
+    this.savedStart = this.textarea.selectionStart;
+    this.savedEnd = this.textarea.selectionEnd;
+  }
+
+  restoreSelection(): void {
+    this.textarea.focus();
+    this.textarea.setSelectionRange(this.savedStart, this.savedEnd);
   }
 }

@@ -3,7 +3,13 @@
 // is deliberately string/model-only so both editor backends can share it.
 
 import { describe, it, expect } from 'vitest';
-import { findRanges, findInDocument, buildMatcher, type FindFlags } from '../../src/lib/find/engine';
+import {
+  findRanges,
+  findInDocument,
+  buildMatcher,
+  replaceRangesInString,
+  type FindFlags
+} from '../../src/lib/find/engine';
 import { parseDocument, type BlockNode } from '../../src/lib/blockmodel';
 import { inlinePlainText } from '../../src/lib/blocksurface/inline-ops';
 
@@ -112,5 +118,23 @@ describe('findInDocument', () => {
   it('returns nothing for an empty query', () => {
     const { blocks } = parseDocument('the cat');
     expect(findInDocument(blocks, '', flags())).toEqual([]);
+  });
+});
+
+describe('replaceRangesInString', () => {
+  it('replaces every range, preserving the gaps', () => {
+    const text = 'the the the';
+    const ranges = findRanges(text, 'the', flags());
+    expect(replaceRangesInString(text, ranges, 'xy')).toBe('xy xy xy');
+  });
+
+  it('handles a longer replacement without offset drift', () => {
+    const text = 'a-a-a';
+    const ranges = findRanges(text, 'a', flags());
+    expect(replaceRangesInString(text, ranges, 'BBB')).toBe('BBB-BBB-BBB');
+  });
+
+  it('returns the text unchanged when there are no ranges', () => {
+    expect(replaceRangesInString('untouched', [], 'x')).toBe('untouched');
   });
 });

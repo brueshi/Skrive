@@ -71,6 +71,24 @@ export function findRanges(text: string, query: string, flags: FindFlags): FindR
   return matcher ? execAll(matcher, text) : [];
 }
 
+/** Apply `replacement` to every range in `text`, returning the new string. Ranges
+ *  must be ascending and non-overlapping — the order findRanges returns them. The
+ *  textarea backend rebuilds its whole value with this in one edit (replace-all). */
+export function replaceRangesInString(
+  text: string,
+  ranges: readonly FindRange[],
+  replacement: string
+): string {
+  if (ranges.length === 0) return text;
+  let out = '';
+  let cursor = 0;
+  for (const r of ranges) {
+    out += text.slice(cursor, r.start) + replacement;
+    cursor = r.end;
+  }
+  return out + text.slice(cursor);
+}
+
 /** All matches across a block document, in document order, as block-keyed records.
  *  Descends into lists and blockquotes; matches within each inline-text leaf, never
  *  across a block boundary. The matcher is compiled once and reused per leaf. */

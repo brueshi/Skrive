@@ -10,6 +10,8 @@
   flex-direction: column;
   background: var(--skrive-bg);
   color: var(--skrive-fg);
+  /* Anchors the find highlight backdrop and the find bar in the textarea's box. */
+  position: relative;
 }
 
 .raw-source-textarea {
@@ -38,4 +40,43 @@
 .raw-source-textarea:focus,
 .raw-source-textarea:focus-visible {
   outline: none;
+}
+
+/* The textarea draws its own (transparent-background) text above the highlight
+   backdrop, so the marks show through behind the source. */
+.raw-source-textarea {
+  position: relative;
+  z-index: 1;
+}
+
+/* Find highlight backdrop (SKR-143): a mirror of the source text behind the
+   transparent textarea, with the matches wrapped in marks. Its own text is
+   invisible — only the mark fills show, under the live glyphs. The content copies
+   the textarea's font / padding / wrap metrics (in TextareaHighlighter) and centers
+   in the same column; the layer clips it and the content is translated to follow
+   the textarea's scroll (a transform, so the marks track within the same frame). */
+.thm-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.thm-content {
+  margin: 0 auto;
+  color: transparent;
+  will-change: transform;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.thm-mark {
+  border-radius: var(--skrive-radius-sm, 3px);
+  background: color-mix(in srgb, var(--skrive-accent) 24%, transparent);
+  color: transparent;
+}
+
+.thm-mark--active {
+  background: color-mix(in srgb, var(--skrive-accent) 42%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--skrive-accent) 70%, transparent);
 }
