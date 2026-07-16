@@ -230,6 +230,14 @@
   border-radius: var(--skrive-radius-sm, 3px);
 }
 
+/* Find-active: the match currently cycled to — a stronger fill plus a hairline
+   ring, so it reads as "this one" among the other matches without a caret. */
+.sk-decoration--find-active {
+  background: color-mix(in srgb, var(--skrive-accent) 42%, transparent);
+  border-radius: var(--skrive-radius-sm, 3px);
+  outline: 1px solid color-mix(in srgb, var(--skrive-accent) 70%, transparent);
+}
+
 /* Misspelling: a wavy underline along the bottom of the text line, visually
    distinct from the filled find-match marker. The box is filled with the themed
    danger colour and masked to a repeating wave, so the tint follows light/dark and

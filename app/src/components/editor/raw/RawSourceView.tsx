@@ -11,8 +11,11 @@
 // switch. A textarea is not the gated keystroke path (that is the contenteditable
 // block surface), so a debounced store write is fine here.
 
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { setActiveEditorFlush } from '../active-editor';
+import { FindBar } from '../find/FindBar';
+import { TextareaFindTarget } from '../find/FindTarget';
+import { TextareaHighlighter } from '../find/TextareaHighlighter';
 import './RawSourceView.css';
 
 /** Where the writer was: caret/selection and scroll offset. Owned by whoever
@@ -62,6 +65,8 @@ export function RawSourceView({
   autoFocus = false
 }: Props): React.ReactElement {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const viewRef = useRef<HTMLDivElement>(null);
+  const [findTarget, setFindTarget] = useState<TextareaFindTarget | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const onLiveInputRef = useRef(onLiveInput);
@@ -133,6 +138,23 @@ export function RawSourceView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // In-document find over the textarea: a highlight backdrop behind the transparent
+  // textarea paints the matches (native selection is invisible while the find bar
+  // holds focus). Built once per mount; the FindBar renders off the global find
+  // store and self-hides when closed. Covers both `.md` and plain-text mode, which
+  // both edit through this component.
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    const view = viewRef.current;
+    if (!textarea || !view) return;
+    const highlighter = new TextareaHighlighter(textarea, view);
+    setFindTarget(new TextareaFindTarget(textarea, highlighter));
+    return () => {
+      highlighter.destroy();
+      setFindTarget(null);
+    };
+  }, []);
+
   const onInput = () => {
     const el = textareaRef.current;
     // Live, undebounced signal for the preview; the store write below stays
@@ -147,7 +169,7 @@ export function RawSourceView({
   };
 
   return (
-    <div className="raw-source-view">
+    <div className="raw-source-view" ref={viewRef}>
       <textarea
         ref={textareaRef}
         className="raw-source-textarea"
@@ -163,6 +185,7 @@ export function RawSourceView({
           if (el) onChangeRef.current(el.value);
         }}
       />
+      {findTarget && <FindBar target={findTarget} />}
     </div>
   );
 }

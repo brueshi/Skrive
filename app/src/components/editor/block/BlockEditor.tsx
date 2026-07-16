@@ -24,6 +24,8 @@ import { SelectionBubble } from '../menus/SelectionBubble';
 import { LinkEditor } from '../menus/LinkEditor';
 import { BlockSlashMenu } from '../menus/BlockSlashMenu';
 import { BlockTagMenu } from '../menus/BlockTagMenu';
+import { FindBar } from '../find/FindBar';
+import { BlockFindTarget } from '../find/FindTarget';
 import { OutlineRail } from '../OutlineRail';
 import { WordCountBadge } from '../WordCountBadge';
 import { attachLiveCounts, type LiveCounts } from '../../../lib/wordcount/live';
@@ -60,7 +62,11 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
   const decorationRef = useRef<HTMLDivElement>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
-  const [ctx, setCtx] = useState<{ surface: BlockSurface; controller: BlockMenuController } | null>(null);
+  const [ctx, setCtx] = useState<{
+    surface: BlockSurface;
+    controller: BlockMenuController;
+    findTarget: BlockFindTarget;
+  } | null>(null);
   const showWordCount = usePreferencesStore((s) => s.showWordCount);
   const [counts, setCounts] = useState<LiveCounts | null>(null);
 
@@ -126,7 +132,7 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
     surface.onTagClick((name) =>
       useProjectStore.getState().setFilter({ kind: 'tag', value: name })
     );
-    setCtx({ surface, controller });
+    setCtx({ surface, controller, findTarget: new BlockFindTarget(surface) });
     setActiveEditorFlush(() => surface.flush());
     setActiveBlockMenu(controller);
     return () => {
@@ -183,6 +189,7 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
       {showWordCount && counts && (
         <WordCountBadge counts={counts} scopeRef={bodyRef} />
       )}
+      {ctx && <FindBar target={ctx.findTarget} />}
       {ctx && <SelectionBubble controller={ctx.controller} />}
       {ctx && <LinkEditor controller={ctx.controller} />}
       {ctx && <BlockSlashMenu surface={ctx.surface} />}
