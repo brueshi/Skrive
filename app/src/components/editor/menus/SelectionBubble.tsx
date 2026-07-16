@@ -13,7 +13,15 @@ import type { MenuController } from './controller';
 import { Tooltip } from '../../ui/Tooltip';
 import { useAnchoredRect } from './useAnchoredRect';
 import { BlockTypeDropdown } from './BlockTypeDropdown';
-import { IconBold, IconItalic, IconUnderline, IconStrikethrough, IconInlineCode, IconLink } from './toolbar-icons';
+import {
+  IconBold,
+  IconItalic,
+  IconUnderline,
+  IconStrikethrough,
+  IconInlineCode,
+  IconLink,
+  IconClearFormatting
+} from './toolbar-icons';
 import './menus.css';
 
 function BubbleButton({
@@ -99,6 +107,10 @@ export function SelectionBubble({ controller }: { controller: MenuController }) 
           </BubbleButton>
           <BubbleButton label="Link" active={s.link} onRun={() => controller.openLinkEditor()}>
             <IconLink size={20} />
+          </BubbleButton>
+          <span className="rich-toolbar-sep" aria-hidden="true" />
+          <BubbleButton label="Clear formatting" onRun={() => controller.clearFormatting()}>
+            <IconClearFormatting size={20} />
           </BubbleButton>
         </motion.div>
       )}

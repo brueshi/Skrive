@@ -28,6 +28,7 @@ import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
 import { changeListType, findImmediateList, indentItem, itemsHoldingLeaves, liftItemOut, outdentItem, splitListAround } from './list-ops';
 import {
   type BooleanMark,
+  clearMarksInInline,
   coalesceInline,
   deleteRangeInInline,
   inlineLength,
@@ -470,6 +471,14 @@ export class BlockSurface {
     this.scheduleSerialize();
   }
 
+  /** Whether there is an edit to undo / redo — feeds the palette's enabled state. */
+  get canUndo(): boolean {
+    return this.history.canUndo;
+  }
+  get canRedo(): boolean {
+    return this.history.canRedo;
+  }
+
   /** Redo the last undone edit (Cmd/Ctrl+Shift+Z / Cmd+Y). */
   redo(): void {
     this.clearBlockSelectionState();
@@ -886,6 +895,20 @@ export class BlockSurface {
     this.applyToSelection((inline, start, end) => toggleMarkInInline(inline, start, end, mark));
   }
 
+  /** Strip every character mark (bold / italic / code / strikethrough / underline)
+   *  from the selection, keeping links. A no-op at a collapsed caret — there is no
+   *  range to clear. Mirrors toggleMark's selection routing (SKR-145). */
+  clearMarks(): void {
+    const leaves = this.selectedLeaves();
+    if (leaves.length > 0) {
+      this.clearPendingMarks();
+      this.applyTransformToLeaves(leaves, (inline, start, end) => clearMarksInInline(inline, start, end));
+      return;
+    }
+    // Table-cell range (addressed by coordinates, not a block id).
+    this.applyToSelection((inline, start, end) => clearMarksInInline(inline, start, end));
+  }
+
   private clearPendingMarks(): void {
     this.pendingMarks = null;
     this.pendingCaretKey = null;
@@ -1002,6 +1025,50 @@ export class BlockSurface {
     if (firstEl && lastEl) {
       // Swapped points restore a backward selection: setBaseAndExtent takes
       // base/extent, so base-after-extent IS the direction.
+      if (firstEl === lastEl) {
+        if (backward) setSelectionRange(firstEl, last.end, first.start);
+        else setSelectionRange(firstEl, first.start, last.end);
+      } else if (backward) {
+        setCrossBlockSelection(lastEl, last.end, firstEl, first.start);
+      } else {
+        setCrossBlockSelection(firstEl, first.start, lastEl, last.end);
+      }
+    }
+    this.scheduleSerialize();
+    this.emitSelection();
+  }
+
+  /** Apply an inline transform to every covered leaf's range as one history step,
+   *  re-rendering in place and restoring the selection (with drag direction). The
+   *  mark-agnostic sibling of applyMarkToLeaves, used by clear-formatting; it makes
+   *  no on/off decision, it just maps each leaf's range through `transform`. */
+  private applyTransformToLeaves(
+    leaves: ReadonlyArray<{ leaf: InlineTextBlock; start: number; end: number }>,
+    transform: (inline: InlineNode[], start: number, end: number) => InlineNode[]
+  ): void {
+    const liveSel = window.getSelection();
+    const backward = liveSel != null && isSelectionBackward(liveSel);
+    const index = blockIndexOf(this.doc.blocks);
+    const blocks = this.doc.blocks.slice();
+    for (const l of leaves) {
+      const i = index.get(l.leaf.id);
+      if (i === undefined) continue;
+      const inline = transform(l.leaf.inline, l.start, l.end);
+      blocks[i] = updateBlockInTop(blocks[i]!, l.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode);
+    }
+    this.doc = { ...this.doc, blocks };
+    for (const l of leaves) {
+      const el = this.leafElementById(l.leaf.id);
+      const updated = findBlockById(this.doc.blocks, l.leaf.id);
+      if (el && updated && isInlineText(updated)) renderInlineInto(el, updated.inline, this.resolveAsset);
+      this.markRenderedInPlace(l.leaf.id);
+    }
+    const first = leaves[0];
+    const last = leaves[leaves.length - 1];
+    if (!first || !last) return;
+    const firstEl = this.leafElementById(first.leaf.id);
+    const lastEl = this.leafElementById(last.leaf.id);
+    if (firstEl && lastEl) {
       if (firstEl === lastEl) {
         if (backward) setSelectionRange(firstEl, last.end, first.start);
         else setSelectionRange(firstEl, first.start, last.end);

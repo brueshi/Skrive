@@ -111,6 +111,21 @@ export class BlockMenuController implements MenuController {
   toggleMark(mark: 'strong' | 'em' | 'code' | 'strikethrough' | 'underline'): void {
     this.surface.toggleMark(mark);
   }
+  clearFormatting(): void {
+    this.surface.clearMarks();
+  }
+  undo(): void {
+    this.surface.undo();
+  }
+  redo(): void {
+    this.surface.redo();
+  }
+  canUndo(): boolean {
+    return this.surface.canUndo;
+  }
+  canRedo(): boolean {
+    return this.surface.canRedo;
+  }
   setParagraph(): void {
     this.surface.setBlockType({ kind: 'paragraph' });
   }

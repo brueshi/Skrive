@@ -88,6 +88,15 @@ export interface MenuController {
 
   // Inline marks.
   toggleMark(mark: 'strong' | 'em' | 'code' | 'strikethrough' | 'underline'): void;
+  /** Strip every character mark from the selection, keeping links. */
+  clearFormatting(): void;
+
+  // History. Undo/redo live as palette commands (the surface owns the ⌘Z chords);
+  // the canUndo/canRedo reads gate the palette entries' enabled state.
+  undo(): void;
+  redo(): void;
+  canUndo(): boolean;
+  canRedo(): boolean;
 
   // Block type ("Turn into") and wrap toggles.
   setParagraph(): void;

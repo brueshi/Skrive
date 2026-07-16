@@ -176,6 +176,28 @@ export function IconInlineCode({ active = false, ...p }: IconProps & { active?: 
   );
 }
 
+export function IconClearFormatting(p: IconProps) {
+  // Framed "A" in a window with an eraser sweeping it — the clear-formatting mark
+  // (Joe's artwork). An action, not a toggle, so it is a static glyph: the bubble
+  // signals the press through the button, as the Link control does. The outer frame
+  // is a stroke; the rest ride the wrapper's currentColor for theme correctness.
+  return (
+    <Glyph {...p} viewBox="0 0 144.9 156">
+      <path
+        d="m112 145.4h-79c-15.8 0-28.6-11.1-28.6-27.4v-80.5c0-15 12.7-27.3 28.6-27.3h80c15.9 0 28.6 12.2 28.6 27.2v81.9c-0.9 15.6-14 26.1-29.6 26.1z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={6.792}
+        strokeMiterlimit={10}
+      />
+      <path d="m110.8 30.9h-76.6c-5.7 0-11 4.6-11 10.7l-0.1 72.3c0.2 5 4.4 10.7 10.6 10.7l77-0.1h0.1c4.8 0 10.7-3.2 10.7-10.1v-72.8c0-5.2-4.5-10.7-10.7-10.7zm3.5 83.2c-0.2 2-2 4.4-4.3 4.2l-75.6-0.1c-1.9-0.2-3.9-2.3-4.1-4.7l0.1-72.3c0.2-1.8 1.9-3.9 4-3.9h76.4c1.7 0 3.5 2 3.5 3.3v73.5z" />
+      <path d="m64.8 44.1c-4.3 0-8.2 2.7-9.8 6.9l-18.6 47.6c-1.2 3.7 0.3 7.2 2.7 9.5 1.6 1.3 5.8 2.9 9.1 0.5 1.1-0.8 2.9-2.5 3.1-3.5l4.3-11.7 7.9-0.1c3.3 0 3.3-4.7 0-4.7h-9.5c-0.9 0.1-2 0.7-2.4 1.8l-5 12.6c-2.5 3.5-6.5 1-5.7-2.5l18.2-47.5c1.6-3.1 3.7-4.6 6.6-4.4s4.5 1.7 5.2 3.2l7 20.5c1.2 3 5.7 1.9 4.7-1.6l-7.1-19.1c-0.9-3-4.1-7.5-10-7.5h-0.7z" />
+      <path d="m67.6 57.6c-0.7-2.3-4-2.8-4.8 0l-7.7 22.2c-0.5 1.8 1 3.2 2 3.2h16c1.5 0 2.8-1.4 2-3.3l-7.5-22.1zm-6.6 20.5 4.3-12.3 4.1 12.3h-8.4z" />
+      <path d="m106.2 105.3h-13l13.7-15.2c2.7-2.6 3-7.4-0.4-10.2l-8.7-7.6c-2.7-2.1-6.9-2.2-9.8 0.4l-18.2 20.3c-2.2 2.3-2.2 6.9 1.6 9.6l5.6 5.4c1 0.9 2.4 2.5 5.5 2.5h23.7c3.4 0.3 3.9-5.2 0-5.2zm-14.8-29c0.8-0.8 2.2-0.9 3.2 0l8.1 7.3c1.2 0.8 1.6 2.5 0.1 3.8l-7.1 7.7-11.8-10.6 7.5-8.2zm-4.7 29h-5.1c-0.6-0.1-1.2-0.4-1.6-0.8l-6.2-5.9c-0.8-0.7-0.8-2.1-0.1-2.8l6.8-7.6 12 10.4-5.8 6.7z" />
+    </Glyph>
+  );
+}
+
 export function IconLink(p: IconProps) {
   // Framed interlocked chain links.
   return (

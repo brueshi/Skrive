@@ -441,6 +441,14 @@ export function setLinkInInline(
   );
 }
 
+/** Strip every character mark (bold / italic / code / strikethrough / underline)
+ *  from the range, keeping links. A link is content, not character formatting, so
+ *  "clear formatting" leaves it (Google-Docs semantics). No-op on an empty range. */
+export function clearMarksInInline(nodes: InlineNode[], start: number, end: number): InlineNode[] {
+  if (start >= end) return nodes;
+  return coalesceInline(mapRange(nodes, start, end, (m) => (m.link ? { link: m.link } : {})));
+}
+
 function markEl(tag: string, marks: InlineMarks): InlineMarks {
   switch (tag) {
     case 'strong':
