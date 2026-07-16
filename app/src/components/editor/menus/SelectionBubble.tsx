@@ -84,7 +84,7 @@ export function SelectionBubble({ controller }: { controller: MenuController }) 
             active={s.underline}
             onRun={() => controller.toggleMark('underline')}
           >
-            <IconUnderline size={20} />
+            <IconUnderline size={20} active={s.underline} />
           </BubbleButton>
           <BubbleButton
             label="Strikethrough"
@@ -92,7 +92,7 @@ export function SelectionBubble({ controller }: { controller: MenuController }) 
             active={s.strikethrough}
             onRun={() => controller.toggleMark('strikethrough')}
           >
-            <IconStrikethrough size={20} />
+            <IconStrikethrough size={20} active={s.strikethrough} />
           </BubbleButton>
           <BubbleButton label="Inline code" shortcut="⌘E" active={s.code} onRun={() => controller.toggleMark('code')}>
             <IconInlineCode size={20} active={s.code} />
