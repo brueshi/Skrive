@@ -20,6 +20,7 @@ import { flushActiveEditor } from '../../components/editor/active-editor';
 import { getActiveBlockMenu } from '../../components/editor/active-surface';
 import { INSERT_CATALOG, dispatchInsert } from '../../components/editor/menus/insert-catalog';
 import { useProjectStore, logProjectError } from '../../stores/project';
+import { useFindStore } from '../../stores/find';
 import { peekVisit } from '../../stores/working-set';
 import { fileMode } from '../../stores/save';
 import { EXPORT_FORMATS } from '../export';
@@ -228,8 +229,30 @@ export function buildRegistry(deps: CommandDeps): {
       run: () => deps.toggleFileSwitcher()
     },
     {
+      // ⌘F is in-document find; project search moved to ⌘⇧F (below), the chord it
+      // vacated for the find bar. Find opens on any editable document.
       chord: { code: 'KeyF', mod: true },
       display: '⌘F',
+      scope: 'window',
+      group: 'View',
+      label: 'Find in document',
+      commandId: 'edit.find',
+      when: whenLiveDoc,
+      run: () => useFindStore.getState().openFind()
+    },
+    {
+      chord: { code: 'KeyF', mod: true, alt: true },
+      display: '⌥⌘F',
+      scope: 'window',
+      group: 'View',
+      label: 'Replace in document',
+      commandId: 'edit.replace',
+      when: whenLiveDoc,
+      run: () => useFindStore.getState().openReplace()
+    },
+    {
+      chord: { code: 'KeyF', mod: true, shift: true },
+      display: '⌘⇧F',
       scope: 'window',
       group: 'File',
       label: 'Search in project…',
@@ -305,16 +328,9 @@ export function buildRegistry(deps: CommandDeps): {
       when: whenManifestOpen,
       run: () => useProjectStore.getState().toggleSidebar()
     },
-    {
-      chord: { code: 'KeyF', mod: true, shift: true },
-      display: '⌘⇧F',
-      scope: 'window',
-      group: 'View',
-      label: 'Toggle frontmatter panel',
-      commandId: 'view.toggleFrontmatter',
-      when: whenLiveDoc,
-      run: () => useProjectStore.getState().toggleFrontmatterPanel()
-    },
+    // The frontmatter panel's ⌘⇧F was reassigned to project search (it vacated ⌘F
+    // for in-document find). The toggle stays reachable from the palette + View menu
+    // via the 'view.toggleFrontmatter' command; it no longer carries a chord.
     {
       chord: { code: 'KeyB', mod: true, shift: true },
       display: '⌘⇧B',
@@ -482,6 +498,22 @@ export function buildRegistry(deps: CommandDeps): {
       shortcut: get('file.search'),
       when: whenManifestOpen,
       run: () => deps.toggleSearch()
+    },
+    {
+      id: 'edit.find',
+      label: 'Find in document',
+      group: 'View',
+      shortcut: get('edit.find'),
+      when: whenLiveDoc,
+      run: () => useFindStore.getState().openFind()
+    },
+    {
+      id: 'edit.replace',
+      label: 'Replace in document',
+      group: 'View',
+      shortcut: get('edit.replace'),
+      when: whenLiveDoc,
+      run: () => useFindStore.getState().openReplace()
     },
     {
       id: 'file.save',
