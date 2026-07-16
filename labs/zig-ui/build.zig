@@ -54,4 +54,24 @@ pub fn build(b: *std.Build) !void {
     run_cmd.step.dependOn(b.getInstallStep());
     const run_step = b.step("run", "Run the zig-ui lab");
     run_step.dependOn(&run_cmd.step);
+
+    // Unit tests (Stage 3): the immediate-mode state machine in ui/context.zig.
+    // The module mirrors the exe's config because context.zig pulls the draw ->
+    // gfx graph transitively (and thus stb + libc), even though the tests
+    // exercise only pure logic.
+    const test_module = b.createModule(.{
+        .root_source_file = b.path("src/tests.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .imports = &.{
+            .{ .name = "sokol", .module = dep_sokol.module("sokol") },
+        },
+    });
+    test_module.addIncludePath(b.path("vendor/stb"));
+    test_module.addCSourceFile(.{ .file = b.path("vendor/stb/stb_truetype.c") });
+    const unit_tests = b.addTest(.{ .root_module = test_module });
+    const run_tests = b.addRunArtifact(unit_tests);
+    const test_step = b.step("test", "Run the zig-ui lab unit tests");
+    test_step.dependOn(&run_tests.step);
 }

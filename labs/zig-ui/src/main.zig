@@ -15,6 +15,9 @@
 //    3 — stress: 10,000 randomized rounded rects; S toggles shadows on 10%
 //    5 — settings: heading + paragraphs + labels over Stage 1 surfaces
 //    6 — text wall: the window filled with wrapped 14px paragraphs
+//    7 — buttons: a live row of buttons wired to visible effects (Stage 3)
+//    8 — showcase: every button visual state at once, deterministic, for the
+//        screenshot deliverable (no live input needed)
 //------------------------------------------------------------------------------
 const std = @import("std");
 const sokol = @import("sokol");
@@ -28,6 +31,8 @@ const batch_mod = @import("gfx/batch.zig");
 const atlas_mod = @import("gfx/atlas.zig");
 const text_mod = @import("gfx/text.zig");
 const draw = @import("ui/draw.zig");
+const ui_context = @import("ui/context.zig");
+const widgets = @import("ui/widgets.zig");
 
 const inter_regular_ttf = @embedFile("Inter-Regular.ttf");
 const inter_medium_ttf = @embedFile("Inter-Medium.ttf");
@@ -37,6 +42,15 @@ const hud_print_interval_sec: f64 = 1.0;
 const clear_r: f32 = 0.949;
 const clear_g: f32 = 0.949;
 const clear_b: f32 = 0.941;
+
+// The buttons demo's "Cycle background" walks this palette. All kept light so
+// the by-eye light-theme buttons stay legible; index 0 is the Stage 0-2 base.
+const clear_palette = [_][3]f32{
+    .{ clear_r, clear_g, clear_b },
+    .{ 0.945, 0.955, 0.960 },
+    .{ 0.960, 0.950, 0.940 },
+    .{ 0.930, 0.940, 0.935 },
+};
 
 // Skrive light-theme tokens the toast scene transcribes (app/src/index.css).
 const skrive = struct {
@@ -53,7 +67,7 @@ const skrive = struct {
     };
 };
 
-const Scene = enum { demo, toast, stress, settings, text_wall };
+const Scene = enum { demo, toast, stress, settings, text_wall, buttons, showcase };
 
 const stress_count = 10_000;
 const StressRect = struct {
@@ -103,8 +117,10 @@ const bench = struct {
         .{ .name = "toast", .scene = .toast },
         .{ .name = "settings", .scene = .settings },
         .{ .name = "text-wall", .scene = .text_wall },
+        .{ .name = "buttons", .scene = .buttons },
         .{ .name = "idle-stress-on-demand", .scene = .stress, .continuous = false, .warmup_sec = 1, .measure_sec = 15 },
         .{ .name = "idle-settings-on-demand", .scene = .settings, .continuous = false, .warmup_sec = 1, .measure_sec = 15 },
+        .{ .name = "idle-buttons-on-demand", .scene = .buttons, .continuous = false, .warmup_sec = 1, .measure_sec = 15 },
     };
 
     var active: bool = false;
@@ -196,6 +212,20 @@ const state = struct {
     var continuous: bool = false;
     var present_count: u64 = 0;
     var pulse_phase: f32 = 0.0;
+    // Buttons demo (Stage 3): the effects the demo buttons drive, plus the
+    // immediate-mode context and the input accumulated between frames. Mouse
+    // position is a level (logical px); pressed/released/tab/activate are
+    // edges the event handler sets and the rendered frame clears once consumed.
+    var clear_index: usize = 0;
+    var toast_visible: bool = false;
+    var ctx: ui_context.Context = .{};
+    var mouse: [2]f32 = .{ -1, -1 };
+    var mouse_down: bool = false;
+    var ev_pressed: bool = false;
+    var ev_released: bool = false;
+    var ev_tab: bool = false;
+    var ev_shift: bool = false;
+    var ev_activate: bool = false;
     // HUD accumulators, reset on each refresh of the on-screen line
     var hud_last_print_ticks: u64 = 0;
     var hud_presents: u64 = 0;
@@ -268,7 +298,7 @@ export fn init() void {
         @as(f32, @floatFromInt(sapp.width())) / sapp.dpiScale(),
         @as(f32, @floatFromInt(sapp.height())) / sapp.dpiScale(),
     });
-    std.debug.print("keys: 1 demo | 2 toast | 3 stress | 4 stress small | 5 settings | 6 text wall | S stress shadows | space continuous\n", .{});
+    std.debug.print("keys: 1 demo | 2 toast | 3 stress | 4 stress small | 5 settings | 6 text wall | 7 buttons | 8 showcase | S stress shadows | Tab/Space/Enter buttons | space continuous\n", .{});
     if (bench.active) bench.enterPhase(0);
 }
 
@@ -478,6 +508,141 @@ fn buildStressScene(b: *batch_mod.Batch) void {
     }
 }
 
+fn painter(b: *batch_mod.Batch) widgets.Painter {
+    return .{
+        .b = b,
+        .atlas = &state.atlas,
+        .dpi = sapp.dpiScale(),
+        .font = &state.font_regular,
+        .font_medium = &state.font_medium,
+    };
+}
+
+// A single toast at (x, y), reusing the shipped-spec surface + text the toast
+// scene already composes. The buttons demo pops this when "Toggle toast" fires.
+fn buildDemoToast(b: *batch_mod.Batch, x: f32, y: f32) void {
+    const w: f32 = 356;
+    const h: f32 = 66;
+    draw.rect(b, .{ .x = x, .y = y, .w = w, .h = h }, .{
+        .fill = skrive.bg,
+        .radius = skrive.radius_xl,
+        .shadows = &skrive.shadow_sheet,
+    });
+    buildToastText(b, x, y, w);
+}
+
+// The live Stage 3 button row: real interaction through the immediate-mode
+// context, each button wired to a visible effect. A fired button that changes
+// the clear color or continuous mode marks the frame dirty so the change shows
+// on the next frame (the clear is set before the scene builds).
+fn buildButtonsScene(b: *batch_mod.Batch) void {
+    const dpi = sapp.dpiScale();
+    var p = painter(b);
+
+    _ = draw.text(b, &state.atlas, dpi, .{ 80, 56 }, "Buttons", .{
+        .font = &state.font_medium,
+        .size = 20,
+        .color = skrive.fg,
+    });
+    _ = draw.text(b, &state.atlas, dpi, .{ 80, 92 }, "Hover, click, Tab to move focus, Space or Enter to activate.", .{
+        .font = &state.font_regular,
+        .size = 12,
+        .color = skrive.muted,
+    });
+
+    var fired = false;
+    const gap: f32 = 12;
+    const y: f32 = 132;
+    var x: f32 = 80;
+
+    const r_toast = widgets.button(&state.ctx, &p, x, y, "Toggle toast", .{ .variant = .primary });
+    if (r_toast.fired) {
+        state.toast_visible = !state.toast_visible;
+        fired = true;
+    }
+    x += r_toast.rect.w + gap;
+
+    const r_bg = widgets.button(&state.ctx, &p, x, y, "Cycle background", .{});
+    if (r_bg.fired) {
+        state.clear_index = (state.clear_index + 1) % clear_palette.len;
+        fired = true;
+    }
+    x += r_bg.rect.w + gap;
+
+    // Dynamic label, stable identity: hashing the display text would flip the
+    // button's ID when the label changes and drop its hot/active/focus state,
+    // so identity keys off id_label instead.
+    const cont_label = if (state.continuous) "Continuous: on" else "Continuous: off";
+    const r_cont = widgets.button(&state.ctx, &p, x, y, cont_label, .{ .id_label = "continuous-toggle", .min_width = 140 });
+    if (r_cont.fired) {
+        state.continuous = !state.continuous;
+        state.pulse_phase = 0;
+        fired = true;
+    }
+    x += r_cont.rect.w + gap;
+
+    const r_reset = widgets.button(&state.ctx, &p, x, y, "Reset", .{ .variant = .secondary });
+    if (r_reset.fired) {
+        state.clear_index = 0;
+        state.toast_visible = false;
+        state.continuous = false;
+        fired = true;
+    }
+    x += r_reset.rect.w + gap;
+
+    _ = widgets.button(&state.ctx, &p, x, y, "Disabled", .{ .disabled = true });
+
+    if (fired) state.dirty = true;
+    if (state.toast_visible) buildDemoToast(b, 422, 470);
+}
+
+// The screenshot deliverable: every visual state rendered at once, driven by
+// forced state rather than live input, so the states are deterministic and no
+// mouse-warping is needed. It goes through the exact resolve()+draw path the
+// live widget uses, so it is honest about how each state looks.
+fn buildShowcaseScene(b: *batch_mod.Batch) void {
+    const dpi = sapp.dpiScale();
+    var p = painter(b);
+
+    _ = draw.text(b, &state.atlas, dpi, .{ 80, 56 }, "Button states", .{
+        .font = &state.font_medium,
+        .size = 20,
+        .color = skrive.fg,
+    });
+
+    const states = [_]widgets.ShowcaseState{ .normal, .hovered, .pressed, .focused, .disabled };
+    const state_labels = [_][]const u8{ "Default", "Hover", "Pressed", "Focused", "Disabled" };
+    const rows = [_]struct { variant: widgets.Variant, name: []const u8 }{
+        .{ .variant = .primary, .name = "Primary" },
+        .{ .variant = .default, .name = "Default" },
+        .{ .variant = .secondary, .name = "Secondary" },
+    };
+
+    // Column captions.
+    const col_x0: f32 = 200;
+    const col_w: f32 = 190;
+    for (state_labels, 0..) |lbl, i| {
+        _ = draw.text(b, &state.atlas, dpi, .{ col_x0 + @as(f32, @floatFromInt(i)) * col_w, 104 }, lbl, .{
+            .font = &state.font_regular,
+            .size = 11,
+            .color = skrive.muted,
+        });
+    }
+
+    var y: f32 = 132;
+    for (rows) |row| {
+        _ = draw.text(b, &state.atlas, dpi, .{ 80, y + 9 }, row.name, .{
+            .font = &state.font_regular,
+            .size = 12,
+            .color = skrive.muted,
+        });
+        for (states, 0..) |s, i| {
+            _ = widgets.buttonShowcase(&p, col_x0 + @as(f32, @floatFromInt(i)) * col_w, y, "Button", row.variant, s);
+        }
+        y += 64;
+    }
+}
+
 export fn frame() void {
     if (bench.active) bench.tick();
     if (!state.continuous and !state.dirty) {
@@ -485,14 +650,30 @@ export fn frame() void {
     }
     state.dirty = false;
 
+    const clear_base = clear_palette[state.clear_index];
+    state.pass_action.colors[0].clear_value.r = clear_base[0];
+    state.pass_action.colors[0].clear_value.b = clear_base[2];
     if (state.continuous) {
         // Subtle brightness pulse so continuous mode is visibly on.
         state.pulse_phase += @floatCast(sapp.frameDuration());
         const pulse = 0.02 * @sin(state.pulse_phase * 2.0);
-        state.pass_action.colors[0].clear_value.g = clear_g + pulse;
+        state.pass_action.colors[0].clear_value.g = clear_base[1] + pulse;
     } else {
-        state.pass_action.colors[0].clear_value.g = clear_g;
+        state.pass_action.colors[0].clear_value.g = clear_base[1];
     }
+
+    // Immediate-mode input for this frame, built from the accumulated event
+    // state. begin() resolves Tab against last frame's focusables, so a Tab
+    // this frame lands the focus ring on the new widget in this same frame.
+    state.ctx.begin(.{
+        .mouse = state.mouse,
+        .mouse_down = state.mouse_down,
+        .pressed = state.ev_pressed,
+        .released = state.ev_released,
+        .tab = state.ev_tab,
+        .shift = state.ev_shift,
+        .activate = state.ev_activate,
+    });
 
     const t_build = stime.now();
     state.batch.begin();
@@ -502,9 +683,18 @@ export fn frame() void {
         .stress => buildStressScene(&state.batch),
         .settings => buildSettingsScene(&state.batch),
         .text_wall => buildTextWallScene(&state.batch),
+        .buttons => buildButtonsScene(&state.batch),
+        .showcase => buildShowcaseScene(&state.batch),
     }
     // Bench runs keep the terminal HUD so scene quad counts stay pure.
     if (!bench.active) buildHud(&state.batch);
+    // Input edges consumed this frame; end() swaps the focusable list and
+    // returns the cursor to show. Clear the one-shot edges (levels persist).
+    sapp.setMouseCursor(state.ctx.end());
+    state.ev_pressed = false;
+    state.ev_released = false;
+    state.ev_tab = false;
+    state.ev_activate = false;
     const t_upload = stime.now();
     state.atlas.commit();
     state.batch.upload();
@@ -573,13 +763,42 @@ export fn frame() void {
 
 export fn event(ev: ?*const sapp.Event) void {
     const e = ev.?;
-    if (bench.active) return; // keys must not contaminate a bench run
-    if (e.type == .KEY_DOWN) {
-        switch (e.key_code) {
+    if (bench.active) return; // input must not contaminate a bench run
+    const dpi = sapp.dpiScale();
+    switch (e.type) {
+        // Mouse position arrives in framebuffer px; hit tests are in logical
+        // px, so divide by the DPI scale here once.
+        .MOUSE_MOVE, .MOUSE_ENTER => state.mouse = .{ e.mouse_x / dpi, e.mouse_y / dpi },
+        .MOUSE_LEAVE => state.mouse = .{ -1, -1 }, // drop hover when the pointer leaves
+        .MOUSE_DOWN => if (e.mouse_button == .LEFT) {
+            state.mouse = .{ e.mouse_x / dpi, e.mouse_y / dpi };
+            state.mouse_down = true;
+            state.ev_pressed = true;
+        },
+        .MOUSE_UP => if (e.mouse_button == .LEFT) {
+            state.mouse = .{ e.mouse_x / dpi, e.mouse_y / dpi };
+            state.mouse_down = false;
+            state.ev_released = true;
+        },
+        .KEY_DOWN => switch (e.key_code) {
             .SPACE => {
-                state.continuous = !state.continuous;
-                state.pulse_phase = 0.0;
-                std.debug.print("mode: {s}\n", .{if (state.continuous) "continuous" else "on-demand"});
+                // In the buttons scene Space activates the focused widget;
+                // elsewhere it stays the continuous-mode debug toggle. Guarded
+                // against key-repeat so holding it does not machine-gun.
+                if (state.scene == .buttons) {
+                    if (!e.key_repeat) state.ev_activate = true;
+                } else {
+                    state.continuous = !state.continuous;
+                    state.pulse_phase = 0.0;
+                    std.debug.print("mode: {s}\n", .{if (state.continuous) "continuous" else "on-demand"});
+                }
+            },
+            .ENTER => if (!e.key_repeat) {
+                state.ev_activate = true;
+            },
+            .TAB => {
+                state.ev_tab = true;
+                state.ev_shift = (e.modifiers & sapp.modifier_shift) != 0;
             },
             ._1 => state.scene = .demo,
             ._2 => state.scene = .toast,
@@ -599,12 +818,15 @@ export fn event(ev: ?*const sapp.Event) void {
             },
             ._5 => state.scene = .settings,
             ._6 => state.scene = .text_wall,
+            ._7 => state.scene = .buttons,
+            ._8 => state.scene = .showcase,
             .S => {
                 state.stress_shadows = !state.stress_shadows;
                 std.debug.print("stress shadows: {s}\n", .{if (state.stress_shadows) "on (10% of rects)" else "off"});
             },
             else => {},
-        }
+        },
+        else => {},
     }
     // Any event invalidates the frame; rendering is cheap enough at this
     // stage that finer-grained damage tracking would be premature.
@@ -645,6 +867,10 @@ pub fn main(process: std.process.Init.Minimal) void {
             state.scene = .settings;
         } else if (std.mem.eql(u8, arg, "--text-wall")) {
             state.scene = .text_wall;
+        } else if (std.mem.eql(u8, arg, "--buttons")) {
+            state.scene = .buttons;
+        } else if (std.mem.eql(u8, arg, "--showcase")) {
+            state.scene = .showcase;
         } else if (std.mem.eql(u8, arg, "--dpi1")) {
             high_dpi = false;
         } else if (std.mem.eql(u8, arg, "--bench")) {
