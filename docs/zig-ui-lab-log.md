@@ -374,3 +374,230 @@ optional and skipped. Draw calls landed under budget, not over.
 focus + Space/Enter activation, pointer cursor, and a demo row of buttons
 with visible effects. The renderer is ready for it: measureText exists for
 sizing, and text-in-a-button costs nothing the bench hasn't already priced.
+
+---
+
+## 2026-07-16 — Stage 3: input, identity, and the first button
+
+**Branch:** `joe/skr-233-zig-ui-lab-hand-drawn-interface-research`
+(recreated off `main` — the Stage 2 branch had been merged and deleted).
+**Commit:** `05d2a4a03a648520d9da7eb4eb6e332a503a627e`
+
+**Toolchain.** All pins unchanged: Zig 0.16.0, sokol-zig `54776d6`,
+sokol-shdc `87a6914`. No new dependency, no re-vendor (the stb kerning patch
+is untouched). The renderer became a toolkit without adding anything below it.
+
+**What was built.**
+- `ui/context.zig` — the immediate-mode identity + input core. A per-frame
+  `Input` snapshot (pointer in logical px, `mouse_down` level, and
+  pressed/released/tab/activate edges) plus persistent `hot`/`active`/`focus`
+  IDs, where an ID is a 64-bit Wyhash of label + optional discriminator (0
+  reserved for "none"). `interact(id, rect, disabled)` is the one primitive
+  every widget routes through: it registers the widget for Tab order,
+  hit-tests, runs the state machine, and returns the visual + fired result.
+- `ui/widgets.zig` — `button(ctx, painter, x, y, label, opts)`. Sizes itself
+  around its label via `measureText`, resolves the five states honestly
+  (default / hover / pressed / focused / disabled), draws through the Stage 1
+  `rect` + Stage 2 `text`. By-eye styling from the shipped kit
+  (`app/src/components/ui`): 13px label, 9px radius, ~34px tall, a 2px
+  slate-indigo focus ring offset outside the button. `buttonShowcase()`
+  renders forced states for the screenshot, through the same `resolve`+draw
+  path the live widget uses.
+- `main.zig` — mouse/keyboard event plumbing into the context, pointer cursor
+  over interactive widgets (`sapp.setMouseCursor`), a live buttons scene
+  (key `7`, `--buttons`) wired to visible effects (toggle a toast, cycle the
+  clear color, toggle continuous mode, reset, plus a disabled button), and a
+  deterministic state showcase (key `8`, `--showcase`) for screenshots.
+- Tests — `zig build test` runs 9 headless unit tests over the state machine:
+  hover, fire-on-release-inside, cancel-on-release-outside,
+  drag-off-then-back-on, press+release-in-one-frame, disabled-inert, Tab
+  order + both-way wrap, and mouse-focus-shows-no-ring + Space-activates.
+  All 9 pass. A test aggregator (`src/tests.zig`) roots the test module at
+  `src/` so the `ui/ -> ../gfx/` imports resolve; `end()` was refactored to
+  *return* the cursor rather than call sokol, which is what makes the whole
+  file runnable without a GPU (and is cleaner — the platform side effect now
+  lives in `main`, at the edge).
+
+**The design call worth recording (hover vs frame-on-demand).** Immediate
+mode usually derives "hot" from the *previous* frame's hit test (Dear ImGui
+does; it runs continuously, so the one-frame lag never shows). Under
+frame-on-demand that lag is a bug: a mouse-move produces exactly one repaint,
+so a hover computed for "next frame" would never paint until the pointer
+moved again — hover would look stuck. So hover and the press/release machine
+read *this* frame's hit test: the move event marks the frame dirty, the frame
+re-runs, and the widget under the new pointer paints hovered in that same
+frame. Nothing is scheduled on a timer, so a still pointer paints nothing.
+The one thing this single pass gives up is arbitrating two *overlapping*
+interactive widgets in one frame (both read hit=true); the lab has no such
+overlap, and `hot_id` is still accumulated last-drawn-wins for the cursor and
+as the seam where real overlap arbitration (popovers/menus, explicit Stage 3
+non-goals) would plug in. Tab is the mirror image: resolved at `begin()`
+against the previous frame's focusable list, which — because the scene is
+stable frame to frame — equals this frame's, so the ring lands on the new
+widget the same frame as the keypress, no lag and no nudge repaint.
+
+**The cancel path.** Press over a button arms it (`active_id = id`); a release
+fires only if the pointer is still inside (`hit`), and a release *always*
+clears active. Press-drag-out-release cancels; press-drag-out-drag-back-in-
+release fires (active persists across frames until release). Press and release
+are checked without an `else` between them, so a press and release landing in
+the same frame — a very fast click, or two events arriving before one repaint
+— still fires. All four paths are pinned by unit tests.
+
+**One bug caught in the writing.** The "Continuous: on/off" demo button has a
+label that changes every frame. Hashing the display label for identity would
+flip the button's ID on every toggle and silently drop its hot/active/focus
+state. Fixed with an `id_label` opt: dynamic-label widgets key identity off a
+stable string. Worth remembering for any future toggle/stateful-label widget.
+
+**Measurements (macOS daily driver, ReleaseFast, 1200x800 @ 2x, via
+`--bench`).** Draw calls and the idle result are the load-independent
+invariants and are clean; the frame/CPU numbers carry two environmental
+caveats stated below.
+- Every scene, including the new ones: **1 draw call.** The buttons scene is
+  114 quads; the showcase 251. Shapes + glyphs still share the single batch
+  (the atlas binds unconditionally; the `flush()` seam stays unused).
+- `settings`: 394 quads, **8.33 ms (120.0 fps)** — matches Stage 2's 8.39 ms.
+  `toast`: 74 quads, **8.34 ms (119.9 fps)** — matches Stage 2's 8.36 ms. The
+  renderer is unchanged; the widget layer adds nothing to a frame.
+- `buttons`: 114 quads, 1 draw call. Its phase happened to be vsync-capped at
+  60 Hz (16.66 ms) — see the frontmost caveat — so that frame-avg is a vsync
+  artifact, not a widget cost: 114 quads is a lighter scene than `toast`,
+  which held 120 Hz. On-demand build cost for the scene, measured off the HUD
+  on a quiet frame, was ~150 us.
+- **Frame-on-demand holds with buttons resident: 0 presents over 15 s idle**,
+  in all three idle phases (stress, settings, buttons). The Stage 2 HUD trap
+  (marking the frame dirty on a timer → a permanent 1 fps loop) is avoided —
+  nothing dirties the frame except real input, and hover renders only while
+  the pointer actually moves. This was the criterion I was most watchful of.
+- Atlas census after all phases: **1024², 131 glyphs cached, 5.3% occupied,
+  0 growth events** (up from Stage 2's 89 glyphs — the button/showcase labels
+  and the "Continuous"/"Cycle background" strings added ~40 glyphs). Still no
+  growth; one font family at UI sizes barely dents 1024².
+
+**Two measurement caveats (both environmental, both honest).**
+1. *The window ran shell-launched, not a bundled app.* Launched from the
+   agent's shell, the sokol window opens off the active Space and only reaches
+   120 Hz when it is genuinely frontmost; otherwise the display link cadences
+   at 60 Hz (the Stage 0/1 note about frontmost). Across the run some phases
+   hit 120 Hz (`toast`, `settings`) and some were pinned at 60 (`buttons`,
+   `stress-large`). Where a light scene reads exactly 16.67 ms it is
+   vsync-locked at 60, not GPU-bound. GPU cost was cross-checked with
+   `ioreg` Device Utilization (100% only in the `stress-large` fill-rate
+   torture phase, as in Stage 1).
+2. *Background CPU load inflated the CPU-side build numbers.* A first bench
+   run was contaminated by a `logioptionsplus_agent` (Logitech) spike at ~28%
+   CPU plus Spotlight (`mds`) indexing — build times ran 10–33x Stage 2's
+   (text-wall build 45 ms vs 1.38 ms). A second run after the spike cleared
+   is the one reported here; its build times are still ~3–10x Stage 2's from
+   ambient load (toast build 956 us vs 57 us), but the frames that reached
+   120 Hz did so cleanly, which is the signal that the renderer itself is
+   unaffected. The lesson from Stages 1–2 stands and gained a corollary:
+   measure on a quiet, frontmost window, and treat CPU-build averages from a
+   shared daily driver as upper bounds.
+
+**How the button actually feels — and the honest limit of this session's
+verification.** I could not hand-drive it: the shell-launched window sits off
+the active Space, and warping the physical cursor / injecting keystrokes on
+a machine in active use is exactly the contamination Stages 1–2 warned
+against. So the feel claims here rest on three legs, and I am calling the gap
+plainly. (1) The state machine — the part that makes a button feel like a
+button rather than a demo (no missed clicks, correct release-outside cancel,
+armed-across-frames drag-back, one-frame fast click) — is verified
+deterministically by the 9 unit tests. (2) The visuals of all five states are
+verified by the showcase screenshot, rendered through the identical
+`resolve`+draw path the live widget uses. (3) Zero *added* input latency is a
+property of the design, not a measurement: hover/press/release read this
+frame's hit test and every input event marks the frame dirty, so a click
+registers on the frame its event arrives and hover paints on the frame the
+pointer moves — there is no buffer, no debounce, no next-frame deferral
+anywhere in the path. What remains genuinely unverified by me is the tactile
+end-to-end latency through WKWeb/Metal/display — i.e. whether it *subjectively*
+matches a native button under a fingertip. That is the one thing a person has
+to feel, and it is Joe's to confirm at the keyboard (key `7`). My honest
+expectation, from the design: it should feel at least as immediate as the web
+button, because there is no framework event queue between the OS event and the
+pixel — but I have not felt it, and I am not going to claim I have.
+
+**Screenshots** in `docs/zig-ui-lab/`:
+- `stage3-buttons-showcase-lab.png` — the deliverable: 3 variants
+  (primary / default / secondary) x 5 states, hover and focus visible, from
+  the real render path. HUD confirms 1 draw call.
+- `stage3-buttons-web-reference.png` — the shipped kit transcribed from
+  `app/src/components/ui` and rendered in Chromium over the same Inter TTFs
+  (Playwright, dpr 2), the same method as Stages 1–2.
+- `stage3-buttons-live-lab.png` — the live demo row (key `7`) at rest.
+
+Eyeballed against the reference: the radius, proportions, label weight, and
+the slate focus ring line up; the lab's hairline and fills read as the same
+surface family Stage 1 established. Two honest divergences, both arguably in
+the lab's favour and both noted on the reference sheet: the shipped Button has
+**no `:active` rule**, so a shipped press only shows the hover look — the lab
+gives a distinct pressed state (a deeper wash / a darker primary), which is
+more tactile; and the lab's bare "default" variant carries a subtle hover wash
+the shipped bare `.button` lacks (the shipped default *is* Secondary — the
+bare base is rarely used alone).
+
+**What fought back.**
+- *Driving a GUI from the agent shell.* The window opens off the active Space
+  and does not appear in `CGWindowListCopyWindowInfo(.optionOnScreenOnly)`;
+  it is present under `.optionAll` (owner `zig-ui`, layer 0) and captures fine
+  by window id with `screencapture -l<id> -o -x` even while off-screen, which
+  is how the screenshots were shot. But an off-screen window gets no sustained
+  frame callbacks, so `--bench` (which advances on the frame tick) stalls
+  indefinitely until the window is brought frontmost — a first background run
+  ran for many minutes producing nothing. Fix: `osascript` System-Events
+  "set frontmost" after launch starts the display link; then leave it
+  untouched (headless shell polls don't steal GUI focus).
+- *stderr buffering.* Redirected to a file, `std.debug.print` is
+  block-buffered, so a stalled/killed run shows an empty log (this is why the
+  first stuck run looked silent). A clean run that reaches `requestQuit`
+  flushes through `cleanup`. Running under a pty via `script` to force
+  line-buffering did not work here — the child exited immediately under
+  `script &` — so the approach was: let the bench self-quit and read the file
+  after, cross-checking liveness with `pgrep` + `ioreg` GPU utilisation.
+- *The dynamic-label identity bug* (above) — caught while wiring the demo, not
+  by a test; a good argument that stateful-label widgets deserve a test of
+  their own when Stage 4 adds the toggle.
+- Nothing in Zig 0.16 bit this session beyond what Stages 0–2 already logged;
+  `sapp.MouseCursor`, `sapp.modifier_shift`, and the event union were all
+  where expected.
+
+**Exit criteria.**
+- Interaction feels indistinguishable from a native/web button: **verified for
+  the mechanics** (9/9 state-machine tests: no missed clicks, correct
+  release-outside cancel, focus ring moves in draw order), **design-argued for
+  latency** (no added buffering in the input path), **unverified for
+  subjective tactile feel** (could not hand-drive; Joe's pass owed). Called
+  honestly rather than claimed.
+- Frame-on-demand holds with buttons on screen: **pass** (0 presents / 15 s,
+  all three idle phases). No timer dirties the frame.
+- Focus ring visible + moving correctly through draw order: **pass** (unit
+  test + showcase screenshot).
+- Button-row screenshot with hover + focus next to a shipped reference:
+  **pass** (`stage3-buttons-showcase-lab.png` + `-web-reference.png`).
+- `--bench` runs clean end to end with fresh numbers for an interaction-heavy
+  scene alongside the carried baselines: **pass** (buttons phase +
+  idle-buttons; carried toast/settings re-confirmed at 120 Hz).
+- Isolation: **pass** — repo-wide grep finds `zig-ui` only in
+  `docs/zig-ui-lab-log.md` and `docs/lab-graduation-checklist.md` (no build or
+  code coupling outside `labs/`); `bun run typecheck` untouched.
+
+**Deviations from the plan.** None requiring sign-off. Two additive choices,
+both logged rather than silent: the `--showcase` scene and `buttonShowcase()`
+exist only to make the screenshot deterministic without warping the cursor —
+they go through the real render path and add no widget behaviour; and `end()`
+returns the cursor for `main` to apply instead of calling sokol itself, a
+testability refactor that also keeps the platform side effect at the edge.
+Neither touches a decision in plan section 4.
+
+**Next session (Stage 4, layout and the small kit).** `ui/layout.zig`
+(immediate-mode row/column with padding, gap, fixed/fit/grow sizing —
+transcribe the ~20% of flexbox `app/src/components/ui/*.module.css` actually
+uses), then `toggle` and `segmented` built strictly on this stage's
+hot/active machinery (if they need new primitives, that is a design smell to
+log), the first per-ID animation store (toggle knob / segmented thumb easing,
+frame-on-demand-safe and settling in ~150 ms), a Windows smoke build for
+curiosity, and a settings-card composition authored with zero absolute
+coordinates. The button is hand-placed today precisely because one button can
+be; a kit cannot, which is what Stage 4 is for.
