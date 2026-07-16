@@ -13,8 +13,9 @@
 // decoration at all — O(1), and free when no feature has painted anything.
 
 /** The decoration kinds the overlay styles distinctly. Extend the union (and the
- *  companion CSS) as consumers need more; the store itself is kind-agnostic. */
-export type DecorationType = 'find-match' | 'misspelling';
+ *  companion CSS) as consumers need more; the store itself is kind-agnostic.
+ *  find-match = every match; find-active = the one currently cycled to. */
+export type DecorationType = 'find-match' | 'find-active' | 'misspelling';
 
 /** A single decoration: a flat half-open range `[start, end)` within one block,
  *  in inline-ops.ts offset space (atoms count as one, matching the selection map).

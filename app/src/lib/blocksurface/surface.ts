@@ -553,6 +553,82 @@ export class BlockSurface {
     return this.blockSel;
   }
 
+  // ---- In-document find/replace support ----
+  // The surface half of the view-state plumbing a find feature drives: reveal a
+  // block, read/restore the selection (saved on open, restored on Esc, or jumped to
+  // on commit), and replace one match or all in a single undo step. Ranges are flat
+  // block offsets — the same inline-ops coordinates findInDocument and the
+  // decoration overlay use — so find never touches the line/column shape. The match
+  // highlights themselves ride the decoration overlay (`this.decorations`); nothing
+  // here changes focus during live cycling, so the find bar keeps the keyboard.
+
+  /** Scroll the block with `id` into view. No selection or focus change — the find
+   *  bar reveals the active match while keeping focus in its own input. */
+  revealBlock(id: string): void {
+    this.leafElementById(id)?.scrollIntoView({ block: 'nearest' });
+  }
+
+  /** The live selection as a DocRange, or null when focus is outside the surface —
+   *  the find bar captures this on open so Esc can restore the caret. */
+  readSelectionRange(): DocRange | null {
+    return readSelection(this.container);
+  }
+
+  /** Place the selection from a DocRange, taking focus back first (so it commits in
+   *  WKWebView). Used to restore the pre-find caret on Esc and to jump into a match
+   *  on commit. A no-op when the range's leaves are gone (the block was deleted). */
+  applySelection(range: DocRange): void {
+    this.container.focus();
+    writeSelection(this.container, range, 'find');
+  }
+
+  /** Replace the flat range [start, end) in one inline-text leaf with `text`, as its
+   *  own undo step; the caret lands just after the inserted text. */
+  replaceMatch(id: string, start: number, end: number, text: string): void {
+    const leaf = this.inlineTextLeafById(id);
+    const blockEl = this.leafElementById(id);
+    if (!leaf || !blockEl) return;
+    const next = insertTextInInline(deleteRangeInInline(leaf.inline, start, end), start, text);
+    this.container.focus();
+    this.commitInline(id, next, blockEl, start + text.length);
+    this.scheduleSerialize();
+  }
+
+  /** Replace every given match with `text` in a single undo step. Matches are
+   *  grouped by block and applied back-to-front within each block, so earlier
+   *  offsets stay valid as the surrounding text shifts. */
+  replaceAll(matches: readonly { blockId: string; start: number; end: number }[], text: string): void {
+    if (matches.length === 0) return;
+    const byBlock = new Map<string, { start: number; end: number }[]>();
+    for (const m of matches) {
+      const list = byBlock.get(m.blockId);
+      if (list) list.push({ start: m.start, end: m.end });
+      else byBlock.set(m.blockId, [{ start: m.start, end: m.end }]);
+    }
+    this.container.focus();
+    this.compoundEdit(() => {
+      for (const [id, ranges] of byBlock) {
+        const leaf = this.inlineTextLeafById(id);
+        const blockEl = this.leafElementById(id);
+        if (!leaf || !blockEl) continue;
+        ranges.sort((a, b) => b.start - a.start);
+        let inline = leaf.inline;
+        let caret = 0;
+        for (const r of ranges) {
+          inline = insertTextInInline(deleteRangeInInline(inline, r.start, r.end), r.start, text);
+          caret = r.start + text.length;
+        }
+        this.commitInline(id, inline, blockEl, caret);
+      }
+    });
+    this.scheduleSerialize();
+  }
+
+  private inlineTextLeafById(id: string): Extract<BlockNode, { type: 'paragraph' | 'heading' }> | null {
+    const b = findBlockById(this.doc.blocks, id);
+    return b && (b.type === 'paragraph' || b.type === 'heading') ? b : null;
+  }
+
   /** Return focus to the editing surface (after a menu action that moved focus). */
   focus(): void {
     this.container.focus();
