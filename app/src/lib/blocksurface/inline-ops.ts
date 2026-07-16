@@ -229,7 +229,7 @@ export function insertTagInInline(nodes: InlineNode[], offset: number, name: str
 }
 
 /** The toggleable boolean marks (link is set/cleared with a value, separately). */
-export type BooleanMark = 'strong' | 'em' | 'code';
+export type BooleanMark = 'strong' | 'em' | 'code' | 'strikethrough';
 
 // Apply a mark transform to the text within the flat range [start, end), splitting
 // runs at the range boundaries so only the covered characters change.

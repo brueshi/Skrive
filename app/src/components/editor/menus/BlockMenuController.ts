@@ -22,6 +22,7 @@ function selectionsEqual(a: MenuSelection, b: MenuSelection): boolean {
     a.strong === b.strong &&
     a.em === b.em &&
     a.code === b.code &&
+    a.strikethrough === b.strikethrough &&
     a.link === b.link &&
     a.linkHref === b.linkHref &&
     a.blockType === b.blockType &&
@@ -40,6 +41,7 @@ function toSelection(info: SelectionInfo | null): MenuSelection {
     strong: info.marks.strong,
     em: info.marks.em,
     code: info.marks.code,
+    strikethrough: info.marks.strikethrough,
     link: info.marks.link,
     linkHref: info.linkHref,
     blockType: info.blockType,
@@ -104,7 +106,7 @@ export class BlockMenuController implements MenuController {
   anchorRect = (): AnchorRect | null => this.rect;
   liveAnchorRect = (): AnchorRect | null => this.surface.currentSelectionRect();
 
-  toggleMark(mark: 'strong' | 'em' | 'code'): void {
+  toggleMark(mark: 'strong' | 'em' | 'code' | 'strikethrough'): void {
     this.surface.toggleMark(mark);
   }
   setParagraph(): void {

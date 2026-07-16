@@ -13,7 +13,7 @@ import type { MenuController } from './controller';
 import { Tooltip } from '../../ui/Tooltip';
 import { useAnchoredRect } from './useAnchoredRect';
 import { BlockTypeDropdown } from './BlockTypeDropdown';
-import { IconBold, IconItalic, IconInlineCode, IconLink } from './toolbar-icons';
+import { IconBold, IconItalic, IconStrikethrough, IconInlineCode, IconLink } from './toolbar-icons';
 import './menus.css';
 
 function BubbleButton({
@@ -77,6 +77,14 @@ export function SelectionBubble({ controller }: { controller: MenuController }) 
           </BubbleButton>
           <BubbleButton label="Italic" shortcut="⌘I" active={s.em} onRun={() => controller.toggleMark('em')}>
             <IconItalic size={20} active={s.em} />
+          </BubbleButton>
+          <BubbleButton
+            label="Strikethrough"
+            shortcut="⌘⇧X"
+            active={s.strikethrough}
+            onRun={() => controller.toggleMark('strikethrough')}
+          >
+            <IconStrikethrough size={20} />
           </BubbleButton>
           <BubbleButton label="Inline code" shortcut="⌘E" active={s.code} onRun={() => controller.toggleMark('code')}>
             <IconInlineCode size={20} active={s.code} />

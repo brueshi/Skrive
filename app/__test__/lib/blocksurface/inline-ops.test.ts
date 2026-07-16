@@ -172,6 +172,12 @@ describe('toggleMarkInInline', () => {
     const nodes = [text('ab', { em: true }), text('cd')];
     expect(toggleMarkInInline(nodes, 0, 4, 'em')).toEqual([text('abcd', { em: true })]);
   });
+
+  it('toggles strikethrough over a sub-range and clears it on a second toggle', () => {
+    const struck = toggleMarkInInline([text('done later')], 0, 4, 'strikethrough');
+    expect(struck).toEqual([text('done', { strikethrough: true }), text(' later')]);
+    expect(toggleMarkInInline(struck, 0, 4, 'strikethrough')).toEqual([text('done later')]);
+  });
 });
 
 describe('setMarkInInline', () => {

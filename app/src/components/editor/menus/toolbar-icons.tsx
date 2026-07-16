@@ -16,8 +16,9 @@
 // sizes so the marks read as an even set.
 //
 // IconChevronDown stays a line glyph (a disclosure affordance, not a
-// formatting mark), and IconStrikethrough is drawn but not yet wired (the
-// strikethrough mark is a separate change).
+// formatting mark). IconStrikethrough is a static filled glyph (no outline->fill
+// active variant): the selection bubble signals its on-state through the button's
+// active class, the same way the Link control does.
 
 type IconProps = { size?: number; className?: string };
 
