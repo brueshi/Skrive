@@ -65,6 +65,22 @@
   --skrive-icon-doc-page: light-dark(#dfdfe0, #aeb0b4);
   --skrive-icon-doc-ink: light-dark(#4a4c4d, #2b2d30);
   --skrive-icon-doc-faint: light-dark(#b2b2b2, #7c7e82);
+
+  /* ---- Syntax highlighting (SKR-262) ----
+     A restrained, Overcast-harmonised palette rather than a loud rainbow: the
+     keyword/builtin hue is pulled toward the slate-indigo accent, and every hue
+     is desaturated to read as calm colour on the code block's faint fill. Light
+     values first, dark second (light-dark resolves against the active scheme).
+     Each Prism token type maps onto one of these below; unmapped types fall
+     through to the default text colour. */
+  --skrive-hl-comment: light-dark(#8a8f98, #7f858f);
+  --skrive-hl-keyword: light-dark(#6a4ca6, #b39ae0);
+  --skrive-hl-string: light-dark(#2f7a52, #8fca9f);
+  --skrive-hl-number: light-dark(#a15c1e, #e0a56a);
+  --skrive-hl-function: light-dark(#3a63c0, #85a9ef);
+  --skrive-hl-class: light-dark(#8a6d1f, #e0c579);
+  --skrive-hl-property: light-dark(#3f6d8f, #7fb6c9);
+  --skrive-hl-punctuation: light-dark(#73737a, #9a9ca2);
 }
 
 :root[data-theme='light'] {

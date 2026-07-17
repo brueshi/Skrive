@@ -11,7 +11,7 @@
 // atom is tagged HARD_BREAK_ATTR so it is distinguished from the bare <br> an empty
 // block carries for height (that placeholder is zero-width, like the empty model).
 
-import { BLOCK_ID_ATTR, CARET_FILLER, HARD_BREAK_ATTR, TAG_CLASS } from './render';
+import { BLOCK_ID_ATTR, CARET_FILLER, CHROME_ATTR, HARD_BREAK_ATTR, TAG_CLASS } from './render';
 import type { BlockViewRegistry } from './render';
 import { isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
 
@@ -162,10 +162,17 @@ export function domPointFromFlatOffset(blockEl: HTMLElement, target: number): { 
   let last: { node: Node; offset: number } = { node: blockEl, offset: 0 };
   // Skip everything INSIDE a tag chip: the chip is visited (and handled) as one
   // atom below, so descending into its `#name` text would double-count it and try
-  // to plant the caret inside a non-editable span.
+  // to plant the caret inside a non-editable span. Skip surface chrome wholesale
+  // (SKR-262: a code block's colour mirror and language button) — rejecting the
+  // chrome element also rejects its subtree, so its text never absorbs offset or
+  // catches a past-end caret.
   const walker = document.createTreeWalker(blockEl, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
-    acceptNode: (n) =>
-      n.parentElement?.closest(`.${TAG_CLASS}`) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+    acceptNode: (n) => {
+      if (n.nodeType === Node.ELEMENT_NODE && (n as HTMLElement).hasAttribute(CHROME_ATTR)) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return n.parentElement?.closest(`.${TAG_CLASS}`) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+    }
   });
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     if (isChipEl(n)) {

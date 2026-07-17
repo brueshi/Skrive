@@ -325,3 +325,49 @@
   color: var(--skrive-muted);
   font-size: 0.9em;
 }
+
+/* Code-block language picker (SKR-262). Reuses the slash menu's surface + row
+   styling, but pins a filter input above a scrolling list instead of scrolling the
+   whole popover — so the search box stays put as the language list narrows. */
+.code-lang-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 14rem;
+  max-height: 19rem;
+  overflow: hidden;
+  /* The soft toast lift, not the float shadow — aligns the picker with the shipped
+     popover surfaces (sheets/palettes). */
+  border-radius: var(--skrive-radius-lg, 12px);
+  box-shadow: var(--skrive-shadow-sheet);
+}
+
+.code-lang-search {
+  flex: 0 0 auto;
+  margin: 0.1rem 0.1rem 0.25rem;
+  padding: 0.4rem 0.55rem;
+  background: color-mix(in srgb, var(--skrive-fg) 5%, var(--skrive-bg));
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-sm, 4px);
+  color: var(--skrive-fg);
+  font: inherit;
+  font-size: 0.9em;
+  outline: none;
+}
+
+.code-lang-search:focus-visible {
+  border-color: var(--skrive-focus-ring);
+}
+
+.code-lang-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The active-language tick, right-aligned in its row. */
+.code-lang-check {
+  flex: 0 0 auto;
+  margin-left: 0.75rem;
+  color: var(--skrive-accent);
+  font-size: 0.85em;
+}

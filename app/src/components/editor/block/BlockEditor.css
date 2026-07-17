@@ -80,6 +80,7 @@
 }
 
 .block-editor-surface pre {
+  position: relative;
   padding: 0.8rem 1rem;
   border-radius: var(--skrive-radius-sm, 6px);
   background: color-mix(in srgb, var(--skrive-fg) 5%, var(--skrive-bg));
@@ -87,8 +88,145 @@
   font-size: 0.9em;
 }
 
+/* Language corner button (SKR-262 / SKR-3): per-block chrome, top-right, revealed on
+   hover / focus-within / while its picker is open. Absolutely positioned so it stays
+   out of the code's grid cell and never shifts the text. It sticks to the right edge
+   as the code scrolls horizontally (position: sticky within the scrolling <pre> would
+   ride the scroll; absolute keeps it pinned to the padding box, which reads better
+   for a control). */
+.block-editor-surface .sk-code-lang {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.4rem;
+  z-index: 1;
+  padding: 0.1rem 0.45rem;
+  border: none;
+  border-radius: var(--skrive-radius-xs, 4px);
+  background: color-mix(in srgb, var(--skrive-fg) 8%, var(--skrive-bg));
+  color: var(--skrive-muted);
+  font: inherit;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+/* A block WITH a language wears its label at a glance (no click needed) — quiet by
+   default, full prominence on hover. A plain block (no data-lang) keeps its button
+   hidden until hover, so undifferentiated code isn't littered with "Plain text". */
+.block-editor-surface pre[data-lang] > .sk-code-lang {
+  opacity: 0.6;
+}
+
+.block-editor-surface pre:hover > .sk-code-lang,
+.block-editor-surface pre:focus-within > .sk-code-lang,
+.block-editor-surface .sk-code-lang:focus-visible {
+  opacity: 1;
+}
+
+.block-editor-surface .sk-code-lang:hover {
+  color: var(--skrive-fg);
+  background: color-mix(in srgb, var(--skrive-fg) 14%, var(--skrive-bg));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .block-editor-surface .sk-code-lang {
+    transition: none;
+  }
+}
+
 .block-editor-surface code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Syntax highlighting (SKR-262). The painter stacks an inert colour "mirror"
+   <code> behind the real editable one, both in a single CSS grid cell so they
+   overlap AND share the <pre>'s horizontal scroll with no listener. The real
+   text is made transparent to reveal the mirror's colour; while typing
+   (`is-editing`) the real text shows in its default colour and the stale mirror
+   hides, so a keystroke never waits on re-tokenizing. */
+.block-editor-surface pre.has-highlight {
+  display: grid;
+}
+
+.block-editor-surface pre.has-highlight > code {
+  grid-area: 1 / 1;
+}
+
+.block-editor-surface pre.has-highlight:not(.is-editing) > code:not([data-hl-mirror]) {
+  color: transparent;
+}
+
+.block-editor-surface pre.has-highlight > code[data-hl-mirror] {
+  /* The mirror is pure paint: never a caret target, never selectable, and clicks
+     fall through to the real code beneath it. */
+  pointer-events: none;
+  user-select: none;
+}
+
+.block-editor-surface pre.has-highlight.is-editing > code[data-hl-mirror] {
+  /* visibility (not display:none) so the grid cell keeps its size — no width jump
+     when highlighting resolves after a pause. */
+  visibility: hidden;
+}
+
+/* Prism token type -> palette token. Several related types share one hue to keep
+   the result calm; anything unmapped inherits the default code colour. */
+.block-editor-surface .sk-hl-comment,
+.block-editor-surface .sk-hl-prolog,
+.block-editor-surface .sk-hl-doctype,
+.block-editor-surface .sk-hl-cdata {
+  color: var(--skrive-hl-comment);
+  font-style: italic;
+}
+
+.block-editor-surface .sk-hl-keyword,
+.block-editor-surface .sk-hl-atrule,
+.block-editor-surface .sk-hl-important,
+.block-editor-surface .sk-hl-builtin,
+.block-editor-surface .sk-hl-variable {
+  color: var(--skrive-hl-keyword);
+}
+
+.block-editor-surface .sk-hl-string,
+.block-editor-surface .sk-hl-char,
+.block-editor-surface .sk-hl-attr-value,
+.block-editor-surface .sk-hl-regex,
+.block-editor-surface .sk-hl-url,
+.block-editor-surface .sk-hl-inserted {
+  color: var(--skrive-hl-string);
+}
+
+.block-editor-surface .sk-hl-number,
+.block-editor-surface .sk-hl-boolean,
+.block-editor-surface .sk-hl-constant,
+.block-editor-surface .sk-hl-symbol {
+  color: var(--skrive-hl-number);
+}
+
+.block-editor-surface .sk-hl-function {
+  color: var(--skrive-hl-function);
+}
+
+.block-editor-surface .sk-hl-class-name,
+.block-editor-surface .sk-hl-tag,
+.block-editor-surface .sk-hl-selector,
+.block-editor-surface .sk-hl-title {
+  color: var(--skrive-hl-class);
+}
+
+.block-editor-surface .sk-hl-property,
+.block-editor-surface .sk-hl-attr-name,
+.block-editor-surface .sk-hl-namespace {
+  color: var(--skrive-hl-property);
+}
+
+.block-editor-surface .sk-hl-punctuation,
+.block-editor-surface .sk-hl-operator,
+.block-editor-surface .sk-hl-entity {
+  color: var(--skrive-hl-punctuation);
 }
 
 .block-editor-surface :not(pre) > code {

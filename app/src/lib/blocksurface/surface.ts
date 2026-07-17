@@ -16,9 +16,10 @@ import { literalParagraphs, plainTextParagraphs } from '../clipboard/plainText';
 import { buildClipboardPayload } from '../clipboard/copyOut';
 import { imageExtension, imageMarkdownLink, pastedImageFilename } from '../clipboard/pasteImage';
 import { notify } from '../notify';
-import { BLOCK_ID_ATTR, BlockViewRegistry, renderBlock, renderDocument, renderInlineInto, setCodeContent, TAG_ATTR, TAG_CLASS } from './render';
+import { BLOCK_ID_ATTR, BlockViewRegistry, CODE_LANG_CLASS, renderBlock, renderDocument, renderInlineInto, setCodeContent, TAG_ATTR, TAG_CLASS } from './render';
 import type { AssetResolver } from './render';
 import { DecorationStore } from './decorations';
+import { HighlightBus } from './highlight/highlight-bus';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
 import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
@@ -70,6 +71,13 @@ export type SlashMenuState = { rect: DOMRect; query: string };
  *  menu — the two share the anchoring machinery, differing only in trigger and
  *  what a commit does. */
 export type TagMenuState = { rect: DOMRect; query: string };
+
+/** What the code-block language picker needs: where to anchor (the corner button's
+ *  rect), which block it edits, and that block's current language (so the list can
+ *  mark the active choice). Null when the picker is closed. Click-triggered, so —
+ *  unlike the slash/tag menus — it carries no live query; the picker owns its own
+ *  filter input. */
+export type CodeLangMenuState = { rect: DOMRect; blockId: string; current: string };
 
 /** The paste-image write seam (SKR-175). The surface can pull an image off the
  *  clipboard/drop and read its bytes, but knows neither the active document's
@@ -247,6 +255,12 @@ export class BlockSurface {
   // (attachDecorationOverlay) subscribes and repaints. Empty and inert until a
   // feature adds a decoration, so the store adds no keystroke cost when idle.
   private readonly _decorations = new DecorationStore();
+
+  // Syntax-highlight invalidation channel (SKR-262). The surface pokes it when a
+  // code block's text changes or a reconcile rebuilds the tree; the code-highlight
+  // painter subscribes and repaints the colour mirror off-thread. Gated to code
+  // blocks at the call site, so a prose keystroke never touches it.
+  private readonly _highlight = new HighlightBus();
   private readonly onDocChange?: (doc: Document) => void;
   private debounceTimer: number | null = null;
   // The deferred idle-callback handle for the cold path, and whether the doc has
@@ -313,6 +327,10 @@ export class BlockSurface {
   // mid-text at a word boundary rather than only on a whole-block `/`.
   private tagSession: { blockId: string; hashOffset: number } | null = null;
   private tagCb: ((state: TagMenuState | null) => void) | null = null;
+  // The code-block language picker observer (SKR-262). Click-triggered from a code
+  // block's corner button, so there is no persistent "session" — the surface just
+  // emits an open state and the picker drives itself until it commits or closes.
+  private codeLangCb: ((state: CodeLangMenuState | null) => void) | null = null;
   // The registered paste-image write delegate (SKR-175); see ImagePasteDelegate.
   // Null until the editor component registers one, and on the harness/tests that
   // never do — an image paste with no delegate toasts and declines rather than
@@ -399,6 +417,12 @@ export class BlockSurface {
    *  wired in the editor subscribes and keeps them positioned over live text. */
   get decorations(): DecorationStore {
     return this._decorations;
+  }
+
+  /** The syntax-highlight invalidation channel. The code-highlight painter wired in
+   *  the editor subscribes and repaints code blocks' colour mirrors off-thread. */
+  get highlight(): HighlightBus {
+    return this._highlight;
   }
 
   // The document. Reads are plain; every assignment records a pre-edit snapshot
@@ -510,6 +534,42 @@ export class BlockSurface {
    *  closes (null). */
   onTagMenu(cb: ((state: TagMenuState | null) => void) | null): void {
     this.tagCb = cb;
+  }
+
+  /** Register (or clear) the code-block language picker observer. Fired with an open
+   *  state when a code block's corner button is clicked, and with null when the
+   *  picker should close. */
+  onCodeLangMenu(cb: ((state: CodeLangMenuState | null) => void) | null): void {
+    this.codeLangCb = cb;
+  }
+
+  /** Close the language picker (Escape, an outside click, or after a commit). */
+  closeCodeLangMenu(): void {
+    this.codeLangCb?.(null);
+  }
+
+  /** Set a code block's language (from the picker). Updates the model, re-renders the
+   *  block so its `data-lang`, corner label, and colour mirror follow, persists, and
+   *  closes the picker. A no-op when the language is unchanged. */
+  setCodeLanguage(blockId: string, lang: string): void {
+    const block = findBlockById(this.doc.blocks, blockId);
+    if (!block || block.type !== 'code_block' || block.lang === lang) {
+      this.closeCodeLangMenu();
+      return;
+    }
+    // The doc setter records the pre-edit undo snapshot; nextEditHint defaults to
+    // a discrete step, so a language change is one atomic undo.
+    this.doc = {
+      ...this.doc,
+      blocks: updateBlockById(this.doc.blocks, blockId, (b) =>
+        b.type === 'code_block' ? ({ ...b, lang, dirty: true } as BlockNode) : b
+      )
+    };
+    // A structural re-render: renderBlock rebuilds the <pre> with the new data-lang
+    // and label, and reconcile's highlight invalidate(null) repaints the mirror.
+    this.reconcile();
+    this.scheduleSerialize();
+    this.closeCodeLangMenu();
   }
 
   /** The distinct tag names used in the current document (inline `#tag` leaves),
@@ -3199,6 +3259,20 @@ export class BlockSurface {
         return;
       }
     }
+    // A click on a code block's language corner button opens the language picker.
+    // The button is contenteditable=false chrome, so this never competes with caret
+    // placement (like the tag chip above).
+    const langBtn = targetEl?.closest<HTMLElement>(`.${CODE_LANG_CLASS}`);
+    if (langBtn && this.codeLangCb) {
+      const pre = langBtn.closest<HTMLElement>(`[${BLOCK_ID_ATTR}]`);
+      const blockId = pre?.getAttribute(BLOCK_ID_ATTR) ?? null;
+      const block = blockId ? findBlockById(this.doc.blocks, blockId) : null;
+      if (blockId && block?.type === 'code_block') {
+        this.onPointerUp();
+        this.codeLangCb({ rect: langBtn.getBoundingClientRect(), blockId, current: block.lang });
+        return;
+      }
+    }
     const blockEl = targetEl?.closest<HTMLElement>(`[${BLOCK_ID_ATTR}]`) ?? null;
     const blockId = blockEl?.getAttribute(BLOCK_ID_ATTR) ?? null;
     const block = blockId ? findBlockById(this.doc.blocks, blockId) : null;
@@ -4750,6 +4824,10 @@ export class BlockSurface {
     // its boxes; the overlay recomputes them. O(1) when the leaf carries none —
     // and free when nothing is decorated at all — so the hot path pays nothing.
     this._decorations.invalidate(leafId);
+    // A code block whose text just changed needs its colour mirror rebuilt; the
+    // painter debounces the actual (off-thread) work. Gated here so only code
+    // edits reach the highlight bus — prose typing pays a single type check.
+    if (top?.type === 'code_block') this._highlight.invalidate(leafId);
   }
 
   private reconcile(): void {
@@ -4784,6 +4862,9 @@ export class BlockSurface {
     // on, so reassess every decorated block (short-circuits when none exist). Not
     // the keystroke path — typing re-renders in place and never reconciles.
     this._decorations.invalidate(null);
+    // Likewise reassess every code block's highlight: a reconcile rebuilds code
+    // blocks' elements (dropping their mirrors) and can add or remove blocks.
+    this._highlight.invalidate(null);
   }
 
   private scheduleSerialize(): void {

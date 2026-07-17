@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BlockSurface, DocHistory } from '../../../lib/blocksurface';
 import { attachCustomCaret } from '../../../lib/blocksurface/caret';
 import { attachDecorationOverlay } from '../../../lib/blocksurface/decoration-overlay';
+import { attachCodeHighlight } from '../../../lib/blocksurface/highlight/code-highlight';
 import { installDecorationDevHarness } from '../../../lib/blocksurface/decoration-dev';
 import type { Document } from '../../../lib/blockmodel';
 import { setActiveEditorFlush } from '../active-editor';
@@ -24,6 +25,7 @@ import { SelectionBubble } from '../menus/SelectionBubble';
 import { LinkEditor } from '../menus/LinkEditor';
 import { BlockSlashMenu } from '../menus/BlockSlashMenu';
 import { BlockTagMenu } from '../menus/BlockTagMenu';
+import { CodeLangMenu } from '../menus/CodeLangMenu';
 import { FindBar } from '../find/FindBar';
 import { BlockFindTarget } from '../find/FindTarget';
 import { OutlineRail } from '../OutlineRail';
@@ -120,6 +122,10 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
     const teardownDevHarness = import.meta.env.DEV
       ? installDecorationDevHarness(host, surface.decorations)
       : null;
+    // Syntax highlighting (SKR-262): the painter owns an off-thread worker that
+    // tokenizes code blocks and stacks a colour mirror behind the real editable
+    // text. View-only and debounced, so it never touches the keystroke path.
+    const highlight = attachCodeHighlight({ surface: host, store: surface.highlight });
     const controller = new BlockMenuController(surface);
     // The write seam (SKR-175): the surface can read a pasted image's bytes but
     // owns neither docPath nor the shell bridge, so it hands both to the store
@@ -141,6 +147,7 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
       controller.destroy();
       caret.destroy();
       decorations.destroy();
+      highlight.destroy();
       teardownDevHarness?.();
       // Drain the pending snapshot before teardown so a tab switch / view
       // toggle within the debounce window doesn't drop the last edit — destroy()
@@ -194,6 +201,7 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
       {ctx && <LinkEditor controller={ctx.controller} />}
       {ctx && <BlockSlashMenu surface={ctx.surface} />}
       {ctx && <BlockTagMenu surface={ctx.surface} />}
+      {ctx && <CodeLangMenu surface={ctx.surface} />}
     </div>
   );
 }
