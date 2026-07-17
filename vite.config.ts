@@ -38,5 +38,15 @@ export default defineConfig({
     // must be stable; fail loudly rather than silently hopping to 5174.
     port: 5173,
     strictPort: true
+  },
+  optimizeDeps: {
+    // The dep pre-bundler crawls index.html at startup, but NOT the Web Workers
+    // reached via `new Worker(new URL(...))`. So the highlight worker's Prism
+    // grammars (SKR-262) were discovered lazily on first code-block highlight,
+    // and Vite pre-bundled them mid-session and forced a full page reload — which
+    // drops editor state while testing. Naming the worker as a scan entry pre-
+    // bundles Prism at server start instead, so there is no mid-session reload.
+    // The html stays listed (setting `entries` replaces the default html crawl).
+    entries: ['index.html', 'src/lib/blocksurface/highlight/highlight.worker.ts']
   }
 });

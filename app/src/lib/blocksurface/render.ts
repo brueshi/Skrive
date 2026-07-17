@@ -11,6 +11,7 @@
 
 import type { BlockNode, InlineMarks, InlineNode } from '../blockmodel';
 import { isSafeUrl } from '../security/urls';
+import { languageLabel } from './highlight/languages';
 
 export const BLOCK_ID_ATTR = 'data-block-id';
 // Marks a rendered hard-break atom so the offset mapping can tell it apart from
@@ -31,6 +32,24 @@ export const CARET_FILLER = '\u200b';
 // offset map counts it as `('#'+name).length` cells \u2014 the tag's width in the model.
 export const TAG_CLASS = 'sk-tag';
 export const TAG_ATTR = 'data-tag';
+// A code block's syntax-highlight colour mirror (SKR-262) is an inert second
+// <code> the painter appends INSIDE the <pre>, carrying colourised token spans
+// behind the real editable text. It must stay the LAST child so the offset-walk
+// fast path (a native Range that ends before it) never counts its text, and the
+// caret walker skips its subtree by this attribute. Nothing in the model or a DOM
+// readback ever sees it — it is pure paint.
+export const HL_MIRROR_ATTR = 'data-hl-mirror';
+// Surface chrome: an element the surface renders INSIDE a block that is presentation,
+// not content (the code colour mirror, the code language corner button). It carries
+// no model text, so the offset/caret walkers skip its subtree wholesale by this
+// attribute, and it must sit AFTER the block's real editable content in DOM order so
+// the offset fast path never counts it. Distinct from a contenteditable=false ATOM
+// (a tag chip / frozen block), which IS content and carries a cell in the offset map.
+export const CHROME_ATTR = 'data-sk-chrome';
+// The class on a code block's language corner button, used by the surface's click
+// handler to open the language picker (SKR-262 / SKR-3) and by CSS to reveal it on
+// hover. The button is chrome (CHROME_ATTR), so it never disturbs the caret.
+export const CODE_LANG_CLASS = 'sk-code-lang';
 
 // A small, deliberately calm hue palette for tag chips — spread around the wheel
 // but skipping the garish bands (pure yellow / lime) so every tag reads gently.
@@ -212,9 +231,26 @@ export function renderBlock(
       // Code is code, not prose: the surface's spellcheck (SKR-191) stops at
       // the fence.
       el.setAttribute('spellcheck', 'false');
+      // The language drives syntax highlighting (SKR-262) and the fenced info
+      // string on export; the highlight painter reads it from here. Empty means
+      // no language, which degrades to plain monospace.
+      if (block.lang) el.dataset.lang = block.lang;
       const code = document.createElement('code');
       setCodeContent(code, block.text);
       el.appendChild(code);
+      // Language corner button (SKR-262 / SKR-3) — per-block chrome, on the block,
+      // revealed on hover; clicking opens the language picker. It is chrome, not
+      // content (CHROME_ATTR): appended AFTER the real code and skipped by the
+      // offset/caret walkers, so it never disturbs editing. tabindex=-1 keeps it
+      // out of the document's tab order (it is hover chrome, not a form field).
+      const langBtn = document.createElement('button');
+      langBtn.type = 'button';
+      langBtn.className = CODE_LANG_CLASS;
+      langBtn.setAttribute(CHROME_ATTR, '');
+      langBtn.contentEditable = 'false';
+      langBtn.tabIndex = -1;
+      langBtn.textContent = languageLabel(block.lang);
+      el.appendChild(langBtn);
       break;
     }
     case 'blockquote':
