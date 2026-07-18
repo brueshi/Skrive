@@ -109,7 +109,9 @@ export function itemsHoldingLeaves(list: ListBlock, leafIds: ReadonlySet<string>
 function subtreeHasLeaf(node: BlockNode, leafIds: ReadonlySet<string>): boolean {
   if (leafIds.has(node.id)) return true;
   if (isList(node)) return node.items.some((it) => it.children.some((c) => subtreeHasLeaf(c, leafIds)));
-  if (node.type === 'blockquote') return node.children.some((c) => subtreeHasLeaf(c, leafIds));
+  if (node.type === 'blockquote' || node.type === 'footnote_definition') {
+    return node.children.some((c) => subtreeHasLeaf(c, leafIds));
+  }
   return false;
 }
 

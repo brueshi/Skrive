@@ -67,6 +67,7 @@ import type {
   BulletListBlock,
   CodeBlock,
   Document,
+  FootnoteDefinitionBlock,
   HeadingBlock,
   InlineNode,
   OrderedListBlock,
@@ -109,6 +110,10 @@ function collectInline(nodes: InlineNode[], breaks: 'keep' | 'space'): InlineIte
       if (text) item = { ...context, kind: m.code === true ? 'code' : 'text', text };
     } else if (node.kind === 'image') {
       item = { ...context, kind: 'image', url: node.url, alt: node.alt, title: node.title };
+    } else if (node.kind === 'footnote_ref') {
+      // A real construct now (not literal text like a tag): it serializes through
+      // mdast as a `footnoteReference`, back to the exact `[^label]` source bytes.
+      item = { ...context, kind: 'footnote_ref', label: node.label };
     } else {
       item = breaks === 'space' ? { ...context, kind: 'text', text: ' ' } : { ...context, kind: 'break' };
     }
@@ -211,6 +216,20 @@ function quotedBlockquote(block: BlockquoteBlock): string {
     .join('\n');
 }
 
+// Model footnote definition -> canonical GFM: `[^label]: <first line>` with any
+// continuation lines and further blocks indented by four spaces (the GFM
+// definition rule). A clean definition emits its verbatim `src` instead (via
+// serializeBlockUncached); this is the fresh/dirty form the idempotence guard
+// restores when a definition is edited then reverted.
+function canonicalFootnoteDefinition(block: FootnoteDefinitionBlock): string {
+  const body = block.children.map((child) => canonicalBlock(child)).join('\n\n');
+  const [first = '', ...rest] = body.split('\n');
+  const head = `[^${block.label}]: ${first}`;
+  if (rest.length === 0) return head;
+  const tail = rest.map((line) => (line.length > 0 ? `    ${line}` : '')).join('\n');
+  return `${head}\n${tail}`;
+}
+
 // A pipe inside a GFM cell must be escaped, and a cell is a single line — collapse
 // any stray newline from a hard break.
 function escapeTableCell(text: string): string {
@@ -250,6 +269,8 @@ function canonicalBlock(block: BlockNode): string {
       return block.src;
     case 'blockquote':
       return quotedBlockquote(block);
+    case 'footnote_definition':
+      return canonicalFootnoteDefinition(block);
     case 'table':
       return serializeTable(block);
     case 'heading':

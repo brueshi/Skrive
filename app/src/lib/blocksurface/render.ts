@@ -50,6 +50,11 @@ export const CHROME_ATTR = 'data-sk-chrome';
 // handler to open the language picker (SKR-262 / SKR-3) and by CSS to reveal it on
 // hover. The button is chrome (CHROME_ATTR), so it never disturbs the caret.
 export const CODE_LANG_CLASS = 'sk-code-lang';
+// A footnote reference (SKR-56) renders as a `<sup>` marked with this attribute so
+// the offset walkers treat it as a SINGLE-CELL atom (like an image): one cell wide
+// regardless of the label text inside, which the walker never descends into. The
+// authoritative label rides `data-footnote-label` for DOM readback.
+export const FOOTNOTE_REF_ATTR = 'data-footnote-ref';
 
 // A small, deliberately calm hue palette for tag chips — spread around the wheel
 // but skipping the garish bands (pure yellow / lime) so every tag reads gently.
@@ -129,6 +134,18 @@ function renderInlineNode(node: InlineNode, resolveAsset: AssetResolver): Node {
     img.alt = node.alt;
     if (node.title != null) img.title = node.title;
     dom = img;
+  } else if (node.kind === 'footnote_ref') {
+    // A single-cell atom: contentEditable=false so the caret steps over it and a
+    // delete removes it whole. The label text sits inside for display, but the
+    // offset walker counts the whole <sup> as one cell (isAtomEl) and never reads
+    // that text — the authoritative label is the data attribute, for DOM readback.
+    const sup = document.createElement('sup');
+    sup.className = 'sk-footnote-ref';
+    sup.setAttribute(FOOTNOTE_REF_ATTR, '');
+    sup.dataset.footnoteLabel = node.label;
+    sup.contentEditable = 'false';
+    sup.textContent = node.label;
+    dom = sup;
   } else {
     const br = document.createElement('br');
     br.setAttribute(HARD_BREAK_ATTR, '');
@@ -257,6 +274,27 @@ export function renderBlock(
       el = document.createElement('blockquote');
       renderChildren(block.children, el, resolveAsset);
       break;
+    case 'footnote_definition': {
+      // Gathered into the document-end footer by orderForDisplay; the editable
+      // definition body is its child blocks. The leading `[^label]` marker is a
+      // chrome button (CHROME_ATTR, so the offset walkers skip it) that jumps back
+      // to the reference. It is a direct child of the container, not inside an
+      // inline block, so it never sits in a caret path.
+      el = document.createElement('div');
+      el.className = 'sk-footnote-def';
+      el.dataset.footnoteLabel = block.label;
+      const backref = document.createElement('button');
+      backref.type = 'button';
+      backref.className = 'sk-footnote-backref';
+      backref.setAttribute(CHROME_ATTR, '');
+      backref.contentEditable = 'false';
+      backref.tabIndex = -1;
+      backref.dataset.footnoteLabel = block.label;
+      backref.textContent = `[^${block.label}]`;
+      el.appendChild(backref);
+      renderChildren(block.children, el, resolveAsset);
+      break;
+    }
     case 'bullet_list':
     case 'ordered_list': {
       if (block.type === 'ordered_list') {
@@ -357,6 +395,26 @@ export class BlockViewRegistry {
  * Render a whole document into `container`, populating the registry with every
  * top-level block's element. Replaces any prior content.
  */
+/** Visual order for the surface: body blocks in model order, then every footnote
+ *  definition (SKR-56) in model order — so definitions gather into a document-end
+ *  footer while the MODEL keeps their authored position (the `.md` round-trip stays
+ *  byte-stable). Returns the input array unchanged when there are no definitions,
+ *  the common case, so nothing is allocated. */
+export function orderForDisplay(blocks: BlockNode[]): BlockNode[] {
+  let hasDef = false;
+  for (const b of blocks) {
+    if (b.type === 'footnote_definition') {
+      hasDef = true;
+      break;
+    }
+  }
+  if (!hasDef) return blocks;
+  const body: BlockNode[] = [];
+  const defs: BlockNode[] = [];
+  for (const b of blocks) (b.type === 'footnote_definition' ? defs : body).push(b);
+  return [...body, ...defs];
+}
+
 export function renderDocument(
   container: HTMLElement,
   blocks: BlockNode[],
@@ -365,7 +423,7 @@ export function renderDocument(
 ): void {
   container.textContent = '';
   registry.clear();
-  for (const block of blocks) {
+  for (const block of orderForDisplay(blocks)) {
     const el = renderBlock(block, resolveAsset);
     registry.set(block.id, el);
     container.appendChild(el);

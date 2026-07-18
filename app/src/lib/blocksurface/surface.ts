@@ -16,7 +16,7 @@ import { literalParagraphs, plainTextParagraphs } from '../clipboard/plainText';
 import { buildClipboardPayload } from '../clipboard/copyOut';
 import { imageExtension, imageMarkdownLink, pastedImageFilename } from '../clipboard/pasteImage';
 import { notify } from '../notify';
-import { BLOCK_ID_ATTR, BlockViewRegistry, CODE_LANG_CLASS, renderBlock, renderDocument, renderInlineInto, setCodeContent, TAG_ATTR, TAG_CLASS } from './render';
+import { BLOCK_ID_ATTR, BlockViewRegistry, CODE_LANG_CLASS, FOOTNOTE_REF_ATTR, orderForDisplay, renderBlock, renderDocument, renderInlineInto, setCodeContent, TAG_ATTR, TAG_CLASS } from './render';
 import type { AssetResolver } from './render';
 import { DecorationStore } from './decorations';
 import { HighlightBus } from './highlight/highlight-bus';
@@ -36,6 +36,7 @@ import {
   inlinePlainText,
   insertBreakInInline,
   insertTagInInline,
+  insertFootnoteRefInInline,
   insertTextInInline,
   linkHrefInRange,
   linkRunAt,
@@ -60,7 +61,8 @@ export type BlockTypeSpec =
   | { kind: 'ordered_list'; start?: number; delimiter?: '.' | ')' }
   | { kind: 'code' }
   | { kind: 'table' }
-  | { kind: 'divider' };
+  | { kind: 'divider' }
+  | { kind: 'footnote' };
 
 /** What the insert (slash) menu needs: where to anchor, and the query typed after
  *  the `/`. Null when the menu is closed. */
@@ -548,6 +550,20 @@ export class BlockSurface {
     this.codeLangCb?.(null);
   }
 
+  /** Scroll the first element matching `selector[data-footnote-label="label"]` into
+   *  view and flash it — the shared move behind ref->definition and definition->ref
+   *  jumps (SKR-56). No-op when the label is empty or the target isn't present. */
+  private revealFootnote(selector: string, label: string): void {
+    if (!label) return;
+    const target = this.container.querySelector<HTMLElement>(
+      `${selector}[data-footnote-label="${CSS.escape(label)}"]`
+    );
+    if (!target) return;
+    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    target.classList.add('sk-footnote-flash');
+    window.setTimeout(() => target.classList.remove('sk-footnote-flash'), 1200);
+  }
+
   /** Set a code block's language (from the picker). Updates the model, re-renders the
    *  block so its `data-lang`, corner label, and colour mirror follow, persists, and
    *  closes the picker. A no-op when the language is unchanged. */
@@ -583,7 +599,7 @@ export class BlockSurface {
     const walk = (blocks: BlockNode[]): void => {
       for (const b of blocks) {
         if (b.type === 'paragraph' || b.type === 'heading') fromInline(b.inline);
-        else if (b.type === 'blockquote') walk(b.children);
+        else if (b.type === 'blockquote' || b.type === 'footnote_definition') walk(b.children);
         else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
           for (const item of b.items) walk(item.children);
         } else if (b.type === 'table') {
@@ -1350,6 +1366,14 @@ export class BlockSurface {
    *  after it. The branch lives here so every caller (toolbar, palette, slash)
    *  gets it for free. */
   setBlockType(spec: BlockTypeSpec): void {
+    // A footnote is an inline-atom INSERT, not a block conversion (SKR-56): it drops
+    // a reference at the caret and seeds a definition, leaving the block's type
+    // untouched. Both the slash path (applySlashCommand) and the Insert dropdown /
+    // palette funnel through here, so this one branch covers every caller.
+    if (spec.kind === 'footnote') {
+      this.insertFootnote();
+      return;
+    }
     // Multi-block textblock conversions (Text / Heading / Code) map over every
     // covered inline-text leaf as one history step, mirroring the mark commands
     // (SKR-169 / F50). Barriers are skipped for free: selectedLeaves only yields
@@ -1607,6 +1631,108 @@ export class BlockSurface {
     this.doc = { ...this.doc, blocks };
     this.reconcile();
     const el = this.leafElementById(landing.id);
+    if (el) setCaret(el, 0);
+    this.scheduleSerialize();
+  }
+
+  /** The next footnote label: one past the largest integer label in use (references
+   *  and definitions both). Non-integer labels are left alone (auto-renumber is out
+   *  of scope) — they just don't participate in the max. */
+  private nextFootnoteLabel(): string {
+    let max = 0;
+    const consider = (label: string): void => {
+      const v = Number.parseInt(label, 10);
+      if (String(v) === label && v > max) max = v;
+    };
+    const scanInline = (nodes: InlineNode[]): void => {
+      for (const n of nodes) if (n.kind === 'footnote_ref') consider(n.label);
+    };
+    const scanBlocks = (blocks: BlockNode[]): void => {
+      for (const b of blocks) {
+        if (b.type === 'footnote_definition') {
+          consider(b.label);
+          scanBlocks(b.children);
+        } else if (b.type === 'paragraph' || b.type === 'heading') {
+          scanInline(b.inline);
+        } else if (b.type === 'blockquote') {
+          scanBlocks(b.children);
+        } else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
+          for (const item of b.items) scanBlocks(item.children);
+        } else if (b.type === 'table') {
+          for (const row of b.rows) for (const cell of row) scanInline(cell);
+        }
+      }
+    };
+    scanBlocks(this.doc.blocks);
+    return String(max + 1);
+  }
+
+  /** Remove any footnote definition whose label no longer has a reference anywhere
+   *  in the document (SKR-56) — deleting a footnote's reference deletes the footnote,
+   *  matching Docs/Word. Cheap when there are no definitions (a single scan of the
+   *  top-level blocks, short-circuited), so the delete paths can call it freely; the
+   *  full reference walk runs only once a definition actually exists. The caret sits
+   *  in the body block the reference left behind, not in a pruned definition, so the
+   *  reconcile that drops the definition element leaves it undisturbed. */
+  private pruneOrphanedFootnotes(): void {
+    if (!this.doc.blocks.some((b) => b.type === 'footnote_definition')) return;
+    const used = new Set<string>();
+    const scanInline = (nodes: InlineNode[]): void => {
+      for (const n of nodes) if (n.kind === 'footnote_ref') used.add(n.label);
+    };
+    const scanBlocks = (blocks: BlockNode[]): void => {
+      for (const b of blocks) {
+        if (b.type === 'paragraph' || b.type === 'heading') scanInline(b.inline);
+        else if (b.type === 'blockquote' || b.type === 'footnote_definition') scanBlocks(b.children);
+        else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
+          for (const item of b.items) scanBlocks(item.children);
+        } else if (b.type === 'table') {
+          for (const row of b.rows) for (const cell of row) scanInline(cell);
+        }
+      }
+    };
+    scanBlocks(this.doc.blocks);
+    const next = this.doc.blocks.filter((b) => b.type !== 'footnote_definition' || used.has(b.label));
+    if (next.length === this.doc.blocks.length) return;
+    this.doc = { ...this.doc, blocks: next };
+    this.reconcile();
+  }
+
+  /** Insert a footnote (SKR-56): drop a reference atom at the caret in the current
+   *  inline block, and seed an empty definition appended to the document (so it lands
+   *  in the footer and serializes last). The caret moves into the definition to type
+   *  the note. A no-op when the caret isn't in an inline-text block (e.g. a table
+   *  cell or code block). One undo step: the single doc assignment snapshots once. */
+  private insertFootnote(): void {
+    const cur = this.currentInlineLeaf();
+    if (!cur) return;
+    // Restore focus if the Insert dropdown / palette took it (SKR-173): currentInlineLeaf
+    // already resolved the caret from the saved selection, but the trailing caret move
+    // into the definition otherwise lands arbitrarily in WKWebView with no live focus.
+    this.container.focus();
+    const label = this.nextFootnoteLabel();
+    const marks = marksAtOffset(cur.block.inline, cur.caret);
+    const inline = insertFootnoteRefInInline(cur.block.inline, cur.caret, label, marks);
+    const para = this.newInlineBlock('paragraph', [], 1);
+    const def: BlockNode = {
+      type: 'footnote_definition',
+      id: generateBlockId(),
+      durable: false,
+      src: null,
+      gapBefore: null,
+      dirty: true,
+      label,
+      children: [para]
+    };
+    this.doc = {
+      ...this.doc,
+      blocks: [
+        ...updateBlockById(this.doc.blocks, cur.block.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode),
+        def
+      ]
+    };
+    this.reconcile();
+    const el = this.leafElementById(para.id);
     if (el) setCaret(el, 0);
     this.scheduleSerialize();
   }
@@ -2387,6 +2513,11 @@ export class BlockSurface {
         if (b.type === 'blockquote') {
           const r = walk(b.children, { ...acc, inBlockquote: true });
           if (r) return r;
+        } else if (b.type === 'footnote_definition') {
+          // Descend to find the leaf, but a definition is not a blockquote context —
+          // its children keep the outer container flags unchanged.
+          const r = walk(b.children, acc);
+          if (r) return r;
         } else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
           const bullet = b.type === 'bullet_list';
           for (const item of b.items) {
@@ -2450,23 +2581,29 @@ export class BlockSurface {
     } else if (type === 'deleteContentBackward') {
       e.preventDefault();
       this.applyDeleteBackward();
+      this.pruneOrphanedFootnotes();
     } else if (type === 'deleteContentForward') {
       e.preventDefault();
       this.applyDeleteForward();
+      this.pruneOrphanedFootnotes();
     } else if (type === 'deleteWordBackward') {
       e.preventDefault();
       this.applyRunDelete('backward', wordScan);
+      this.pruneOrphanedFootnotes();
     } else if (type === 'deleteWordForward') {
       e.preventDefault();
       this.applyRunDelete('forward', wordScan);
+      this.pruneOrphanedFootnotes();
     } else if (type === 'deleteSoftLineBackward' || type === 'deleteHardLineBackward') {
       // WebKit emits Hard for Cmd+Backspace, Chromium Soft; both map to the same
       // pragmatic run delete (to the text-run start — SKR-165), so accept either.
       e.preventDefault();
       this.applyRunDelete('backward', lineScan);
+      this.pruneOrphanedFootnotes();
     } else if (type === 'deleteSoftLineForward' || type === 'deleteHardLineForward') {
       e.preventDefault();
       this.applyRunDelete('forward', lineScan);
+      this.pruneOrphanedFootnotes();
     } else if (type === 'insertReplacementText') {
       // A spellcheck correction / dictation revision (SKR-191). With spellcheck
       // enabled these MUST land in the model — left to the catch-all below, the
@@ -3273,6 +3410,21 @@ export class BlockSurface {
         return;
       }
     }
+    // A footnote reference jumps to its definition in the footer; a definition's
+    // `[^label]` backref jumps back to the reference (SKR-56). Both are chrome, so
+    // this never competes with caret placement.
+    const fnRef = targetEl?.closest<HTMLElement>(`[${FOOTNOTE_REF_ATTR}]`);
+    if (fnRef) {
+      this.onPointerUp();
+      this.revealFootnote('.sk-footnote-def', fnRef.dataset.footnoteLabel ?? '');
+      return;
+    }
+    const backref = targetEl?.closest<HTMLElement>('.sk-footnote-backref');
+    if (backref) {
+      this.onPointerUp();
+      this.revealFootnote(`[${FOOTNOTE_REF_ATTR}]`, backref.dataset.footnoteLabel ?? '');
+      return;
+    }
     const blockEl = targetEl?.closest<HTMLElement>(`[${BLOCK_ID_ATTR}]`) ?? null;
     const blockId = blockEl?.getAttribute(BLOCK_ID_ATTR) ?? null;
     const block = blockId ? findBlockById(this.doc.blocks, blockId) : null;
@@ -4000,7 +4152,10 @@ export class BlockSurface {
   // barrier survives and the prose up to it is deleted (SKR-166).
   private deleteSelectionRange(): void {
     const plan = this.planBarrierCrossingDeletion();
-    if (plan) plan();
+    if (plan) {
+      plan();
+      this.pruneOrphanedFootnotes();
+    }
   }
 
   // Compute (without applying) the deletion for a cross-cell or barrier-crossing
@@ -4839,7 +4994,9 @@ export class BlockSurface {
     }
 
     let i = 0;
-    for (const block of this.doc.blocks) {
+    // Definitions gather into a document-end footer (SKR-56) while the model keeps
+    // their authored order; iterate the DISPLAY order so the DOM reflects the footer.
+    for (const block of orderForDisplay(this.doc.blocks)) {
       let el = have.get(block.id);
       if (!el || this.renderedFrom.get(block.id) !== block) {
         const fresh = renderBlock(block, this.resolveAsset);

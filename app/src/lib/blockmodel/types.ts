@@ -55,8 +55,19 @@ export type InlineBreak = { kind: 'break'; marks: InlineMarks };
  *  aligned; but it is indivisible, like an image/break atom: a delete touching any
  *  part removes the whole tag, and marks apply to it as a unit. */
 export type InlineTag = { kind: 'tag'; name: string; marks: InlineMarks };
+/** An inline footnote reference: the `[^label]` marker whose definition lives in a
+ *  `footnote_definition` block. `label` is the raw identifier as authored (no `[^`
+ *  / `]`), so it re-serializes to the exact source bytes. A distinct `kind`,
+ *  deliberately NOT a mark, so every `switch (node.kind)` is forced to handle it.
+ *
+ *  Offset space: a footnote ref is a SINGLE-CELL ATOM, like an image or a hard
+ *  break — indivisible and one cell wide regardless of how long its rendered
+ *  superscript label is (the DOM<->offset map counts it as one and never descends
+ *  into the `<sup>` text). A delete touching it removes the whole ref; marks apply
+ *  to it as a unit. */
+export type InlineFootnoteRef = { kind: 'footnote_ref'; label: string; marks: InlineMarks };
 
-export type InlineNode = InlineText | InlineImage | InlineBreak | InlineTag;
+export type InlineNode = InlineText | InlineImage | InlineBreak | InlineTag | InlineFootnoteRef;
 
 /** Column alignment for a GFM table, from the delimiter row. */
 export type TableAlign = 'left' | 'right' | 'center' | null;
@@ -118,6 +129,16 @@ export type OrderedListBlock = BlockBase & {
   items: ListItem[];
 };
 export type BlockquoteBlock = BlockBase & { type: 'blockquote'; children: BlockNode[] };
+/** A footnote definition: `[^label]: …`, whose body is one or more child blocks.
+ *  It keeps its authored position in the block list (so `.md` round-trips
+ *  byte-for-byte), and the renderer gathers every definition into a document-end
+ *  footnotes footer rather than painting it in flow (SKR-56). `label` is the raw
+ *  identifier, matching the `footnote_ref` leaves that point at it. */
+export type FootnoteDefinitionBlock = BlockBase & {
+  type: 'footnote_definition';
+  label: string;
+  children: BlockNode[];
+};
 export type HorizontalRuleBlock = BlockBase & { type: 'horizontal_rule' };
 export type TableCell = InlineNode[];
 export type TableBlock = BlockBase & {
@@ -144,6 +165,7 @@ export type BlockNode =
   | BulletListBlock
   | OrderedListBlock
   | BlockquoteBlock
+  | FootnoteDefinitionBlock
   | HorizontalRuleBlock
   | TableBlock
   | FrozenBlock;

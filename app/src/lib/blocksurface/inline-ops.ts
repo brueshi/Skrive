@@ -13,7 +13,7 @@
 // array — blocks are immutable, so an edit replaces the one block object.
 
 import type { InlineMarks, InlineNode } from '../blockmodel';
-import { HARD_BREAK_ATTR, TAG_ATTR, TAG_CLASS } from './render';
+import { FOOTNOTE_REF_ATTR, HARD_BREAK_ATTR, TAG_ATTR, TAG_CLASS } from './render';
 
 function isText(node: InlineNode): node is Extract<InlineNode, { kind: 'text' }> {
   return node.kind === 'text';
@@ -232,6 +232,18 @@ export function splitInline(nodes: InlineNode[], offset: number): [InlineNode[],
 export function insertTagInInline(nodes: InlineNode[], offset: number, name: string, marks: InlineMarks): InlineNode[] {
   const [left, right] = splitInline(nodes, offset);
   return coalesceInline([...left, { kind: 'tag', name, marks: { ...marks } }, ...right]);
+}
+
+/** Splice a footnote reference atom (SKR-56) at a flat offset, inheriting the given
+ *  marks. A single-cell atom, so it never coalesces with its neighbours. */
+export function insertFootnoteRefInInline(
+  nodes: InlineNode[],
+  offset: number,
+  label: string,
+  marks: InlineMarks
+): InlineNode[] {
+  const [left, right] = splitInline(nodes, offset);
+  return coalesceInline([...left, { kind: 'footnote_ref', label, marks: { ...marks } }, ...right]);
 }
 
 /** The toggleable boolean marks (link is set/cleared with a value, separately). */
@@ -502,6 +514,12 @@ function walkDom(node: Node, marks: InlineMarks, out: InlineNode[]): void {
         // stripping the leading `#`) and don't descend into the span.
         const name = el.getAttribute(TAG_ATTR) ?? (el.textContent ?? '').replace(/^#/, '');
         if (name) out.push({ kind: 'tag', name, marks: { ...marks } });
+      } else if (el.hasAttribute(FOOTNOTE_REF_ATTR)) {
+        // A footnote reference atom. The label is authoritative in the attribute;
+        // the superscript text inside is view-only, so read the attribute and don't
+        // descend into the <sup> (which would turn the ref into plain text).
+        const label = el.getAttribute('data-footnote-label') ?? el.textContent ?? '';
+        if (label) out.push({ kind: 'footnote_ref', label, marks: { ...marks } });
       } else {
         walkDom(el, markEl(tag, marks), out);
       }

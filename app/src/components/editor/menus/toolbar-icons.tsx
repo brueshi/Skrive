@@ -385,3 +385,20 @@ export function IconParagraph(p: IconProps) {
     </Glyph>
   );
 }
+
+export function IconFootnote(p: IconProps) {
+  // Body text lines with a raised superscript reference mark — insertion of a
+  // footnote reference (SKR-56).
+  return (
+    <Glyph {...p} viewBox="0 0 24 24">
+      <path
+        d="M3.5 8h9M3.5 13h6.5M3.5 18h11"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+      <circle cx="17.5" cy="7" r="2.4" />
+    </Glyph>
+  );
+}

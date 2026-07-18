@@ -28,7 +28,7 @@ export function documentLeaves(blocks: BlockNode[]): LeafEntry[] {
   const walk = (nodes: BlockNode[]): void => {
     for (const b of nodes) {
       if (b.type === 'paragraph' || b.type === 'heading') out.push({ id: b.id, kind: 'inline' });
-      else if (b.type === 'blockquote') walk(b.children);
+      else if (b.type === 'blockquote' || b.type === 'footnote_definition') walk(b.children);
       else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
         for (const item of b.items) walk(item.children);
       } else out.push({ id: b.id, kind: 'barrier' }); // code_block / table / hr / frozen_block
@@ -51,9 +51,9 @@ export function removeBlocks(blocks: BlockNode[], ids: Set<string>): BlockNode[]
     const out: BlockNode[] = [];
     for (const b of nodes) {
       if (ids.has(b.id)) continue;
-      if (b.type === 'blockquote') {
+      if (b.type === 'blockquote' || b.type === 'footnote_definition') {
         const children = walk(b.children);
-        if (children.length === 0) continue; // emptied quote: prune
+        if (children.length === 0) continue; // emptied container: prune
         out.push(children === b.children ? b : { ...b, children, dirty: true });
       } else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
         let changed = false;

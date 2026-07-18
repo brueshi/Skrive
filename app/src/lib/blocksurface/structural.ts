@@ -93,7 +93,7 @@ export function enterInContainer(
   function recurse(nodes: BlockNode[]): BlockNode[] | null {
     for (let i = 0; i < nodes.length; i++) {
       const b = nodes[i]!;
-      if (b.type === 'blockquote') {
+      if (b.type === 'blockquote' || b.type === 'footnote_definition') {
         const ci = b.children.findIndex((c) => c.id === id);
         if (ci >= 0) {
           const child = b.children[ci]!;

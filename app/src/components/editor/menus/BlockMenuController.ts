@@ -150,6 +150,9 @@ export class BlockMenuController implements MenuController {
   insertTable(): void {
     this.surface.setBlockType({ kind: 'table' });
   }
+  insertFootnote(): void {
+    this.surface.setBlockType({ kind: 'footnote' });
+  }
 
   openLinkEditor(): void {
     if (!this.surface.beginLink()) return;

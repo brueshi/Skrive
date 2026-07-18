@@ -150,6 +150,11 @@ function inlineToModel(
       case 'break':
         out.push({ kind: 'break', marks: { ...marks } });
         break;
+      case 'footnoteReference':
+        // The raw label re-serializes to the exact `[^label]` bytes; `identifier`
+        // is the folded match key mdast also carries, used only as a fallback.
+        out.push({ kind: 'footnote_ref', label: n.label ?? n.identifier ?? '', marks: { ...marks } });
+        break;
       case 'html':
         // Raw inline HTML. On the paste path (inlineHtmlAsText) keep it as literal
         // text so the surrounding prose stays an editable paragraph and the tag
@@ -356,8 +361,17 @@ function blockToModel(
       return listToModel(node, ctx, base) ?? frozen(src, gapBefore, id, durable);
     case 'table':
       return tableToModel(node, base, ctx) ?? frozen(src, gapBefore, id, durable);
+    case 'footnoteDefinition': {
+      // A definition's body is a run of blocks (a multi-paragraph definition is why
+      // the unmodeled path corrupted to a code block). Model it like a blockquote;
+      // freeze the whole definition if any child block is unmappable.
+      const kids = mapChildBlocks(node.children, ctx);
+      return kids
+        ? { type: 'footnote_definition', ...base, label: node.label ?? node.identifier ?? '', children: kids }
+        : frozen(src, gapBefore, id, durable);
+    }
     default:
-      // HTML, definitions, footnotes, etc.: preserved verbatim, never canonicalized.
+      // HTML, link/image definitions, etc.: preserved verbatim, never canonicalized.
       return frozen(src, gapBefore, id, durable);
   }
 }

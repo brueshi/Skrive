@@ -19,6 +19,9 @@ function inlineToText(nodes: InlineNode[]): string {
     else if (node.kind === 'tag') out += `#${node.name}`;
     else if (node.kind === 'image') out += node.alt;
     else if (node.kind === 'break') out += '\n';
+    // A footnote reference is a pointer, not prose — its content lives in the
+    // definition (rendered where that block sits), so it flattens to nothing.
+    else if (node.kind === 'footnote_ref') out += '';
   }
   return out;
 }
@@ -37,6 +40,7 @@ function blockToText(block: BlockNode): string {
     case 'code_block':
       return block.text;
     case 'blockquote':
+    case 'footnote_definition':
       return block.children.map(blockToText).join('\n\n');
     case 'bullet_list':
       return block.items.map((item) => itemToText(item.children)).join('\n');

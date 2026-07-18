@@ -19,7 +19,9 @@ const indexCache = new WeakMap<readonly BlockNode[], Map<string, number>>();
 function indexSubtree(block: BlockNode, top: number, out: Map<string, number>): void {
   // First occurrence wins, matching find-first semantics on a duplicate id.
   if (!out.has(block.id)) out.set(block.id, top);
-  if (block.type === 'blockquote') {
+  // blockquote and footnote_definition (SKR-56) are both single-children containers;
+  // their descendants must be addressable so the caret can edit them.
+  if (block.type === 'blockquote' || block.type === 'footnote_definition') {
     for (const child of block.children) indexSubtree(child, top, out);
   } else if (block.type === 'bullet_list' || block.type === 'ordered_list') {
     for (const item of block.items) for (const child of item.children) indexSubtree(child, top, out);
@@ -41,7 +43,7 @@ export function blockIndexOf(blocks: readonly BlockNode[]): ReadonlyMap<string, 
 
 function findInBlock(block: BlockNode, id: string): BlockNode | null {
   if (block.id === id) return block;
-  if (block.type === 'blockquote') {
+  if (block.type === 'blockquote' || block.type === 'footnote_definition') {
     for (const child of block.children) {
       const hit = findInBlock(child, id);
       if (hit) return hit;
@@ -75,7 +77,7 @@ function rewrite(blocks: BlockNode[], id: string, fn: (b: BlockNode) => BlockNod
       changed = true;
       return fn(block);
     }
-    if (block.type === 'blockquote') {
+    if (block.type === 'blockquote' || block.type === 'footnote_definition') {
       const r = rewrite(block.children, id, fn);
       if (r.changed) {
         changed = true;
@@ -114,17 +116,25 @@ export function updateBlockInTop(top: BlockNode, id: string, fn: (b: BlockNode) 
 /** Whether two subtrees carry exactly the same block ids in the same shape —
  *  the condition under which an edited array can share its predecessor's
  *  id -> index map instead of rebuilding it O(document) on the next lookup. */
+// The child-block array of a single-children container (blockquote / footnote
+// definition), or null for any other block. Both are structurally identical here.
+function containerChildren(block: BlockNode): BlockNode[] | null {
+  return block.type === 'blockquote' || block.type === 'footnote_definition' ? block.children : null;
+}
+
 function sameIds(a: BlockNode, b: BlockNode): boolean {
   if (a === b) return true;
   if (a.id !== b.id) return false;
-  if (a.type === 'blockquote' && b.type === 'blockquote') {
-    if (a.children.length !== b.children.length) return false;
-    for (let i = 0; i < a.children.length; i++) {
-      if (!sameIds(a.children[i]!, b.children[i]!)) return false;
+  const aKids = containerChildren(a);
+  const bKids = containerChildren(b);
+  if (aKids && bKids) {
+    if (aKids.length !== bKids.length) return false;
+    for (let i = 0; i < aKids.length; i++) {
+      if (!sameIds(aKids[i]!, bKids[i]!)) return false;
     }
     return true;
   }
-  if (a.type === 'blockquote' || b.type === 'blockquote') return false;
+  if (aKids || bKids) return false;
   if (
     (a.type === 'bullet_list' || a.type === 'ordered_list') &&
     (b.type === 'bullet_list' || b.type === 'ordered_list')

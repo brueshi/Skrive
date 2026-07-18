@@ -107,6 +107,7 @@ export interface MenuController {
   toggleBlockquote(): void;
   insertDivider(): void;
   insertTable(): void;
+  insertFootnote(): void;
 
   // Link affordance: open the floating editor against the current selection, then
   // commit / remove / cancel. The adapter preserves the target across the input

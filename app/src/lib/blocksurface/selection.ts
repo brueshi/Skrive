@@ -11,7 +11,7 @@
 // atom is tagged HARD_BREAK_ATTR so it is distinguished from the bare <br> an empty
 // block carries for height (that placeholder is zero-width, like the empty model).
 
-import { BLOCK_ID_ATTR, CARET_FILLER, CHROME_ATTR, HARD_BREAK_ATTR, TAG_CLASS } from './render';
+import { BLOCK_ID_ATTR, CARET_FILLER, CHROME_ATTR, FOOTNOTE_REF_ATTR, HARD_BREAK_ATTR, TAG_CLASS } from './render';
 import type { BlockViewRegistry } from './render';
 import { isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
 
@@ -22,13 +22,19 @@ function isFillerText(node: Node): boolean {
   return node.nodeType === Node.TEXT_NODE && (node as Text).data === CARET_FILLER;
 }
 
-/** An inline atom in the DOM: an image, or a real hard break (not the placeholder
- *  <br> an empty block carries). Each occupies one unit of offset space. */
+/** An inline atom in the DOM: an image, a real hard break (not the placeholder
+ *  <br> an empty block carries), or a footnote reference (SKR-56). Each occupies one
+ *  unit of offset space; the walker counts it as one and never descends into its
+ *  text (so a footnote ref's label, however long, stays a single cell). */
 function isAtomEl(node: Node): boolean {
   if (node.nodeType !== Node.ELEMENT_NODE) return false;
   const el = node as Element;
   const tag = el.tagName.toLowerCase();
-  return tag === 'img' || (tag === 'br' && el.hasAttribute(HARD_BREAK_ATTR));
+  return (
+    tag === 'img' ||
+    (tag === 'br' && el.hasAttribute(HARD_BREAK_ATTR)) ||
+    el.hasAttribute(FOOTNOTE_REF_ATTR)
+  );
 }
 
 /** A tag chip: a `contenteditable=false` `.sk-tag` span. Unlike an image/break it is
@@ -44,7 +50,7 @@ function isChipEl(node: Node): boolean {
 // Selects the atoms a block might contain. When a block has none — the
 // overwhelming common case for prose — offset equals text length and the cheap
 // Range measurement is exact, so the atom-aware walk is skipped on the hot path.
-const ATOM_SELECTOR = `img, br[${HARD_BREAK_ATTR}]`;
+const ATOM_SELECTOR = `img, br[${HARD_BREAK_ATTR}], [${FOOTNOTE_REF_ATTR}]`;
 
 /** The top-level block element the caret sits in, or null. Walks up to the first
  *  ancestor whose id is a registered top-level block (nested blocks are not

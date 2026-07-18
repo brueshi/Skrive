@@ -38,7 +38,8 @@ function recordingController(): { controller: MenuController; calls: string[] } 
     toggleOrderedList: () => calls.push('ordered'),
     toggleBlockquote: () => calls.push('quote'),
     insertDivider: () => calls.push('divider'),
-    insertTable: () => calls.push('table')
+    insertTable: () => calls.push('table'),
+    insertFootnote: () => calls.push('footnote')
   } as unknown as MenuController;
   return { controller, calls };
 }

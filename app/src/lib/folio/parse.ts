@@ -97,6 +97,8 @@ function readInline(v: unknown, where: string): FolioInline {
       };
     case 'break':
       return { kind: 'break', marks };
+    case 'footnote_ref':
+      return { kind: 'footnote_ref', label: requireString(v.label, `${where}.label`), marks };
     default:
       throw new FolioParseError(`${where}.kind is not a known inline kind: ${String(v.kind)}`);
   }
@@ -159,6 +161,13 @@ function readBlock(v: unknown, where: string): FolioBlock {
       return { id, type: 'horizontal_rule' };
     case 'blockquote':
       return { id, type: 'blockquote', children: readBlockArray(v.children, `${where}.children`) };
+    case 'footnote_definition':
+      return {
+        id,
+        type: 'footnote_definition',
+        label: requireString(v.label, `${where}.label`),
+        children: readBlockArray(v.children, `${where}.children`)
+      };
     case 'bullet_list':
       return {
         id,
