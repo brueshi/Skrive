@@ -9,9 +9,13 @@ import {
   deleteAcross,
   deleteBlock,
   exitFootnoteDefinition,
+  insertTableColumn,
+  insertTableRow,
   mergeBackward,
   mergeForward,
   removeFootnote,
+  removeTableColumn,
+  removeTableRow,
   replaceAcross,
   documentLeaves
 } from '../../../src/lib/blocksurface/range-ops';
@@ -201,6 +205,148 @@ describe('clearTableCells', () => {
   it('returns null when the id is not a table', () => {
     const d = doc('a\n');
     expect(clearTableCells(d.blocks, leafId(d.blocks, 'a'), 0, 0, 0, 0)).toBeNull();
+  });
+});
+
+function table(blocks: BlockNode[]): Extract<BlockNode, { type: 'table' }> {
+  const t = blocks.find((b) => b.type === 'table');
+  if (!t || t.type !== 'table') throw new Error('no table block');
+  return t;
+}
+// Serializing the op's output, re-parsing, and serializing again is a fixpoint —
+// the byte-stable-GFM guarantee every structural op must preserve.
+function idempotent(blocks: BlockNode[], base: Document): string {
+  const once = ser(blocks, base);
+  expect(ser(doc(once).blocks, doc(once)), 'serialize is a fixpoint').toBe(once);
+  return once;
+}
+// A table whose body row is shorter than its header — raggedness only arises in the
+// model (SKR-159), never from GFM parse — so it is hand-built to pin the guarantee.
+function raggedTable(): BlockNode {
+  return {
+    type: 'table',
+    id: 'ragged-1',
+    durable: true,
+    src: null,
+    gapBefore: null,
+    dirty: false,
+    align: [null, null],
+    rows: [
+      [[{ kind: 'text', text: 'a' }], [{ kind: 'text', text: 'b' }]],
+      [[{ kind: 'text', text: 'x' }]]
+    ]
+  } as BlockNode;
+}
+
+describe('insertTableRow', () => {
+  it('inserts an empty row below the caret row, byte-stable', () => {
+    const d = doc(`${TABLE}\n`);
+    const blocks = insertTableRow(d.blocks, tableId(d.blocks), 2)!;
+    expect(table(blocks).rows.map((r) => r.map(plain))).toEqual([
+      ['a', 'b'],
+      ['1', '2'],
+      ['', '']
+    ]);
+    expect(idempotent(blocks, d)).toBe('| a | b |\n| --- | --- |\n| 1 | 2 |\n|  |  |\n');
+  });
+
+  it('inserts above a body row without disturbing align', () => {
+    const d = doc('| a | b |\n| :- | -: |\n| 1 | 2 |\n');
+    const blocks = insertTableRow(d.blocks, tableId(d.blocks), 1)!;
+    expect(table(blocks).rows.map((r) => r.map(plain))).toEqual([
+      ['a', 'b'],
+      ['', ''],
+      ['1', '2']
+    ]);
+    expect(table(blocks).align).toEqual(['left', 'right']);
+  });
+
+  it('returns null when the id is not a table', () => {
+    const d = doc('a\n');
+    expect(insertTableRow(d.blocks, leafId(d.blocks, 'a'), 0)).toBeNull();
+  });
+});
+
+describe('insertTableColumn', () => {
+  it('inserts an empty column into every row and a null align entry, byte-stable', () => {
+    const d = doc(`${TABLE}\n`);
+    const blocks = insertTableColumn(d.blocks, tableId(d.blocks), 1)!;
+    const t = table(blocks);
+    expect(t.rows.map((r) => r.map(plain))).toEqual([
+      ['a', '', 'b'],
+      ['1', '', '2']
+    ]);
+    expect(t.align).toEqual([null, null, null]);
+    expect(t.align.length, 'align tracks column count').toBe(t.rows[0]!.length);
+    expect(idempotent(blocks, d)).toBe('| a |  | b |\n| --- | --- | --- |\n| 1 |  | 2 |\n');
+  });
+
+  it('grows a ragged row at its own end rather than padding it (SKR-159)', () => {
+    const blocks = insertTableColumn([raggedTable()], 'ragged-1', 1)!;
+    const t = table(blocks);
+    expect(t.rows[0]!.length, 'header widened').toBe(3);
+    expect(t.rows[1]!.map(plain), 'ragged row grew by one, not padded to header width').toEqual(['x', '']);
+  });
+
+  it('returns null when the id is not a table', () => {
+    const d = doc('a\n');
+    expect(insertTableColumn(d.blocks, leafId(d.blocks, 'a'), 0)).toBeNull();
+  });
+});
+
+describe('removeTableRow', () => {
+  it('removes a body row, leaving a header-only table, byte-stable', () => {
+    const d = doc(`${TABLE}\n`);
+    const blocks = removeTableRow(d.blocks, tableId(d.blocks), 1)!;
+    expect(table(blocks).rows.map((r) => r.map(plain))).toEqual([['a', 'b']]);
+    expect(idempotent(blocks, d)).toBe('| a | b |\n| --- | --- |\n');
+  });
+
+  it('removing the header row promotes the next row to header, align preserved', () => {
+    const d = doc('| a | b |\n| :- | -: |\n| 1 | 2 |\n');
+    const blocks = removeTableRow(d.blocks, tableId(d.blocks), 0)!;
+    const t = table(blocks);
+    expect(t.rows.map((r) => r.map(plain))).toEqual([['1', '2']]);
+    expect(t.align, 'column-indexed align survives header removal').toEqual(['left', 'right']);
+  });
+
+  it('returns null when the removal would empty the table (header-only)', () => {
+    const d = doc('| a | b |\n| - | - |\n');
+    expect(removeTableRow(d.blocks, tableId(d.blocks), 0)).toBeNull();
+  });
+
+  it('returns null when the id is not a table', () => {
+    const d = doc('a\n');
+    expect(removeTableRow(d.blocks, leafId(d.blocks, 'a'), 0)).toBeNull();
+  });
+});
+
+describe('removeTableColumn', () => {
+  it('removes a column and its align entry from every row, byte-stable', () => {
+    const d = doc('| a | b |\n| :- | -: |\n| 1 | 2 |\n');
+    const blocks = removeTableColumn(d.blocks, tableId(d.blocks), 1)!;
+    const t = table(blocks);
+    expect(t.rows.map((r) => r.map(plain))).toEqual([['a'], ['1']]);
+    expect(t.align).toEqual(['left']);
+    expect(idempotent(blocks, d)).toBe('| a |\n| :--- |\n| 1 |\n');
+  });
+
+  it('leaves a ragged row without that column untouched (SKR-159)', () => {
+    const blocks = removeTableColumn([raggedTable()], 'ragged-1', 1)!;
+    const t = table(blocks);
+    expect(t.rows[0]!.map(plain), 'header lost its second column').toEqual(['a']);
+    expect(t.rows[1]!.map(plain), 'ragged row had no column 1, untouched').toEqual(['x']);
+    expect(t.align).toEqual([null]);
+  });
+
+  it('returns null when the table has a single column', () => {
+    const d = doc('| a |\n| - |\n| 1 |\n');
+    expect(removeTableColumn(d.blocks, tableId(d.blocks), 0)).toBeNull();
+  });
+
+  it('returns null when the id is not a table', () => {
+    const d = doc('a\n');
+    expect(removeTableColumn(d.blocks, leafId(d.blocks, 'a'), 0)).toBeNull();
   });
 });
 

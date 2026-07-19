@@ -566,5 +566,93 @@ export function appendTableRow(blocks: BlockNode[], tableId: string): BlockNode[
   });
 }
 
+/**
+ * Insert one empty row into a table at `index` (clamped to `[0, rowCount]`). The
+ * new row matches the header's column count. Callers pass the caret row for an
+ * "above" insert and caret-row + 1 for "below". Null when `tableId` is not a table.
+ */
+export function insertTableRow(blocks: BlockNode[], tableId: string, index: number): BlockNode[] | null {
+  const table = findBlockById(blocks, tableId);
+  if (!table || table.type !== 'table') return null;
+  const cols = table.rows[0]?.length ?? 0;
+  const at = Math.max(0, Math.min(index, table.rows.length));
+  return updateBlockById(blocks, tableId, (b) => {
+    if (b.type !== 'table') return b;
+    const row: InlineNode[][] = Array.from({ length: cols }, () => []);
+    const rows = [...b.rows.slice(0, at), row, ...b.rows.slice(at)];
+    return { ...b, rows, dirty: true } as BlockNode;
+  });
+}
+
+/**
+ * Insert one empty column into a table at `index` (clamped to `[0, colCount]`). An
+ * empty cell is spliced into every row and a `null` (no-alignment) entry into
+ * `align`, so the delimiter row stays the same width as the header. A ragged row
+ * shorter than `index` gains its cell at its own end (splice clamps) — the row is
+ * left ragged, never padded (SKR-159). Null when `tableId` is not a table.
+ */
+export function insertTableColumn(blocks: BlockNode[], tableId: string, index: number): BlockNode[] | null {
+  const table = findBlockById(blocks, tableId);
+  if (!table || table.type !== 'table') return null;
+  const cols = table.rows[0]?.length ?? 0;
+  const at = Math.max(0, Math.min(index, cols));
+  return updateBlockById(blocks, tableId, (b) => {
+    if (b.type !== 'table') return b;
+    const rows = b.rows.map((row) => {
+      const next = [...row];
+      next.splice(at, 0, []);
+      return next;
+    });
+    const align = [...b.align];
+    align.splice(at, 0, null);
+    return { ...b, align, rows, dirty: true } as BlockNode;
+  });
+}
+
+/**
+ * Remove row `index` from a table. Removing the header row (index 0) simply lets
+ * the next row become the header — `align` is column-indexed, so it survives and
+ * the table stays valid GFM. Returns null when `tableId` is not a table OR the
+ * removal would empty the table (it holds only that one row); the surface routes a
+ * null-from-a-known-table to whole-table deletion.
+ */
+export function removeTableRow(blocks: BlockNode[], tableId: string, index: number): BlockNode[] | null {
+  const table = findBlockById(blocks, tableId);
+  if (!table || table.type !== 'table') return null;
+  if (table.rows.length <= 1 || index < 0 || index >= table.rows.length) return null;
+  return updateBlockById(blocks, tableId, (b) => {
+    if (b.type !== 'table') return b;
+    const rows = [...b.rows.slice(0, index), ...b.rows.slice(index + 1)];
+    return { ...b, rows, dirty: true } as BlockNode;
+  });
+}
+
+/**
+ * Remove column `index` from a table: drop that cell from every row and its
+ * `align` entry, keeping the delimiter row the header's width. A ragged row with
+ * no cell at `index` is untouched (splice on a short row is a no-op) — raggedness
+ * is preserved, not repaired (SKR-159). Returns null when `tableId` is not a table
+ * OR the table has a single column (removal would leave zero columns); the surface
+ * routes that null to whole-table deletion.
+ */
+export function removeTableColumn(blocks: BlockNode[], tableId: string, index: number): BlockNode[] | null {
+  const table = findBlockById(blocks, tableId);
+  if (!table || table.type !== 'table') return null;
+  const cols = table.rows[0]?.length ?? 0;
+  if (cols <= 1 || index < 0 || index >= cols) return null;
+  return updateBlockById(blocks, tableId, (b) => {
+    if (b.type !== 'table') return b;
+    const rows = b.rows.map((row) => {
+      if (index >= row.length) return row;
+      const next = [...row];
+      next.splice(index, 1);
+      return next;
+    });
+    const align = [...b.align];
+    align.splice(index, 1);
+    return { ...b, align, rows, dirty: true } as BlockNode;
+  });
+}
+
 // Re-export so callers that need a fresh id for any future split path have it.
 export { generateBlockId };

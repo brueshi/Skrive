@@ -22,7 +22,7 @@ import { DecorationStore } from './decorations';
 import { HighlightBus } from './highlight/highlight-bus';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
-import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, mergeBackward, mergeForward, removeBlocks, removeFootnote, replaceAcross } from './range-ops';
+import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertTableColumn, insertTableRow, mergeBackward, mergeForward, removeBlocks, removeFootnote, replaceAcross } from './range-ops';
 import { blockIndexOf, findBlockById, updateBlockById, updateBlockInTop } from './tree';
 import { enterInContainer, exitContainer, splitBlockAt, type StructuralResult } from './structural';
 import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
@@ -877,6 +877,26 @@ export class BlockSurface {
       if (e.shiftKey) this.applyLineBreak();
       else this.applyEnter();
       return;
+    }
+    // Cmd/Ctrl+Alt+Arrow inside a table inserts a row/column in the arrow's
+    // direction and steps into it. Claimed only when the caret is in a cell; the
+    // whole Cmd+Alt chord space is otherwise unhandled by the surface (the mark
+    // section below bails on Alt), and Cmd+Alt+Arrow is not a native text gesture.
+    // Outside a table it falls through to the native-arrow bail just below.
+    if (
+      (e.metaKey || e.ctrlKey) &&
+      e.altKey &&
+      !e.shiftKey &&
+      (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+    ) {
+      if (this.cellTarget()) {
+        e.preventDefault();
+        if (e.key === 'ArrowUp') this.insertTableRowRelative('above');
+        else if (e.key === 'ArrowDown') this.insertTableRowRelative('below');
+        else if (e.key === 'ArrowLeft') this.insertTableColumnRelative('left');
+        else this.insertTableColumnRelative('right');
+        return;
+      }
     }
     // Arrow keys inside a table or a code block: navigate cell-to-cell / line-to-line
     // and, at the barrier's edges, step the caret OUT to the adjacent block (the
@@ -4927,6 +4947,38 @@ export class BlockSurface {
     const table = findBlockById(this.doc.blocks, tableId);
     if (!table || table.type !== 'table') return;
     this.focusCell(table, table.rows.length - 1, 0, 0);
+    this.scheduleSerialize();
+  }
+
+  // Insert an empty row above/below the caret's row and step into it, ready to
+  // type (Docs/Word muscle memory). Reads the table fresh after the reconcile so
+  // focusCell sees the new row count, and places the caret through the robust
+  // sel.collapse path (WKWebView-safe) at the caret's own column.
+  insertTableRowRelative(dir: 'above' | 'below'): void {
+    const cell = this.cellTarget();
+    if (!cell) return;
+    const index = dir === 'above' ? cell.row : cell.row + 1;
+    const blocks = insertTableRow(this.doc.blocks, cell.tableId, index);
+    if (!blocks) return;
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    const table = findBlockById(this.doc.blocks, cell.tableId);
+    if (table?.type === 'table') this.focusCell(table, index, cell.col, 0);
+    this.scheduleSerialize();
+  }
+
+  // Insert an empty column left/right of the caret's column and step into it. The
+  // op keeps `align` the header's width, so the serialized delimiter row stays valid.
+  insertTableColumnRelative(dir: 'left' | 'right'): void {
+    const cell = this.cellTarget();
+    if (!cell) return;
+    const index = dir === 'left' ? cell.col : cell.col + 1;
+    const blocks = insertTableColumn(this.doc.blocks, cell.tableId, index);
+    if (!blocks) return;
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    const table = findBlockById(this.doc.blocks, cell.tableId);
+    if (table?.type === 'table') this.focusCell(table, cell.row, index, 0);
     this.scheduleSerialize();
   }
 
