@@ -79,6 +79,19 @@
   padding-inline-start: 1.5rem;
 }
 
+/* Nested ordered lists paint their markers the way Docs/Word do — decimal, then
+   lower-alpha, then lower-roman, cycling every three levels. Depth is counted by
+   ordered-list ancestry (the descendant combinator), so a list nested through a
+   bullet still advances the style, and each deeper selector outranks the shallower
+   one on specificity. Display only: the model and the .md export keep 1. at every
+   depth, so re-serialization stays byte-stable. */
+.block-editor-surface ol { list-style-type: decimal; }
+.block-editor-surface ol ol { list-style-type: lower-alpha; }
+.block-editor-surface ol ol ol { list-style-type: lower-roman; }
+.block-editor-surface ol ol ol ol { list-style-type: decimal; }
+.block-editor-surface ol ol ol ol ol { list-style-type: lower-alpha; }
+.block-editor-surface ol ol ol ol ol ol { list-style-type: lower-roman; }
+
 .block-editor-surface pre {
   position: relative;
   padding: 0.8rem 1rem;
