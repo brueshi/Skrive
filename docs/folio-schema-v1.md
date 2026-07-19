@@ -161,6 +161,8 @@ children, so the array is a **tree**. Every block object begins with `id` then
 ] }
 
 { "id": "…", "type": "ordered_list", "start": 1, "spread": false, "items": [ … ] }
+
+{ "id": "…", "type": "footnote_definition", "label": "1", "children": [ … ] }
 ```
 
 - **List `spread`** (boolean) — loose (blank-line-separated, paragraph-rendered)
@@ -168,6 +170,11 @@ children, so the array is a **tree**. Every block object begins with `id` then
 - **`ListItem`** — `{ spread, checked?, children }`. `checked` (boolean) is present
   only for task-list items (`true`/`false`); absent for a plain item. `children`
   is a block array (list items hold blocks, enabling nesting).
+- **`footnote_definition`** — `{ id, type, label, children }`. The body of the
+  footnote `label` names (a `footnote_ref` leaf, §6, points here). The block keeps
+  its **authored position** in the block list; gathering definitions into a
+  document-end footer is the renderer's job, not the store's — so the position
+  round-trips.
 
 ### Table
 
@@ -196,6 +203,8 @@ An `inline` array (and each table cell) is a list of inline leaves:
 { "kind": "text",  "text": "hello", "marks": { "strong": true } }
 { "kind": "image", "url": "assets/diagram.png", "alt": "…", "title": null, "marks": {} }
 { "kind": "break", "marks": {} }
+{ "kind": "tag", "name": "project/skrive", "marks": {} }
+{ "kind": "footnote_ref", "label": "1", "marks": {} }
 ```
 
 - **`text`** — `{ kind, text, marks }`.
@@ -203,6 +212,12 @@ An `inline` array (and each table cell) is a list of inline leaves:
   (relative asset path or asset id), never an embedded blob (§8). Inline images are
   atoms; they occupy one unit of offset space in the editor (SKR-155).
 - **`break`** — `{ kind, marks }`, a hard line break within a block.
+- **`tag`** — `{ kind, name, marks }`, an inline tag (`#name`, nested
+  `#parent/child`); `name` is the text after the `#`. Native here — in `.md` a tag
+  is literal body text.
+- **`footnote_ref`** — `{ kind, label, marks }`, a footnote reference
+  (`[^label]`); `label` points at the `footnote_definition` block (§5) carrying
+  the content. A single-cell atom, like an image.
 
 ### `marks`
 
@@ -211,10 +226,10 @@ compactness — never `"em": false`):
 
 ```json
 { "em": true, "strong": true, "code": true, "strikethrough": true,
-  "link": { "href": "https://…", "title": null } }
+  "underline": true, "link": { "href": "https://…", "title": null } }
 ```
 
-Boolean marks: `em`, `strong`, `code`, `strikethrough`. `link` is
+Boolean marks: `em`, `strong`, `code`, `strikethrough`, `underline`. `link` is
 `{ href, title }` (`title` string | null). A leaf with no marks has `"marks": {}`.
 
 ---
@@ -261,7 +276,7 @@ git and backup tools; a no-op save rewrites nothing). The writer guarantees:
 - **Fixed key order** everywhere: envelope (`schemaVersion`, `docId`, `docMeta`,
   `blocks`); block (`id`, `type`, then the type-specific order in §5); inline
   (`kind`, then fields, `marks` last); marks (`em`, `strong`, `code`,
-  `strikethrough`, `link`); link (`href`, `title`); docMeta (`title`, `createdAt`,
+  `strikethrough`, `underline`, `link`); link (`href`, `title`); docMeta (`title`, `createdAt`,
   then preserved unknown keys in first-seen order).
 - **Only set marks emitted**; absent booleans omitted.
 - **Pretty-printed**, 2-space indent, LF, single trailing newline, UTF-8 no BOM, no

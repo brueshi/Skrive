@@ -85,6 +85,34 @@ function wordEndAfter(text: string, caret: number): number {
   return firstSegEnd ?? text.length;
 }
 
+/**
+ * Clamp a word/line-delete run so it never silently consumes a single-cell atom
+ * (an image, a hard break, a footnote reference — SCAN_ATOM placeholders in the
+ * scan text). The run truncates at the atom nearest the caret; when that empties
+ * the run entirely (the atom is adjacent to the caret), the caller falls back to
+ * a plain char delete, which owns the atom gestures — a footnote reference's
+ * arming beat, a break/image's single-cell delete. Without this, one
+ * Option+Backspace could blow through a reference and take its footer definition
+ * with it, with no beat at all.
+ */
+export function clampRunToAtoms(
+  scanText: string,
+  from: number,
+  to: number,
+  caret: number,
+  atomChar: string,
+  direction: 'backward' | 'forward'
+): [number, number] {
+  if (direction === 'backward') {
+    const cut = caret > 0 ? scanText.lastIndexOf(atomChar, caret - 1) : -1;
+    if (cut >= from) return [cut + 1, to];
+  } else {
+    const cut = scanText.indexOf(atomChar, caret);
+    if (cut !== -1 && cut < to) return [from, cut];
+  }
+  return [from, to];
+}
+
 const WS = /\s/;
 
 // Whitespace-only fallback for runtimes without Intl.Segmenter: skip whitespace

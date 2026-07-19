@@ -16,13 +16,13 @@ import { literalParagraphs, plainTextParagraphs } from '../clipboard/plainText';
 import { buildClipboardPayload } from '../clipboard/copyOut';
 import { imageExtension, imageMarkdownLink, pastedImageFilename } from '../clipboard/pasteImage';
 import { notify } from '../notify';
-import { BLOCK_ID_ATTR, BlockViewRegistry, CODE_LANG_CLASS, renderBlock, renderDocument, renderInlineInto, setCodeContent, TAG_ATTR, TAG_CLASS } from './render';
+import { BLOCK_ID_ATTR, BlockViewRegistry, CODE_LANG_CLASS, FOOTNOTE_REF_ATTR, orderForDisplay, renderBlock, renderDocument, renderInlineInto, setCodeContent, TAG_ATTR, TAG_CLASS } from './render';
 import type { AssetResolver } from './render';
 import { DecorationStore } from './decorations';
 import { HighlightBus } from './highlight/highlight-bus';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
-import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, replaceAcross } from './range-ops';
+import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, mergeBackward, mergeForward, removeBlocks, removeFootnote, replaceAcross } from './range-ops';
 import { blockIndexOf, findBlockById, updateBlockById, updateBlockInTop } from './tree';
 import { enterInContainer, exitContainer, splitBlockAt, type StructuralResult } from './structural';
 import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
@@ -32,23 +32,27 @@ import {
   clearMarksInInline,
   coalesceInline,
   deleteRangeInInline,
+  footnoteRefAt,
   inlineLength,
+  inlineScanText,
   inlinePlainText,
   insertBreakInInline,
   insertTagInInline,
+  insertFootnoteRefInInline,
   insertTextInInline,
   linkHrefInRange,
   linkRunAt,
   marksAtOffset,
   rangeHasLink,
   rangeHasMark,
+  SCAN_ATOM,
   readInlineFromDOM,
   setLinkInInline,
   setMarkInInline,
   splitInline,
   toggleMarkInInline
 } from './inline-ops';
-import { lineBoundaryRange, wordBoundaryRange } from './word-boundary';
+import { clampRunToAtoms, lineBoundaryRange, wordBoundaryRange } from './word-boundary';
 import { DocHistory, type EditHint } from './history';
 
 /** A block type the insert menu / commands can apply to the current block. */
@@ -60,11 +64,15 @@ export type BlockTypeSpec =
   | { kind: 'ordered_list'; start?: number; delimiter?: '.' | ')' }
   | { kind: 'code' }
   | { kind: 'table' }
-  | { kind: 'divider' };
+  | { kind: 'divider' }
+  | { kind: 'footnote' };
 
-/** What the insert (slash) menu needs: where to anchor, and the query typed after
- *  the `/`. Null when the menu is closed. */
-export type SlashMenuState = { rect: DOMRect; query: string };
+/** What the insert (slash) menu needs: where to anchor, the query typed after
+ *  the `/`, and which kind of session is open — `block` (the `/` is the whole
+ *  line; full catalog, commits convert the block) or `inline` (typed mid-text at
+ *  a word boundary; Inline-group entries only, commits splice at the caret).
+ *  Null when the menu is closed. */
+export type SlashMenuState = { rect: DOMRect; query: string; kind: 'block' | 'inline' };
 
 /** What the inline-tag (`#`) autocomplete needs: where to anchor and the query
  *  typed after the `#`. Null when the popover is closed. Same shape as the slash
@@ -320,12 +328,19 @@ export class BlockSurface {
   // generalized form of the savedLink dodge (SKR-173, absorbing SKR-151; cell
   // coverage SKR-220).
   private lastSelection: SavedSelection | null = null;
-  private slash: { blockId: string; slashOffset: number } | null = null;
+  private slash: { blockId: string; slashOffset: number; kind: 'block' | 'inline' } | null = null;
   private slashCb: ((state: SlashMenuState | null) => void) | null = null;
   // The inline-tag (`#`) autocomplete session: the block and the flat offset of the
   // `#` that opened it. Null when closed. Mirrors `slash`, but a tag session opens
   // mid-text at a word boundary rather than only on a whole-block `/`.
   private tagSession: { blockId: string; hashOffset: number } | null = null;
+  // A footnote reference armed for deletion (the select-before-delete beat): the
+  // first Backspace/Delete adjacent to a reference highlights it (and, when it is
+  // the label's last reference, the definition that would die with it) instead of
+  // deleting; the second performs the delete. `key` is the leaf id or cell key,
+  // `caret` the collapsed caret offset the gesture was armed at — any selection
+  // move away from it disarms.
+  private armedFootnote: { key: string; refOffset: number; caret: number; label: string } | null = null;
   private tagCb: ((state: TagMenuState | null) => void) | null = null;
   // The code-block language picker observer (SKR-262). Click-triggered from a code
   // block's corner button, so there is no persistent "session" — the surface just
@@ -548,6 +563,20 @@ export class BlockSurface {
     this.codeLangCb?.(null);
   }
 
+  /** Scroll the first element matching `selector[data-footnote-label="label"]` into
+   *  view and flash it — the shared move behind ref->definition and definition->ref
+   *  jumps (SKR-56). No-op when the label is empty or the target isn't present. */
+  private revealFootnote(selector: string, label: string): void {
+    if (!label) return;
+    const target = this.container.querySelector<HTMLElement>(
+      `${selector}[data-footnote-label="${CSS.escape(label)}"]`
+    );
+    if (!target) return;
+    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    target.classList.add('sk-footnote-flash');
+    window.setTimeout(() => target.classList.remove('sk-footnote-flash'), 1200);
+  }
+
   /** Set a code block's language (from the picker). Updates the model, re-renders the
    *  block so its `data-lang`, corner label, and colour mirror follow, persists, and
    *  closes the picker. A no-op when the language is unchanged. */
@@ -583,7 +612,7 @@ export class BlockSurface {
     const walk = (blocks: BlockNode[]): void => {
       for (const b of blocks) {
         if (b.type === 'paragraph' || b.type === 'heading') fromInline(b.inline);
-        else if (b.type === 'blockquote') walk(b.children);
+        else if (b.type === 'blockquote' || b.type === 'footnote_definition') walk(b.children);
         else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
           for (const item of b.items) walk(item.children);
         } else if (b.type === 'table') {
@@ -1350,6 +1379,14 @@ export class BlockSurface {
    *  after it. The branch lives here so every caller (toolbar, palette, slash)
    *  gets it for free. */
   setBlockType(spec: BlockTypeSpec): void {
+    // A footnote is an inline-atom INSERT, not a block conversion (SKR-56): it drops
+    // a reference at the caret and seeds a definition, leaving the block's type
+    // untouched. Both the slash path (applySlashCommand) and the Insert dropdown /
+    // palette funnel through here, so this one branch covers every caller.
+    if (spec.kind === 'footnote') {
+      this.insertFootnote();
+      return;
+    }
     // Multi-block textblock conversions (Text / Heading / Code) map over every
     // covered inline-text leaf as one history step, mirroring the mark commands
     // (SKR-169 / F50). Barriers are skipped for free: selectedLeaves only yields
@@ -1607,6 +1644,208 @@ export class BlockSurface {
     this.doc = { ...this.doc, blocks };
     this.reconcile();
     const el = this.leafElementById(landing.id);
+    if (el) setCaret(el, 0);
+    this.scheduleSerialize();
+  }
+
+  /** The next footnote label: one past the largest integer label in use (references
+   *  and definitions both). Non-integer labels are left alone (auto-renumber is out
+   *  of scope) — they just don't participate in the max. */
+  private nextFootnoteLabel(): string {
+    let max = 0;
+    const consider = (label: string): void => {
+      const v = Number.parseInt(label, 10);
+      if (String(v) === label && v > max) max = v;
+    };
+    const scanInline = (nodes: InlineNode[]): void => {
+      for (const n of nodes) if (n.kind === 'footnote_ref') consider(n.label);
+    };
+    const scanBlocks = (blocks: BlockNode[]): void => {
+      for (const b of blocks) {
+        if (b.type === 'footnote_definition') {
+          consider(b.label);
+          scanBlocks(b.children);
+        } else if (b.type === 'paragraph' || b.type === 'heading') {
+          scanInline(b.inline);
+        } else if (b.type === 'blockquote') {
+          scanBlocks(b.children);
+        } else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
+          for (const item of b.items) scanBlocks(item.children);
+        } else if (b.type === 'table') {
+          for (const row of b.rows) for (const cell of row) scanInline(cell);
+        }
+      }
+    };
+    scanBlocks(this.doc.blocks);
+    return String(max + 1);
+  }
+
+  /** Remove any footnote definition whose label no longer has a reference anywhere
+   *  in the document (SKR-56) — deleting a footnote's reference deletes the footnote,
+   *  matching Docs/Word. Cheap when there are no definitions (a single scan of the
+   *  top-level blocks, short-circuited), so the delete paths can call it freely; the
+   *  full reference walk runs only once a definition actually exists. The caret sits
+   *  in the body block the reference left behind, not in a pruned definition, so the
+   *  reconcile that drops the definition element leaves it undisturbed. */
+  private pruneOrphanedFootnotes(): void {
+    if (!this.doc.blocks.some((b) => b.type === 'footnote_definition')) return;
+    const used = new Set<string>();
+    const scanInline = (nodes: InlineNode[]): void => {
+      for (const n of nodes) if (n.kind === 'footnote_ref') used.add(n.label);
+    };
+    const scanBlocks = (blocks: BlockNode[]): void => {
+      for (const b of blocks) {
+        if (b.type === 'paragraph' || b.type === 'heading') scanInline(b.inline);
+        else if (b.type === 'blockquote' || b.type === 'footnote_definition') scanBlocks(b.children);
+        else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
+          for (const item of b.items) scanBlocks(item.children);
+        } else if (b.type === 'table') {
+          for (const row of b.rows) for (const cell of row) scanInline(cell);
+        }
+      }
+    };
+    scanBlocks(this.doc.blocks);
+    const next = this.doc.blocks.filter((b) => b.type !== 'footnote_definition' || used.has(b.label));
+    if (next.length === this.doc.blocks.length) return;
+    this.doc = { ...this.doc, blocks: next };
+    this.reconcile();
+  }
+
+  /** Give a delete gesture adjacent to a footnote reference its arming beat.
+   *  Returns true when the gesture was consumed by ARMING (highlight the reference
+   *  and, when it is the label's last, the definition it would take with it);
+   *  false when the same position is already armed — the caller then performs the
+   *  actual delete — or when the reference element can't be resolved (fall through
+   *  to a plain delete rather than dead-ending the key). Purely visual: no model
+   *  change, no history entry, and the caret does not move. */
+  private armFootnoteRef(el: HTMLElement, key: string, refOffset: number, caret: number, label: string): boolean {
+    const armed = this.armedFootnote;
+    if (armed && armed.key === key && armed.refOffset === refOffset) {
+      this.disarmFootnoteRef();
+      return false;
+    }
+    const refEl = this.footnoteRefElementAt(el, refOffset);
+    if (!refEl) return false;
+    this.disarmFootnoteRef();
+    this.armedFootnote = { key, refOffset, caret, label };
+    refEl.classList.add('sk-footnote-ref-armed');
+    if (this.isLastFootnoteRef(label)) {
+      this.container
+        .querySelector(`.sk-footnote-def[data-footnote-label="${CSS.escape(label)}"]`)
+        ?.classList.add('sk-footnote-def-doomed');
+    }
+    return true;
+  }
+
+  private disarmFootnoteRef(): void {
+    if (!this.armedFootnote) return;
+    this.armedFootnote = null;
+    for (const el of Array.from(this.container.querySelectorAll('.sk-footnote-ref-armed'))) {
+      el.classList.remove('sk-footnote-ref-armed');
+    }
+    for (const el of Array.from(this.container.querySelectorAll('.sk-footnote-def-doomed'))) {
+      el.classList.remove('sk-footnote-def-doomed');
+    }
+  }
+
+  /** Disarm when the selection leaves the position the gesture was armed at —
+   *  the pure-selection-move counterpart of the arm/delete pair, mirroring
+   *  closeTagOnSelectionMove. Any edit moves the caret, so this also retires the
+   *  armed state after typing without a per-edit hook. */
+  private disarmFootnoteOnSelectionMove(): void {
+    const armed = this.armedFootnote;
+    if (!armed) return;
+    const cell = this.cellTarget();
+    if (cell && !cell.spansCells) {
+      if (cell.collapsed && cellKey(cell) === armed.key && cell.start === armed.caret) return;
+    } else if (!cell) {
+      const cur = this.currentInlineLeaf();
+      if (cur && cur.collapsed && cur.block.id === armed.key && cur.caret === armed.caret) return;
+    }
+    this.disarmFootnoteRef();
+  }
+
+  /** The reference atom element whose cell starts at `refOffset` within `el` (a
+   *  block element or table cell). Resolved by measuring each candidate's own flat
+   *  offset — labels are not unique enough (one label may have several references,
+   *  even within one block). */
+  private footnoteRefElementAt(el: HTMLElement, refOffset: number): HTMLElement | null {
+    for (const ref of Array.from(el.querySelectorAll<HTMLElement>(`[${FOOTNOTE_REF_ATTR}]`))) {
+      const parent = ref.parentNode;
+      if (!parent) continue;
+      const index = Array.prototype.indexOf.call(parent.childNodes, ref);
+      if (flatOffsetFromDOM(el, parent, index) === refOffset) return ref;
+    }
+    return null;
+  }
+
+  /** True when exactly one reference with this label remains — i.e. deleting the
+   *  armed reference would prune its definition. Runs only when arming (rare). */
+  private isLastFootnoteRef(label: string): boolean {
+    let count = 0;
+    const scanInline = (nodes: InlineNode[]): void => {
+      for (const n of nodes) if (n.kind === 'footnote_ref' && n.label === label) count++;
+    };
+    const scanBlocks = (blocks: BlockNode[]): void => {
+      for (const b of blocks) {
+        if (b.type === 'paragraph' || b.type === 'heading') scanInline(b.inline);
+        else if (b.type === 'blockquote' || b.type === 'footnote_definition') scanBlocks(b.children);
+        else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
+          for (const item of b.items) scanBlocks(item.children);
+        } else if (b.type === 'table') {
+          for (const row of b.rows) for (const cell of row) scanInline(cell);
+        }
+      }
+    };
+    scanBlocks(this.doc.blocks);
+    return count <= 1;
+  }
+
+  /** Delete a footnote from its definition side (the footer chrome's delete
+   *  button): the definition and every reference carrying its label go together,
+   *  one undo step, caret at the first reference's former position. */
+  private deleteFootnote(label: string): void {
+    if (!label) return;
+    this.disarmFootnoteRef();
+    const r = removeFootnote(this.doc.blocks, label);
+    if (r) this.applyStructural(r);
+  }
+
+  /** Insert a footnote (SKR-56): drop a reference atom at the caret in the current
+   *  inline block, and seed an empty definition appended to the document (so it lands
+   *  in the footer and serializes last). The caret moves into the definition to type
+   *  the note. A no-op when the caret isn't in an inline-text block (e.g. a table
+   *  cell or code block). One undo step: the single doc assignment snapshots once. */
+  private insertFootnote(): void {
+    const cur = this.currentInlineLeaf();
+    if (!cur) return;
+    // Restore focus if the Insert dropdown / palette took it (SKR-173): currentInlineLeaf
+    // already resolved the caret from the saved selection, but the trailing caret move
+    // into the definition otherwise lands arbitrarily in WKWebView with no live focus.
+    this.container.focus();
+    const label = this.nextFootnoteLabel();
+    const marks = marksAtOffset(cur.block.inline, cur.caret);
+    const inline = insertFootnoteRefInInline(cur.block.inline, cur.caret, label, marks);
+    const para = this.newInlineBlock('paragraph', [], 1);
+    const def: BlockNode = {
+      type: 'footnote_definition',
+      id: generateBlockId(),
+      durable: false,
+      src: null,
+      gapBefore: null,
+      dirty: true,
+      label,
+      children: [para]
+    };
+    this.doc = {
+      ...this.doc,
+      blocks: [
+        ...updateBlockById(this.doc.blocks, cur.block.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode),
+        def
+      ]
+    };
+    this.reconcile();
+    const el = this.leafElementById(para.id);
     if (el) setCaret(el, 0);
     this.scheduleSerialize();
   }
@@ -1938,6 +2177,27 @@ export class BlockSurface {
       this.closeSlash();
       return;
     }
+    // An INLINE session commits a splice at the caret, never a block conversion:
+    // strip the typed `/query` run, then insert the atom where the `/` was — one
+    // undo step, so the first undo restores the literal "/query" text. Only
+    // inline-atom specs are accepted (the menu filters to the Inline group, but a
+    // stale click must not convert the block the writer is mid-sentence in).
+    if (slash.kind === 'inline') {
+      if (spec.kind !== 'footnote') {
+        this.closeSlash();
+        return;
+      }
+      this.compoundEdit(() => {
+        const inline = deleteRangeInInline(cur.block.inline, slash.slashOffset, cur.caret);
+        this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, cur.block.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
+        renderInlineInto(cur.blockEl, inline, this.resolveAsset);
+        this.markRenderedInPlace(cur.block.id);
+        setCaret(cur.blockEl, slash.slashOffset);
+        this.closeSlash();
+        this.insertFootnote();
+      });
+      return;
+    }
     // Strip the /query, then convert — ONE undo step (SKR-178 / F39): recorded
     // separately, undo exposed the query-stripped intermediate state. The first
     // undo now restores the block with its literal "/query" text.
@@ -2068,9 +2328,23 @@ export class BlockSurface {
       // there too — the SKR-169 sink already converts a nested leaf correctly,
       // this only decides whether to open.
       const cur = this.currentInlineLeaf();
-      // Open only when the `/` is the entire block (a deliberate, empty-line gesture).
-      if (cur && inlinePlainText(cur.block.inline) === '/') {
-        this.slash = { blockId: cur.block.id, slashOffset: cur.caret - 1 };
+      if (cur) {
+        const plain = inlinePlainText(cur.block.inline);
+        // The `/` as the entire block (a deliberate, empty-line gesture) opens the
+        // full-catalog block session.
+        if (plain === '/') {
+          this.slash = { blockId: cur.block.id, slashOffset: cur.caret - 1, kind: 'block' };
+        } else {
+          // Mid-text at a word boundary (run start or after whitespace — the same
+          // rule the `#` tag session opens by) opens the INLINE session: only the
+          // catalog's Inline group, committed as a splice at the caret. A `/`
+          // inside a word ("and/or", "7/19") never triggers.
+          const slashOffset = cur.caret - 1;
+          const atBoundary = slashOffset === 0 || /\s/.test(plain[slashOffset - 1] ?? '');
+          if (atBoundary && plain[slashOffset] === '/') {
+            this.slash = { blockId: cur.block.id, slashOffset, kind: 'inline' };
+          }
+        }
       }
     }
     this.refreshSlash();
@@ -2080,6 +2354,10 @@ export class BlockSurface {
     if (!this.slash) return;
     const cur = this.currentInlineLeaf();
     if (!this.slashCaretIntact(cur)) return this.closeSlash();
+    // An inline session dies when the caret moves back onto or before its `/`
+    // (same rule as the tag session); a block session's `/` is the line start,
+    // where the same move already fails the checks below.
+    if (this.slash.kind === 'inline' && cur.caret <= this.slash.slashOffset) return this.closeSlash();
     const text = inlinePlainText(cur.block.inline);
     if (text[this.slash.slashOffset] !== '/') return this.closeSlash();
     const query = text.slice(this.slash.slashOffset + 1, cur.caret);
@@ -2089,7 +2367,7 @@ export class BlockSurface {
     let rect = sel.getRangeAt(0).getBoundingClientRect();
     // A caret in an empty block can report a degenerate rect; anchor to the block.
     if (rect.height === 0 && rect.width === 0) rect = cur.blockEl.getBoundingClientRect();
-    this.slashCb?.({ rect, query });
+    this.slashCb?.({ rect, query, kind: this.slash.kind });
   }
 
   // --- the inline-tag (`#`) autocomplete -----------------------------------
@@ -2192,6 +2470,7 @@ export class BlockSurface {
       this.dissolveOnUserSelection();
       this.closeSlashOnSelectionMove();
       this.closeTagOnSelectionMove();
+      this.disarmFootnoteOnSelectionMove();
       this.emitSelection();
     });
   };
@@ -2387,6 +2666,11 @@ export class BlockSurface {
         if (b.type === 'blockquote') {
           const r = walk(b.children, { ...acc, inBlockquote: true });
           if (r) return r;
+        } else if (b.type === 'footnote_definition') {
+          // Descend to find the leaf, but a definition is not a blockquote context —
+          // its children keep the outer container flags unchanged.
+          const r = walk(b.children, acc);
+          if (r) return r;
         } else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
           const bullet = b.type === 'bullet_list';
           for (const item of b.items) {
@@ -2450,23 +2734,29 @@ export class BlockSurface {
     } else if (type === 'deleteContentBackward') {
       e.preventDefault();
       this.applyDeleteBackward();
+      this.pruneOrphanedFootnotes();
     } else if (type === 'deleteContentForward') {
       e.preventDefault();
       this.applyDeleteForward();
+      this.pruneOrphanedFootnotes();
     } else if (type === 'deleteWordBackward') {
       e.preventDefault();
       this.applyRunDelete('backward', wordScan);
+      this.pruneOrphanedFootnotes();
     } else if (type === 'deleteWordForward') {
       e.preventDefault();
       this.applyRunDelete('forward', wordScan);
+      this.pruneOrphanedFootnotes();
     } else if (type === 'deleteSoftLineBackward' || type === 'deleteHardLineBackward') {
       // WebKit emits Hard for Cmd+Backspace, Chromium Soft; both map to the same
       // pragmatic run delete (to the text-run start — SKR-165), so accept either.
       e.preventDefault();
       this.applyRunDelete('backward', lineScan);
+      this.pruneOrphanedFootnotes();
     } else if (type === 'deleteSoftLineForward' || type === 'deleteHardLineForward') {
       e.preventDefault();
       this.applyRunDelete('forward', lineScan);
+      this.pruneOrphanedFootnotes();
     } else if (type === 'insertReplacementText') {
       // A spellcheck correction / dictation revision (SKR-191). With spellcheck
       // enabled these MUST land in the model — left to the catch-all below, the
@@ -3273,6 +3563,29 @@ export class BlockSurface {
         return;
       }
     }
+    // A footnote reference jumps to its definition in the footer; a definition's
+    // `[^label]` backref jumps back to the reference (SKR-56). Both are chrome, so
+    // this never competes with caret placement.
+    const fnRef = targetEl?.closest<HTMLElement>(`[${FOOTNOTE_REF_ATTR}]`);
+    if (fnRef) {
+      this.onPointerUp();
+      this.revealFootnote('.sk-footnote-def', fnRef.dataset.footnoteLabel ?? '');
+      return;
+    }
+    const backref = targetEl?.closest<HTMLElement>('.sk-footnote-backref');
+    if (backref) {
+      this.onPointerUp();
+      this.revealFootnote(`[${FOOTNOTE_REF_ATTR}]`, backref.dataset.footnoteLabel ?? '');
+      return;
+    }
+    // The definition chrome's delete action: the footnote goes as a whole — the
+    // definition and every reference — in one undo step.
+    const fnDelete = targetEl?.closest<HTMLElement>('.sk-footnote-delete');
+    if (fnDelete) {
+      this.onPointerUp();
+      this.deleteFootnote(fnDelete.dataset.footnoteLabel ?? '');
+      return;
+    }
     const blockEl = targetEl?.closest<HTMLElement>(`[${BLOCK_ID_ATTR}]`) ?? null;
     const blockId = blockEl?.getAttribute(BLOCK_ID_ATTR) ?? null;
     const block = blockId ? findBlockById(this.doc.blocks, blockId) : null;
@@ -3520,6 +3833,10 @@ export class BlockSurface {
         inline = insertTextInInline(inline, cell.start, text);
         if (pending) inline = this.applyPendingMarks(inline, cell.start, cell.start + text.length, pending);
         this.commitCell(cell, inline, cell.start + text.length);
+        // Typing over a selection can swallow a footnote reference; its orphaned
+        // definition prunes exactly as the delete paths do (free when no
+        // definitions exist).
+        if (!cell.collapsed) this.pruneOrphanedFootnotes();
       }
       this.scheduleSerialize();
       return;
@@ -3557,6 +3874,10 @@ export class BlockSurface {
       inline = insertTextInInline(inline, t.start, text);
       if (pending) inline = this.applyPendingMarks(inline, t.start, t.start + text.length, pending);
       this.commitInline(t.leaf.id, inline, t.blockEl, t.start + text.length);
+      // Typing over a selection can swallow a footnote reference; its orphaned
+      // definition prunes exactly as the delete paths do (free when no
+      // definitions exist).
+      if (!t.collapsed) this.pruneOrphanedFootnotes();
     }
     this.scheduleSerialize();
     // A typed space at the start of a paragraph may fire a marker input rule (list
@@ -3589,6 +3910,10 @@ export class BlockSurface {
         return;
       }
       if (cell.collapsed && cell.start === 0) return; // start of cell: no merge back
+      if (cell.collapsed) {
+        const label = footnoteRefAt(cell.inline, cell.start - 1);
+        if (label != null && this.armFootnoteRef(cell.cellEl, cellKey(cell), cell.start - 1, cell.start, label)) return;
+      }
       this.nextEditHint = { kind: 'delete', target: cellKey(cell) };
       const point = cell.collapsed ? this.surgicalPoint() : null;
       if (point && this.canSurgicalDeleteBack(point)) {
@@ -3663,6 +3988,10 @@ export class BlockSurface {
       return;
     }
     if (!isInlineText(t.leaf)) return;
+    if (t.collapsed) {
+      const label = footnoteRefAt(t.leaf.inline, t.start - 1);
+      if (label != null && this.armFootnoteRef(t.blockEl, t.leaf.id, t.start - 1, t.start, label)) return;
+    }
 
     this.nextEditHint = { kind: 'delete', target: t.leaf.id };
     // Surgical fast path for a within-text-node backspace; full re-render only for
@@ -3694,6 +4023,10 @@ export class BlockSurface {
       }
       const cellLen = inlineLength(cell.inline);
       if (cell.collapsed && cell.start >= cellLen) return;
+      if (cell.collapsed) {
+        const label = footnoteRefAt(cell.inline, cell.start);
+        if (label != null && this.armFootnoteRef(cell.cellEl, cellKey(cell), cell.start, cell.start, label)) return;
+      }
       this.nextEditHint = { kind: 'delete', target: cellKey(cell) };
       const from = cell.start;
       const to = cell.collapsed ? cell.start + 1 : cell.end;
@@ -3735,6 +4068,10 @@ export class BlockSurface {
       return;
     }
     if (!isInlineText(t.leaf)) return;
+    if (t.collapsed) {
+      const label = footnoteRefAt(t.leaf.inline, t.start);
+      if (label != null && this.armFootnoteRef(t.blockEl, t.leaf.id, t.start, t.start, label)) return;
+    }
     this.nextEditHint = { kind: 'delete', target: t.leaf.id };
     this.commitInline(t.leaf.id, deleteRangeInInline(t.leaf.inline, from, to), t.blockEl, from);
     this.scheduleSerialize();
@@ -3752,8 +4089,15 @@ export class BlockSurface {
   private applyRunDelete(direction: 'backward' | 'forward', scan: RunScan): void {
     const cell = this.cellTarget();
     if (cell && cell.collapsed && !cell.spansCells) {
-      const [from, to] = scan(inlinePlainText(cell.inline), cell.start, false, direction);
-      if (from >= to) return this.plainDelete(direction); // at the cell edge
+      // The offset-ALIGNED scan text (atoms as placeholder cells) — inlinePlainText
+      // drops atoms, so any scan past one was off by their count (SKR-56 follow-up).
+      // The clamp stops the run at an atom rather than deleting it silently; an
+      // atom adjacent to the caret empties the run and falls back to plainDelete,
+      // which owns the atom gestures (a reference's arming beat included).
+      const cellScanText = inlineScanText(cell.inline);
+      let [from, to] = scan(cellScanText, cell.start, false, direction);
+      [from, to] = clampRunToAtoms(cellScanText, from, to, cell.start, SCAN_ATOM, direction);
+      if (from >= to) return this.plainDelete(direction); // at the cell edge / an adjacent atom
       this.nextEditHint = { kind: 'other' }; // a word / line delete is its own atomic step
       this.commitCell(cell, deleteRangeInInline(cell.inline, from, to), from);
       this.scheduleSerialize();
@@ -3770,8 +4114,11 @@ export class BlockSurface {
         this.scheduleSerialize();
         return;
       }
-      const [from, to] = scan(inlinePlainText(leaf.inline), t.start, false, direction);
-      if (from >= to) return this.plainDelete(direction); // at the leaf edge
+      // Same aligned-scan + atom clamp as the cell branch above.
+      const leafScanText = inlineScanText(leaf.inline);
+      let [from, to] = scan(leafScanText, t.start, false, direction);
+      [from, to] = clampRunToAtoms(leafScanText, from, to, t.start, SCAN_ATOM, direction);
+      if (from >= to) return this.plainDelete(direction); // at the leaf edge / an adjacent atom
       this.nextEditHint = { kind: 'other' };
       this.commitInline(leaf.id, deleteRangeInInline(leaf.inline, from, to), t.blockEl, from);
       this.scheduleSerialize();
@@ -3863,9 +4210,14 @@ export class BlockSurface {
         this.applyOutdent(t.leaf.id, 0);
         return;
       }
+      // Enter on an empty leaf inside a footnote DEFINITION returns to the prose
+      // (caret after the first reference — the mirror of insertion's
+      // caret-into-the-definition move) rather than exiting to a paragraph:
+      // exitContainer's "paragraph after the container" would land model-after
+      // the definition but render in the body group, a visual teleport.
       const result =
         inlineLength(t.leaf.inline) === 0
-          ? exitContainer(this.doc.blocks, t.leaf.id, generateBlockId)
+          ? (exitFootnoteDefinition(this.doc.blocks, t.leaf.id) ?? exitContainer(this.doc.blocks, t.leaf.id, generateBlockId))
           : // [t.start, t.end) is deleted before the split, as at the top level. Passing
             // only t.start left the selected text in the right half, duplicating it.
             enterInContainer(this.doc.blocks, t.leaf.id, t.start, t.end, generateBlockId);
@@ -4000,7 +4352,10 @@ export class BlockSurface {
   // barrier survives and the prose up to it is deleted (SKR-166).
   private deleteSelectionRange(): void {
     const plan = this.planBarrierCrossingDeletion();
-    if (plan) plan();
+    if (plan) {
+      plan();
+      this.pruneOrphanedFootnotes();
+    }
   }
 
   // Compute (without applying) the deletion for a cross-cell or barrier-crossing
@@ -4033,7 +4388,12 @@ export class BlockSurface {
     }
     if (norm.start.id === norm.end.id) return;
     const r = replaceAcross(this.doc.blocks, norm.start.id, norm.start.offset, norm.end.id, norm.end.offset, text);
-    if (r) this.applyStructural(r);
+    if (r) {
+      this.applyStructural(r);
+      // A cross-block replace can swallow footnote references with the range;
+      // orphaned definitions prune as on the delete paths.
+      this.pruneOrphanedFootnotes();
+    }
   }
 
   // Classify a cross-endpoint selection into the two barrier-aware shapes
@@ -4839,7 +5199,9 @@ export class BlockSurface {
     }
 
     let i = 0;
-    for (const block of this.doc.blocks) {
+    // Definitions gather into a document-end footer (SKR-56) while the model keeps
+    // their authored order; iterate the DISPLAY order so the DOM reflects the footer.
+    for (const block of orderForDisplay(this.doc.blocks)) {
       let el = have.get(block.id);
       if (!el || this.renderedFrom.get(block.id) !== block) {
         const fresh = renderBlock(block, this.resolveAsset);

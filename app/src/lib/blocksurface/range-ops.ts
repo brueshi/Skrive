@@ -28,7 +28,7 @@ export function documentLeaves(blocks: BlockNode[]): LeafEntry[] {
   const walk = (nodes: BlockNode[]): void => {
     for (const b of nodes) {
       if (b.type === 'paragraph' || b.type === 'heading') out.push({ id: b.id, kind: 'inline' });
-      else if (b.type === 'blockquote') walk(b.children);
+      else if (b.type === 'blockquote' || b.type === 'footnote_definition') walk(b.children);
       else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
         for (const item of b.items) walk(item.children);
       } else out.push({ id: b.id, kind: 'barrier' }); // code_block / table / hr / frozen_block
@@ -51,9 +51,9 @@ export function removeBlocks(blocks: BlockNode[], ids: Set<string>): BlockNode[]
     const out: BlockNode[] = [];
     for (const b of nodes) {
       if (ids.has(b.id)) continue;
-      if (b.type === 'blockquote') {
+      if (b.type === 'blockquote' || b.type === 'footnote_definition') {
         const children = walk(b.children);
-        if (children.length === 0) continue; // emptied quote: prune
+        if (children.length === 0) continue; // emptied container: prune
         out.push(children === b.children ? b : { ...b, children, dirty: true });
       } else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
         let changed = false;
@@ -148,6 +148,30 @@ export function deleteAcross(
     eOff = inlineLength(pl.inline);
   }
 
+  // A footnote definition renders in the document-end footer regardless of its
+  // model position, so its leaves are VISUALLY outside any body range (and vice
+  // versa). An endpoint pair straddling a definition boundary retreats the end
+  // into the start's region — the same clamp shape as a barrier endpoint — and
+  // definitions lying model-order-between two body endpoints survive untouched
+  // (removing them because an imported `.md` authored its definitions
+  // mid-document would delete footer content the writer never selected).
+  const regionOf = (id: string): string | null => footnoteDefAncestorId(blocks, id);
+  const region = regionOf(leaves[si]!.id);
+  if (regionOf(leaves[ei]!.id) !== region) {
+    let pi = -1;
+    for (let i = ei - 1; i >= si; i--) {
+      if (leaves[i]!.kind === 'inline' && regionOf(leaves[i]!.id) === region) {
+        pi = i;
+        break;
+      }
+    }
+    if (pi < 0) return null; // nothing of the start's region inside the range
+    const pl = inlineLeaf(blocks, leaves[pi]!.id);
+    if (!pl) return null;
+    ei = pi;
+    eOff = inlineLength(pl.inline);
+  }
+
   const startLeaf = inlineLeaf(blocks, leaves[si]!.id);
   const endLeaf = inlineLeaf(blocks, leaves[ei]!.id);
   if (!startLeaf || !endLeaf) return null;
@@ -165,7 +189,12 @@ export function deleteAcross(
   // The join can butt two same-mark runs against each other; merge the seam.
   const merged = coalesceInline([...headOf(startLeaf.inline, sOff), ...tailOf(endLeaf.inline, eOff)]);
   const removeIds = new Set<string>();
-  for (let i = si + 1; i <= ei; i++) removeIds.add(leaves[i]!.id);
+  for (let i = si + 1; i <= ei; i++) {
+    // A leaf in a DIFFERENT footnote region sits in the footer, not in this
+    // range's visual span — leave its definition intact (see the region clamp).
+    if (regionOf(leaves[i]!.id) !== region) continue;
+    removeIds.add(leaves[i]!.id);
+  }
 
   let next = updateBlockById(blocks, startLeaf.id, (b) => ({ ...b, inline: merged, dirty: true }) as BlockNode);
   next = removeBlocks(next, removeIds);
@@ -220,28 +249,225 @@ export function deleteBlock(blocks: BlockNode[], id: string): RangeResult | null
   return { blocks: next, caret };
 }
 
+/**
+ * Remove a footnote wholesale: its definition block AND every reference atom
+ * carrying its label, anywhere in the document (body prose, containers, table
+ * cells) — the explicit "delete this footnote" action on the definition's
+ * chrome, the footer-side counterpart of the reference-side prune. Caret lands
+ * where the FIRST reference was (its former offset), since that is where the
+ * writer's prose just changed; with no references (an orphan definition) it
+ * lands at the end of the last body leaf, or a seeded paragraph when nothing
+ * else remains. Null when no definition carries the label.
+ */
+export function removeFootnote(blocks: BlockNode[], label: string): RangeResult | null {
+  let defId: string | null = null;
+  for (const b of blocks) {
+    if (b.type === 'footnote_definition' && b.label === label) {
+      defId = b.id;
+      break;
+    }
+  }
+  if (!defId) return null;
+
+  let caret: { id: string; offset: number } | null = null;
+
+  const stripInline = (nodes: InlineNode[], note?: (offset: number) => void): InlineNode[] => {
+    let changed = false;
+    let acc = 0;
+    const out: InlineNode[] = [];
+    for (const n of nodes) {
+      if (n.kind === 'footnote_ref' && n.label === label) {
+        note?.(acc);
+        changed = true;
+        continue;
+      }
+      acc += inlineLength([n]);
+      out.push(n);
+    }
+    return changed ? coalesceInline(out) : nodes;
+  };
+
+  const walk = (nodes: BlockNode[]): BlockNode[] => {
+    let changed = false;
+    const out = nodes.map((b): BlockNode => {
+      if (b.type === 'paragraph' || b.type === 'heading') {
+        const inline = stripInline(b.inline, (offset) => {
+          caret ??= { id: b.id, offset };
+        });
+        if (inline === b.inline) return b;
+        changed = true;
+        return { ...b, inline, dirty: true };
+      }
+      if (b.type === 'blockquote' || b.type === 'footnote_definition') {
+        const children = walk(b.children);
+        if (children === b.children) return b;
+        changed = true;
+        return { ...b, children, dirty: true };
+      }
+      if (b.type === 'bullet_list' || b.type === 'ordered_list') {
+        let itemsChanged = false;
+        const items = b.items.map((item) => {
+          const children = walk(item.children);
+          if (children === item.children) return item;
+          itemsChanged = true;
+          return { ...item, children };
+        });
+        if (!itemsChanged) return b;
+        changed = true;
+        return { ...b, items, dirty: true };
+      }
+      if (b.type === 'table') {
+        let rowsChanged = false;
+        // Cells are never the caret target: a table is a range barrier, so the
+        // caret stays with the first PROSE reference (or the body fallback).
+        const rows = b.rows.map((row) => {
+          let rowChanged = false;
+          const cells = row.map((cell) => {
+            const stripped = stripInline(cell);
+            if (stripped !== cell) rowChanged = true;
+            return stripped;
+          });
+          return rowChanged ? ((rowsChanged = true), cells) : row;
+        });
+        if (!rowsChanged) return b;
+        changed = true;
+        return { ...b, rows, dirty: true };
+      }
+      return b;
+    });
+    return changed ? out : nodes;
+  };
+
+  const next = removeBlocks(walk(blocks), new Set([defId]));
+  if (caret) return { blocks: next, caret };
+
+  // Orphan definition (no references anywhere): prefer the end of the last BODY
+  // leaf — the footer sits below the body, so that is the nearest prose — then
+  // any inline leaf, then a seeded paragraph when the definition was all there was.
+  const leaves = documentLeaves(next);
+  let fallback: { id: string; offset: number } | null = null;
+  for (let i = leaves.length - 1; i >= 0; i--) {
+    const entry = leaves[i]!;
+    if (entry.kind !== 'inline') continue;
+    const leaf = inlineLeaf(next, entry.id);
+    if (!leaf) continue;
+    fallback ??= { id: leaf.id, offset: inlineLength(leaf.inline) };
+    if (footnoteDefAncestorId(next, entry.id) === null) {
+      return { blocks: next, caret: { id: leaf.id, offset: inlineLength(leaf.inline) } };
+    }
+  }
+  if (fallback) return { blocks: next, caret: fallback };
+  const para: BlockNode = {
+    type: 'paragraph',
+    id: generateBlockId(),
+    durable: false,
+    src: null,
+    gapBefore: null,
+    dirty: true,
+    inline: []
+  };
+  return { blocks: [...next, para], caret: { id: para.id, offset: 0 } };
+}
+
+/** The first reference carrying `label` that can host a caret (paragraph /
+ *  heading prose, at any depth outside a table), as its leaf id + the atom's
+ *  flat offset. Document order; null when no such reference exists. */
+function firstFootnoteRefPos(blocks: BlockNode[], label: string): { id: string; offset: number } | null {
+  const scanInline = (nodes: InlineNode[], id: string): { id: string; offset: number } | null => {
+    let acc = 0;
+    for (const n of nodes) {
+      if (n.kind === 'footnote_ref' && n.label === label) return { id, offset: acc };
+      acc += inlineLength([n]);
+    }
+    return null;
+  };
+  const walk = (nodes: BlockNode[]): { id: string; offset: number } | null => {
+    for (const b of nodes) {
+      if (b.type === 'paragraph' || b.type === 'heading') {
+        const hit = scanInline(b.inline, b.id);
+        if (hit) return hit;
+      } else if (b.type === 'blockquote' || b.type === 'footnote_definition') {
+        const hit = walk(b.children);
+        if (hit) return hit;
+      } else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
+        for (const item of b.items) {
+          const hit = walk(item.children);
+          if (hit) return hit;
+        }
+      }
+      // Table cells are skipped: a cell reference exists but cannot take the
+      // returned caret (cells are coordinate-addressed, not leaf blocks).
+    }
+    return null;
+  };
+  return walk(blocks);
+}
+
+/**
+ * Enter on an EMPTY leaf inside a footnote definition: leave the note and return
+ * to the prose — caret lands just after the definition's first reference, the
+ * mirror of insertFootnote's caret-into-the-definition move. The empty leaf is
+ * removed unless it is the definition's whole body (a definition always keeps
+ * one block). Null when the leaf is not an empty inline-text child of a
+ * definition, or the definition has no reference to return to (an orphan) —
+ * the caller then falls through to its other Enter semantics.
+ */
+export function exitFootnoteDefinition(blocks: BlockNode[], leafId: string): RangeResult | null {
+  const defId = footnoteDefAncestorId(blocks, leafId);
+  if (!defId) return null;
+  const leaf = inlineLeaf(blocks, leafId);
+  if (!leaf || inlineLength(leaf.inline) > 0) return null;
+  const def = blocks.find((b) => b.id === defId);
+  if (!def || def.type !== 'footnote_definition') return null;
+  const ref = firstFootnoteRefPos(blocks, def.label);
+  if (!ref || ref.id === leafId) return null;
+  // removeBlocks prunes a container that empties; if that takes the definition
+  // itself, the empty leaf was its whole body — keep it and just leave.
+  let next = removeBlocks(blocks, new Set([leafId]));
+  if (!next.some((b) => b.id === defId)) next = blocks;
+  return { blocks: next, caret: { id: ref.id, offset: ref.offset + 1 } };
+}
+
+/** The id of the footnote definition containing `leafId`, or null when the leaf
+ *  lives in the document body. Definitions are top-level containers (GFM
+ *  footnote definitions are flow content, never nested), so one pass over the
+ *  top-level defs suffices. Used to refuse a merge across the body/footer seam:
+ *  the footer renders at the document end regardless of the definition's model
+ *  position, so a merge across that boundary would visually teleport text. */
+function footnoteDefAncestorId(blocks: BlockNode[], leafId: string): string | null {
+  for (const b of blocks) {
+    if (b.type === 'footnote_definition' && findBlockById(b.children, leafId)) return b.id;
+  }
+  return null;
+}
+
 /** Backspace at the start of an inline leaf: merge it into the previous inline
  *  leaf in document order (across a list / quote boundary). Null when it is the
- *  first leaf, or the previous leaf is a barrier (don't merge into a table/code). */
+ *  first leaf, the previous leaf is a barrier (don't merge into a table/code),
+ *  or the merge would cross a footnote-definition boundary (a definition's body
+ *  never bleeds into the document body, and vice versa). */
 export function mergeBackward(blocks: BlockNode[], leafId: string): RangeResult | null {
   const leaves = documentLeaves(blocks);
   const i = leaves.findIndex((l) => l.id === leafId);
   if (i <= 0) return null;
   const prev = leaves[i - 1]!;
   if (prev.kind !== 'inline') return null;
+  if (footnoteDefAncestorId(blocks, leafId) !== footnoteDefAncestorId(blocks, prev.id)) return null;
   const prevLeaf = inlineLeaf(blocks, prev.id);
   if (!prevLeaf) return null;
   return deleteAcross(blocks, prev.id, inlineLength(prevLeaf.inline), leafId, 0);
 }
 
 /** Delete at the end of an inline leaf: pull the next inline leaf up into it.
- *  Null when it is the last leaf, or the next leaf is a barrier. */
+ *  Null when it is the last leaf, the next leaf is a barrier, or the merge would
+ *  cross a footnote-definition boundary (mirror of mergeBackward). */
 export function mergeForward(blocks: BlockNode[], leafId: string): RangeResult | null {
   const leaves = documentLeaves(blocks);
   const i = leaves.findIndex((l) => l.id === leafId);
   if (i < 0 || i >= leaves.length - 1) return null;
   const next = leaves[i + 1]!;
   if (next.kind !== 'inline') return null;
+  if (footnoteDefAncestorId(blocks, leafId) !== footnoteDefAncestorId(blocks, next.id)) return null;
   const cur = inlineLeaf(blocks, leafId);
   if (!cur) return null;
   return deleteAcross(blocks, leafId, inlineLength(cur.inline), next.id, 0);

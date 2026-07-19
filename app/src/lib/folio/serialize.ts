@@ -51,6 +51,8 @@ function orderInline(n: FolioInline): Record<string, unknown> {
       };
     case 'break':
       return { kind: 'break', marks: orderMarks(n.marks) };
+    case 'footnote_ref':
+      return { kind: 'footnote_ref', label: n.label, marks: orderMarks(n.marks) };
   }
 }
 
@@ -73,6 +75,8 @@ function orderBlock(b: FolioBlock): Record<string, unknown> {
       return { id: b.id, type: b.type };
     case 'blockquote':
       return { id: b.id, type: b.type, children: b.children.map(orderBlock) };
+    case 'footnote_definition':
+      return { id: b.id, type: b.type, label: b.label, children: b.children.map(orderBlock) };
     case 'bullet_list':
       return { id: b.id, type: b.type, spread: b.spread, items: b.items.map(orderListItem) };
     case 'ordered_list':

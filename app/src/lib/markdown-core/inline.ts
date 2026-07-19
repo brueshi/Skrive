@@ -21,21 +21,24 @@ import type { Heading, Paragraph, PhrasingContent, Root } from 'mdast';
 import { unified } from 'unified';
 import remarkStringify from 'remark-stringify';
 import { gfmStrikethroughToMarkdown } from 'mdast-util-gfm-strikethrough';
+import { gfmFootnoteToMarkdown } from 'mdast-util-gfm-footnote';
 
-// The strikethrough extension (SKR-142) teaches the stringifier `delete` nodes
-// and the matching `~` escaping in plain text, mirroring what the shared parser
-// now models — the two must widen together or the idempotence guard mis-fires.
-// remark-stringify only reads toMarkdown extensions from processor data (the
-// mechanism remark-gfm uses), not from its options, hence the micro-plugin.
-function strikethroughSerialization(this: import('unified').Processor): void {
+// The strikethrough extension (SKR-142) teaches the stringifier `delete` nodes and
+// the matching `~` escaping in plain text; the footnote extension (SKR-56) teaches
+// it `footnoteReference` -> `[^id]`. Both mirror what the shared parser now models —
+// they must widen together or the idempotence guard mis-fires. remark-stringify
+// only reads toMarkdown extensions from processor data (the mechanism remark-gfm
+// uses), not from its options, hence the micro-plugin.
+function markdownSerialization(this: import('unified').Processor): void {
   const data = this.data();
   const extensions = (data.toMarkdownExtensions ??= []);
   extensions.push(gfmStrikethroughToMarkdown());
+  extensions.push(gfmFootnoteToMarkdown());
 }
 
 // `*` emphasis/strong matches the canonical style this serializer emits.
 const stringifier = unified()
-  .use(strikethroughSerialization)
+  .use(markdownSerialization)
   .use(remarkStringify, { emphasis: '*', strong: '*' });
 
 // Serialize a single mdast block. remark-stringify terminates the document with a
@@ -60,6 +63,7 @@ export type InlineItem = {
   | { kind: 'text' | 'code'; text: string }
   | { kind: 'image'; url: string; alt: string; title: string | null }
   | { kind: 'break' }
+  | { kind: 'footnote_ref'; label: string }
 );
 
 export function sameInlineContext(a: InlineItem, b: InlineItem): boolean {
@@ -111,6 +115,10 @@ function leafToMdast(item: InlineItem): PhrasingContent {
       return { type: 'image', url: item.url, alt: item.alt, title: item.title };
     case 'break':
       return { type: 'break' };
+    case 'footnote_ref':
+      // identifier is what the stringifier emits (`[^identifier]`); using the raw
+      // label keeps the exact source bytes.
+      return { type: 'footnoteReference', identifier: item.label, label: item.label };
     default:
       return { type: 'text', value: item.text };
   }

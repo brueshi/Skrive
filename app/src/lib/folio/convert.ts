@@ -54,6 +54,8 @@ function inlineToFolio(n: InlineNode): FolioInline {
       return { kind: 'image', url: n.url, alt: n.alt, title: n.title, marks: marksToFolio(n.marks) };
     case 'break':
       return { kind: 'break', marks: marksToFolio(n.marks) };
+    case 'footnote_ref':
+      return { kind: 'footnote_ref', label: n.label, marks: marksToFolio(n.marks) };
   }
 }
 
@@ -77,6 +79,8 @@ function inlineToModel(n: FolioInline): InlineNode {
       return { kind: 'image', url: n.url, alt: n.alt, title: n.title, marks: marksToModel(n.marks) };
     case 'break':
       return { kind: 'break', marks: marksToModel(n.marks) };
+    case 'footnote_ref':
+      return { kind: 'footnote_ref', label: n.label, marks: marksToModel(n.marks) };
   }
 }
 
@@ -106,6 +110,8 @@ function blockToFolio(b: BlockNode): FolioBlock {
       return { id: b.id, type: 'horizontal_rule' };
     case 'blockquote':
       return { id: b.id, type: 'blockquote', children: b.children.map(blockToFolio) };
+    case 'footnote_definition':
+      return { id: b.id, type: 'footnote_definition', label: b.label, children: b.children.map(blockToFolio) };
     case 'bullet_list':
       return { id: b.id, type: 'bullet_list', spread: b.spread, items: b.items.map(itemToFolio) };
     case 'ordered_list':
@@ -168,6 +174,14 @@ function blockToModel(b: FolioBlock): BlockNode {
         ...FIDELITY_DEFAULTS,
         id: b.id,
         type: 'blockquote',
+        children: b.children.map(blockToModel)
+      };
+    case 'footnote_definition':
+      return {
+        ...FIDELITY_DEFAULTS,
+        id: b.id,
+        type: 'footnote_definition',
+        label: b.label,
         children: b.children.map(blockToModel)
       };
     case 'bullet_list':

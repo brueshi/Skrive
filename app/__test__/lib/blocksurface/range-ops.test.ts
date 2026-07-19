@@ -8,8 +8,10 @@ import {
   clearTableCells,
   deleteAcross,
   deleteBlock,
+  exitFootnoteDefinition,
   mergeBackward,
   mergeForward,
+  removeFootnote,
   replaceAcross,
   documentLeaves
 } from '../../../src/lib/blocksurface/range-ops';
@@ -24,7 +26,7 @@ function leafId(blocks: BlockNode[], text: string): string {
   const hit = (nodes: BlockNode[]): string | null => {
     for (const b of nodes) {
       if ((b.type === 'paragraph' || b.type === 'heading') && plain(b.inline) === text) return b.id;
-      if (b.type === 'blockquote') {
+      if (b.type === 'blockquote' || b.type === 'footnote_definition') {
         const r = hit(b.children);
         if (r) return r;
       } else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
@@ -278,5 +280,151 @@ describe('barrierNeighbor (SKR-167)', () => {
   it('returns null for an unknown leaf id', () => {
     const d = doc('a\n');
     expect(barrierNeighbor(d.blocks, 'nope', 'backward')).toBeNull();
+  });
+});
+
+describe('footnote-definition merge barrier (SKR-56)', () => {
+  it('refuses a backward merge from a definition into the body', () => {
+    const d = doc('body[^1]\n\n[^1]: note\n');
+    expect(mergeBackward(d.blocks, leafId(d.blocks, 'note'))).toBeNull();
+  });
+
+  it('refuses a forward merge from the body into a definition', () => {
+    const d = doc('body[^1]\n\n[^1]: note\n');
+    expect(mergeForward(d.blocks, leafId(d.blocks, 'body'))).toBeNull();
+  });
+
+  it('refuses a merge between two definitions', () => {
+    const d = doc('a[^1] b[^2]\n\n[^1]: one\n\n[^2]: two\n');
+    expect(mergeBackward(d.blocks, leafId(d.blocks, 'two'))).toBeNull();
+    expect(mergeForward(d.blocks, leafId(d.blocks, 'one'))).toBeNull();
+  });
+
+  it('still merges paragraphs WITHIN one definition', () => {
+    const d = doc('body[^1]\n\n[^1]: one\n\n    two\n');
+    const r = mergeBackward(d.blocks, leafId(d.blocks, 'two'));
+    expect(r, 'within-definition merge happened').not.toBeNull();
+    expect(ser(r!.blocks, d)).toBe('body[^1]\n\n[^1]: onetwo\n');
+  });
+});
+
+describe('removeFootnote (SKR-56)', () => {
+  it('removes the definition and its reference; caret at the former reference', () => {
+    const d = doc('see[^1] here\n\n[^1]: note\n');
+    const r = removeFootnote(d.blocks, '1');
+    expect(r).not.toBeNull();
+    expect(ser(r!.blocks, d)).toBe('see here\n');
+    expect(r!.caret).toEqual({ id: leafId(d.blocks, 'see here'), offset: 3 });
+  });
+
+  it('removes every reference when the label is used more than once', () => {
+    const d = doc('a[^1] b[^1]\n\n[^1]: note\n');
+    const r = removeFootnote(d.blocks, '1');
+    expect(ser(r!.blocks, d)).toBe('a b\n');
+    expect(r!.caret.offset).toBe(1); // the FIRST reference's former position
+  });
+
+  it('reaches a reference inside a blockquote', () => {
+    const d = doc('> quoted[^1]\n\n[^1]: note\n');
+    const r = removeFootnote(d.blocks, '1');
+    expect(ser(r!.blocks, d)).toBe('> quoted\n');
+  });
+
+  it('leaves other footnotes untouched', () => {
+    const d = doc('a[^1] b[^2]\n\n[^1]: one\n\n[^2]: two\n');
+    const r = removeFootnote(d.blocks, '1');
+    expect(ser(r!.blocks, d)).toBe('a b[^2]\n\n[^2]: two\n');
+  });
+
+  it('deletes an orphan definition; caret at the end of the last body leaf', () => {
+    const d = doc('body\n\n[^1]: note\n');
+    const r = removeFootnote(d.blocks, '1');
+    expect(ser(r!.blocks, d)).toBe('body\n');
+    expect(r!.caret).toEqual({ id: leafId(d.blocks, 'body'), offset: 4 });
+  });
+
+  it('returns null for an unknown label', () => {
+    const d = doc('body[^1]\n\n[^1]: note\n');
+    expect(removeFootnote(d.blocks, 'nope')).toBeNull();
+  });
+});
+
+describe('deleteAcross footnote-region guard (SKR-56)', () => {
+  // A definition renders in the document-end footer wherever it sits in the
+  // model, so a body range must never eat one that happens to lie model-order
+  // between its endpoints (the imported-.md shape), and an endpoint inside a
+  // definition clamps to the start's region like a barrier endpoint.
+  it('a body-to-body range leaves a model-order-between definition untouched', () => {
+    const d = doc('a[^1]\n\n[^1]: note\n\nb\n');
+    const r = deleteAcross(d.blocks, leafId(d.blocks, 'a'), 1, leafId(d.blocks, 'b'), 0);
+    expect(r).not.toBeNull();
+    expect(ser(r!.blocks, d)).toBe('ab\n\n[^1]: note\n');
+  });
+
+  it('an endpoint inside a definition retreats to the start region', () => {
+    const d = doc('a[^1]\n\n[^1]: note\n\nb\n');
+    const r = deleteAcross(d.blocks, leafId(d.blocks, 'a'), 1, leafId(d.blocks, 'note'), 2);
+    expect(r).not.toBeNull();
+    // Only the start leaf's tail (the reference cell) goes; the note is untouched.
+    expect(ser(r!.blocks, d)).toBe('a\n\n[^1]: note\n\nb\n');
+  });
+
+  it('a range within one definition still deletes normally', () => {
+    const d = doc('x[^1]\n\n[^1]: one\n\n    two\n');
+    const r = deleteAcross(d.blocks, leafId(d.blocks, 'one'), 1, leafId(d.blocks, 'two'), 1);
+    expect(ser(r!.blocks, d)).toBe('x[^1]\n\n[^1]: owo\n');
+  });
+});
+
+describe('exitFootnoteDefinition (SKR-56)', () => {
+  const emptyPara = (id: string): BlockNode => ({
+    type: 'paragraph',
+    id,
+    durable: false,
+    src: null,
+    gapBefore: null,
+    dirty: true,
+    inline: []
+  });
+  const withDefChild = (d: Document, child: BlockNode, replace = false): BlockNode[] =>
+    d.blocks.map((b) =>
+      b.type === 'footnote_definition'
+        ? { ...b, children: replace ? [child] : [...b.children, child], dirty: true }
+        : b
+    );
+
+  it('removes the empty leaf and returns the caret to just after the reference', () => {
+    const d = doc('see[^1] x\n\n[^1]: note\n');
+    const blocks = withDefChild(d, emptyPara('e1'));
+    const r = exitFootnoteDefinition(blocks, 'e1');
+    expect(r).not.toBeNull();
+    expect(r!.caret).toEqual({ id: leafId(d.blocks, 'see x'), offset: 4 });
+    expect(ser(r!.blocks, d)).toBe('see[^1] x\n\n[^1]: note\n');
+  });
+
+  it('keeps a sole empty body, still returning to the reference', () => {
+    const d = doc('see[^1]\n\n[^1]: note\n');
+    const blocks = withDefChild(d, emptyPara('e2'), true);
+    const r = exitFootnoteDefinition(blocks, 'e2');
+    expect(r).not.toBeNull();
+    expect(r!.caret.offset).toBe(4); // after the reference atom
+    const def = r!.blocks.find((b) => b.type === 'footnote_definition');
+    expect(def && def.type === 'footnote_definition' ? def.children.length : 0).toBe(1);
+  });
+
+  it('returns null for a non-empty leaf', () => {
+    const d = doc('see[^1]\n\n[^1]: note\n');
+    expect(exitFootnoteDefinition(d.blocks, leafId(d.blocks, 'note'))).toBeNull();
+  });
+
+  it('returns null for an orphan definition (no reference to return to)', () => {
+    const d = doc('body\n\n[^1]: note\n');
+    const blocks = withDefChild(d, emptyPara('e3'));
+    expect(exitFootnoteDefinition(blocks, 'e3')).toBeNull();
+  });
+
+  it('returns null for a leaf outside any definition', () => {
+    const d = doc('see[^1]\n\n[^1]: note\n');
+    expect(exitFootnoteDefinition(d.blocks, leafId(d.blocks, 'see'))).toBeNull();
   });
 });

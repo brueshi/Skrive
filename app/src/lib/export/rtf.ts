@@ -73,6 +73,12 @@ function renderInline(nodes: InlineNode[]): string {
       out += escapeText(node.alt);
       continue;
     }
+    if (node.kind === 'footnote_ref') {
+      // A superscript label; RTF footnote objects are out of scope, matching the
+      // lossy-but-honest posture the rest of this exporter takes.
+      out += `\\super ${escapeText(node.label)}\\nosupersub `;
+      continue;
+    }
     const m = node.marks;
     let open = '';
     let close = '';
@@ -159,6 +165,13 @@ function renderBlock(block: BlockNode, indent: number): string {
       return `\\pard${li}\\brdrb\\brdrs\\brdrw10\\brsp20 \\par\n`;
     case 'blockquote':
       return block.children.map((child) => renderBlock(child, indent + QUOTE_INDENT)).join('');
+    case 'footnote_definition': {
+      // A label line, then the definition body, so the reader can match it to the
+      // superscript ref. A proper RTF footnote object is out of scope.
+      const label = `\\pard${li}\\sa60\\b\\fs${BODY_FS} [${escapeText(block.label)}]\\b0\\par\n`;
+      const body = block.children.map((child) => renderBlock(child, indent + QUOTE_INDENT)).join('');
+      return label + body;
+    }
     case 'bullet_list':
       return renderList(block.items, indent, () => '\\bullet\\tab ');
     case 'ordered_list': {

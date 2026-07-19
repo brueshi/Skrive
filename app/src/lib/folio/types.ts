@@ -43,8 +43,12 @@ export type FolioBreak = { kind: 'break'; marks: FolioMarks };
  *  `#`. Native to `.folio`: unlike `.md`, where a tag is literal `#name` body text,
  *  here it persists as its own leaf. */
 export type FolioTag = { kind: 'tag'; name: string; marks: FolioMarks };
+/** A footnote reference (`[^label]`). Native to `.folio`: the `label` points at the
+ *  `footnote_definition` block carrying the content. A single-cell atom, like an
+ *  image (SKR-155 / SKR-56). */
+export type FolioFootnoteRef = { kind: 'footnote_ref'; label: string; marks: FolioMarks };
 
-export type FolioInline = FolioText | FolioImage | FolioBreak | FolioTag;
+export type FolioInline = FolioText | FolioImage | FolioBreak | FolioTag | FolioFootnoteRef;
 
 /** Column alignment for a table, from the header row. */
 export type FolioAlign = 'left' | 'right' | 'center' | null;
@@ -90,6 +94,15 @@ export type FolioOrderedList = {
   items: FolioListItem[];
 };
 export type FolioBlockquote = { id: string; type: 'blockquote'; children: FolioBlock[] };
+/** A footnote definition (`[^label]: …`), body held as child blocks. Keeps its
+ *  authored position in the block list; the renderer gathers definitions into a
+ *  document-end footer (SKR-56). */
+export type FolioFootnoteDefinition = {
+  id: string;
+  type: 'footnote_definition';
+  label: string;
+  children: FolioBlock[];
+};
 /** Each cell is an inline array. Ragged rows are permitted natively (SKR-159):
  *  the native format has no column-clamp; clamping/padding happens only on
  *  Markdown export. */
@@ -110,6 +123,7 @@ export type FolioBlock =
   | FolioBulletList
   | FolioOrderedList
   | FolioBlockquote
+  | FolioFootnoteDefinition
   | FolioTable;
 
 /** Document-level metadata (spec §4). Minimal and extensible — a reader preserves

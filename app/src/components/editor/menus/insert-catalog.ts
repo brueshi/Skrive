@@ -27,7 +27,8 @@ import {
   IconQuote,
   IconCodeBlock,
   IconTable,
-  IconDivider
+  IconDivider,
+  IconFootnote
 } from './toolbar-icons';
 
 type IconC = ComponentType<{ size?: number; className?: string }>;
@@ -35,9 +36,9 @@ type IconC = ComponentType<{ size?: number; className?: string }>;
 /** The near-term slice of the grammar's group taxonomy. A hairline separates
  *  consecutive groups in every renderer (no text headers — the calm-menu
  *  language). `inline` / `media` join when their features ship. */
-export type InsertGroup = 'text' | 'list' | 'block';
+export type InsertGroup = 'text' | 'list' | 'block' | 'inline';
 
-export const INSERT_GROUP_ORDER: InsertGroup[] = ['text', 'list', 'block'];
+export const INSERT_GROUP_ORDER: InsertGroup[] = ['text', 'list', 'block', 'inline'];
 
 /** The selection facts a `when` predicate reads. Every renderer passes what it
  *  has (the slash menu and dropdown from the surface's SelectionInfo, the palette
@@ -85,7 +86,12 @@ export const INSERT_CATALOG: InsertEntry[] = [
   { id: 'quote', title: 'Quote', keywords: 'quote blockquote', Icon: IconQuote, group: 'block', spec: { kind: 'blockquote' }, when: notInTable },
   { id: 'code', title: 'Code', keywords: 'code monospace pre fenced', Icon: IconCodeBlock, group: 'block', spec: { kind: 'code' }, when: notInTable },
   { id: 'table', title: 'Table', keywords: 'table grid rows columns', Icon: IconTable, group: 'block', spec: { kind: 'table' }, when: notInTable },
-  { id: 'divider', title: 'Divider', keywords: 'divider rule separator hr line', Icon: IconDivider, group: 'block', spec: { kind: 'divider' }, when: notInTable }
+  { id: 'divider', title: 'Divider', keywords: 'divider rule separator hr line', Icon: IconDivider, group: 'block', spec: { kind: 'divider' }, when: notInTable },
+  // Inline — the first entry in the grammar's Inline group. A footnote is an
+  // inline-atom insert (a reference + a seeded definition), not a block conversion;
+  // it lands at the caret. Table cells have no inline-atom insert path, so hide it
+  // there (like the block entries).
+  { id: 'footnote', title: 'Footnote', keywords: 'footnote note reference citation aside', Icon: IconFootnote, group: 'inline', spec: { kind: 'footnote' }, when: notInTable }
 ];
 
 /** Subsequence match: every char of `q` appears in `haystack` in order. The
@@ -145,5 +151,7 @@ export function dispatchInsert(controller: MenuController, spec: BlockTypeSpec):
       return controller.insertTable();
     case 'divider':
       return controller.insertDivider();
+    case 'footnote':
+      return controller.insertFootnote();
   }
 }

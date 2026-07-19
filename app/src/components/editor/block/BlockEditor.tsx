@@ -16,6 +16,7 @@ import { BlockSurface, DocHistory } from '../../../lib/blocksurface';
 import { attachCustomCaret } from '../../../lib/blocksurface/caret';
 import { attachDecorationOverlay } from '../../../lib/blocksurface/decoration-overlay';
 import { attachCodeHighlight } from '../../../lib/blocksurface/highlight/code-highlight';
+import { attachFootnotePeek } from '../../../lib/blocksurface/footnote-peek';
 import { installDecorationDevHarness } from '../../../lib/blocksurface/decoration-dev';
 import type { Document } from '../../../lib/blockmodel';
 import { setActiveEditorFlush } from '../active-editor';
@@ -126,6 +127,9 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
     // tokenizes code blocks and stacks a colour mirror behind the real editable
     // text. View-only and debounced, so it never touches the keystroke path.
     const highlight = attachCodeHighlight({ surface: host, store: surface.highlight });
+    // Footnote hover peek (SKR-56): shows a reference's definition text on hover.
+    // View-only, delegated off the host; the ref<->def jump lives in the surface.
+    const footnotePeek = attachFootnotePeek(host);
     const controller = new BlockMenuController(surface);
     // The write seam (SKR-175): the surface can read a pasted image's bytes but
     // owns neither docPath nor the shell bridge, so it hands both to the store
@@ -148,6 +152,7 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
       caret.destroy();
       decorations.destroy();
       highlight.destroy();
+      footnotePeek.destroy();
       teardownDevHarness?.();
       // Drain the pending snapshot before teardown so a tab switch / view
       // toggle within the debounce window doesn't drop the last edit — destroy()
