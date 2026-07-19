@@ -39,10 +39,13 @@ export function BlockSlashMenu({ surface }: { surface: BlockSurface }) {
   // is bound to one block, so its table-context can't flip mid-session — read it
   // from the surface's live selection when filtering.
   const inTable = state ? (surface.getSelectionInfo()?.inTable ?? false) : false;
-  const items = useMemo(
-    () => filterCatalog(state?.query ?? '', { inTable }),
-    [state?.query, inTable]
-  );
+  // An inline session (mid-text `/` at a word boundary) offers only the catalog's
+  // Inline group — those entries splice at the caret, which is the only insert
+  // that makes sense mid-sentence. Block conversions stay empty-line-only.
+  const items = useMemo(() => {
+    const all = filterCatalog(state?.query ?? '', { inTable });
+    return state?.kind === 'inline' ? all.filter((e) => e.group === 'inline') : all;
+  }, [state?.query, state?.kind, inTable]);
   const visible = isOpen;
 
   // A session opening (not a query narrowing within one that's already open)

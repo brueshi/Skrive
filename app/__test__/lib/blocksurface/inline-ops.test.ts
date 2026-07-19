@@ -7,6 +7,7 @@ import {
   clearMarksInInline,
   coalesceInline,
   deleteRangeInInline,
+  footnoteRefAt,
   inlineLength,
   inlinePlainText,
   insertTextInInline,
@@ -299,5 +300,33 @@ describe('setLinkInInline', () => {
     const linked = setLinkInInline([text('hello')], 0, 5, link);
     expect(linked).toEqual([text('hello', { link })]);
     expect(setLinkInInline(linked, 0, 5, null)).toEqual([text('hello')]);
+  });
+});
+
+describe('footnoteRefAt (SKR-56)', () => {
+  const fnref = (label: string): InlineNode => ({ kind: 'footnote_ref', label, marks: {} });
+
+  it('returns the label when the cell at the offset is a footnote reference', () => {
+    expect(footnoteRefAt([text('ab'), fnref('1'), text('cd')], 2)).toBe('1');
+  });
+
+  it('returns null on text cells and other atoms', () => {
+    const nodes = [text('ab'), fnref('1'), img(), text('cd')];
+    expect(footnoteRefAt(nodes, 0)).toBeNull(); // 'a'
+    expect(footnoteRefAt(nodes, 1)).toBeNull(); // 'b'
+    expect(footnoteRefAt(nodes, 3)).toBeNull(); // the image atom
+    expect(footnoteRefAt(nodes, 4)).toBeNull(); // 'c'
+  });
+
+  it('returns null out of range (negative and past-end offsets)', () => {
+    const nodes = [fnref('1')];
+    expect(footnoteRefAt(nodes, -1)).toBeNull();
+    expect(footnoteRefAt(nodes, 1)).toBeNull();
+  });
+
+  it('distinguishes adjacent references by offset', () => {
+    const nodes = [fnref('1'), fnref('2')];
+    expect(footnoteRefAt(nodes, 0)).toBe('1');
+    expect(footnoteRefAt(nodes, 1)).toBe('2');
   });
 });

@@ -246,6 +246,22 @@ export function insertFootnoteRefInInline(
   return coalesceInline([...left, { kind: 'footnote_ref', label, marks: { ...marks } }, ...right]);
 }
 
+/** The label of the footnote reference atom occupying exactly the cell
+ *  [start, start + 1), or null when that cell holds anything else. The delete
+ *  paths use this to give a reference the select-before-delete beat: unlike an
+ *  image, deleting a reference destroys content elsewhere on screen (its
+ *  definition in the footer), so the gesture gets a visible arming step first. */
+export function footnoteRefAt(nodes: InlineNode[], start: number): string | null {
+  if (start < 0) return null;
+  let acc = 0;
+  for (const node of nodes) {
+    const w = nodeWidth(node);
+    if (start < acc + w) return node.kind === 'footnote_ref' && start === acc ? node.label : null;
+    acc += w;
+  }
+  return null;
+}
+
 /** The toggleable boolean marks (link is set/cleared with a value, separately). */
 export type BooleanMark = 'strong' | 'em' | 'code' | 'strikethrough' | 'underline';
 

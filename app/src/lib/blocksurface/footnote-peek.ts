@@ -15,14 +15,16 @@ export type FootnotePeekHandle = { destroy(): void };
 
 const CLOSE_DELAY_MS = 120;
 
-/** The definition body text for a label: every child of the matching definition
- *  except its `[^label]` backref chrome, joined. Empty when there is no definition. */
+/** The definition body text for a label: the blocks inside the definition's body
+ *  wrapper (the marker and delete chrome live outside it), joined. Empty when
+ *  there is no definition. */
 function definitionText(surface: HTMLElement, label: string): string {
-  const def = surface.querySelector<HTMLElement>(`.sk-footnote-def[data-footnote-label="${CSS.escape(label)}"]`);
-  if (!def) return '';
+  const body = surface.querySelector<HTMLElement>(
+    `.sk-footnote-def[data-footnote-label="${CSS.escape(label)}"] > .sk-footnote-def-body`
+  );
+  if (!body) return '';
   const parts: string[] = [];
-  for (const child of Array.from(def.children)) {
-    if ((child as HTMLElement).classList.contains('sk-footnote-backref')) continue;
+  for (const child of Array.from(body.children)) {
     const t = child.textContent?.trim();
     if (t) parts.push(t);
   }

@@ -10,6 +10,7 @@ import {
   deleteBlock,
   mergeBackward,
   mergeForward,
+  removeFootnote,
   replaceAcross,
   documentLeaves
 } from '../../../src/lib/blocksurface/range-ops';
@@ -24,7 +25,7 @@ function leafId(blocks: BlockNode[], text: string): string {
   const hit = (nodes: BlockNode[]): string | null => {
     for (const b of nodes) {
       if ((b.type === 'paragraph' || b.type === 'heading') && plain(b.inline) === text) return b.id;
-      if (b.type === 'blockquote') {
+      if (b.type === 'blockquote' || b.type === 'footnote_definition') {
         const r = hit(b.children);
         if (r) return r;
       } else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
@@ -278,5 +279,71 @@ describe('barrierNeighbor (SKR-167)', () => {
   it('returns null for an unknown leaf id', () => {
     const d = doc('a\n');
     expect(barrierNeighbor(d.blocks, 'nope', 'backward')).toBeNull();
+  });
+});
+
+describe('footnote-definition merge barrier (SKR-56)', () => {
+  it('refuses a backward merge from a definition into the body', () => {
+    const d = doc('body[^1]\n\n[^1]: note\n');
+    expect(mergeBackward(d.blocks, leafId(d.blocks, 'note'))).toBeNull();
+  });
+
+  it('refuses a forward merge from the body into a definition', () => {
+    const d = doc('body[^1]\n\n[^1]: note\n');
+    expect(mergeForward(d.blocks, leafId(d.blocks, 'body'))).toBeNull();
+  });
+
+  it('refuses a merge between two definitions', () => {
+    const d = doc('a[^1] b[^2]\n\n[^1]: one\n\n[^2]: two\n');
+    expect(mergeBackward(d.blocks, leafId(d.blocks, 'two'))).toBeNull();
+    expect(mergeForward(d.blocks, leafId(d.blocks, 'one'))).toBeNull();
+  });
+
+  it('still merges paragraphs WITHIN one definition', () => {
+    const d = doc('body[^1]\n\n[^1]: one\n\n    two\n');
+    const r = mergeBackward(d.blocks, leafId(d.blocks, 'two'));
+    expect(r, 'within-definition merge happened').not.toBeNull();
+    expect(ser(r!.blocks, d)).toBe('body[^1]\n\n[^1]: onetwo\n');
+  });
+});
+
+describe('removeFootnote (SKR-56)', () => {
+  it('removes the definition and its reference; caret at the former reference', () => {
+    const d = doc('see[^1] here\n\n[^1]: note\n');
+    const r = removeFootnote(d.blocks, '1');
+    expect(r).not.toBeNull();
+    expect(ser(r!.blocks, d)).toBe('see here\n');
+    expect(r!.caret).toEqual({ id: leafId(d.blocks, 'see here'), offset: 3 });
+  });
+
+  it('removes every reference when the label is used more than once', () => {
+    const d = doc('a[^1] b[^1]\n\n[^1]: note\n');
+    const r = removeFootnote(d.blocks, '1');
+    expect(ser(r!.blocks, d)).toBe('a b\n');
+    expect(r!.caret.offset).toBe(1); // the FIRST reference's former position
+  });
+
+  it('reaches a reference inside a blockquote', () => {
+    const d = doc('> quoted[^1]\n\n[^1]: note\n');
+    const r = removeFootnote(d.blocks, '1');
+    expect(ser(r!.blocks, d)).toBe('> quoted\n');
+  });
+
+  it('leaves other footnotes untouched', () => {
+    const d = doc('a[^1] b[^2]\n\n[^1]: one\n\n[^2]: two\n');
+    const r = removeFootnote(d.blocks, '1');
+    expect(ser(r!.blocks, d)).toBe('a b[^2]\n\n[^2]: two\n');
+  });
+
+  it('deletes an orphan definition; caret at the end of the last body leaf', () => {
+    const d = doc('body\n\n[^1]: note\n');
+    const r = removeFootnote(d.blocks, '1');
+    expect(ser(r!.blocks, d)).toBe('body\n');
+    expect(r!.caret).toEqual({ id: leafId(d.blocks, 'body'), offset: 4 });
+  });
+
+  it('returns null for an unknown label', () => {
+    const d = doc('body[^1]\n\n[^1]: note\n');
+    expect(removeFootnote(d.blocks, 'nope')).toBeNull();
   });
 });

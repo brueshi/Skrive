@@ -204,7 +204,14 @@ function renderInline(nodes: InlineNode[], host: HTMLElement, resolveAsset: Asse
   // WebKit paints reliably — and also gives the line its height. The offset map
   // treats it as zero-width and readInlineFromDOM strips it, so the model and the
   // flat offsets never see it (SKR-176).
-  if (nodes[nodes.length - 1]!.kind === 'break') {
+  //
+  // A trailing footnote reference needs the same filler: with nothing after the
+  // contenteditable=false <sup>, WKWebView has no anchor to host a caret at the
+  // block's end — you cannot type after the reference, and an end-of-line click
+  // hit-tests onto the <sup> itself (firing its jump affordance) instead of
+  // placing a caret. The filler gives both gestures a real landing spot.
+  const last = nodes[nodes.length - 1]!;
+  if (last.kind === 'break' || last.kind === 'footnote_ref') {
     host.appendChild(document.createTextNode(CARET_FILLER));
   }
 }
@@ -275,11 +282,14 @@ export function renderBlock(
       renderChildren(block.children, el, resolveAsset);
       break;
     case 'footnote_definition': {
-      // Gathered into the document-end footer by orderForDisplay; the editable
-      // definition body is its child blocks. The leading `[^label]` marker is a
-      // chrome button (CHROME_ATTR, so the offset walkers skip it) that jumps back
-      // to the reference. It is a direct child of the container, not inside an
-      // inline block, so it never sits in a caret path.
+      // Gathered into the document-end footer by orderForDisplay. Laid out as a
+      // real section row — marker column, body column, delete action — with the
+      // editable child blocks inside their own body wrapper, so no chrome ever
+      // overlays the text (the old absolutely-positioned marker collided with the
+      // body once the label outgrew its guessed padding). The marker is a chrome
+      // button (CHROME_ATTR, so the offset walkers skip it) showing the plain
+      // label — an indicator, not `[^label]` syntax — that jumps back to the
+      // reference.
       el = document.createElement('div');
       el.className = 'sk-footnote-def';
       el.dataset.footnoteLabel = block.label;
@@ -290,9 +300,26 @@ export function renderBlock(
       backref.contentEditable = 'false';
       backref.tabIndex = -1;
       backref.dataset.footnoteLabel = block.label;
-      backref.textContent = `[^${block.label}]`;
+      backref.textContent = block.label;
+      backref.setAttribute('aria-label', `Jump to footnote ${block.label} reference`);
       el.appendChild(backref);
-      renderChildren(block.children, el, resolveAsset);
+      const body = document.createElement('div');
+      body.className = 'sk-footnote-def-body';
+      renderChildren(block.children, body, resolveAsset);
+      el.appendChild(body);
+      // Hover-revealed delete action: removes the definition AND every reference
+      // carrying its label (surface.deleteFootnote via onClick). Chrome, so the
+      // offset/caret walkers skip it.
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'sk-footnote-delete';
+      del.setAttribute(CHROME_ATTR, '');
+      del.contentEditable = 'false';
+      del.tabIndex = -1;
+      del.dataset.footnoteLabel = block.label;
+      del.setAttribute('aria-label', `Delete footnote ${block.label}`);
+      del.textContent = '×';
+      el.appendChild(del);
       break;
     }
     case 'bullet_list':

@@ -276,11 +276,16 @@
 /* Footnote definitions (SKR-56) gather into a document-end footer (orderForDisplay).
    The run reads as reference material: tinted, smaller, and rule-separated from the
    body. The separator rides CSS adjacency — the FIRST definition (one preceded by a
-   non-definition) carries the top rule; later definitions in the run do not. */
+   non-definition) carries the top rule; later definitions in the run do not.
+
+   Each definition is a flex row: marker column, editable body, delete action. Real
+   columns — the old absolutely-positioned marker overlaid the body text as soon as
+   the label outgrew its guessed padding. */
 .block-editor-surface .sk-footnote-def {
-  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
   margin: 0.35em 0;
-  padding-left: 1.7em;
   color: var(--skrive-muted);
   font-size: 0.92em;
 }
@@ -291,28 +296,77 @@
   border-top: 1px solid var(--skrive-rule);
 }
 
-/* The `[^label]` backref marker: a chrome button (skipped by the offset walkers)
-   pinned to the definition's left, jumping back to the reference. */
+/* The marker: a chrome button (skipped by the offset walkers) showing the plain
+   label as an indicator, jumping back to the reference. min-width keeps a run of
+   1-2 digit labels aligned; a longer label simply widens its own row. */
 .block-editor-surface .sk-footnote-backref {
-  position: absolute;
-  left: 0;
-  top: 0;
+  flex: none;
+  min-width: 1.3em;
   padding: 0;
   border: none;
   background: none;
   color: var(--skrive-accent);
   font: inherit;
+  font-size: 0.88em;
   font-variant-numeric: tabular-nums;
+  text-align: right;
   cursor: pointer;
   user-select: none;
 }
 
-.block-editor-surface :not(.sk-footnote-def) + .sk-footnote-def > .sk-footnote-backref {
-  top: 1.1em; /* clear the run's top padding */
-}
-
 .block-editor-surface .sk-footnote-backref:hover {
   text-decoration: underline;
+}
+
+/* The editable definition body: its own flow column, so the child blocks never
+   share layout space with chrome. min-width lets long content wrap, not overflow. */
+.block-editor-surface .sk-footnote-def-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Armed for deletion (the select-before-delete beat): the first Backspace/Delete
+   adjacent to a reference highlights it — and, when it is the label's last
+   reference, the definition that would die with it — in the danger tint; the
+   second performs the delete. Any caret move disarms. */
+.block-editor-surface .sk-footnote-ref-armed {
+  color: var(--skrive-danger);
+  background: color-mix(in srgb, var(--skrive-danger) 14%, transparent);
+  border-radius: var(--skrive-radius-xs, 4px);
+}
+
+.block-editor-surface .sk-footnote-def-doomed {
+  color: var(--skrive-danger);
+}
+
+.block-editor-surface .sk-footnote-def-doomed > .sk-footnote-backref {
+  color: var(--skrive-danger);
+}
+
+/* The definition's delete action: the row's last flex column, hover-revealed and
+   muted so the footer stays calm. Removes the definition and every reference
+   (surface.deleteFootnote). */
+.block-editor-surface .sk-footnote-delete {
+  flex: none;
+  padding: 0 0.3em;
+  border: none;
+  background: none;
+  color: var(--skrive-muted);
+  font: inherit;
+  line-height: 1.2;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.block-editor-surface .sk-footnote-def:hover > .sk-footnote-delete,
+.block-editor-surface .sk-footnote-delete:focus-visible {
+  opacity: 1;
+}
+
+.block-editor-surface .sk-footnote-delete:hover {
+  color: var(--skrive-danger);
 }
 
 /* Jump flash: a brief accent wash when a ref or definition is scrolled to. */
