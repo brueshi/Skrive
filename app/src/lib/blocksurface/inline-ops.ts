@@ -246,6 +246,26 @@ export function insertFootnoteRefInInline(
   return coalesceInline([...left, { kind: 'footnote_ref', label, marks: { ...marks } }, ...right]);
 }
 
+/** Placeholder for a single-cell atom in `inlineScanText`: U+FFFC OBJECT
+ *  REPLACEMENT CHARACTER, the Unicode character for exactly this job. */
+export const SCAN_ATOM = '￼';
+
+/** Flat-offset-ALIGNED text for word/line boundary scans: text verbatim, a tag
+ *  as its `#name` cells, and every single-cell atom (image / break / footnote
+ *  reference) as one SCAN_ATOM placeholder. Unlike `inlinePlainText` — which
+ *  drops atoms and therefore misaligns any string index past one — an index into
+ *  this string IS a flat offset, so a scan's [from, to) can be applied to the
+ *  inline model directly. */
+export function inlineScanText(nodes: InlineNode[]): string {
+  let s = '';
+  for (const node of nodes) {
+    if (node.kind === 'text') s += node.text;
+    else if (node.kind === 'tag') s += `#${node.name}`;
+    else s += SCAN_ATOM;
+  }
+  return s;
+}
+
 /** The label of the footnote reference atom occupying exactly the cell
  *  [start, start + 1), or null when that cell holds anything else. The delete
  *  paths use this to give a reference the select-before-delete beat: unlike an

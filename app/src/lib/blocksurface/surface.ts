@@ -22,7 +22,7 @@ import { DecorationStore } from './decorations';
 import { HighlightBus } from './highlight/highlight-bus';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
-import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, mergeBackward, mergeForward, removeBlocks, removeFootnote, replaceAcross } from './range-ops';
+import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, mergeBackward, mergeForward, removeBlocks, removeFootnote, replaceAcross } from './range-ops';
 import { blockIndexOf, findBlockById, updateBlockById, updateBlockInTop } from './tree';
 import { enterInContainer, exitContainer, splitBlockAt, type StructuralResult } from './structural';
 import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
@@ -34,6 +34,7 @@ import {
   deleteRangeInInline,
   footnoteRefAt,
   inlineLength,
+  inlineScanText,
   inlinePlainText,
   insertBreakInInline,
   insertTagInInline,
@@ -44,13 +45,14 @@ import {
   marksAtOffset,
   rangeHasLink,
   rangeHasMark,
+  SCAN_ATOM,
   readInlineFromDOM,
   setLinkInInline,
   setMarkInInline,
   splitInline,
   toggleMarkInInline
 } from './inline-ops';
-import { lineBoundaryRange, wordBoundaryRange } from './word-boundary';
+import { clampRunToAtoms, lineBoundaryRange, wordBoundaryRange } from './word-boundary';
 import { DocHistory, type EditHint } from './history';
 
 /** A block type the insert menu / commands can apply to the current block. */
@@ -4087,8 +4089,15 @@ export class BlockSurface {
   private applyRunDelete(direction: 'backward' | 'forward', scan: RunScan): void {
     const cell = this.cellTarget();
     if (cell && cell.collapsed && !cell.spansCells) {
-      const [from, to] = scan(inlinePlainText(cell.inline), cell.start, false, direction);
-      if (from >= to) return this.plainDelete(direction); // at the cell edge
+      // The offset-ALIGNED scan text (atoms as placeholder cells) — inlinePlainText
+      // drops atoms, so any scan past one was off by their count (SKR-56 follow-up).
+      // The clamp stops the run at an atom rather than deleting it silently; an
+      // atom adjacent to the caret empties the run and falls back to plainDelete,
+      // which owns the atom gestures (a reference's arming beat included).
+      const cellScanText = inlineScanText(cell.inline);
+      let [from, to] = scan(cellScanText, cell.start, false, direction);
+      [from, to] = clampRunToAtoms(cellScanText, from, to, cell.start, SCAN_ATOM, direction);
+      if (from >= to) return this.plainDelete(direction); // at the cell edge / an adjacent atom
       this.nextEditHint = { kind: 'other' }; // a word / line delete is its own atomic step
       this.commitCell(cell, deleteRangeInInline(cell.inline, from, to), from);
       this.scheduleSerialize();
@@ -4105,8 +4114,11 @@ export class BlockSurface {
         this.scheduleSerialize();
         return;
       }
-      const [from, to] = scan(inlinePlainText(leaf.inline), t.start, false, direction);
-      if (from >= to) return this.plainDelete(direction); // at the leaf edge
+      // Same aligned-scan + atom clamp as the cell branch above.
+      const leafScanText = inlineScanText(leaf.inline);
+      let [from, to] = scan(leafScanText, t.start, false, direction);
+      [from, to] = clampRunToAtoms(leafScanText, from, to, t.start, SCAN_ATOM, direction);
+      if (from >= to) return this.plainDelete(direction); // at the leaf edge / an adjacent atom
       this.nextEditHint = { kind: 'other' };
       this.commitInline(leaf.id, deleteRangeInInline(leaf.inline, from, to), t.blockEl, from);
       this.scheduleSerialize();
@@ -4198,9 +4210,14 @@ export class BlockSurface {
         this.applyOutdent(t.leaf.id, 0);
         return;
       }
+      // Enter on an empty leaf inside a footnote DEFINITION returns to the prose
+      // (caret after the first reference — the mirror of insertion's
+      // caret-into-the-definition move) rather than exiting to a paragraph:
+      // exitContainer's "paragraph after the container" would land model-after
+      // the definition but render in the body group, a visual teleport.
       const result =
         inlineLength(t.leaf.inline) === 0
-          ? exitContainer(this.doc.blocks, t.leaf.id, generateBlockId)
+          ? (exitFootnoteDefinition(this.doc.blocks, t.leaf.id) ?? exitContainer(this.doc.blocks, t.leaf.id, generateBlockId))
           : // [t.start, t.end) is deleted before the split, as at the top level. Passing
             // only t.start left the selected text in the right half, duplicating it.
             enterInContainer(this.doc.blocks, t.leaf.id, t.start, t.end, generateBlockId);

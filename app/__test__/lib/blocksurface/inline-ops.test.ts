@@ -9,6 +9,8 @@ import {
   deleteRangeInInline,
   footnoteRefAt,
   inlineLength,
+  inlineScanText,
+  SCAN_ATOM,
   inlinePlainText,
   insertTextInInline,
   marksEqual,
@@ -328,5 +330,21 @@ describe('footnoteRefAt (SKR-56)', () => {
     const nodes = [fnref('1'), fnref('2')];
     expect(footnoteRefAt(nodes, 0)).toBe('1');
     expect(footnoteRefAt(nodes, 1)).toBe('2');
+  });
+});
+
+describe('inlineScanText (SKR-56)', () => {
+  const fnref = (label: string): InlineNode => ({ kind: 'footnote_ref', label, marks: {} });
+  const tag = (name: string): InlineNode => ({ kind: 'tag', name, marks: {} });
+
+  it('aligns string indices with flat offsets', () => {
+    const nodes = [text('ab'), img(), text('cd'), tag('x'), brk(), fnref('1')];
+    const s = inlineScanText(nodes);
+    expect(s).toBe(`ab${SCAN_ATOM}cd#x${SCAN_ATOM}${SCAN_ATOM}`);
+    expect(s.length).toBe(inlineLength(nodes));
+  });
+
+  it('is plain text when there are no atoms', () => {
+    expect(inlineScanText([text('hello '), text('world', { strong: true })])).toBe('hello world');
   });
 });
