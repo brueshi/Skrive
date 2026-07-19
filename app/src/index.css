@@ -2414,6 +2414,15 @@ body {
   padding-left: 1.5em;
 }
 
+/* Nested ordered markers by depth (decimal / lower-alpha / lower-roman, cycling)
+   so the .md preview reads the same as the block editor. Display only. */
+.preview-inner ol { list-style-type: decimal; }
+.preview-inner ol ol { list-style-type: lower-alpha; }
+.preview-inner ol ol ol { list-style-type: lower-roman; }
+.preview-inner ol ol ol ol { list-style-type: decimal; }
+.preview-inner ol ol ol ol ol { list-style-type: lower-alpha; }
+.preview-inner ol ol ol ol ol ol { list-style-type: lower-roman; }
+
 .preview-inner li {
   margin-bottom: 0.25em;
 }
@@ -2855,6 +2864,14 @@ body {
   padding-left: 1.5em;
 }
 .diff-pane-preview li { margin-bottom: 0.2em; }
+
+/* Nested ordered markers by depth, matching the editor and full-file preview. */
+.diff-pane-preview ol { list-style-type: decimal; }
+.diff-pane-preview ol ol { list-style-type: lower-alpha; }
+.diff-pane-preview ol ol ol { list-style-type: lower-roman; }
+.diff-pane-preview ol ol ol ol { list-style-type: decimal; }
+.diff-pane-preview ol ol ol ol ol { list-style-type: lower-alpha; }
+.diff-pane-preview ol ol ol ol ol ol { list-style-type: lower-roman; }
 
 .diff-pane-preview blockquote {
   margin: 0.85em 0;
