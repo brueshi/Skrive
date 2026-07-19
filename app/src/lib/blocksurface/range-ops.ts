@@ -589,7 +589,7 @@ export function insertTableRow(blocks: BlockNode[], tableId: string, index: numb
  * empty cell is spliced into every row and a `null` (no-alignment) entry into
  * `align`, so the delimiter row stays the same width as the header. A ragged row
  * shorter than `index` gains its cell at its own end (splice clamps) — the row is
- * left ragged, never padded (SKR-159). Null when `tableId` is not a table.
+ * left ragged, never padded. Null when `tableId` is not a table.
  */
 export function insertTableColumn(blocks: BlockNode[], tableId: string, index: number): BlockNode[] | null {
   const table = findBlockById(blocks, tableId);
@@ -631,7 +631,7 @@ export function removeTableRow(blocks: BlockNode[], tableId: string, index: numb
  * Remove column `index` from a table: drop that cell from every row and its
  * `align` entry, keeping the delimiter row the header's width. A ragged row with
  * no cell at `index` is untouched (splice on a short row is a no-op) — raggedness
- * is preserved, not repaired (SKR-159). Returns null when `tableId` is not a table
+ * is preserved, not repaired. Returns null when `tableId` is not a table
  * OR the table has a single column (removal would leave zero columns); the surface
  * routes that null to whole-table deletion.
  */
