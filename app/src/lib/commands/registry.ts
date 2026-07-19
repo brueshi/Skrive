@@ -474,6 +474,39 @@ export function buildRegistry(deps: CommandDeps): {
       label: 'Redo',
       commandId: 'edit.redo'
     },
+    // Table row/column INSERT chords. Removal and the rest of table structure live
+    // in per-block hover chrome (the grammar's home for table editing), not the
+    // palette — a collapsed caret is a lossy "which row/column" once focus leaves.
+    // Catalogued here (run-less) so the cheat-sheet lists them; the surface handler
+    // owns the dispatch.
+    {
+      chord: { code: 'ArrowUp', mod: true, alt: true },
+      display: '⌥⌘↑',
+      scope: 'surface',
+      group: 'Edit',
+      label: 'Table: insert row above'
+    },
+    {
+      chord: { code: 'ArrowDown', mod: true, alt: true },
+      display: '⌥⌘↓',
+      scope: 'surface',
+      group: 'Edit',
+      label: 'Table: insert row below'
+    },
+    {
+      chord: { code: 'ArrowLeft', mod: true, alt: true },
+      display: '⌥⌘←',
+      scope: 'surface',
+      group: 'Edit',
+      label: 'Table: insert column left'
+    },
+    {
+      chord: { code: 'ArrowRight', mod: true, alt: true },
+      display: '⌥⌘→',
+      scope: 'surface',
+      group: 'Edit',
+      label: 'Table: insert column right'
+    },
     {
       chord: { code: 'Escape' },
       display: 'Esc',
