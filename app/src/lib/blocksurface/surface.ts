@@ -4950,36 +4950,50 @@ export class BlockSurface {
     this.scheduleSerialize();
   }
 
-  // Insert an empty row above/below the caret's row and step into it, ready to
-  // type (Docs/Word muscle memory). Reads the table fresh after the reconcile so
-  // focusCell sees the new row count, and places the caret through the robust
-  // sel.collapse path (WKWebView-safe) at the caret's own column.
-  insertTableRowRelative(dir: 'above' | 'below'): void {
-    const cell = this.cellTarget();
-    if (!cell) return;
-    const index = dir === 'above' ? cell.row : cell.row + 1;
-    const blocks = insertTableRow(this.doc.blocks, cell.tableId, index);
+  /** Insert an empty row into `tableId` at `index` and step into it at `col`,
+   *  ready to type. Coordinate-addressed: the caller names the row outright, so
+   *  nothing is inferred from the caret. That matters for chrome, whose target is
+   *  the clicked grip rather than wherever focus happens to sit — a collapsed
+   *  caret is a lossy signal once focus leaves the surface. Reads the table fresh
+   *  after the reconcile so focusCell sees the new row count, and places the caret
+   *  through the robust sel.collapse path (WKWebView-safe). */
+  insertTableRowAt(tableId: string, index: number, col = 0): void {
+    const blocks = insertTableRow(this.doc.blocks, tableId, index);
     if (!blocks) return;
     this.doc = { ...this.doc, blocks };
     this.reconcile();
-    const table = findBlockById(this.doc.blocks, cell.tableId);
-    if (table?.type === 'table') this.focusCell(table, index, cell.col, 0);
+    const table = findBlockById(this.doc.blocks, tableId);
+    if (table?.type === 'table') this.focusCell(table, index, col, 0);
     this.scheduleSerialize();
   }
 
-  // Insert an empty column left/right of the caret's column and step into it. The
-  // op keeps `align` the header's width, so the serialized delimiter row stays valid.
-  insertTableColumnRelative(dir: 'left' | 'right'): void {
-    const cell = this.cellTarget();
-    if (!cell) return;
-    const index = dir === 'left' ? cell.col : cell.col + 1;
-    const blocks = insertTableColumn(this.doc.blocks, cell.tableId, index);
+  /** Insert an empty column into `tableId` at `index` and step into it at `row`.
+   *  The op keeps `align` the header's width, so the serialized delimiter row
+   *  stays valid. Coordinate-addressed for the same reason as insertTableRowAt. */
+  insertTableColumnAt(tableId: string, index: number, row = 0): void {
+    const blocks = insertTableColumn(this.doc.blocks, tableId, index);
     if (!blocks) return;
     this.doc = { ...this.doc, blocks };
     this.reconcile();
-    const table = findBlockById(this.doc.blocks, cell.tableId);
-    if (table?.type === 'table') this.focusCell(table, cell.row, index, 0);
+    const table = findBlockById(this.doc.blocks, tableId);
+    if (table?.type === 'table') this.focusCell(table, row, index, 0);
     this.scheduleSerialize();
+  }
+
+  // Insert an empty row above/below the caret's row and step into it, ready to
+  // type (Docs/Word muscle memory). The keyboard accelerator's job is only to turn
+  // the caret into coordinates; the insert itself is insertTableRowAt's.
+  insertTableRowRelative(dir: 'above' | 'below'): void {
+    const cell = this.cellTarget();
+    if (!cell) return;
+    this.insertTableRowAt(cell.tableId, dir === 'above' ? cell.row : cell.row + 1, cell.col);
+  }
+
+  // Insert an empty column left/right of the caret's column and step into it.
+  insertTableColumnRelative(dir: 'left' | 'right'): void {
+    const cell = this.cellTarget();
+    if (!cell) return;
+    this.insertTableColumnAt(cell.tableId, dir === 'left' ? cell.col : cell.col + 1, cell.row);
   }
 
   // Arrow-key navigation inside a table: step cell-to-cell, and at the grid's
