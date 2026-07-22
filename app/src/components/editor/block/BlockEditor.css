@@ -606,14 +606,53 @@
 }
 
 /* Row / column handles: quiet rounded bars that read as "this column is a thing
-   you can grab". Inert in this stage — selection and the handle menu arrive in B2
-   — so they take no pointer input yet. */
+   you can grab". A click selects the whole row/column (SKR-266 B2); the handle
+   brightens to its accent on hover to advertise it. */
 .sk-table-chrome--col-handle,
 .sk-table-chrome--row-handle {
+  padding: 0;
+  border: none;
   background: var(--skrive-rule);
   border-radius: 999px;
   opacity: 0.9;
-  pointer-events: none;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background-color 120ms ease, opacity 120ms ease;
+}
+
+.sk-table-chrome--col-handle:hover,
+.sk-table-chrome--row-handle:hover,
+.sk-table-chrome--col-handle:focus-visible,
+.sk-table-chrome--row-handle:focus-visible {
+  background: var(--skrive-accent);
+  opacity: 1;
+}
+
+/* The selected slice's handle stays accent-filled while the selection is active,
+   independent of hover — the persistent anchor for the selection (and, in B2b, its
+   menu). Its persistence with the mouse away is what marks it selected; a faint
+   accent ring separates it from a merely-hovered handle. (Width/height come from
+   the slot's inline style, so the distinction is drawn with the shadow, not size.) */
+.sk-table-chrome--col-handle.is-selected,
+.sk-table-chrome--row-handle.is-selected {
+  background: var(--skrive-accent);
+  opacity: 1;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--skrive-accent) 30%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk-table-chrome--col-handle,
+  .sk-table-chrome--row-handle {
+    transition: none;
+  }
+}
+
+/* Selected row/column tint (SKR-266 B2): a calm accent wash on every cell of the
+   grip-selected slice, matching the block-selection ring's accent family and
+   holding in both themes via color-mix. A view-only marker; the model is
+   untouched until the slice is removed. */
+.block-editor-surface [data-cell-selected] {
+  background: color-mix(in srgb, var(--skrive-accent) 16%, transparent);
 }
 
 /* The append rails: a soft-lifted lane in the toast's visual language, running the

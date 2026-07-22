@@ -8,6 +8,7 @@ import {
   GUTTER_METRICS,
   hoverZone,
   tableGutterSlots,
+  tableHandleSlot,
   zoneContains,
   type GutterSlot,
   type HoverCell,
@@ -140,6 +141,23 @@ describe('tableGutterSlots', () => {
   it('emits nothing for a degenerate table', () => {
     const empty: TableGeometry = { box: { x: 0, y: 0, width: 0, height: 0 }, colEdges: [0], rowEdges: [0] };
     expect(tableGutterSlots(empty, NONE)).toEqual([]);
+  });
+});
+
+describe('tableHandleSlot', () => {
+  it('matches the hover handle a full slot list would emit', () => {
+    // The persistent selected handle must sit exactly where the hover handle does,
+    // so selecting a column a user is hovering doesn't shift its bar.
+    const geom = geometry(3, 3);
+    const fromList = tableGutterSlots(geom, { row: null, col: 2 }).find((s) => s.kind === 'col-handle');
+    expect(tableHandleSlot(geom, 'col', 2)).toEqual(fromList);
+  });
+
+  it('returns null for an out-of-range index', () => {
+    const geom = geometry(3, 3);
+    expect(tableHandleSlot(geom, 'col', 3)).toBeNull();
+    expect(tableHandleSlot(geom, 'col', -1)).toBeNull();
+    expect(tableHandleSlot(geom, 'row', 9)).toBeNull();
   });
 });
 
