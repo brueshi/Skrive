@@ -269,6 +269,10 @@ export class BlockSurface {
   // painter subscribes and repaints the colour mirror off-thread. Gated to code
   // blocks at the call site, so a prose keystroke never touches it.
   private readonly _highlight = new HighlightBus();
+  // Structural-re-render listeners (table hover chrome). Notified from reconcile,
+  // which is where block elements are rebuilt or removed and any geometry an
+  // overlay measured goes stale. Empty until an overlay subscribes.
+  private readonly structureListeners = new Set<() => void>();
   private readonly onDocChange?: (doc: Document) => void;
   private debounceTimer: number | null = null;
   // The deferred idle-callback handle for the cold path, and whether the doc has
@@ -438,6 +442,18 @@ export class BlockSurface {
    *  the editor subscribes and repaints code blocks' colour mirrors off-thread. */
   get highlight(): HighlightBus {
     return this._highlight;
+  }
+
+  /** Subscribe to structural re-renders — passes that rebuild, add, or remove
+   *  block elements. Overlays measuring real DOM geometry (table hover chrome)
+   *  need it because a reconcile replaces elements outright, invalidating every
+   *  rect they hold. Deliberately NOT a per-keystroke signal: typing re-renders a
+   *  block in place and never reconciles. Returns an unsubscribe. */
+  onStructureChange(fn: () => void): () => void {
+    this.structureListeners.add(fn);
+    return () => {
+      this.structureListeners.delete(fn);
+    };
   }
 
   // The document. Reads are plain; every assignment records a pre-edit snapshot
@@ -4950,36 +4966,50 @@ export class BlockSurface {
     this.scheduleSerialize();
   }
 
-  // Insert an empty row above/below the caret's row and step into it, ready to
-  // type (Docs/Word muscle memory). Reads the table fresh after the reconcile so
-  // focusCell sees the new row count, and places the caret through the robust
-  // sel.collapse path (WKWebView-safe) at the caret's own column.
-  insertTableRowRelative(dir: 'above' | 'below'): void {
-    const cell = this.cellTarget();
-    if (!cell) return;
-    const index = dir === 'above' ? cell.row : cell.row + 1;
-    const blocks = insertTableRow(this.doc.blocks, cell.tableId, index);
+  /** Insert an empty row into `tableId` at `index` and step into it at `col`,
+   *  ready to type. Coordinate-addressed: the caller names the row outright, so
+   *  nothing is inferred from the caret. That matters for chrome, whose target is
+   *  the clicked grip rather than wherever focus happens to sit — a collapsed
+   *  caret is a lossy signal once focus leaves the surface. Reads the table fresh
+   *  after the reconcile so focusCell sees the new row count, and places the caret
+   *  through the robust sel.collapse path (WKWebView-safe). */
+  insertTableRowAt(tableId: string, index: number, col = 0): void {
+    const blocks = insertTableRow(this.doc.blocks, tableId, index);
     if (!blocks) return;
     this.doc = { ...this.doc, blocks };
     this.reconcile();
-    const table = findBlockById(this.doc.blocks, cell.tableId);
-    if (table?.type === 'table') this.focusCell(table, index, cell.col, 0);
+    const table = findBlockById(this.doc.blocks, tableId);
+    if (table?.type === 'table') this.focusCell(table, index, col, 0);
     this.scheduleSerialize();
   }
 
-  // Insert an empty column left/right of the caret's column and step into it. The
-  // op keeps `align` the header's width, so the serialized delimiter row stays valid.
-  insertTableColumnRelative(dir: 'left' | 'right'): void {
-    const cell = this.cellTarget();
-    if (!cell) return;
-    const index = dir === 'left' ? cell.col : cell.col + 1;
-    const blocks = insertTableColumn(this.doc.blocks, cell.tableId, index);
+  /** Insert an empty column into `tableId` at `index` and step into it at `row`.
+   *  The op keeps `align` the header's width, so the serialized delimiter row
+   *  stays valid. Coordinate-addressed for the same reason as insertTableRowAt. */
+  insertTableColumnAt(tableId: string, index: number, row = 0): void {
+    const blocks = insertTableColumn(this.doc.blocks, tableId, index);
     if (!blocks) return;
     this.doc = { ...this.doc, blocks };
     this.reconcile();
-    const table = findBlockById(this.doc.blocks, cell.tableId);
-    if (table?.type === 'table') this.focusCell(table, cell.row, index, 0);
+    const table = findBlockById(this.doc.blocks, tableId);
+    if (table?.type === 'table') this.focusCell(table, row, index, 0);
     this.scheduleSerialize();
+  }
+
+  // Insert an empty row above/below the caret's row and step into it, ready to
+  // type (Docs/Word muscle memory). The keyboard accelerator's job is only to turn
+  // the caret into coordinates; the insert itself is insertTableRowAt's.
+  insertTableRowRelative(dir: 'above' | 'below'): void {
+    const cell = this.cellTarget();
+    if (!cell) return;
+    this.insertTableRowAt(cell.tableId, dir === 'above' ? cell.row : cell.row + 1, cell.col);
+  }
+
+  // Insert an empty column left/right of the caret's column and step into it.
+  insertTableColumnRelative(dir: 'left' | 'right'): void {
+    const cell = this.cellTarget();
+    if (!cell) return;
+    this.insertTableColumnAt(cell.tableId, dir === 'left' ? cell.col : cell.col + 1, cell.row);
   }
 
   // Arrow-key navigation inside a table: step cell-to-cell, and at the grid's
@@ -5279,6 +5309,9 @@ export class BlockSurface {
     // Likewise reassess every code block's highlight: a reconcile rebuilds code
     // blocks' elements (dropping their mirrors) and can add or remove blocks.
     this._highlight.invalidate(null);
+    // And any overlay measuring block geometry directly: the elements it measured
+    // may have just been replaced.
+    for (const fn of this.structureListeners) fn();
   }
 
   private scheduleSerialize(): void {

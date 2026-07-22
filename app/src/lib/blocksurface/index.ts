@@ -38,3 +38,19 @@ export {
   type ContentBox,
   type DecorationOverlayHandle
 } from './decoration-overlay';
+// Table hover chrome (per-block affordance layer for tables). The painter is
+// attached by the editor; `tableGutterSlots` is exported because it is the pure
+// arithmetic half, verified without layout.
+export {
+  attachTableChrome,
+  measureTable,
+  tableGutterSlots,
+  hoverZone,
+  zoneContains,
+  GUTTER_METRICS,
+  type GutterSlot,
+  type HoverCell,
+  type TableGeometry,
+  type HoverZone,
+  type TableChromeHandle
+} from './table-chrome';

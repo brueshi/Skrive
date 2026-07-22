@@ -584,3 +584,94 @@
     opacity: 0;
   }
 }
+
+/* Table hover chrome (Notion-shaped): a handle above the hovered column and left
+   of the hovered row, plus a + rail down the right (add column) and along the
+   bottom (add row). Like the decoration layer, the container is a zero-size anchor
+   at the scroller's content origin and each slot is transform-positioned in
+   content coordinates, so the chrome rides the scroll for free and never sits
+   inside the contenteditable. The layer is inert; only the rails take pointer
+   input, so clicks anywhere else fall through to the text. */
+.block-table-chrome-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.sk-table-chrome {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* Row / column handles: quiet rounded bars that read as "this column is a thing
+   you can grab". Inert in this stage — selection and the handle menu arrive in B2
+   — so they take no pointer input yet. */
+.sk-table-chrome--col-handle,
+.sk-table-chrome--row-handle {
+  background: var(--skrive-rule);
+  border-radius: 999px;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+/* The append rails: a soft-lifted lane in the toast's visual language, running the
+   full length of the table's right / bottom edge, with a drawn + centred in it.
+   Faint until pointed at, so a hovered table reads as calm. */
+.sk-table-chrome--col-append,
+.sk-table-chrome--row-append {
+  padding: 0;
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-sm, 6px);
+  background: var(--skrive-bg);
+  box-shadow: var(--skrive-shadow-sheet);
+  color: var(--skrive-accent);
+  opacity: 0.55;
+  cursor: pointer;
+  pointer-events: auto;
+  /* Opacity only: `transform` is what POSITIONS each slot, so transitioning it
+     would animate the rail sliding into place on every reflow. */
+  transition: opacity 120ms ease;
+}
+
+.sk-table-chrome--col-append:hover,
+.sk-table-chrome--row-append:hover,
+.sk-table-chrome--col-append:focus-visible,
+.sk-table-chrome--row-append:focus-visible {
+  opacity: 1;
+}
+
+/* The +, drawn rather than shipped as an asset: two centred bars. */
+.sk-table-chrome--col-append::before,
+.sk-table-chrome--row-append::before,
+.sk-table-chrome--col-append::after,
+.sk-table-chrome--row-append::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+.sk-table-chrome--col-append::before,
+.sk-table-chrome--row-append::before {
+  width: 9px;
+  height: 1.5px;
+  transform: translate(-50%, -50%);
+}
+
+.sk-table-chrome--col-append::after,
+.sk-table-chrome--row-append::after {
+  width: 1.5px;
+  height: 9px;
+  transform: translate(-50%, -50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk-table-chrome--col-append,
+  .sk-table-chrome--row-append {
+    transition: none;
+  }
+}
