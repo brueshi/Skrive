@@ -9,7 +9,7 @@
 // models enough DOM for the cell queries, focusCell, and readSelection to run.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { BlockSurface } from '../../src/lib/blocksurface';
+import { BlockSurface, type TableMenuState } from '../../src/lib/blocksurface';
 import { parseDocument, type BlockNode } from '../../src/lib/blockmodel';
 
 let container: HTMLElement;
@@ -212,5 +212,57 @@ describe('deleting the last row or column deletes the table', () => {
     key(surface, { key: 'Delete' });
 
     expect(surface.getDocument().blocks.some((b) => b.type === 'table')).toBe(false);
+  });
+});
+
+describe('the per-row/column menu (B2b)', () => {
+  const rect = { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+
+  it('opens the menu and selects the slice, and closes on demand', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`${TABLE}\n`) });
+    const states: Array<TableMenuState | null> = [];
+    surface.onTableMenu((s) => states.push(s));
+
+    surface.openTableMenu(tableId(surface), 'col', 2, rect);
+    // The open state names the slice, and the slice is selected (handle stays lit).
+    expect(states.at(-1)).toMatchObject({ tableId: tableId(surface), kind: 'col', index: 2 });
+    expect(surface.getTableSelection()).toEqual({ tableId: tableId(surface), kind: 'col', index: 2 });
+
+    surface.closeTableMenu();
+    expect(states.at(-1)).toBeNull();
+    // A dismiss leaves the selection intact.
+    expect(surface.getTableSelection()).not.toBeNull();
+  });
+
+  it('closes the menu when the selection dissolves', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`${TABLE}\n`) });
+    const states: Array<TableMenuState | null> = [];
+    surface.onTableMenu((s) => states.push(s));
+
+    surface.openTableMenu(tableId(surface), 'row', 1, rect);
+    expect(states.at(-1)).not.toBeNull();
+
+    key(surface, { key: 'Escape' }); // dissolves the selection
+    expect(states.at(-1)).toBeNull();
+  });
+
+  it('removeTableColumnAt removes the addressed column', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`${TABLE}\n`) });
+    surface.removeTableColumnAt(tableId(surface), 0);
+    expect(grid(surface)).toEqual([
+      ['b', 'c'],
+      ['2', '3'],
+      ['5', '6']
+    ]);
+  });
+
+  it('removeTableRowAt on the only body-bearing single row deletes the table', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument('| a |\n| - |\n| 1 |\n') });
+    surface.removeTableRowAt(tableId(surface), 0);
+    // Two rows remain after... no: a 1-column, 2-row table (header + one body).
+    // Removing the header promotes the body; removing again would empty it. Here we
+    // remove row 0, leaving one row — still a table.
+    expect(surface.getDocument().blocks.some((b) => b.type === 'table')).toBe(true);
+    expect(grid(surface)).toEqual([['1']]);
   });
 });

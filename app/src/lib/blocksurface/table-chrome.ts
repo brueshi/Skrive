@@ -324,10 +324,10 @@ export function attachTableChrome({
           blockSurface.insertTableRowAt(blockId, index, 0);
           break;
         case 'col-handle':
-          blockSurface.selectTableColumn(blockId, index);
+          blockSurface.openTableMenu(blockId, 'col', index, el.getBoundingClientRect());
           break;
         case 'row-handle':
-          blockSurface.selectTableRow(blockId, index);
+          blockSurface.openTableMenu(blockId, 'row', index, el.getBoundingClientRect());
           break;
       }
     });
