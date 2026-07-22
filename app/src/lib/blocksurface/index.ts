@@ -45,6 +45,7 @@ export {
   attachTableChrome,
   measureTable,
   tableGutterSlots,
+  tableHandleSlot,
   hoverZone,
   zoneContains,
   GUTTER_METRICS,

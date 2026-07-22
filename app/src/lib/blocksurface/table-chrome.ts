@@ -128,35 +128,60 @@ export function tableGutterSlots(
     height: m.railThickness
   });
 
-  // Contextual column handle: a bar above the hovered column, spanning most of it.
-  if (hover.col !== null && hover.col >= 0 && hover.col < cols) {
-    const left = colEdges[hover.col]!;
-    const width = colEdges[hover.col + 1]! - left;
-    slots.push({
+  // Contextual handles: a bar above the hovered column and left of the hovered row.
+  if (hover.col !== null) {
+    const s = tableHandleSlot(geom, 'col', hover.col, m);
+    if (s) slots.push(s);
+  }
+  if (hover.row !== null) {
+    const s = tableHandleSlot(geom, 'row', hover.row, m);
+    if (s) slots.push(s);
+  }
+
+  return slots;
+}
+
+/**
+ * The handle bar for one row or column — a bar left of a row, or above a column,
+ * spanning most of the cell but inset from its ends. Returns null when `index` is
+ * out of range. Shared by the hover chrome and the persistent selected handle, so
+ * a selected slice's handle sits exactly where its hover handle would.
+ *
+ * Pure: no DOM, no measurement.
+ */
+export function tableHandleSlot(
+  geom: TableGeometry,
+  kind: 'row' | 'col',
+  index: number,
+  m: GutterMetrics = GUTTER_METRICS
+): GutterSlot | null {
+  const { box, colEdges, rowEdges } = geom;
+  if (kind === 'col') {
+    const cols = colEdges.length - 1;
+    if (index < 0 || index >= cols) return null;
+    const left = colEdges[index]!;
+    const width = colEdges[index + 1]! - left;
+    return {
       kind: 'col-handle',
-      index: hover.col,
+      index,
       x: left + m.handleInset,
       y: box.y - m.handleGap - m.handleThickness,
       width: Math.max(width - 2 * m.handleInset, m.handleThickness),
       height: m.handleThickness
-    });
+    };
   }
-
-  // Contextual row handle: a bar left of the hovered row, spanning most of it.
-  if (hover.row !== null && hover.row >= 0 && hover.row < rows) {
-    const top = rowEdges[hover.row]!;
-    const height = rowEdges[hover.row + 1]! - top;
-    slots.push({
-      kind: 'row-handle',
-      index: hover.row,
-      x: box.x - m.handleGap - m.handleThickness,
-      y: top + m.handleInset,
-      width: m.handleThickness,
-      height: Math.max(height - 2 * m.handleInset, m.handleThickness)
-    });
-  }
-
-  return slots;
+  const rows = rowEdges.length - 1;
+  if (index < 0 || index >= rows) return null;
+  const top = rowEdges[index]!;
+  const height = rowEdges[index + 1]! - top;
+  return {
+    kind: 'row-handle',
+    index,
+    x: box.x - m.handleGap - m.handleThickness,
+    y: top + m.handleInset,
+    width: m.handleThickness,
+    height: Math.max(height - 2 * m.handleInset, m.handleThickness)
+  };
 }
 
 /** A viewport-space rectangle: the pointer hit-test region. */
@@ -235,6 +260,15 @@ export type TableChromeHandle = { destroy(): void };
 
 const SLOT_CLASS = 'sk-table-chrome';
 
+/** Accessible labels per slot kind. Handles are 1-based for humans; the append
+ *  rails read as plain actions. */
+const SLOT_LABELS: Record<GutterSlot['kind'], (index: number) => string> = {
+  'col-append': () => 'Add column',
+  'row-append': () => 'Add row',
+  'col-handle': (i) => `Select column ${i + 1}`,
+  'row-handle': (i) => `Select row ${i + 1}`
+};
+
 /** Wire table hover chrome to a surface. Returns a handle whose destroy() removes
  *  every listener and slot. Mirrors attachDecorationOverlay's lifecycle. */
 export function attachTableChrome({
@@ -248,6 +282,9 @@ export function attachTableChrome({
   let active: HTMLTableElement | null = null;
   let hoverRow: number | null = null;
   let hoverCol: number | null = null;
+  // The surface's grip-selection, so the selected handle stays lit while the
+  // selection is active, independent of hover.
+  let selection = blockSurface.getTableSelection();
   let scheduled = false;
   let rafId = 0;
   let hideTimer = 0;
@@ -257,50 +294,95 @@ export function attachTableChrome({
     layer.textContent = '';
   };
 
-  const paint = (): void => {
-    scheduled = false;
-    if (destroyed) return;
-    clear();
-    if (!active || !active.isConnected) {
-      active = null;
-      return;
-    }
-    const blockId = active.getAttribute(BLOCK_ID_ATTR);
+  /** Does this slot address the selected row/column? */
+  const isSelectedSlot = (blockId: string, slot: GutterSlot): boolean =>
+    selection !== null &&
+    selection.tableId === blockId &&
+    slot.kind === (selection.kind === 'col' ? 'col-handle' : 'row-handle') &&
+    slot.index === selection.index;
+
+  /** Build one slot's button and append it. */
+  const renderSlot = (blockId: string, slot: GutterSlot): void => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = `${SLOT_CLASS} ${SLOT_CLASS}--${slot.kind}`;
+    if (isSelectedSlot(blockId, slot)) el.classList.add('is-selected');
+    el.style.transform = `translate(${slot.x}px, ${slot.y}px)`;
+    el.style.width = `${slot.width}px`;
+    el.style.height = `${slot.height}px`;
+    const index = slot.index;
+    el.setAttribute('aria-label', SLOT_LABELS[slot.kind](index));
+    // Bound to click, NOT pointerup: WKWebView drops pointerup on a motionless
+    // press, and the Chromium latency gate is blind to that difference.
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      switch (slot.kind) {
+        case 'col-append':
+          blockSurface.insertTableColumnAt(blockId, index, 0);
+          break;
+        case 'row-append':
+          blockSurface.insertTableRowAt(blockId, index, 0);
+          break;
+        case 'col-handle':
+          blockSurface.selectTableColumn(blockId, index);
+          break;
+        case 'row-handle':
+          blockSurface.selectTableRow(blockId, index);
+          break;
+      }
+    });
+    // Keep a press on the chrome from stealing the caret out of the cell before the
+    // op runs.
+    el.addEventListener('mousedown', (e) => e.preventDefault());
+    layer.appendChild(el);
+  };
+
+  /** Render one table's chrome. `hovered` tables get the full set (rails + the
+   *  hover handles); a table that only carries a selection gets just its selected
+   *  handle, so the selection stays visible with the mouse away. */
+  const renderTable = (table: HTMLTableElement, hovered: boolean): void => {
+    if (!table.isConnected) return;
+    const blockId = table.getAttribute(BLOCK_ID_ATTR);
     if (!blockId) return;
     const geom = measureTable(
-      active,
+      table,
       scroller.getBoundingClientRect(),
       scroller.scrollLeft,
       scroller.scrollTop
     );
     if (!geom) return;
 
-    for (const slot of tableGutterSlots(geom, { row: hoverRow, col: hoverCol })) {
-      const isRail = slot.kind === 'col-append' || slot.kind === 'row-append';
-      const el = document.createElement(isRail ? 'button' : 'div');
-      el.className = `${SLOT_CLASS} ${SLOT_CLASS}--${slot.kind}`;
-      el.style.transform = `translate(${slot.x}px, ${slot.y}px)`;
-      el.style.width = `${slot.width}px`;
-      el.style.height = `${slot.height}px`;
-      if (el instanceof HTMLButtonElement) {
-        el.type = 'button';
-        const isCol = slot.kind === 'col-append';
-        el.setAttribute('aria-label', isCol ? 'Add column' : 'Add row');
-        const index = slot.index;
-        // Bound to click, NOT pointerup: WKWebView drops pointerup on a motionless
-        // press, and the Chromium latency gate is blind to that difference.
-        el.addEventListener('click', (e) => {
-          e.preventDefault();
-          if (isCol) blockSurface.insertTableColumnAt(blockId, index, 0);
-          else blockSurface.insertTableRowAt(blockId, index, 0);
-        });
-        // Keep a press on the chrome from stealing the caret out of the cell
-        // before the op runs.
-        el.addEventListener('mousedown', (e) => e.preventDefault());
+    const slots = hovered ? tableGutterSlots(geom, { row: hoverRow, col: hoverCol }) : [];
+    // Ensure the selected handle is present even when its slice isn't the hovered
+    // one (or the table isn't hovered at all).
+    if (selection && selection.tableId === blockId) {
+      const already = slots.some((s) => isSelectedSlot(blockId, s));
+      if (!already) {
+        const s = tableHandleSlot(geom, selection.kind, selection.index);
+        if (s) slots.push(s);
       }
-      layer.appendChild(el);
+    }
+    for (const slot of slots) renderSlot(blockId, slot);
+  };
+
+  const paint = (): void => {
+    scheduled = false;
+    if (destroyed) return;
+    clear();
+    if (active && !active.isConnected) active = null;
+
+    // The tables to draw: the hovered one (full chrome) and, if different, the one
+    // carrying the selection (its handle only).
+    if (active) renderTable(active, true);
+    if (selection) {
+      const selTable = layerSelectedTable();
+      if (selTable && selTable !== active) renderTable(selTable, false);
     }
   };
+
+  /** The element of the currently selected table, or null. */
+  const layerSelectedTable = (): HTMLTableElement | null =>
+    selection ? surface.querySelector<HTMLTableElement>(`table[${BLOCK_ID_ATTR}="${selection.tableId}"]`) : null;
 
   const schedule = (): void => {
     if (scheduled || destroyed) return;
@@ -323,10 +405,8 @@ export function attachTableChrome({
     active = table;
     hoverRow = table ? row : null;
     hoverCol = table ? col : null;
-    if (!table) {
-      clear();
-      return;
-    }
+    // Always repaint — even when clearing the hover, so a live selection's handle
+    // stays lit (paint renders the selected table's handle independent of hover).
     schedule();
   };
 
@@ -357,8 +437,9 @@ export function attachTableChrome({
 
   // Hover tracking runs on the scroller, not the table, because the chrome sits
   // OUTSIDE the table element. Over a cell: adopt its table and coordinates. Over
-  // an append rail: keep the table but drop the contextual handles. In the grace
-  // zone (handle lane or rail gap, which hit-test to no cell): hold as-is. Only
+  // a chrome element (a handle or rail) or anywhere in the grace zone (handle lane
+  // / rail gap, which hit-test to no cell): hold the current state — crucially, do
+  // NOT clear the hovered handle, or moving onto it to click would erase it. Only
   // when none of those holds does the chrome begin to fade.
   const onPointerOver = (e: PointerEvent): void => {
     const target = e.target as HTMLElement | null;
@@ -371,8 +452,7 @@ export function attachTableChrome({
     }
     if (!active) return;
     if (layer.contains(target)) {
-      cancelHide(); // over an append rail: no cell, so no handles
-      setState(active, null, null);
+      cancelHide(); // over a handle or rail of the active table: keep it drawn
       return;
     }
     if (zoneContains(hoverZone(active.getBoundingClientRect()), e.clientX, e.clientY)) {
@@ -394,7 +474,7 @@ export function attachTableChrome({
   };
 
   const onReflow = (): void => {
-    if (active) schedule();
+    if (active || selection) schedule();
   };
 
   // A structural pass rebuilds block elements wholesale (replaceWith), so every
@@ -402,19 +482,22 @@ export function attachTableChrome({
   // overlay and the code-highlight mirrors ride, and it is provably off the
   // keystroke path.
   const unsubscribe = blockSurface.onStructureChange(() => {
-    // The element identity changed; re-resolve the active table by block id. A
-    // structural op can change the row/column count (a just-appended column shifts
-    // the counts), so clamp the hovered coordinates against the fresh geometry
-    // rather than trust the pre-op indices.
-    if (!active) return;
-    const blockId = active.getAttribute(BLOCK_ID_ATTR);
-    active = blockId
-      ? surface.querySelector<HTMLTableElement>(`table[${BLOCK_ID_ATTR}="${blockId}"]`)
-      : null;
-    if (!active) {
-      setState(null, null, null);
-      return;
+    // The element identity changed; re-resolve the active table by block id (a
+    // structural op can also change the row/column count). paint re-measures both
+    // the hovered and the selected table, so a repaint is all that's owed.
+    if (active) {
+      const blockId = active.getAttribute(BLOCK_ID_ATTR);
+      active = blockId
+        ? surface.querySelector<HTMLTableElement>(`table[${BLOCK_ID_ATTR}="${blockId}"]`)
+        : null;
     }
+    if (active || selection) schedule();
+  });
+
+  // The selected handle stays lit off the surface's selection state, so it
+  // persists with the mouse away and clears when the selection dissolves.
+  const unsubscribeSelection = blockSurface.onTableSelectionChange(() => {
+    selection = blockSurface.getTableSelection();
     schedule();
   });
 
@@ -432,6 +515,7 @@ export function attachTableChrome({
     destroy(): void {
       destroyed = true;
       unsubscribe();
+      unsubscribeSelection();
       scroller.removeEventListener('pointerover', onPointerOver);
       scroller.removeEventListener('pointerleave', onPointerLeave);
       surface.removeEventListener('focusin', onFocusIn);

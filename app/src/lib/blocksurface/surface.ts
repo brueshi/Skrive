@@ -22,7 +22,7 @@ import { DecorationStore } from './decorations';
 import { HighlightBus } from './highlight/highlight-bus';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
-import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertTableColumn, insertTableRow, mergeBackward, mergeForward, removeBlocks, removeFootnote, replaceAcross } from './range-ops';
+import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertTableColumn, insertTableRow, mergeBackward, mergeForward, removeBlocks, removeFootnote, removeTableColumn, removeTableRow, replaceAcross } from './range-ops';
 import { blockIndexOf, findBlockById, updateBlockById, updateBlockInTop } from './tree';
 import { enterInContainer, exitContainer, splitBlockAt, type StructuralResult } from './structural';
 import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
@@ -157,6 +157,10 @@ function summariesEqual(a: SelectionInfo | null, b: SelectionInfo | null): boole
 // suppression. Every block element carries BLOCK_ID_ATTR; this rides on the same
 // element.
 const BLOCK_SELECTED_ATTR = 'data-block-selected';
+// Marks each cell of a grip-selected table row or column (SKR-266 B2). Like
+// BLOCK_SELECTED_ATTR it is a view-only ring the surface paints; the model is
+// untouched until the row/column is actually removed.
+const CELL_SELECTED_ATTR = 'data-cell-selected';
 /** How far the pointer may travel between mousedown and mouseup and still count as a
  *  press rather than a drag. A trackpad wobbles a pixel or two under a finger; a
  *  drag-select does not (SKR-239). */
@@ -273,6 +277,9 @@ export class BlockSurface {
   // which is where block elements are rebuilt or removed and any geometry an
   // overlay measured goes stale. Empty until an overlay subscribes.
   private readonly structureListeners = new Set<() => void>();
+  // Table row/column selection-change listeners (the chrome keeps the selected
+  // handle lit off this). Empty until the chrome subscribes.
+  private readonly tableSelectionListeners = new Set<() => void>();
   private readonly onDocChange?: (doc: Document) => void;
   private debounceTimer: number | null = null;
   // The deferred idle-callback handle for the cold path, and whether the doc has
@@ -372,6 +379,13 @@ export class BlockSurface {
   // on the surface, so keydown still routes here. Plural-ready (it feeds
   // removeBlocks) though today's gestures only ever select a single block.
   private blockSel: string[] = [];
+  // A grip-selected table row or column (SKR-266 B2): persistent, coordinate-
+  // addressed state set by a chrome handle click. Like blockSel it can't ride the
+  // live DOM selection — a handle click leaves no selection to read and WKWebView
+  // would collapse one anyway — so while it is active the DOM selection is cleared
+  // but focus stays on the surface, and keydown owns Delete/Escape. Mutually
+  // exclusive with blockSel.
+  private tableSel: { tableId: string; kind: 'row' | 'col'; index: number } | null = null;
   // A drag that started from inside this surface (a selection being dragged),
   // as opposed to content dragged in from another app (SKR-165). Internal moves
   // are refused honestly (dropEffect 'none') rather than silently mishandled —
@@ -812,6 +826,9 @@ export class BlockSurface {
     // A block is selected as a unit (SKR-203): its keys (delete / type-over /
     // dissolve / ⌘A-to-document) are owned here, ahead of every prose handler.
     if (this.blockSel.length > 0 && this.handleBlockSelectionKey(e)) return;
+    // A table row/column is grip-selected (SKR-266 B2): Delete removes it, Escape
+    // dissolves it. Owned here for the same reason — the DOM selection is cleared.
+    if (this.tableSel && this.handleTableSelectionKey(e)) return;
     // Cmd/Ctrl+Shift+V = paste literally (escape hatch for prose with incidental
     // * - # that would otherwise be read as Markdown). The native shell doesn't
     // issue a paste event for this chord, so we read the clipboard ourselves and
@@ -2518,12 +2535,13 @@ export class BlockSurface {
    *  self-inflicted-dissolution guard. Lives in the observer, not scattered
    *  handlers, so every user-driven selection change routes through one place. */
   private dissolveOnUserSelection(): void {
-    if (this.blockSel.length === 0) return;
+    if (this.blockSel.length === 0 && !this.tableSel) return;
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) return;
     const range = sel.getRangeAt(0);
     if (!this.container.contains(range.startContainer)) return;
     this.clearBlockSelectionState();
+    this.clearTableSelectionState();
   }
 
   /** Close an open slash session when the selection moves out from under it —
@@ -4691,6 +4709,158 @@ export class BlockSurface {
     if (el) setCaret(el, 0);
   }
 
+  // --- table row/column selection: a grip-selected slice (SKR-266 B2) --------
+
+  /** Select a whole table column by its grip. Coordinate-addressed — the chrome
+   *  passes the clicked column outright, so nothing is inferred from a caret. */
+  selectTableColumn(tableId: string, index: number): void {
+    this.setTableSelection(tableId, 'col', index);
+  }
+
+  /** Select a whole table row by its grip. */
+  selectTableRow(tableId: string, index: number): void {
+    this.setTableSelection(tableId, 'row', index);
+  }
+
+  /** The grip-selected row/column, or null. The table chrome reads it to keep the
+   *  selected handle lit while the selection is active, independent of hover. */
+  getTableSelection(): { tableId: string; kind: 'row' | 'col'; index: number } | null {
+    return this.tableSel;
+  }
+
+  /** Subscribe to table row/column selection changes (set and cleared). The chrome
+   *  keeps the selected handle painted off this signal. Returns an unsubscribe. */
+  onTableSelectionChange(fn: () => void): () => void {
+    this.tableSelectionListeners.add(fn);
+    return () => {
+      this.tableSelectionListeners.delete(fn);
+    };
+  }
+
+  private notifyTableSelection(): void {
+    for (const fn of this.tableSelectionListeners) fn();
+  }
+
+  /** Store the selection as authoritative state, paint the row/column, then clear
+   *  the DOM selection while KEEPING focus on the surface — so keydown owns
+   *  Delete/Escape and the state never depends on a WKWebView-collapsible
+   *  selection. Mirrors selectBlock; supersedes any block-as-unit selection. */
+  private setTableSelection(tableId: string, kind: 'row' | 'col', index: number): void {
+    this.clearBlockSelectionState();
+    this.tableSel = { tableId, kind, index };
+    this.renderTableSelection();
+    window.getSelection()?.removeAllRanges();
+    this.container.focus();
+    this.notifyTableSelection();
+    this.emitSelection();
+  }
+
+  /** Paint the selection tint: clear any stale marks, then mark every cell in the
+   *  selected row or column. Idempotent, so a repaint after a reconcile is safe. */
+  private renderTableSelection(): void {
+    for (const el of this.container.querySelectorAll(`[${CELL_SELECTED_ATTR}]`)) {
+      el.removeAttribute(CELL_SELECTED_ATTR);
+    }
+    const sel = this.tableSel;
+    if (!sel) return;
+    const table = this.leafElementById(sel.tableId);
+    if (!table) return;
+    // Cells carry data-cell-row / data-cell-col (render.ts); a row is all cells at
+    // one row index, a column all cells at one column index.
+    const key = sel.kind === 'row' ? 'data-cell-row' : 'data-cell-col';
+    for (const cell of table.querySelectorAll(`[${key}="${sel.index}"]`)) {
+      cell.setAttribute(CELL_SELECTED_ATTR, '');
+    }
+  }
+
+  /** Clear the table-selection state and its tint, without moving the caret. */
+  private clearTableSelectionState(): void {
+    if (!this.tableSel) return;
+    this.tableSel = null;
+    for (const el of this.container.querySelectorAll(`[${CELL_SELECTED_ATTR}]`)) {
+      el.removeAttribute(CELL_SELECTED_ATTR);
+    }
+    this.notifyTableSelection();
+  }
+
+  /** Keys owned while a table row/column is selected. Delete removes the slice;
+   *  Escape and the arrows dissolve back to a caret; a printable key ends the
+   *  selection at the slice's first cell (typing into a whole-row selection is not
+   *  meaningful). Undo/redo and other chords fall through. */
+  private handleTableSelectionKey(e: KeyboardEvent): boolean {
+    if (e.isComposing) return false;
+    const key = e.key;
+    // A delete chord with a modifier (⌥⌫, ⌘⌫, …) reduces to "remove the slice",
+    // exactly as plain Backspace/Delete does — the modifier is irrelevant here.
+    if ((key === 'Backspace' || key === 'Delete') && !e.shiftKey) {
+      e.preventDefault();
+      this.deleteSelectedTableSlice();
+      return true;
+    }
+    // Let undo/redo (and any other chord) run through the normal handler.
+    if (e.metaKey || e.ctrlKey || e.altKey) return false;
+    if (
+      key === 'Escape' ||
+      key === 'ArrowUp' ||
+      key === 'ArrowDown' ||
+      key === 'ArrowLeft' ||
+      key === 'ArrowRight' ||
+      key.length === 1
+    ) {
+      e.preventDefault();
+      this.dissolveTableSelectionToCaret();
+      return true;
+    }
+    return false;
+  }
+
+  /** Remove the selected row or column as one undo step, landing the caret in the
+   *  surviving table. Removing the last row/column would empty the table, so the
+   *  op returns null and we delete the whole table instead — the documented
+   *  contract of removeTableRow/removeTableColumn. */
+  private deleteSelectedTableSlice(): void {
+    const sel = this.tableSel;
+    if (!sel) return;
+    this.clearTableSelectionState();
+    const blocks =
+      sel.kind === 'row'
+        ? removeTableRow(this.doc.blocks, sel.tableId, sel.index)
+        : removeTableColumn(this.doc.blocks, sel.tableId, sel.index);
+    if (!blocks) {
+      const r = deleteBlock(this.doc.blocks, sel.tableId);
+      if (r) this.applyStructural(r);
+      this.closeSlash();
+      return;
+    }
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    const table = findBlockById(this.doc.blocks, sel.tableId);
+    if (table && table.type === 'table') {
+      const rows = table.rows.length;
+      const cols = table.rows[0]?.length ?? 0;
+      // Land in the slice that took the removed one's place (clamped to the end).
+      const row = sel.kind === 'row' ? Math.min(sel.index, rows - 1) : 0;
+      const col = sel.kind === 'col' ? Math.min(sel.index, cols - 1) : 0;
+      this.focusCell(table, Math.max(0, row), Math.max(0, col), 0);
+    }
+    this.scheduleSerialize();
+    this.closeSlash();
+  }
+
+  /** Dissolve the table selection back to a text caret at the slice's first cell. */
+  private dissolveTableSelectionToCaret(): void {
+    const sel = this.tableSel;
+    this.clearTableSelectionState();
+    if (!sel) return;
+    const table = findBlockById(this.doc.blocks, sel.tableId);
+    if (table && table.type === 'table') {
+      const row = sel.kind === 'row' ? sel.index : 0;
+      const col = sel.kind === 'col' ? sel.index : 0;
+      this.focusCell(table, row, col, 0);
+    }
+    this.emitSelection();
+  }
+
   private newInlineBlock(type: 'paragraph' | 'heading', inline: InlineNode[], level: number): BlockNode {
     const base = { id: generateBlockId(), durable: false, src: null, gapBefore: null, dirty: true };
     return type === 'heading' ? { type: 'heading', ...base, level, inline } : { type: 'paragraph', ...base, inline };
@@ -5312,6 +5482,9 @@ export class BlockSurface {
     // And any overlay measuring block geometry directly: the elements it measured
     // may have just been replaced.
     for (const fn of this.structureListeners) fn();
+    // Repaint a live table-selection tint: reconcile rebuilt the cells it sat on.
+    // A now-out-of-range index simply matches no cells (safe).
+    if (this.tableSel) this.renderTableSelection();
   }
 
   private scheduleSerialize(): void {
