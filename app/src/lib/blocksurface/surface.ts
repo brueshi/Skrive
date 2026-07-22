@@ -269,6 +269,10 @@ export class BlockSurface {
   // painter subscribes and repaints the colour mirror off-thread. Gated to code
   // blocks at the call site, so a prose keystroke never touches it.
   private readonly _highlight = new HighlightBus();
+  // Structural-re-render listeners (table hover chrome). Notified from reconcile,
+  // which is where block elements are rebuilt or removed and any geometry an
+  // overlay measured goes stale. Empty until an overlay subscribes.
+  private readonly structureListeners = new Set<() => void>();
   private readonly onDocChange?: (doc: Document) => void;
   private debounceTimer: number | null = null;
   // The deferred idle-callback handle for the cold path, and whether the doc has
@@ -438,6 +442,18 @@ export class BlockSurface {
    *  the editor subscribes and repaints code blocks' colour mirrors off-thread. */
   get highlight(): HighlightBus {
     return this._highlight;
+  }
+
+  /** Subscribe to structural re-renders — passes that rebuild, add, or remove
+   *  block elements. Overlays measuring real DOM geometry (table hover chrome)
+   *  need it because a reconcile replaces elements outright, invalidating every
+   *  rect they hold. Deliberately NOT a per-keystroke signal: typing re-renders a
+   *  block in place and never reconciles. Returns an unsubscribe. */
+  onStructureChange(fn: () => void): () => void {
+    this.structureListeners.add(fn);
+    return () => {
+      this.structureListeners.delete(fn);
+    };
   }
 
   // The document. Reads are plain; every assignment records a pre-edit snapshot
@@ -5293,6 +5309,9 @@ export class BlockSurface {
     // Likewise reassess every code block's highlight: a reconcile rebuilds code
     // blocks' elements (dropping their mirrors) and can add or remove blocks.
     this._highlight.invalidate(null);
+    // And any overlay measuring block geometry directly: the elements it measured
+    // may have just been replaced.
+    for (const fn of this.structureListeners) fn();
   }
 
   private scheduleSerialize(): void {
