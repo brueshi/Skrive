@@ -9,6 +9,7 @@ export {
   type SelectionInfo,
   type BlockTypeSpec,
   type SlashMenuState,
+  type TableMenuState,
   type TagMenuState,
   type CodeLangMenuState,
   type ImagePasteDelegate

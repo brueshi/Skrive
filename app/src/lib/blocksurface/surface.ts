@@ -74,6 +74,17 @@ export type BlockTypeSpec =
  *  Null when the menu is closed. */
 export type SlashMenuState = { rect: DOMRect; query: string; kind: 'block' | 'inline' };
 
+/** What the per-row/column table menu needs (SKR-266 B2b): where to anchor (the
+ *  clicked handle's rect), the table it acts on, and which row/column. Null when
+ *  the menu is closed. The chrome opens it on a handle click; the React popover
+ *  renders insert-around / delete against these coordinates. */
+export type TableMenuState = {
+  rect: DOMRect;
+  tableId: string;
+  kind: 'row' | 'col';
+  index: number;
+};
+
 /** What the inline-tag (`#`) autocomplete needs: where to anchor and the query
  *  typed after the `#`. Null when the popover is closed. Same shape as the slash
  *  menu — the two share the anchoring machinery, differing only in trigger and
@@ -341,6 +352,10 @@ export class BlockSurface {
   private lastSelection: SavedSelection | null = null;
   private slash: { blockId: string; slashOffset: number; kind: 'block' | 'inline' } | null = null;
   private slashCb: ((state: SlashMenuState | null) => void) | null = null;
+  // The per-row/column table menu (SKR-266 B2b): open state fed to the React
+  // popover, or null when closed. Set by openTableMenu (a chrome handle click).
+  private tableMenuCb: ((state: TableMenuState | null) => void) | null = null;
+  private tableMenu: TableMenuState | null = null;
   // The inline-tag (`#`) autocomplete session: the block and the flat offset of the
   // `#` that opened it. Null when closed. Mirrors `slash`, but a tag session opens
   // mid-text at a word boundary rather than only on a whole-block `/`.
@@ -572,6 +587,13 @@ export class BlockSurface {
    *  the menu on an empty block, as its query changes, and when it closes (null). */
   onSlashMenu(cb: ((state: SlashMenuState | null) => void) | null): void {
     this.slashCb = cb;
+  }
+
+  /** Register (or clear) the per-row/column table menu observer. Fired when a
+   *  chrome handle click opens the menu and when it closes (null). */
+  onTableMenu(cb: ((state: TableMenuState | null) => void) | null): void {
+    this.tableMenuCb = cb;
+    cb?.(this.tableMenu);
   }
 
   /** Register (or clear) the inline-tag (`#`) autocomplete observer. Fired when a
@@ -4773,13 +4795,15 @@ export class BlockSurface {
     }
   }
 
-  /** Clear the table-selection state and its tint, without moving the caret. */
+  /** Clear the table-selection state and its tint, without moving the caret. Also
+   *  closes the menu, which is anchored to the selection and must not outlive it. */
   private clearTableSelectionState(): void {
     if (!this.tableSel) return;
     this.tableSel = null;
     for (const el of this.container.querySelectorAll(`[${CELL_SELECTED_ATTR}]`)) {
       el.removeAttribute(CELL_SELECTED_ATTR);
     }
+    this.closeTableMenu();
     this.notifyTableSelection();
   }
 
@@ -4814,37 +4838,72 @@ export class BlockSurface {
     return false;
   }
 
-  /** Remove the selected row or column as one undo step, landing the caret in the
-   *  surviving table. Removing the last row/column would empty the table, so the
-   *  op returns null and we delete the whole table instead — the documented
-   *  contract of removeTableRow/removeTableColumn. */
+  /** Remove a table row by coordinate (the table menu's Delete row). */
+  removeTableRowAt(tableId: string, index: number): void {
+    this.removeTableSlice(tableId, 'row', index);
+  }
+
+  /** Remove a table column by coordinate (the table menu's Delete column). */
+  removeTableColumnAt(tableId: string, index: number): void {
+    this.removeTableSlice(tableId, 'col', index);
+  }
+
+  /** Remove the currently grip-selected row or column (keyboard Delete). */
   private deleteSelectedTableSlice(): void {
     const sel = this.tableSel;
     if (!sel) return;
+    this.removeTableSlice(sel.tableId, sel.kind, sel.index);
+  }
+
+  /** Remove one row or column as one undo step, landing the caret in the surviving
+   *  table. Removing the last row/column would empty the table, so the op returns
+   *  null and we delete the whole table instead — the documented contract of
+   *  removeTableRow/removeTableColumn. Coordinate-addressed, so both the keyboard
+   *  Delete and the menu's Delete route through it. */
+  private removeTableSlice(tableId: string, kind: 'row' | 'col', index: number): void {
     this.clearTableSelectionState();
     const blocks =
-      sel.kind === 'row'
-        ? removeTableRow(this.doc.blocks, sel.tableId, sel.index)
-        : removeTableColumn(this.doc.blocks, sel.tableId, sel.index);
+      kind === 'row'
+        ? removeTableRow(this.doc.blocks, tableId, index)
+        : removeTableColumn(this.doc.blocks, tableId, index);
     if (!blocks) {
-      const r = deleteBlock(this.doc.blocks, sel.tableId);
+      const r = deleteBlock(this.doc.blocks, tableId);
       if (r) this.applyStructural(r);
       this.closeSlash();
       return;
     }
     this.doc = { ...this.doc, blocks };
     this.reconcile();
-    const table = findBlockById(this.doc.blocks, sel.tableId);
+    const table = findBlockById(this.doc.blocks, tableId);
     if (table && table.type === 'table') {
       const rows = table.rows.length;
       const cols = table.rows[0]?.length ?? 0;
       // Land in the slice that took the removed one's place (clamped to the end).
-      const row = sel.kind === 'row' ? Math.min(sel.index, rows - 1) : 0;
-      const col = sel.kind === 'col' ? Math.min(sel.index, cols - 1) : 0;
+      const row = kind === 'row' ? Math.min(index, rows - 1) : 0;
+      const col = kind === 'col' ? Math.min(index, cols - 1) : 0;
       this.focusCell(table, Math.max(0, row), Math.max(0, col), 0);
     }
     this.scheduleSerialize();
     this.closeSlash();
+  }
+
+  // --- table menu: the per-row/column popover (SKR-266 B2b) ------------------
+
+  /** Open the per-row/column menu from a chrome handle click: select the slice
+   *  (so the handle stays lit under the menu) and anchor the popover to the handle
+   *  rect. The React menu renders insert-around / delete against these coords. */
+  openTableMenu(tableId: string, kind: 'row' | 'col', index: number, rect: DOMRect): void {
+    this.setTableSelection(tableId, kind, index);
+    this.tableMenu = { rect, tableId, kind, index };
+    this.tableMenuCb?.(this.tableMenu);
+  }
+
+  /** Close the table menu, leaving the selection as-is (a dismiss, not an action).
+   *  No-op when already closed. */
+  closeTableMenu(): void {
+    if (!this.tableMenu) return;
+    this.tableMenu = null;
+    this.tableMenuCb?.(null);
   }
 
   /** Dissolve the table selection back to a text caret at the slice's first cell. */

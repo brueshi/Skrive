@@ -371,3 +371,16 @@
   color: var(--skrive-accent);
   font-size: 0.85em;
 }
+
+/* The per-row/column table menu (SKR-266 B2b) reuses the slash popover shell and
+   rows; its command list is short and its labels compact, so it needs less width
+   than the insert catalog. */
+.sk-table-menu {
+  min-width: 11rem;
+}
+
+/* The destructive row (Delete row/column) reads in the danger tone, the same
+   token the block-danger affordances use. */
+.sk-table-menu-item--danger .rich-slash-title {
+  color: var(--skrive-danger, #c0392b);
+}
