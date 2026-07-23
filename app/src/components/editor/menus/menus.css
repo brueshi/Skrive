@@ -384,3 +384,18 @@
 .sk-table-menu-item--danger .rich-slash-title {
   color: var(--skrive-danger, #c0392b);
 }
+
+/* A hairline between command groups (alignment / insert / delete). */
+.sk-table-menu-sep {
+  height: 1px;
+  margin: 0.3rem 0.2rem;
+  background: var(--skrive-rule);
+}
+
+/* The check on the current column alignment, in the trailing slot. */
+.sk-table-menu-check {
+  margin-left: auto;
+  padding-left: 0.5rem;
+  color: var(--skrive-accent);
+  font-size: 0.85em;
+}

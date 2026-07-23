@@ -14,29 +14,51 @@ import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import type { BlockSurface, TableMenuState } from '../../../lib/blocksurface';
+import type { TableAlign } from '../../../lib/blockmodel';
 import { useAnchoredRect } from './useAnchoredRect';
 import './menus.css';
 
-type TableMenuItem = { label: string; run: () => void; danger?: boolean };
+type TableMenuItem = { label: string; run: () => void; danger?: boolean; checked?: boolean };
 
-/** The commands for a given menu state — insert on either side of the slice, then
- *  delete it. Column and row differ only in wording and axis. Each command closes
- *  the menu; the insert ops land the caret in the new cell (which dissolves the
- *  selection), and delete routes through removeTable*At. */
-function itemsFor(surface: BlockSurface, state: TableMenuState): TableMenuItem[] {
+/** The column's current alignment, or null (default). Read from the live document
+ *  so the alignment group can mark the active option. */
+function currentAlign(surface: BlockSurface, tableId: string, col: number): TableAlign {
+  const table = surface.getDocument().blocks.find((b) => b.id === tableId);
+  return table?.type === 'table' ? (table.align[col] ?? null) : null;
+}
+
+/** The command groups for a menu state, rendered with a separator between groups.
+ *  A column gets alignment (left / center / right, the current one checked and a
+ *  re-pick toggling back to default) then insert-around then delete; a row gets
+ *  insert-around then delete. Each command closes the menu; insert lands the caret
+ *  in the new cell (dissolving the selection), delete routes through removeTable*At,
+ *  and alignment re-serializes the delimiter row. */
+function groupsFor(surface: BlockSurface, state: TableMenuState): TableMenuItem[][] {
   const { tableId, index, kind } = state;
   const close = () => surface.closeTableMenu();
   if (kind === 'col') {
+    const active = currentAlign(surface, tableId, index);
+    const alignItem = (label: string, value: Exclude<TableAlign, null>): TableMenuItem => ({
+      label,
+      checked: active === value,
+      // Re-picking the current alignment clears it back to the default.
+      run: () => (surface.setColumnAlignment(tableId, index, active === value ? null : value), close())
+    });
     return [
-      { label: 'Insert column left', run: () => (surface.insertTableColumnAt(tableId, index), close()) },
-      { label: 'Insert column right', run: () => (surface.insertTableColumnAt(tableId, index + 1), close()) },
-      { label: 'Delete column', danger: true, run: () => (surface.removeTableColumnAt(tableId, index), close()) }
+      [alignItem('Align left', 'left'), alignItem('Align center', 'center'), alignItem('Align right', 'right')],
+      [
+        { label: 'Insert column left', run: () => (surface.insertTableColumnAt(tableId, index), close()) },
+        { label: 'Insert column right', run: () => (surface.insertTableColumnAt(tableId, index + 1), close()) }
+      ],
+      [{ label: 'Delete column', danger: true, run: () => (surface.removeTableColumnAt(tableId, index), close()) }]
     ];
   }
   return [
-    { label: 'Insert row above', run: () => (surface.insertTableRowAt(tableId, index), close()) },
-    { label: 'Insert row below', run: () => (surface.insertTableRowAt(tableId, index + 1), close()) },
-    { label: 'Delete row', danger: true, run: () => (surface.removeTableRowAt(tableId, index), close()) }
+    [
+      { label: 'Insert row above', run: () => (surface.insertTableRowAt(tableId, index), close()) },
+      { label: 'Insert row below', run: () => (surface.insertTableRowAt(tableId, index + 1), close()) }
+    ],
+    [{ label: 'Delete row', danger: true, run: () => (surface.removeTableRowAt(tableId, index), close()) }]
   ];
 }
 
@@ -57,7 +79,9 @@ export function BlockTableMenu({ surface }: { surface: BlockSurface }) {
     return () => surface.onTableMenu(null);
   }, [surface]);
 
-  const items = useMemo(() => (state ? itemsFor(surface, state) : []), [surface, state]);
+  const groups = useMemo(() => (state ? groupsFor(surface, state) : []), [surface, state]);
+  // Flat list for keyboard navigation; the grouping only drives separators.
+  const items = useMemo(() => groups.flat(), [groups]);
 
   // Keyboard: own Escape / arrows / Enter while open (capture phase, so the
   // surface's keydown — which would otherwise dissolve the selection on Escape —
@@ -123,20 +147,33 @@ export function BlockTableMenu({ surface }: { surface: BlockSurface }) {
           transition={{ duration: 0.12 }}
           onMouseDown={(e) => e.preventDefault()}
         >
-          {items.map((item, i) => (
-            <button
-              key={item.label}
-              type="button"
-              role="menuitem"
-              className={`rich-slash-item${i === active ? ' active' : ''}${item.danger ? ' sk-table-menu-item--danger' : ''}`}
-              onMouseEnter={() => setActive(i)}
-              onMouseDown={(e: MouseEvent) => {
-                e.preventDefault();
-                item.run();
-              }}
-            >
-              <span className="rich-slash-title">{item.label}</span>
-            </button>
+          {groups.map((group, g) => (
+            <div key={g} className="sk-table-menu-group" role="group">
+              {g > 0 && <div className="sk-table-menu-sep" role="separator" />}
+              {group.map((item) => {
+                const i = items.indexOf(item);
+                return (
+                  <button
+                    key={item.label}
+                    type="button"
+                    role="menuitem"
+                    className={`rich-slash-item${i === active ? ' active' : ''}${item.danger ? ' sk-table-menu-item--danger' : ''}`}
+                    onMouseEnter={() => setActive(i)}
+                    onMouseDown={(e: MouseEvent) => {
+                      e.preventDefault();
+                      item.run();
+                    }}
+                  >
+                    <span className="rich-slash-title">{item.label}</span>
+                    {item.checked && (
+                      <span className="sk-table-menu-check" aria-hidden="true">
+                        ✓
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           ))}
         </motion.div>
       )}

@@ -256,6 +256,18 @@ describe('the per-row/column menu (B2b)', () => {
     ]);
   });
 
+  it('setColumnAlignment paints the physical text-align on the column and re-serializes', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`${TABLE}\n`) });
+    surface.setColumnAlignment(tableId(surface), 1, 'center');
+
+    // Every cell of column 1 carries the physical align; column 0 is untouched.
+    for (const el of container.querySelectorAll('[data-cell-col="1"]')) {
+      expect((el as HTMLElement).style.textAlign).toBe('center');
+    }
+    expect((container.querySelector('[data-cell-col="0"]') as HTMLElement).style.textAlign).toBe('');
+    expect(tableBlock(surface).align).toEqual([null, 'center', null]);
+  });
+
   it('removeTableRowAt on the only body-bearing single row deletes the table', () => {
     const surface = new BlockSurface({ container, doc: parseDocument('| a |\n| - |\n| 1 |\n') });
     surface.removeTableRowAt(tableId(surface), 0);

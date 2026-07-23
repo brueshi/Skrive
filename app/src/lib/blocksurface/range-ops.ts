@@ -11,7 +11,7 @@
 // no image *block* — an image is an InlineNode embedded in a paragraph, not a
 // barrier in its own right.)
 
-import { generateBlockId, type BlockNode, type InlineNode } from '../blockmodel';
+import { generateBlockId, type BlockNode, type InlineNode, type TableAlign } from '../blockmodel';
 import { coalesceInline, deleteRangeInInline, inlineLength, insertTextInInline } from './inline-ops';
 import { findBlockById, updateBlockById } from './tree';
 
@@ -651,6 +651,34 @@ export function removeTableColumn(blocks: BlockNode[], tableId: string, index: n
     const align = [...b.align];
     align.splice(index, 1);
     return { ...b, align, rows, dirty: true } as BlockNode;
+  });
+}
+
+/**
+ * Set column `col`'s alignment. `align` is column-indexed, so the delimiter row
+ * re-serializes from it (`:---`, `---:`, `:---:`, or `---` for null) and stays the
+ * header's width. Returns null when `tableId` is not a table, `col` is out of the
+ * header's range, or the alignment is unchanged (a no-op earns no undo step). The
+ * `align` array is defensively padded to the header width first, upholding the
+ * length invariant even against a malformed input.
+ */
+export function setColumnAlignment(
+  blocks: BlockNode[],
+  tableId: string,
+  col: number,
+  align: TableAlign
+): BlockNode[] | null {
+  const table = findBlockById(blocks, tableId);
+  if (!table || table.type !== 'table') return null;
+  const cols = table.rows[0]?.length ?? 0;
+  if (col < 0 || col >= cols) return null;
+  if ((table.align[col] ?? null) === align) return null;
+  return updateBlockById(blocks, tableId, (b) => {
+    if (b.type !== 'table') return b;
+    const next = [...b.align];
+    while (next.length < cols) next.push(null);
+    next[col] = align;
+    return { ...b, align: next, dirty: true } as BlockNode;
   });
 }
 
