@@ -4874,6 +4874,15 @@ export class BlockSurface {
     this.scheduleSerialize();
   }
 
+  /** Drop the text caret while leaving focus on the surface — used when a chrome
+   *  pointer gesture (a column resize) takes over, so a stale caret does not keep
+   *  blinking in a cell for the length of the drag. Mirrors the DOM-selection clear
+   *  in setTableSelection; focus stays put, so typing resumes cleanly afterward. */
+  clearCaret(): void {
+    window.getSelection()?.removeAllRanges();
+    this.emitSelection();
+  }
+
   /** Remove the currently grip-selected row or column (keyboard Delete). */
   private deleteSelectedTableSlice(): void {
     const sel = this.tableSel;

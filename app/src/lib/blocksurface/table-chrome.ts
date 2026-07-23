@@ -484,6 +484,11 @@ export function attachTableChrome({
     const onMove = (ev: PointerEvent): void => {
       const delta = ev.clientX - startX;
       if (!moved && Math.abs(delta) < RESIZE_MOVE_THRESHOLD_PX) return;
+      // On the transition from press to drag, drop the caret the press left in the
+      // cell — a blinking insertion point under a column resize reads as a bug. A
+      // sub-threshold press stays a click and never reaches here, so a plain click
+      // near a border leaves the caret alone.
+      if (!moved) blockSurface.clearCaret();
       moved = true;
       current = resizeColumnWidths(startWidths, boundary, delta, MIN_COLUMN_PX);
       applyLiveColWidths(table, current);
