@@ -126,6 +126,15 @@ function readAlign(v: unknown, where: string): FolioAlign {
   throw new FolioParseError(`${where} is not a valid alignment: ${String(v)}`);
 }
 
+// A column width weight: any positive finite number (weights are relative, so
+// magnitude is free; zero/negative/NaN is meaningless and rejected).
+function readWidth(v: unknown, where: string): number {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) {
+    throw new FolioParseError(`${where} must be a positive number`);
+  }
+  return v;
+}
+
 function readListItem(v: unknown, where: string): FolioListItem {
   if (!isObject(v)) throw new FolioParseError(`${where} must be an object`);
   const item: FolioListItem = {
@@ -194,6 +203,13 @@ function readBlock(v: unknown, where: string): FolioBlock {
         align: requireArray(v.align, `${where}.align`).map((a, i) =>
           readAlign(a, `${where}.align[${i}]`)
         ),
+        ...(v.widths !== undefined
+          ? {
+              widths: requireArray(v.widths, `${where}.widths`).map((w, i) =>
+                readWidth(w, `${where}.widths[${i}]`)
+              )
+            }
+          : {}),
         rows: requireArray(v.rows, `${where}.rows`).map((row, r) =>
           requireArray(row, `${where}.rows[${r}]`).map((cell, c) =>
             readInlineArray(cell, `${where}.rows[${r}][${c}]`)

@@ -22,7 +22,7 @@ import { DecorationStore } from './decorations';
 import { HighlightBus } from './highlight/highlight-bus';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
-import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertTableColumn, insertTableRow, mergeBackward, mergeForward, removeBlocks, removeFootnote, removeTableColumn, removeTableRow, replaceAcross, setColumnAlignment } from './range-ops';
+import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertTableColumn, insertTableRow, mergeBackward, mergeForward, removeBlocks, removeFootnote, removeTableColumn, removeTableRow, replaceAcross, setColumnAlignment, setTableColumnWidths } from './range-ops';
 import { blockIndexOf, findBlockById, updateBlockById, updateBlockInTop } from './tree';
 import { enterInContainer, exitContainer, splitBlockAt, type StructuralResult } from './structural';
 import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
@@ -4854,6 +4854,20 @@ export class BlockSurface {
    *  delimiter row re-serializes from `align`. */
   setColumnAlignment(tableId: string, col: number, align: TableAlign): void {
     const blocks = setColumnAlignment(this.doc.blocks, tableId, col, align);
+    if (!blocks) return;
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    this.scheduleSerialize();
+  }
+
+  /** Replace a table's per-column width weights (the drag-resize commit). A length
+   *  mismatch or a no-op set returns null and is ignored. Display-only: widths
+   *  never touch `.md` (byte-stable GFM has no width syntax), and the re-render is
+   *  off the keystroke path — the drag previews by mutating the live `<col>`
+   *  styles and commits once here on pointerup, so this runs at most once per
+   *  drag, not per pointer move. */
+  setTableColumnWidths(tableId: string, widths: number[]): void {
+    const blocks = setTableColumnWidths(this.doc.blocks, tableId, widths);
     if (!blocks) return;
     this.doc = { ...this.doc, blocks };
     this.reconcile();

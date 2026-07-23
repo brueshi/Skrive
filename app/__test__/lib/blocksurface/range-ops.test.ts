@@ -18,6 +18,7 @@ import {
   removeTableRow,
   replaceAcross,
   setColumnAlignment,
+  setTableColumnWidths,
   documentLeaves
 } from '../../../src/lib/blocksurface/range-ops';
 import { parseDocument } from '../../../src/lib/blockmodel/parse';
@@ -289,6 +290,23 @@ describe('insertTableColumn', () => {
     expect(t.rows[1]!.map(plain), 'ragged row grew by one, not padded to header width').toEqual(['x', '']);
   });
 
+  it('splices a weight for the new column when widths are set, in lockstep', () => {
+    const d = doc(`${TABLE}\n`);
+    const id = tableId(d.blocks);
+    const withW = setTableColumnWidths(d.blocks, id, [3, 1])!;
+    const blocks = insertTableColumn(withW, id, 1)!;
+    const t = table(blocks);
+    // The new column takes the average of the existing weights ([3,1] -> 2).
+    expect(t.widths).toEqual([3, 2, 1]);
+    expect(t.widths!.length, 'widths track column count').toBe(t.rows[0]!.length);
+  });
+
+  it('leaves a width-free table width-free on column insert', () => {
+    const d = doc(`${TABLE}\n`);
+    const blocks = insertTableColumn(d.blocks, tableId(d.blocks), 1)!;
+    expect(table(blocks).widths).toBeUndefined();
+  });
+
   it('returns null when the id is not a table', () => {
     const d = doc('a\n');
     expect(insertTableColumn(d.blocks, leafId(d.blocks, 'a'), 0)).toBeNull();
@@ -340,6 +358,23 @@ describe('removeTableColumn', () => {
     expect(t.align).toEqual([null]);
   });
 
+  it("drops the removed column's weight when widths are set", () => {
+    const d = doc('| a | b | c |\n| - | - | - |\n| 1 | 2 | 3 |\n');
+    const id = tableId(d.blocks);
+    const withW = setTableColumnWidths(d.blocks, id, [2, 3, 5])!;
+    const blocks = removeTableColumn(withW, id, 1)!;
+    const t = table(blocks);
+    // Column 1's weight is dropped; the survivors keep their relative sizes.
+    expect(t.widths).toEqual([2, 5]);
+    expect(t.widths!.length).toBe(t.rows[0]!.length);
+  });
+
+  it('leaves a width-free table width-free on column removal', () => {
+    const d = doc('| a | b |\n| - | - |\n| 1 | 2 |\n');
+    const blocks = removeTableColumn(d.blocks, tableId(d.blocks), 1)!;
+    expect(table(blocks).widths).toBeUndefined();
+  });
+
   it('returns null when the table has a single column', () => {
     const d = doc('| a |\n| - |\n| 1 |\n');
     expect(removeTableColumn(d.blocks, tableId(d.blocks), 0)).toBeNull();
@@ -348,6 +383,45 @@ describe('removeTableColumn', () => {
   it('returns null when the id is not a table', () => {
     const d = doc('a\n');
     expect(removeTableColumn(d.blocks, leafId(d.blocks, 'a'), 0)).toBeNull();
+  });
+});
+
+describe('setTableColumnWidths', () => {
+  it('sets per-column width weights, invisible to byte-stable .md', () => {
+    const d = doc(`${TABLE}\n`);
+    const blocks = setTableColumnWidths(d.blocks, tableId(d.blocks), [3, 1])!;
+    expect(table(blocks).widths).toEqual([3, 1]);
+    // Widths never serialize to GFM: the .md stays byte-identical to the authored
+    // source (the single-dash delimiter is preserved, not canonicalized).
+    expect(idempotent(blocks, d)).toBe(`${TABLE}\n`);
+  });
+
+  it('returns null when the widths equal the current ones (no undo step)', () => {
+    const d = doc(`${TABLE}\n`);
+    const id = tableId(d.blocks);
+    const withW = setTableColumnWidths(d.blocks, id, [3, 1])!;
+    expect(setTableColumnWidths(withW, id, [3, 1])).toBeNull();
+  });
+
+  it('returns null on a length mismatch with the header', () => {
+    const d = doc(`${TABLE}\n`);
+    const id = tableId(d.blocks);
+    expect(setTableColumnWidths(d.blocks, id, [1, 2, 3])).toBeNull();
+    expect(setTableColumnWidths(d.blocks, id, [1])).toBeNull();
+  });
+
+  it('returns null on a non-positive or non-finite weight', () => {
+    const d = doc(`${TABLE}\n`);
+    const id = tableId(d.blocks);
+    expect(setTableColumnWidths(d.blocks, id, [1, 0])).toBeNull();
+    expect(setTableColumnWidths(d.blocks, id, [-1, 2])).toBeNull();
+    expect(setTableColumnWidths(d.blocks, id, [1, Number.NaN])).toBeNull();
+    expect(setTableColumnWidths(d.blocks, id, [1, Number.POSITIVE_INFINITY])).toBeNull();
+  });
+
+  it('returns null when the id is not a table', () => {
+    const d = doc('a\n');
+    expect(setTableColumnWidths(d.blocks, leafId(d.blocks, 'a'), [1])).toBeNull();
   });
 });
 

@@ -145,6 +145,14 @@ export type TableBlock = BlockBase & {
   type: 'table';
   /** Per-column alignment, length = column count, taken from the header row. */
   align: TableAlign[];
+  /** Per-column relative width weights, length = column count. Absent means the
+   *  columns share the table's width equally under the browser's auto layout —
+   *  the default for every `.md`-imported or freshly-inserted table. Present
+   *  switches the table to fixed layout in these proportions; the weights are
+   *  relative (the renderer normalizes them), so an op never has to renormalize
+   *  on a column splice. Widths live only in the model / `.folio`: GFM has no
+   *  column-width syntax, so a `.md` round-trip never sees them. */
+  widths?: number[];
   /** Row 0 is the header; the rest are body rows. Each row is a row of cells. */
   rows: TableCell[][];
 };

@@ -122,13 +122,12 @@ function blockToFolio(b: BlockNode): FolioBlock {
         spread: b.spread,
         items: b.items.map(itemToFolio)
       };
-    case 'table':
-      return {
-        id: b.id,
-        type: 'table',
-        align: b.align,
-        rows: b.rows.map((row) => row.map((cell) => cell.map(inlineToFolio)))
-      };
+    case 'table': {
+      const rows = b.rows.map((row) => row.map((cell) => cell.map(inlineToFolio)));
+      return b.widths
+        ? { id: b.id, type: 'table', align: b.align, widths: b.widths, rows }
+        : { id: b.id, type: 'table', align: b.align, rows };
+    }
   }
 }
 
@@ -209,6 +208,7 @@ function blockToModel(b: FolioBlock): BlockNode {
         id: b.id,
         type: 'table',
         align: b.align,
+        ...(b.widths ? { widths: b.widths } : {}),
         rows: b.rows.map((row) => row.map((cell) => cell.map(inlineToModel)))
       };
   }

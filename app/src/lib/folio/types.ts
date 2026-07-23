@@ -111,6 +111,9 @@ export type FolioTable = {
   type: 'table';
   /** Length = column count; each entry from the header. */
   align: FolioAlign[];
+  /** Per-column relative width weights (length = column count). Absent when the
+   *  table has no custom widths. `.folio`-only — GFM has no width syntax. */
+  widths?: number[];
   /** Row 0 is the header; the rest are body rows. */
   rows: FolioInline[][][];
 };

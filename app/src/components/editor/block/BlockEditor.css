@@ -260,6 +260,20 @@
   width: 100%;
 }
 
+/* A table with explicit per-column widths (the <colgroup> the renderer emits)
+   opts into fixed layout so the <col> percentages are honoured proportionally
+   against the table's 100% width. Content is broken to fit rather than widening
+   the column, so the table stays pinned to the writing measure. Width-free tables
+   keep auto layout untouched. */
+.block-editor-surface table.has-col-widths {
+  table-layout: fixed;
+}
+
+.block-editor-surface table.has-col-widths th,
+.block-editor-surface table.has-col-widths td {
+  overflow-wrap: break-word;
+}
+
 .block-editor-surface th,
 .block-editor-surface td {
   border: 1px solid var(--skrive-rule);
