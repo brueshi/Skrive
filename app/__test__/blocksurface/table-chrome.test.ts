@@ -7,8 +7,11 @@ import { describe, expect, it } from 'vitest';
 import {
   GUTTER_METRICS,
   hoverZone,
+  normalizeWidths,
+  resizeColumnWidths,
   tableGutterSlots,
   tableHandleSlot,
+  tableResizeSlots,
   zoneContains,
   type GutterSlot,
   type HoverCell,
@@ -158,6 +161,80 @@ describe('tableHandleSlot', () => {
     expect(tableHandleSlot(geom, 'col', 3)).toBeNull();
     expect(tableHandleSlot(geom, 'col', -1)).toBeNull();
     expect(tableHandleSlot(geom, 'row', 9)).toBeNull();
+  });
+});
+
+describe('tableResizeSlots', () => {
+  it('places a strip on each interior column boundary, centred on the edge', () => {
+    // A 3-column table has two interior boundaries (at colEdges[1] and colEdges[2]).
+    const slots = tableResizeSlots(geometry(3, 3));
+    const { resizeGrab } = GUTTER_METRICS;
+    expect(slots.map((s) => s.kind)).toEqual(['col-resize', 'col-resize']);
+    expect(slots.map((s) => s.index)).toEqual([0, 1]); // left column of each boundary
+    // colEdges are [100,160,220,280]; boundaries at 160 and 220, strip centred there.
+    expect(slots[0]!.x).toBe(160 - resizeGrab / 2);
+    expect(slots[1]!.x).toBe(220 - resizeGrab / 2);
+    expect(slots[0]!.width).toBe(resizeGrab);
+    // Full table height, top-aligned with the table box.
+    expect(slots[0]!.y).toBe(200);
+    expect(slots[0]!.height).toBe(60);
+  });
+
+  it('follows uneven measured column edges rather than a uniform grid', () => {
+    const geom: TableGeometry = {
+      box: { x: 0, y: 0, width: 300, height: 40 },
+      colEdges: [0, 20, 250, 300],
+      rowEdges: [0, 20, 40]
+    };
+    const { resizeGrab } = GUTTER_METRICS;
+    const slots = tableResizeSlots(geom);
+    expect(slots.map((s) => s.x)).toEqual([20 - resizeGrab / 2, 250 - resizeGrab / 2]);
+  });
+
+  it('yields no strips for a single-column table (no boundary to trade across)', () => {
+    expect(tableResizeSlots(geometry(1, 3))).toEqual([]);
+  });
+});
+
+describe('resizeColumnWidths', () => {
+  it('trades width between a column and its right neighbour, conserving the pair', () => {
+    const next = resizeColumnWidths([100, 100, 100], 0, 30, 40);
+    expect(next).toEqual([130, 70, 100]);
+    // The untouched column and the pair sum are unchanged (table width is fixed).
+    expect(next[0]! + next[1]!).toBe(200);
+    expect(next[2]).toBe(100);
+  });
+
+  it('clamps so the shrinking neighbour never falls below the minimum', () => {
+    // A +80 drag would push column 1 to 20; clamp it to the 40 floor (delta 60).
+    expect(resizeColumnWidths([100, 100, 100], 0, 80, 40)).toEqual([160, 40, 100]);
+  });
+
+  it('clamps so the dragged column itself never falls below the minimum', () => {
+    // A -80 drag would push column 0 to 20; clamp to the 40 floor (delta -60).
+    expect(resizeColumnWidths([100, 100, 100], 0, -80, 40)).toEqual([40, 160, 100]);
+  });
+
+  it('returns an unchanged copy for an out-of-range boundary', () => {
+    const widths = [100, 100];
+    expect(resizeColumnWidths(widths, 1, 20, 40)).toEqual([100, 100]); // no column 2
+    expect(resizeColumnWidths(widths, -1, 20, 40)).toEqual([100, 100]);
+    expect(resizeColumnWidths(widths, 1, 20, 40)).not.toBe(widths); // fresh array
+  });
+});
+
+describe('normalizeWidths', () => {
+  it('turns pixel widths into fractional weights summing to ~1', () => {
+    expect(normalizeWidths([150, 50])).toEqual([0.75, 0.25]);
+  });
+
+  it('rounds to 4 decimals so an identical drag commits an identical array', () => {
+    // Thirds round cleanly and stably rather than trailing float noise.
+    expect(normalizeWidths([100, 100, 100])).toEqual([0.3333, 0.3333, 0.3333]);
+  });
+
+  it('falls back to equal weights for a degenerate all-zero input', () => {
+    expect(normalizeWidths([0, 0])).toEqual([0.5, 0.5]);
   });
 });
 
