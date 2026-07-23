@@ -10,7 +10,7 @@
 // are no-ops until Stage 3b — never letting the browser mutate structure behind
 // the model's back.
 
-import { generateBlockId, parseDocument, serializeDocument, type BlockNode, type Document, type InlineMarks, type InlineNode, type ListItem, type TableBlock } from '../blockmodel';
+import { generateBlockId, parseDocument, serializeDocument, type BlockNode, type Document, type InlineMarks, type InlineNode, type ListItem, type TableAlign, type TableBlock } from '../blockmodel';
 import { markdownForPaste } from '../clipboard/htmlToMarkdown';
 import { literalParagraphs, plainTextParagraphs } from '../clipboard/plainText';
 import { buildClipboardPayload } from '../clipboard/copyOut';
@@ -22,7 +22,7 @@ import { DecorationStore } from './decorations';
 import { HighlightBus } from './highlight/highlight-bus';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
-import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertTableColumn, insertTableRow, mergeBackward, mergeForward, removeBlocks, removeFootnote, removeTableColumn, removeTableRow, replaceAcross } from './range-ops';
+import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertTableColumn, insertTableRow, mergeBackward, mergeForward, removeBlocks, removeFootnote, removeTableColumn, removeTableRow, replaceAcross, setColumnAlignment } from './range-ops';
 import { blockIndexOf, findBlockById, updateBlockById, updateBlockInTop } from './tree';
 import { enterInContainer, exitContainer, splitBlockAt, type StructuralResult } from './structural';
 import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
@@ -4846,6 +4846,18 @@ export class BlockSurface {
   /** Remove a table column by coordinate (the table menu's Delete column). */
   removeTableColumnAt(tableId: string, index: number): void {
     this.removeTableSlice(tableId, 'col', index);
+  }
+
+  /** Set a column's alignment (the table menu's align controls). A no-op op (same
+   *  alignment) returns null and is ignored, so re-picking the current value costs
+   *  nothing. The table re-renders with the new physical text-align and the `.md`
+   *  delimiter row re-serializes from `align`. */
+  setColumnAlignment(tableId: string, col: number, align: TableAlign): void {
+    const blocks = setColumnAlignment(this.doc.blocks, tableId, col, align);
+    if (!blocks) return;
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    this.scheduleSerialize();
   }
 
   /** Remove the currently grip-selected row or column (keyboard Delete). */

@@ -358,6 +358,11 @@ export function renderBlock(
           // Cells resolve direction individually; the table element itself
           // stays direction-neutral so the COLUMN order never flips (SKR-232).
           cellEl.setAttribute('dir', 'auto');
+          // GFM column alignment is physical (left / center / right), so it wins
+          // over the CSS `text-align: start` default; a null column keeps `start`,
+          // which honours the cell's own direction (SKR-232).
+          const align = block.align[c];
+          if (align) cellEl.style.textAlign = align;
           renderInline(cell, cellEl, resolveAsset);
           tr.appendChild(cellEl);
         });

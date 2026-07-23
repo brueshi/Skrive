@@ -17,6 +17,7 @@ import {
   removeTableColumn,
   removeTableRow,
   replaceAcross,
+  setColumnAlignment,
   documentLeaves
 } from '../../../src/lib/blocksurface/range-ops';
 import { parseDocument } from '../../../src/lib/blockmodel/parse';
@@ -347,6 +348,47 @@ describe('removeTableColumn', () => {
   it('returns null when the id is not a table', () => {
     const d = doc('a\n');
     expect(removeTableColumn(d.blocks, leafId(d.blocks, 'a'), 0)).toBeNull();
+  });
+});
+
+describe('setColumnAlignment', () => {
+  it('sets a column alignment and re-serializes the delimiter, byte-stable', () => {
+    const d = doc(`${TABLE}\n`);
+    const blocks = setColumnAlignment(d.blocks, tableId(d.blocks), 1, 'center')!;
+    expect(table(blocks).align).toEqual([null, 'center']);
+    // Column 1's delimiter becomes :---:, column 0 stays ---.
+    expect(idempotent(blocks, d)).toBe('| a | b |\n| --- | :---: |\n| 1 | 2 |\n');
+  });
+
+  it('maps every alignment to its delimiter', () => {
+    const d = doc(`${TABLE}\n`);
+    const id = tableId(d.blocks);
+    expect(idempotent(setColumnAlignment(d.blocks, id, 0, 'left')!, d)).toContain('| :--- | --- |');
+    expect(idempotent(setColumnAlignment(d.blocks, id, 0, 'right')!, d)).toContain('| ---: | --- |');
+    expect(idempotent(setColumnAlignment(d.blocks, id, 0, 'center')!, d)).toContain('| :---: | --- |');
+  });
+
+  it('clearing back to null restores the plain delimiter', () => {
+    const d = doc('| a | b |\n| :---: | --- |\n| 1 | 2 |\n');
+    const blocks = setColumnAlignment(d.blocks, tableId(d.blocks), 0, null)!;
+    expect(table(blocks).align).toEqual([null, null]);
+    expect(idempotent(blocks, d)).toBe('| a | b |\n| --- | --- |\n| 1 | 2 |\n');
+  });
+
+  it('returns null when the alignment is unchanged (no undo step for a no-op)', () => {
+    const d = doc('| a | b |\n| :---: | --- |\n| 1 | 2 |\n');
+    expect(setColumnAlignment(d.blocks, tableId(d.blocks), 0, 'center')).toBeNull();
+  });
+
+  it('returns null for an out-of-range column', () => {
+    const d = doc(`${TABLE}\n`);
+    expect(setColumnAlignment(d.blocks, tableId(d.blocks), 2, 'left')).toBeNull();
+    expect(setColumnAlignment(d.blocks, tableId(d.blocks), -1, 'left')).toBeNull();
+  });
+
+  it('returns null when the id is not a table', () => {
+    const d = doc('a\n');
+    expect(setColumnAlignment(d.blocks, leafId(d.blocks, 'a'), 0, 'left')).toBeNull();
   });
 });
 
