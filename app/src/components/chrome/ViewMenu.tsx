@@ -10,10 +10,29 @@
 
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { IconButton } from '../ui/IconButton';
-import { selectLiveDoc, useProjectStore } from '../../stores/project';
+import {
+  selectLiveDoc,
+  selectLiveDocLineMeasure,
+  useProjectStore
+} from '../../stores/project';
 import { IconPanels } from '../icons/IconPanels';
 import { platformShortcut } from '../../lib/commands/shortcut-display';
 import { Tooltip } from '../ui/Tooltip';
+import { usePreferencesStore } from '../../stores/preferences';
+import type { LineMeasure } from '@skrive/shared';
+
+/** Radio rows for the per-document measure override. `null` = follow the
+ *  global Settings default. */
+const DOC_MEASURE_OPTIONS: ReadonlyArray<{
+  value: LineMeasure | null;
+  label: string;
+}> = [
+  { value: null, label: 'Default' },
+  { value: 'narrow', label: 'Narrow' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'wide', label: 'Wide' },
+  { value: 'full', label: 'Full' }
+];
 
 export function ViewMenu() {
   const activeTab = useProjectStore(selectLiveDoc);
@@ -30,8 +49,25 @@ export function ViewMenu() {
   const historyPanelOpen = useProjectStore((s) => s.historyPanelOpen);
   const toggleHistoryPanel = useProjectStore((s) => s.toggleHistoryPanel);
   const historyMode = useProjectStore((s) => s.historyMode);
+  const docLineMeasure = useProjectStore(selectLiveDocLineMeasure);
+  const setLiveDocLineMeasure = useProjectStore(
+    (s) => s.setLiveDocLineMeasure
+  );
+  const showMeasureRule = usePreferencesStore((s) => s.showMeasureRule);
+  const setShowMeasureRule = usePreferencesStore(
+    (s) => s.setShowMeasureRule
+  );
+  const showRuledLines = usePreferencesStore((s) => s.showRuledLines);
+  const setShowRuledLines = usePreferencesStore(
+    (s) => s.setShowRuledLines
+  );
 
   if (!activeTab) return null;
+
+  // The override persists in folio docMeta / md frontmatter; text and
+  // view docs have neither home, so the row hides for them.
+  const hasMeasureHome =
+    activeTab.mode === 'markdown' || activeTab.mode === 'rich';
 
   const frontmatterCount = Object.keys(activeTab.frontmatter).length;
   const openCount =
@@ -97,6 +133,67 @@ export function ViewMenu() {
             </span>
             <span className="ctx-shortcut">{platformShortcut('⌘⇧H')}</span>
           </DropdownMenu.CheckboxItem>
+          <DropdownMenu.Separator className="ctx-sep" />
+          <DropdownMenu.CheckboxItem
+            className="ctx-item"
+            checked={showMeasureRule}
+            onCheckedChange={() => setShowMeasureRule(!showMeasureRule)}
+          >
+            <span className="ctx-label">Measure rule</span>
+          </DropdownMenu.CheckboxItem>
+          <DropdownMenu.CheckboxItem
+            className="ctx-item"
+            checked={showRuledLines}
+            onCheckedChange={() => setShowRuledLines(!showRuledLines)}
+          >
+            <span className="ctx-label">Ruled lines</span>
+          </DropdownMenu.CheckboxItem>
+          {hasMeasureHome && (
+            <>
+              <DropdownMenu.Separator className="ctx-sep" />
+              <DropdownMenu.Sub>
+                <DropdownMenu.SubTrigger className="ctx-item">
+                  <span className="ctx-label">
+                    Document measure
+                    {docLineMeasure && (
+                      <span className="ctx-meta"> · {docLineMeasure}</span>
+                    )}
+                  </span>
+                </DropdownMenu.SubTrigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.SubContent
+                    className="ctx-menu"
+                    sideOffset={2}
+                  >
+                    <DropdownMenu.RadioGroup
+                      value={docLineMeasure ?? 'default'}
+                      onValueChange={(v) =>
+                        setLiveDocLineMeasure(
+                          v === 'default' ? null : (v as LineMeasure)
+                        )
+                      }
+                    >
+                      {DOC_MEASURE_OPTIONS.map((opt) => (
+                        <DropdownMenu.RadioItem
+                          key={opt.label}
+                          className="ctx-item"
+                          value={opt.value ?? 'default'}
+                        >
+                          <span className="ctx-label">{opt.label}</span>
+                          <DropdownMenu.ItemIndicator>
+                            <span
+                              className="ctx-radio-dot"
+                              aria-hidden="true"
+                            />
+                          </DropdownMenu.ItemIndicator>
+                        </DropdownMenu.RadioItem>
+                      ))}
+                    </DropdownMenu.RadioGroup>
+                  </DropdownMenu.SubContent>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Sub>
+            </>
+          )}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

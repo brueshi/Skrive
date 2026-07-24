@@ -117,6 +117,16 @@ export function App() {
     }
   }, [theme]);
 
+  // Ruling toggles, stamped as root attributes so the rules are gated
+  // purely in CSS — toggling repaints once; nothing runs per keystroke.
+  const showMeasureRule = usePreferencesStore((s) => s.showMeasureRule);
+  const showRuledLines = usePreferencesStore((s) => s.showRuledLines);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.toggleAttribute('data-measure-rule', showMeasureRule);
+    root.toggleAttribute('data-ruled-lines', showRuledLines);
+  }, [showMeasureRule, showRuledLines]);
+
   // Phase-12b cold-open measurement. Logs the time from React mount
   // (recorded in main.tsx via window.__skriveMountStart) to the first
   // render where `manifest` is non-null — i.e. an auto-opened project

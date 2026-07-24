@@ -20,6 +20,7 @@ import { flushActiveEditor } from '../../components/editor/active-editor';
 import { getActiveBlockMenu } from '../../components/editor/active-surface';
 import { INSERT_CATALOG, dispatchInsert } from '../../components/editor/menus/insert-catalog';
 import { useProjectStore, logProjectError } from '../../stores/project';
+import { usePreferencesStore } from '../../stores/preferences';
 import { useFindStore } from '../../stores/find';
 import { peekVisit } from '../../stores/working-set';
 import { fileMode } from '../../stores/save';
@@ -114,6 +115,12 @@ export const COMMAND_GROUP_ORDER: CommandGroup[] = [
 
 const whenManifestOpen = () => useProjectStore.getState().manifest !== null;
 const whenLiveDoc = () => useProjectStore.getState().liveDoc !== null;
+/** The per-document measure override persists in folio docMeta or `.md`
+ *  frontmatter — text/view docs have neither, so the commands hide. */
+const whenDocMeasureHome = () => {
+  const doc = useProjectStore.getState().liveDoc;
+  return doc !== null && (doc.mode === 'markdown' || doc.mode === 'rich');
+};
 const whenLiveDocAndManifest = () => {
   const s = useProjectStore.getState();
   return s.manifest !== null && s.liveDoc !== null;
@@ -710,6 +717,43 @@ export function buildRegistry(deps: CommandDeps): {
         const order = ['raw', 'split', 'preview'] as const;
         const next = order[(order.indexOf(doc.layoutMode) + 1) % order.length]!;
         s.setLiveDocLayoutMode(doc.path, next);
+      }
+    },
+    // Per-document measure override (mirrors the View-menu radio group;
+    // palette-only, no chords — the View group's are spoken for).
+    ...(
+      [
+        ['Default', null],
+        ['Narrow', 'narrow'],
+        ['Normal', 'normal'],
+        ['Wide', 'wide'],
+        ['Full', 'full']
+      ] as const
+    ).map<Command>(([label, value]) => ({
+      id: `view.docMeasure.${value ?? 'default'}`,
+      label: `Document measure: ${label}`,
+      group: 'View',
+      when: whenDocMeasureHome,
+      run: () => useProjectStore.getState().setLiveDocLineMeasure(value)
+    })),
+    {
+      id: 'view.toggleMeasureRule',
+      label: 'Toggle measure rule',
+      group: 'View',
+      when: whenLiveDoc,
+      run: () => {
+        const s = usePreferencesStore.getState();
+        s.setShowMeasureRule(!s.showMeasureRule);
+      }
+    },
+    {
+      id: 'view.toggleRuledLines',
+      label: 'Toggle ruled lines',
+      group: 'View',
+      when: whenLiveDoc,
+      run: () => {
+        const s = usePreferencesStore.getState();
+        s.setShowRuledLines(!s.showRuledLines);
       }
     },
 

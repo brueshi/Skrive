@@ -20,6 +20,7 @@ import { create } from 'zustand';
 import {
   defaultProjectUiState,
   migrateProjectUiState,
+  parseLineMeasure,
   type FileEntry,
   type FrontmatterMap,
   type HistoryEntry,
@@ -34,6 +35,7 @@ import {
 } from '@skrive/shared';
 import type {
   LayoutMode,
+  LineMeasure,
   SidebarAllView,
   SidebarFilter,
   SidebarSortKey
@@ -457,6 +459,10 @@ type Actions = {
    *  conflict — the panel's commitKey detects the no-op and reverts the
    *  input back to the original key. */
   renameLiveDocFrontmatterKey(oldKey: string, newKey: string): void;
+  /** Set or clear (null) the live doc's line-measure override. Persists
+   *  with the document — folio docMeta for rich, a frontmatter key for
+   *  markdown; text/view docs have no override home and no-op. */
+  setLiveDocLineMeasure(value: LineMeasure | null): void;
 };
 
 type OpenDocOptions = {
@@ -2276,8 +2282,33 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       else next[k] = v;
     }
     set({ liveDoc: { ...doc, frontmatter: next, dirty: true } });
+  },
+
+  setLiveDocLineMeasure(value: LineMeasure | null) {
+    const doc = get().liveDoc;
+    if (!doc) return;
+    if (selectLiveDocLineMeasure(get()) === value) return;
+    if (doc.mode === 'rich') {
+      if (!doc.docMeta) return;
+      const docMeta = { ...doc.docMeta };
+      if (value === null) delete docMeta[LINE_MEASURE_META_KEY];
+      else docMeta[LINE_MEASURE_META_KEY] = value;
+      set({ liveDoc: { ...doc, docMeta, dirty: true } });
+      return;
+    }
+    if (doc.mode !== 'markdown') return;
+    const next = { ...doc.frontmatter };
+    if (value === null) delete next[LINE_MEASURE_FRONTMATTER_KEY];
+    else next[LINE_MEASURE_FRONTMATTER_KEY] = value;
+    set({ liveDoc: { ...doc, frontmatter: next, dirty: true } });
   }
 }));
+
+/** Per-document line-measure override homes: a docMeta key on `.folio`
+ *  (rides the format's preserve-unknowns contract) and a frontmatter key
+ *  on `.md` (snake_case like the auto-stamped fields). */
+const LINE_MEASURE_META_KEY = 'lineMeasure';
+const LINE_MEASURE_FRONTMATTER_KEY = 'line_measure';
 
 // ============================ Selectors ============================
 //
@@ -2286,6 +2317,18 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 // re-render the sidebar, etc.
 
 export const selectLiveDoc = (s: State): LiveDoc | null => s.liveDoc;
+
+/** The live doc's line-measure override, or null when none is set (or
+ *  the stored value is invalid — ignored, never rewritten). */
+export const selectLiveDocLineMeasure = (s: State): LineMeasure | null => {
+  const doc = s.liveDoc;
+  if (!doc) return null;
+  const raw =
+    doc.mode === 'rich'
+      ? doc.docMeta?.[LINE_MEASURE_META_KEY]
+      : doc.frontmatter[LINE_MEASURE_FRONTMATTER_KEY];
+  return parseLineMeasure(raw);
+};
 
 export const selectLiveDocPath = (s: State): string | null =>
   s.liveDoc?.path ?? null;

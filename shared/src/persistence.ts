@@ -166,9 +166,26 @@ export type SurfaceId = 'text' | 'rich';
  *  renderer no longer reads `AppUiState.markerMode`. */
 export type MarkerMode = 'raw' | 'recessed' | 'concealed';
 
-/** Width of the centered writing column. A reading-comfort knob; the
- *  exact measures are resolved at the editor surface (Stage 2 wiring). */
-export type LineMeasure = 'narrow' | 'normal' | 'wide';
+/** Width of the centered writing column. A reading-comfort knob expressed
+ *  in ch of the editor face (resolved to px in typography-css so every
+ *  view shares one physical column); 'full' lifts the cap entirely. */
+export type LineMeasure = 'narrow' | 'normal' | 'wide' | 'full';
+
+const LINE_MEASURES: readonly LineMeasure[] = [
+  'narrow',
+  'normal',
+  'wide',
+  'full'
+];
+
+/** Normalize an untrusted per-document override (folio docMeta key or
+ *  frontmatter value) to a LineMeasure, or null when absent/invalid.
+ *  Invalid values are ignored at read time, never rewritten on disk. */
+export function parseLineMeasure(value: unknown): LineMeasure | null {
+  return LINE_MEASURES.includes(value as LineMeasure)
+    ? (value as LineMeasure)
+    : null;
+}
 
 /** The figure the word-count chip displays (SKR-53). */
 export type WordCountMetric = 'words' | 'time' | 'chars';
@@ -237,6 +254,10 @@ export type AppUiState = {
 
   /** Width of the centered writing column. */
   lineMeasure: LineMeasure;
+  /** Paint a hairline at the writing column's edge (the measure rule). */
+  showMeasureRule: boolean;
+  /** Paint baseline-spaced ruled lines behind the writing surface. */
+  showRuledLines: boolean;
   /** Curly quotes, em dashes, and ellipses substituted as you type. */
   smartTypography: boolean;
   /** Normalize Markdown spacing when a file is written to disk. */
@@ -288,6 +309,8 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   surfaceSwitchingEnabled: true,
   markerMode: 'recessed',
   lineMeasure: 'normal',
+  showMeasureRule: false,
+  showRuledLines: false,
   smartTypography: true,
   formatOnSave: false,
   autosaveIdleDelayMs: 500,
