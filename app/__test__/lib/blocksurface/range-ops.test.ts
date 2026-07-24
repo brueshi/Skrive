@@ -13,6 +13,8 @@ import {
   insertTableRow,
   mergeBackward,
   mergeForward,
+  moveTableColumn,
+  moveTableRow,
   removeFootnote,
   removeTableColumn,
   removeTableRow,
@@ -463,6 +465,99 @@ describe('setColumnAlignment', () => {
   it('returns null when the id is not a table', () => {
     const d = doc('a\n');
     expect(setColumnAlignment(d.blocks, leafId(d.blocks, 'a'), 0, 'left')).toBeNull();
+  });
+});
+
+describe('moveTableRow', () => {
+  const ROWS = '| a | b |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |';
+
+  it('moves a body row to a later boundary, byte-stable', () => {
+    const d = doc(`${ROWS}\n`);
+    const blocks = moveTableRow(d.blocks, tableId(d.blocks), 1, 4)!;
+    expect(table(blocks).rows.map((r) => r.map(plain))).toEqual([
+      ['a', 'b'],
+      ['3', '4'],
+      ['5', '6'],
+      ['1', '2']
+    ]);
+    // A structural change canonicalizes the delimiter (--- from the plain -).
+    expect(idempotent(blocks, d)).toBe('| a | b |\n| --- | --- |\n| 3 | 4 |\n| 5 | 6 |\n| 1 | 2 |\n');
+  });
+
+  it('moves a body row to an earlier boundary', () => {
+    const d = doc(`${ROWS}\n`);
+    const blocks = moveTableRow(d.blocks, tableId(d.blocks), 3, 1)!;
+    expect(table(blocks).rows.map((r) => r.map(plain))).toEqual([
+      ['a', 'b'],
+      ['5', '6'],
+      ['1', '2'],
+      ['3', '4']
+    ]);
+  });
+
+  it('pins the header: it never moves and nothing drops above it', () => {
+    const d = doc(`${ROWS}\n`);
+    const id = tableId(d.blocks);
+    expect(moveTableRow(d.blocks, id, 0, 2), 'header (row 0) is not draggable').toBeNull();
+    expect(moveTableRow(d.blocks, id, 2, 0), 'cannot drop above the header').toBeNull();
+  });
+
+  it('returns null for the boundaries flanking the row (no reorder, no undo step)', () => {
+    const d = doc(`${ROWS}\n`);
+    const id = tableId(d.blocks);
+    expect(moveTableRow(d.blocks, id, 2, 2)).toBeNull();
+    expect(moveTableRow(d.blocks, id, 2, 3)).toBeNull();
+  });
+
+  it('returns null for out-of-range indices and non-tables', () => {
+    const d = doc(`${ROWS}\n`);
+    const id = tableId(d.blocks);
+    expect(moveTableRow(d.blocks, id, 5, 1)).toBeNull(); // no row 5
+    expect(moveTableRow(d.blocks, id, 1, 9)).toBeNull(); // boundary past the end
+    const d2 = doc('a\n');
+    expect(moveTableRow(d2.blocks, leafId(d2.blocks, 'a'), 1, 2)).toBeNull();
+  });
+});
+
+describe('moveTableColumn', () => {
+  const COLS = '| a | b | c |\n| :- | -: | --- |\n| 1 | 2 | 3 |';
+
+  it('moves a column with its align in lockstep, byte-stable', () => {
+    const d = doc(`${COLS}\n`);
+    const blocks = moveTableColumn(d.blocks, tableId(d.blocks), 0, 3)!;
+    const t = table(blocks);
+    expect(t.rows.map((r) => r.map(plain))).toEqual([
+      ['b', 'c', 'a'],
+      ['2', '3', '1']
+    ]);
+    expect(t.align).toEqual(['right', null, 'left']);
+    expect(idempotent(blocks, d)).toBe('| b | c | a |\n| ---: | --- | :--- |\n| 2 | 3 | 1 |\n');
+  });
+
+  it("moves the column's width weight in lockstep when widths are set", () => {
+    const d = doc(`${COLS}\n`);
+    const id = tableId(d.blocks);
+    const withW = setTableColumnWidths(d.blocks, id, [5, 3, 2])!;
+    const blocks = moveTableColumn(withW, id, 0, 3)!;
+    expect(table(blocks).widths).toEqual([3, 2, 5]);
+  });
+
+  it('preserves a ragged row on a column move (SKR-159)', () => {
+    const blocks = moveTableColumn([raggedTable()], 'ragged-1', 0, 2)!;
+    const t = table(blocks);
+    expect(t.rows[0]!.map(plain), 'header columns swapped').toEqual(['b', 'a']);
+    expect(t.rows[1]!.map(plain), 'ragged row kept its single cell').toEqual(['x']);
+    expect(t.rows[1]!.length).toBe(1);
+  });
+
+  it('returns null for flanking boundaries, out-of-range, and non-tables', () => {
+    const d = doc(`${COLS}\n`);
+    const id = tableId(d.blocks);
+    expect(moveTableColumn(d.blocks, id, 1, 1)).toBeNull();
+    expect(moveTableColumn(d.blocks, id, 1, 2)).toBeNull();
+    expect(moveTableColumn(d.blocks, id, 3, 0)).toBeNull(); // no column 3
+    const d2 = doc('a\n');
+    expect(moveTableColumn(d2.blocks, leafId(d2.blocks, 'a'), 0, 2)).toBeNull();
   });
 });
 

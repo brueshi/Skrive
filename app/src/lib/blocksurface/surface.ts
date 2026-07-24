@@ -22,7 +22,7 @@ import { DecorationStore } from './decorations';
 import { HighlightBus } from './highlight/highlight-bus';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
-import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertTableColumn, insertTableRow, mergeBackward, mergeForward, removeBlocks, removeFootnote, removeTableColumn, removeTableRow, replaceAcross, setColumnAlignment, setTableColumnWidths } from './range-ops';
+import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertTableColumn, insertTableRow, mergeBackward, mergeForward, moveTableColumn, moveTableRow, removeBlocks, removeFootnote, removeTableColumn, removeTableRow, replaceAcross, setColumnAlignment, setTableColumnWidths } from './range-ops';
 import { blockIndexOf, findBlockById, updateBlockById, updateBlockInTop } from './tree';
 import { enterInContainer, exitContainer, splitBlockAt, type StructuralResult } from './structural';
 import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
@@ -4881,6 +4881,32 @@ export class BlockSurface {
   clearCaret(): void {
     window.getSelection()?.removeAllRanges();
     this.emitSelection();
+  }
+
+  /** Move a body row to a drop BOUNDARY (drag-to-reorder). Coordinate-addressed:
+   *  the chrome passes the dragged row and the drop line outright. A no-op or
+   *  header-crossing move returns null and is ignored. The moved row lands at
+   *  `to > from ? to - 1 : to` and is left grip-selected there, so the reorder is
+   *  visible after the drop. */
+  moveTableRowAt(tableId: string, from: number, to: number): void {
+    const blocks = moveTableRow(this.doc.blocks, tableId, from, to);
+    if (!blocks) return;
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    this.selectTableRow(tableId, to > from ? to - 1 : to);
+    this.scheduleSerialize();
+  }
+
+  /** Move a column to a drop BOUNDARY (drag-to-reorder). `align` and `widths` travel
+   *  with the column. The moved column lands at `to > from ? to - 1 : to` and is
+   *  left grip-selected there. */
+  moveTableColumnAt(tableId: string, from: number, to: number): void {
+    const blocks = moveTableColumn(this.doc.blocks, tableId, from, to);
+    if (!blocks) return;
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    this.selectTableColumn(tableId, to > from ? to - 1 : to);
+    this.scheduleSerialize();
   }
 
   /** Remove the currently grip-selected row or column (keyboard Delete). */

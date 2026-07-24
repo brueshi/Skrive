@@ -743,5 +743,73 @@ function widthsEqual(a: number[] | undefined, b: number[]): boolean {
   return true;
 }
 
+// Move the element at `from` to sit at `insertAt` (post-removal index), returning a
+// fresh array. Spreads the removed slice back in, so it never trips the
+// possibly-undefined index type.
+function spliceMove<T>(arr: T[], from: number, insertAt: number): T[] {
+  const next = arr.slice();
+  const removed = next.splice(from, 1);
+  next.splice(insertAt, 0, ...removed);
+  return next;
+}
+
+/**
+ * Move a body row to a new position (drag-to-reorder, SKR-271). `to` is an
+ * insertion BOUNDARY in `[0, rowCount]` — the drop line between rows — not a final
+ * index, so it maps straight from where the drop indicator sits. The GFM header is
+ * PINNED: row 0 never moves and nothing drops above it, so `from` and `to` must both
+ * be >= 1 — a data row can never silently become the header. Returns null when
+ * `tableId` is not a table, an index is out of range, or the drop would not change
+ * the order (`to === from` or `to === from + 1`, the boundaries flanking the row),
+ * so a no-op drag earns no undo step. The moved row lands at index
+ * `to > from ? to - 1 : to`.
+ */
+export function moveTableRow(blocks: BlockNode[], tableId: string, from: number, to: number): BlockNode[] | null {
+  const table = findBlockById(blocks, tableId);
+  if (!table || table.type !== 'table') return null;
+  const n = table.rows.length;
+  if (from < 1 || from >= n) return null; // header pinned; row must be a body row
+  if (to < 1 || to > n) return null; // never drop above the header
+  if (to === from || to === from + 1) return null; // flanking boundaries: no move
+  const insertAt = to > from ? to - 1 : to;
+  return updateBlockById(blocks, tableId, (b) => {
+    if (b.type !== 'table') return b;
+    return { ...b, rows: spliceMove(b.rows, from, insertAt), dirty: true } as BlockNode;
+  });
+}
+
+/**
+ * Move a column to a new position (drag-to-reorder, SKR-271). `to` is an insertion
+ * BOUNDARY in `[0, colCount]`. Every row's cell, plus the `align` entry and (when
+ * present) the `widths` weight, move in lockstep — so the delimiter row and the
+ * fixed-layout colgroup stay column-aligned. Ragged rows are preserved: a row with
+ * no cell at `from` is untouched, and a shorter row reinserts its cell clamped to
+ * its own end rather than padding. Returns null when `tableId` is not a table, an
+ * index is out of range, or the boundary flanks the column (no reorder). The moved
+ * column lands at index `to > from ? to - 1 : to`.
+ */
+export function moveTableColumn(blocks: BlockNode[], tableId: string, from: number, to: number): BlockNode[] | null {
+  const table = findBlockById(blocks, tableId);
+  if (!table || table.type !== 'table') return null;
+  const cols = table.rows[0]?.length ?? 0;
+  if (from < 0 || from >= cols) return null;
+  if (to < 0 || to > cols) return null;
+  if (to === from || to === from + 1) return null;
+  const insertAt = to > from ? to - 1 : to;
+  return updateBlockById(blocks, tableId, (b) => {
+    if (b.type !== 'table') return b;
+    const rows = b.rows.map((row) => {
+      if (from >= row.length) return row; // ragged: no cell in this column to move
+      const next = [...row];
+      const removed = next.splice(from, 1);
+      next.splice(Math.min(insertAt, next.length), 0, ...removed);
+      return next;
+    });
+    const align = spliceMove(b.align, from, insertAt);
+    const widths = b.widths ? spliceMove(b.widths, from, insertAt) : undefined;
+    return { ...b, align, ...(widths ? { widths } : {}), rows, dirty: true } as BlockNode;
+  });
+}
+
 // Re-export so callers that need a fresh id for any future split path have it.
 export { generateBlockId };
