@@ -774,3 +774,74 @@ body.sk-col-resizing {
     transition: none;
   }
 }
+
+/* Drag-to-reorder (SKR-271): the drop-indicator line that tracks the nearest
+   boundary while a row/column handle is dragged, an accent bar spanning the table's
+   cross axis. Reads as an insertion marker (glow + dot end caps), not a table
+   border. Inert — the drag owns the pointer, not this line. */
+.sk-table-chrome--drop-col,
+.sk-table-chrome--drop-row {
+  background: var(--skrive-accent);
+  border-radius: 2px;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--skrive-accent) 35%, transparent),
+    0 0 6px color-mix(in srgb, var(--skrive-accent) 45%, transparent);
+}
+
+/* A filled accent dot at each end of the line, so it reads unmistakably as "insert
+   here" rather than blending into the 1px cell rules. */
+.sk-table-chrome--drop-col::before,
+.sk-table-chrome--drop-col::after,
+.sk-table-chrome--drop-row::before,
+.sk-table-chrome--drop-row::after {
+  content: '';
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--skrive-accent);
+}
+
+.sk-table-chrome--drop-col::before {
+  top: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.sk-table-chrome--drop-col::after {
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.sk-table-chrome--drop-row::before {
+  left: -4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.sk-table-chrome--drop-row::after {
+  right: -4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* The slice being dragged tints for the length of the drag — the "what is moving"
+   half of the feedback. A touch stronger than the selection wash so it reads as
+   actively in flight; view-only, cleared on drop. */
+.block-editor-surface [data-cell-dragging] {
+  background: color-mix(in srgb, var(--skrive-accent) 24%, transparent);
+}
+
+/* The handle being dragged stays accent-lit for the length of the drag, so the eye
+   keeps hold of the slice in flight. */
+.sk-table-chrome--col-handle.is-dragging,
+.sk-table-chrome--row-handle.is-dragging {
+  background: var(--skrive-accent);
+  opacity: 1;
+}
+
+/* Held on <body> while a row/column is dragged: a grabbing cursor and no stray
+   text selection, even as the pointer leaves the handle. */
+body.sk-table-reordering {
+  cursor: grabbing;
+  user-select: none;
+}

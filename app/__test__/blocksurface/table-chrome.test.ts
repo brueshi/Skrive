@@ -5,8 +5,10 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  dropIndicatorRect,
   GUTTER_METRICS,
   hoverZone,
+  nearestBoundary,
   normalizeWidths,
   resizeColumnWidths,
   tableGutterSlots,
@@ -235,6 +237,45 @@ describe('normalizeWidths', () => {
 
   it('falls back to equal weights for a degenerate all-zero input', () => {
     expect(normalizeWidths([0, 0])).toEqual([0.5, 0.5]);
+  });
+});
+
+describe('nearestBoundary', () => {
+  it('returns the index of the edge closest to the position', () => {
+    const edges = [0, 100, 200, 300];
+    expect(nearestBoundary(edges, 0)).toBe(0);
+    expect(nearestBoundary(edges, 140)).toBe(1); // nearer 100 than 200
+    expect(nearestBoundary(edges, 160)).toBe(2); // nearer 200 than 100
+    expect(nearestBoundary(edges, 999)).toBe(3); // past the end -> last edge
+  });
+
+  it('breaks a tie toward the lower index', () => {
+    expect(nearestBoundary([0, 100], 50)).toBe(0);
+  });
+});
+
+describe('dropIndicatorRect', () => {
+  // geometry(3,3): box (100,200) 180x60; colEdges [100,160,220,280]; rowEdges [200,220,240,260].
+  const geom = geometry(3, 3);
+
+  it('draws a vertical line at a column boundary, full table height', () => {
+    const r = dropIndicatorRect(geom, 'col', 2, 2);
+    expect(r.x).toBe(220 - 1); // colEdges[2] centred for thickness 2
+    expect(r.y).toBe(200);
+    expect(r.width).toBe(2);
+    expect(r.height).toBe(60);
+  });
+
+  it('draws a horizontal line at a row boundary, full table width', () => {
+    const r = dropIndicatorRect(geom, 'row', 1, 2);
+    expect(r.y).toBe(220 - 1); // rowEdges[1]
+    expect(r.x).toBe(100);
+    expect(r.width).toBe(180);
+    expect(r.height).toBe(2);
+  });
+
+  it('clamps a boundary past the ends to the last edge', () => {
+    expect(dropIndicatorRect(geom, 'col', 99, 2).x).toBe(280 - 1);
   });
 });
 
