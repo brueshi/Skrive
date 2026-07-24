@@ -1,6 +1,7 @@
 //------------------------------------------------------------------------------
-//  Skrive Zig UI Lab — Stage 2: text. stb_truetype, the glyph atlas, and
-//  draw.text on top of the Stage 1 batcher.
+//  Skrive Zig UI Lab — Stage 4: layout and the small kit. Row/column boxes,
+//  toggle and segmented, and the first animation, on top of the Stage 3 widget
+//  layer and the Stage 1-2 renderer.
 //
 //  Renders on demand (see the Stage 0 note: sokol_app has no public
 //  frame-on-demand mode at the pinned commit, so clean frames early-out of
@@ -16,8 +17,11 @@
 //    5 — settings: heading + paragraphs + labels over Stage 1 surfaces
 //    6 — text wall: the window filled with wrapped 14px paragraphs
 //    7 — buttons: a live row of buttons wired to visible effects (Stage 3)
-//    8 — showcase: every button visual state at once, deterministic, for the
-//        screenshot deliverable (no live input needed)
+//    8 — showcase: every button / toggle / segmented visual state at once,
+//        deterministic, for the screenshot deliverable (no live input needed)
+//    9 — card: the Stage 4 settings card — heading, three labeled rows
+//        (segmented, toggle, button), laid out entirely by ui/layout.zig with
+//        zero absolute coordinates, resizing with the window
 //------------------------------------------------------------------------------
 const std = @import("std");
 const sokol = @import("sokol");
@@ -33,6 +37,7 @@ const text_mod = @import("gfx/text.zig");
 const draw = @import("ui/draw.zig");
 const ui_context = @import("ui/context.zig");
 const widgets = @import("ui/widgets.zig");
+const layout = @import("ui/layout.zig");
 
 const inter_regular_ttf = @embedFile("Inter-Regular.ttf");
 const inter_medium_ttf = @embedFile("Inter-Medium.ttf");
@@ -67,7 +72,7 @@ const skrive = struct {
     };
 };
 
-const Scene = enum { demo, toast, stress, settings, text_wall, buttons, showcase };
+const Scene = enum { demo, toast, stress, settings, text_wall, buttons, showcase, card };
 
 const stress_count = 10_000;
 const StressRect = struct {
@@ -109,6 +114,12 @@ const bench = struct {
         continuous: bool = true,
         warmup_sec: f64 = 3,
         measure_sec: f64 = 9,
+        /// Flip the card's toggle on entry, so an idle phase can prove both
+        /// halves of the animation criterion: the transition repaints while it
+        /// is moving (presents during warmup) and stops dead once it settles
+        /// (0 presents through the measure window). --bench ignores the
+        /// keyboard, so the only way to animate anything is from in here.
+        kick_animation: bool = false,
     };
     const phases = [_]Phase{
         .{ .name = "stress-large", .scene = .stress },
@@ -118,9 +129,11 @@ const bench = struct {
         .{ .name = "settings", .scene = .settings },
         .{ .name = "text-wall", .scene = .text_wall },
         .{ .name = "buttons", .scene = .buttons },
+        .{ .name = "card", .scene = .card },
         .{ .name = "idle-stress-on-demand", .scene = .stress, .continuous = false, .warmup_sec = 1, .measure_sec = 15 },
         .{ .name = "idle-settings-on-demand", .scene = .settings, .continuous = false, .warmup_sec = 1, .measure_sec = 15 },
         .{ .name = "idle-buttons-on-demand", .scene = .buttons, .continuous = false, .warmup_sec = 1, .measure_sec = 15 },
+        .{ .name = "idle-card-after-toggle", .scene = .card, .continuous = false, .warmup_sec = 1, .measure_sec = 15, .kick_animation = true },
     };
 
     var active: bool = false;
@@ -128,6 +141,8 @@ const bench = struct {
     var phase_start_ticks: u64 = 0;
     var measuring: bool = false;
     var presents: u64 = 0;
+    var phase_presents: u64 = 0; // every render since the phase began
+    var warmup_presents: u64 = 0; // the above, snapshotted when measuring starts
     var build_ticks: u64 = 0;
     var upload_ticks: u64 = 0;
     var encode_ticks: u64 = 0;
@@ -144,8 +159,10 @@ const bench = struct {
             state.stress_size = p.stress_size;
             initStressRects();
         }
+        if (p.kick_animation) state.card_word_count = !state.card_word_count;
         state.dirty = true;
         measuring = false;
+        phase_presents = 0;
         phase_start_ticks = stime.now();
         std.debug.print("bench: {s} (warmup {d:.0}s, measure {d:.0}s)\n", .{ p.name, p.warmup_sec, p.measure_sec });
     }
@@ -166,6 +183,7 @@ const bench = struct {
         const elapsed = stime.sec(stime.diff(stime.now(), phase_start_ticks));
         if (!measuring and elapsed >= p.warmup_sec) {
             measuring = true;
+            warmup_presents = phase_presents;
             resetAccumulators();
         }
         if (elapsed < p.warmup_sec + p.measure_sec) return;
@@ -183,6 +201,16 @@ const bench = struct {
                 avg_frame_ms,
                 1000.0 / avg_frame_ms,
                 worst_frame_sec * std.time.ms_per_s,
+            });
+        } else if (p.kick_animation) {
+            std.debug.print("bench result: {s} | quads: {d} | draw calls: {d} | presents during the {d:.0}s settle window: {d} (the animation) | presents during {d:.0}s idle after: {d} (0 = the animation stopped marking the frame dirty)\n", .{
+                p.name,
+                state.batch.stats.quads,
+                state.batch.stats.draw_calls,
+                p.warmup_sec,
+                warmup_presents,
+                p.measure_sec,
+                presents,
             });
         } else {
             std.debug.print("bench result: {s} | presents during {d:.0}s idle: {d} (0 = frame-on-demand holds)\n", .{
@@ -226,6 +254,14 @@ const state = struct {
     var ev_tab: bool = false;
     var ev_shift: bool = false;
     var ev_activate: bool = false;
+    var ev_nav_prev: bool = false;
+    var ev_nav_next: bool = false;
+    // Wall clock of the last *rendered* frame, which under frame-on-demand is
+    // not the display interval. The animation store takes dt from this.
+    var last_frame_ticks: u64 = 0;
+    // The settings-card demo's bound values (Stage 4).
+    var card_theme: usize = 2;
+    var card_word_count: bool = true;
     // HUD accumulators, reset on each refresh of the on-screen line
     var hud_last_print_ticks: u64 = 0;
     var hud_presents: u64 = 0;
@@ -298,7 +334,7 @@ export fn init() void {
         @as(f32, @floatFromInt(sapp.width())) / sapp.dpiScale(),
         @as(f32, @floatFromInt(sapp.height())) / sapp.dpiScale(),
     });
-    std.debug.print("keys: 1 demo | 2 toast | 3 stress | 4 stress small | 5 settings | 6 text wall | 7 buttons | 8 showcase | S stress shadows | Tab/Space/Enter buttons | space continuous\n", .{});
+    std.debug.print("keys: 1 demo | 2 toast | 3 stress | 4 stress small | 5 settings | 6 text wall | 7 buttons | 8 showcase | 9 card | S stress shadows | Tab/Space/Enter buttons | space continuous\n", .{});
     if (bench.active) bench.enterPhase(0);
 }
 
@@ -596,6 +632,207 @@ fn buildButtonsScene(b: *batch_mod.Batch) void {
     if (state.toast_visible) buildDemoToast(b, 422, 470);
 }
 
+//------------------------------------------------------------------------------
+//  The Stage 4 deliverable: a settings card laid out entirely by ui/layout.zig.
+//
+//  There is not one absolute coordinate below — every rect comes out of a Box.
+//  The page column centres a 720px-max content column in whatever the window
+//  is; the card takes the space left under the heading and then shrinks to its
+//  rows (Fit.content); each row is the real .settings-row (grow text block,
+//  never-shrinking control, 24px gap, 16/18 padding); each text block is a
+//  nested column with the real 3px gap. Resize the window and it all follows.
+//
+//  Adding a fourth row is one line in `card_rows`. That is the exit criterion,
+//  and it is why the controls are a tagged union rather than three hand-placed
+//  widget calls.
+//------------------------------------------------------------------------------
+const CardControl = union(enum) {
+    toggle: *bool,
+    segmented: struct { options: []const []const u8, selected: *usize },
+    button: []const u8,
+};
+
+const CardRow = struct {
+    label: []const u8,
+    desc: []const u8,
+    id: []const u8, // stable widget identity, independent of the visible text
+    control: CardControl,
+};
+
+const theme_options = [_][]const u8{ "Light", "Dark", "System" };
+
+fn cardRows() [3]CardRow {
+    return .{
+        .{
+            .label = "Colour theme",
+            .desc = "Light, dark, or whatever the system is doing.",
+            .id = "card-theme",
+            .control = .{ .segmented = .{ .options = &theme_options, .selected = &state.card_theme } },
+        },
+        .{
+            .label = "Word count",
+            .desc = "Keep a live count in the corner of the window.",
+            .id = "card-word-count",
+            .control = .{ .toggle = &state.card_word_count },
+        },
+        .{
+            .label = "Restore defaults",
+            .desc = "Put every appearance setting back where it started.",
+            .id = "card-reset",
+            .control = .{ .button = "Restore" },
+        },
+    };
+}
+
+const card_label_size: f32 = 13.5; // .settings-row-label
+const card_desc_size: f32 = 12.5; // .settings-row-desc
+const card_row_gap: f32 = 3;
+const card_row_pad_y: f32 = 16;
+const card_row_pad_x: f32 = 18;
+
+fn buildCardScene(b: *batch_mod.Batch) void {
+    const dpi = sapp.dpiScale();
+    var p = painter(b);
+    const rows = cardRows();
+
+    const win: draw.Rect = .{
+        .x = 0,
+        .y = 0,
+        .w = @as(f32, @floatFromInt(sapp.width())) / dpi,
+        .h = @as(f32, @floatFromInt(sapp.height())) / dpi,
+    };
+
+    const label_m = draw.measureText(&state.font_medium, card_label_size, dpi, "Hg", 0);
+    const desc_m = draw.measureText(&state.font_regular, card_desc_size, dpi, "Hg", 0);
+    const title_m = draw.measureText(&state.font_medium, 25, dpi, "Hg", 0);
+    const sub_m = draw.measureText(&state.font_regular, 13.5, dpi, "Hg", 0);
+    const cap_m = draw.measureText(&state.font_medium, 11, dpi, "HG", 0);
+    const text_h = label_m.lineHeight() + card_row_gap + desc_m.lineHeight();
+
+    // .settings-col: a 720px column, centred, 44/40 padding.
+    var page = layout.Box.column(win, .{
+        .padding = .xy(44, 40),
+        .gap = 10,
+        .cross = .center,
+    });
+    const col_w = @min(720, win.w - 80);
+    const i_title = page.add(.{ .main = .{ .content = title_m.lineHeight() }, .cross = col_w });
+    const i_sub = page.add(.{ .main = .{ .content = sub_m.lineHeight() }, .cross = col_w });
+    const i_cap = page.add(.{ .main = .{ .content = cap_m.lineHeight() + 18 }, .cross = col_w });
+    // The card takes whatever is left, then shrinks to its rows below.
+    const i_card = page.add(.{ .main = .{ .grow = 1 }, .cross = col_w });
+    const page_rects = page.resolve();
+
+    _ = draw.text(b, &state.atlas, dpi, .{ page_rects[i_title].x, page_rects[i_title].y }, "Appearance", .{
+        .font = &state.font_medium,
+        .size = 25,
+        .color = skrive.fg,
+        .letter_spacing = -0.25, // -0.01em at 25px, per .settings-pane-title
+    });
+    _ = draw.text(b, &state.atlas, dpi, .{ page_rects[i_sub].x, page_rects[i_sub].y }, "How Skrive looks while you write. Changes apply immediately.", .{
+        .font = &state.font_regular,
+        .size = 13.5,
+        .color = skrive.muted,
+    });
+    _ = draw.text(b, &state.atlas, dpi, .{ page_rects[i_cap].x, page_rects[i_cap].y + 18 }, "THEME", .{
+        .font = &state.font_medium,
+        .size = 11,
+        .color = skrive.muted,
+        .letter_spacing = 0.77, // 0.07em at 11px, per .settings-section-cap
+    });
+
+    // The card column: one child per row, plus a hairline between them. Its
+    // height is never written down anywhere — Fit.content computes it.
+    var card = layout.Box.column(page_rects[i_card], .{ .main = .content });
+    var row_slots: [rows.len]usize = undefined;
+    for (rows, 0..) |row, i| {
+        if (i > 0) _ = card.add(.{ .main = .{ .fixed = 1 } }); // .settings-row + .settings-row border-top
+        const control_h: f32 = switch (row.control) {
+            .toggle => widgets.toggle_h,
+            .segmented => widgets.segmented_h,
+            .button => widgets.button_h,
+        };
+        row_slots[i] = card.add(.{ .main = .{ .fixed = 2 * card_row_pad_y + @max(text_h, control_h) } });
+    }
+    const card_rects = card.resolve();
+    const card_rect = card.resolvedBounds();
+
+    draw.rect(b, card_rect, .{
+        .fill = skrive.bg,
+        .radius = 12,
+        .border = .{ .width = 1, .color = skrive.rule },
+        .shadows = &.{.{ .offset = .{ 0, 2 }, .sigma = 4, .color = draw.Color.hex(0x000000).withAlpha(0.05) }},
+    });
+
+    var fired = false;
+    for (rows, 0..) |row, i| {
+        if (i > 0) {
+            const hair = card_rects[row_slots[i] - 1];
+            draw.rect(b, hair, .{ .fill = skrive.rule.withAlpha(0.6) });
+        }
+
+        const control_w: f32 = switch (row.control) {
+            .toggle => widgets.toggle_w,
+            .segmented => |sg_ctl| widgets.segmentedWidth(&p, sg_ctl.options),
+            .button => |label| widgets.buttonWidth(&p, label, .{ .variant = .secondary }),
+        };
+        const control_h: f32 = switch (row.control) {
+            .toggle => widgets.toggle_h,
+            .segmented => widgets.segmented_h,
+            .button => widgets.button_h,
+        };
+
+        var r = layout.Box.row(card_rects[row_slots[i]], .{
+            .padding = .xy(card_row_pad_y, card_row_pad_x),
+            .gap = 24,
+            .cross = .center,
+        });
+        const i_text = r.add(.{ .main = .{ .grow = 1 } }); // flex: 1; min-width: 0
+        const i_ctl = r.add(.{ .main = .{ .fixed = control_w }, .cross = control_h }); // flex-shrink: 0
+        const row_rects = r.resolve();
+
+        var tc = layout.Box.column(row_rects[i_text], .{ .gap = card_row_gap });
+        const i_label = tc.add(.{ .main = .{ .content = label_m.lineHeight() } });
+        const i_desc = tc.add(.{ .main = .{ .content = desc_m.lineHeight() } });
+        const text_rects = tc.resolve();
+
+        _ = draw.text(b, &state.atlas, dpi, .{ text_rects[i_label].x, text_rects[i_label].y }, row.label, .{
+            .font = &state.font_medium,
+            .size = card_label_size,
+            .color = skrive.fg,
+        });
+        _ = draw.text(b, &state.atlas, dpi, .{ text_rects[i_desc].x, text_rects[i_desc].y }, row.desc, .{
+            .font = &state.font_regular,
+            .size = card_desc_size,
+            .color = skrive.muted,
+        });
+
+        const ctl = row_rects[i_ctl];
+        switch (row.control) {
+            .toggle => |value| {
+                if (widgets.toggle(&state.ctx, &p, ctl.x, ctl.y, row.id, value, .{}).changed) fired = true;
+            },
+            .segmented => |sg_ctl| {
+                if (widgets.segmented(&state.ctx, &p, ctl.x, ctl.y, row.id, sg_ctl.options, sg_ctl.selected, .{}).changed) fired = true;
+            },
+            .button => |label| {
+                if (widgets.button(&state.ctx, &p, ctl.x, ctl.y, label, .{ .variant = .secondary, .id_label = row.id }).fired) {
+                    state.card_theme = 2;
+                    state.card_word_count = true;
+                    fired = true;
+                }
+            },
+        }
+    }
+
+    _ = draw.text(b, &state.atlas, dpi, .{ page_rects[i_title].x, card_rect.y + card_rect.h + 20 }, "Tab moves between controls; arrows pick a segment; space toggles.", .{
+        .font = &state.font_regular,
+        .size = 12,
+        .color = skrive.muted,
+    });
+    if (fired) state.dirty = true;
+}
+
 // The screenshot deliverable: every visual state rendered at once, driven by
 // forced state rather than live input, so the states are deterministic and no
 // mouse-warping is needed. It goes through the exact resolve()+draw path the
@@ -604,7 +841,7 @@ fn buildShowcaseScene(b: *batch_mod.Batch) void {
     const dpi = sapp.dpiScale();
     var p = painter(b);
 
-    _ = draw.text(b, &state.atlas, dpi, .{ 80, 56 }, "Button states", .{
+    _ = draw.text(b, &state.atlas, dpi, .{ 80, 56 }, "Component states", .{
         .font = &state.font_medium,
         .size = 20,
         .color = skrive.fg,
@@ -641,6 +878,48 @@ fn buildShowcaseScene(b: *batch_mod.Batch) void {
         }
         y += 64;
     }
+
+    // Stage 4 widgets, same five states. The toggle gets two rows because its
+    // states multiply against on/off, which is the whole point of it.
+    const toggle_rows = [_]struct { on: bool, name: []const u8 }{
+        .{ .on = false, .name = "Toggle off" },
+        .{ .on = true, .name = "Toggle on" },
+    };
+    y += 12;
+    for (toggle_rows) |row| {
+        _ = draw.text(b, &state.atlas, dpi, .{ 80, y + 3 }, row.name, .{
+            .font = &state.font_regular,
+            .size = 12,
+            .color = skrive.muted,
+        });
+        for (states, 0..) |s, i| {
+            _ = widgets.toggleShowcase(&p, col_x0 + @as(f32, @floatFromInt(i)) * col_w, y, row.on, s);
+        }
+        y += 44;
+    }
+
+    y += 12;
+    _ = draw.text(b, &state.atlas, dpi, .{ 80, y + 8 }, "Segmented", .{
+        .font = &state.font_regular,
+        .size = 12,
+        .color = skrive.muted,
+    });
+    for (states, 0..) |s, i| {
+        _ = widgets.segmentedShowcase(&p, col_x0 + @as(f32, @floatFromInt(i)) * col_w, y, &theme_options, 1, s);
+    }
+
+    // The animated in-between states, sampled along the transition the
+    // animation store drives. Not a caught frame — see toggleShowcaseAt.
+    y += 56;
+    _ = draw.text(b, &state.atlas, dpi, .{ 80, y + 3 }, "Mid-transition", .{
+        .font = &state.font_regular,
+        .size = 12,
+        .color = skrive.muted,
+    });
+    const ladder = [_]f32{ 0, 0.25, 0.5, 0.75, 1 };
+    for (ladder, 0..) |t, i| {
+        _ = widgets.toggleShowcaseAt(&p, col_x0 + @as(f32, @floatFromInt(i)) * col_w, y, t);
+    }
 }
 
 export fn frame() void {
@@ -649,6 +928,17 @@ export fn frame() void {
         return;
     }
     state.dirty = false;
+
+    // Seconds since the last rendered frame. Measured here rather than from
+    // sapp.frameDuration() because on-demand frames are separated by however
+    // long the user sat still, and the animation store is written to take
+    // exactly that.
+    const frame_ticks = stime.now();
+    const dt: f32 = if (state.last_frame_ticks == 0)
+        0
+    else
+        @floatCast(stime.sec(stime.diff(frame_ticks, state.last_frame_ticks)));
+    state.last_frame_ticks = frame_ticks;
 
     const clear_base = clear_palette[state.clear_index];
     state.pass_action.colors[0].clear_value.r = clear_base[0];
@@ -673,7 +963,9 @@ export fn frame() void {
         .tab = state.ev_tab,
         .shift = state.ev_shift,
         .activate = state.ev_activate,
-    });
+        .nav_prev = state.ev_nav_prev,
+        .nav_next = state.ev_nav_next,
+    }, dt);
 
     const t_build = stime.now();
     state.batch.begin();
@@ -685,6 +977,7 @@ export fn frame() void {
         .text_wall => buildTextWallScene(&state.batch),
         .buttons => buildButtonsScene(&state.batch),
         .showcase => buildShowcaseScene(&state.batch),
+        .card => buildCardScene(&state.batch),
     }
     // Bench runs keep the terminal HUD so scene quad counts stay pure.
     if (!bench.active) buildHud(&state.batch);
@@ -695,6 +988,14 @@ export fn frame() void {
     state.ev_released = false;
     state.ev_tab = false;
     state.ev_activate = false;
+    state.ev_nav_prev = false;
+    state.ev_nav_next = false;
+
+    // The animation half of frame-on-demand, and the only place it can be
+    // decided: *after* the scene is built, because a widget retargets its
+    // animation while drawing. An in-flight value asks for the next frame; the
+    // frame that lands on the target asks for nothing, and the app goes quiet.
+    if (state.ctx.anim.animating()) state.dirty = true;
     const t_upload = stime.now();
     state.atlas.commit();
     state.batch.upload();
@@ -723,6 +1024,7 @@ export fn frame() void {
     state.hud_encode_ticks += stime.diff(now, t_encode);
     state.hud_frame_dur_sec += sapp.frameDuration();
 
+    if (bench.active) bench.phase_presents += 1;
     if (bench.active and bench.measuring) {
         bench.presents += 1;
         bench.build_ticks += stime.diff(t_upload, t_build);
@@ -785,7 +1087,7 @@ export fn event(ev: ?*const sapp.Event) void {
                 // In the buttons scene Space activates the focused widget;
                 // elsewhere it stays the continuous-mode debug toggle. Guarded
                 // against key-repeat so holding it does not machine-gun.
-                if (state.scene == .buttons) {
+                if (state.scene == .buttons or state.scene == .card) {
                     if (!e.key_repeat) state.ev_activate = true;
                 } else {
                     state.continuous = !state.continuous;
@@ -820,6 +1122,16 @@ export fn event(ev: ?*const sapp.Event) void {
             ._6 => state.scene = .text_wall,
             ._7 => state.scene = .buttons,
             ._8 => state.scene = .showcase,
+            ._9 => state.scene = .card,
+            // Directional selection inside a focused radiogroup (the segmented
+            // control). Guarded against key-repeat so holding an arrow does not
+            // machine-gun through the options.
+            .LEFT => if (!e.key_repeat) {
+                state.ev_nav_prev = true;
+            },
+            .RIGHT => if (!e.key_repeat) {
+                state.ev_nav_next = true;
+            },
             .S => {
                 state.stress_shadows = !state.stress_shadows;
                 std.debug.print("stress shadows: {s}\n", .{if (state.stress_shadows) "on (10% of rects)" else "off"});
@@ -852,7 +1164,14 @@ pub fn main(process: std.process.Init.Minimal) void {
     // opens a non-high-DPI window: glyphs rasterize at 1x, which is the
     // honest way to shoot the "text at 1x" screenshot on a retina display.
     var high_dpi = true;
-    var args = std.process.Args.Iterator.init(process.args);
+    // initAllocator, not init: `init` is @compileError on Windows (the command
+    // line arrives as one WTF-16 string that has to be split and re-encoded),
+    // and it is a plain no-op wrapper on posix. Found by the Stage 4 Windows
+    // smoke build — it was the *only* thing that stood between this and a
+    // clean cross-compile.
+    var args = std.process.Args.Iterator.initAllocator(process.args, std.heap.page_allocator) catch
+        @panic("zig-ui: could not read the command line");
+    defer args.deinit();
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--continuous")) {
             state.continuous = true;
@@ -871,6 +1190,8 @@ pub fn main(process: std.process.Init.Minimal) void {
             state.scene = .buttons;
         } else if (std.mem.eql(u8, arg, "--showcase")) {
             state.scene = .showcase;
+        } else if (std.mem.eql(u8, arg, "--card")) {
+            state.scene = .card;
         } else if (std.mem.eql(u8, arg, "--dpi1")) {
             high_dpi = false;
         } else if (std.mem.eql(u8, arg, "--bench")) {

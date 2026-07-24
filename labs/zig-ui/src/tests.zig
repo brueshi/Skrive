@@ -5,4 +5,7 @@
 //------------------------------------------------------------------------------
 test {
     _ = @import("ui/context.zig");
+    _ = @import("ui/layout.zig");
+    _ = @import("ui/anim.zig");
+    _ = @import("ui/widgets.zig");
 }

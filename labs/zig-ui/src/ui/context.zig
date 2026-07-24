@@ -35,6 +35,7 @@
 const std = @import("std");
 const sapp = @import("sokol").app;
 const draw = @import("draw.zig");
+const anim = @import("anim.zig");
 
 /// The per-frame input snapshot main.zig hands to begin(). Positions are
 /// logical px (sokol reports mouse in framebuffer px; main divides by the DPI
@@ -50,17 +51,45 @@ pub const Input = struct {
     tab: bool = false, // Tab pressed this frame
     shift: bool = false, // Shift held (with Tab = focus backward)
     activate: bool = false, // Space/Enter pressed this frame
+    // Directional selection within a focused widget (Left/Right today; named
+    // for the axis-neutral role so a vertical list could reuse them). Stage 4
+    // added these for the segmented control — see the design-smell note on
+    // Interact.focusable below.
+    nav_prev: bool = false,
+    nav_next: bool = false,
 };
 
 /// What a widget learns from a single interact() call. `hovered` and `pressed`
 /// are the mutually-exclusive visual states (never both); `focused` is true
 /// only when focus arrived via keyboard, matching :focus-visible — a mouse
 /// click focuses the control (so Space/Enter work) but shows no ring.
+/// `has_focus` is the underlying fact regardless of the ring: a widget that
+/// reads arrow keys needs to know it is the keyboard target even when it was
+/// focused by a click.
 pub const Interaction = struct {
     hovered: bool = false,
     pressed: bool = false,
     focused: bool = false,
+    has_focus: bool = false,
     fired: bool = false,
+};
+
+/// Per-call interaction options.
+///
+/// `focusable = false` is Stage 4's one addition to the primitive, and it is
+/// worth naming as the design smell the plan asked to watch for. A segmented
+/// control is a radiogroup: it is *one* Tab stop whose options are selected
+/// with arrow keys, but each option still needs its own hit test, hover, and
+/// press. Stage 3's interact() fused "is a keyboard target" with "is
+/// interactive", which cannot express that. Rather than let the widget reach
+/// around the primitive (hand-rolling its own hit test, or registering a fake
+/// ID), the distinction moved into the primitive itself: the group takes the
+/// Tab stop, its options interact with focusable = false. A non-focusable
+/// widget also does not steal focus on press, which is what keeps a click on
+/// an option leaving focus on the group.
+pub const Interact = struct {
+    disabled: bool = false,
+    focusable: bool = true,
 };
 
 const max_focusables = 64;
@@ -80,6 +109,11 @@ pub const Context = struct {
     next: [max_focusables]u64 = undefined,
     next_len: usize = 0,
 
+    /// Per-widget animation state (Stage 4). Lives here because it is keyed by
+    /// widget identity and has the same lifetime as hot/active/focus; see
+    /// anim.zig for why it is a separate file all the same.
+    anim: anim.Store = .{},
+
     /// 64-bit hash of label + discriminator. The discriminator disambiguates
     /// repeated labels (two "OK" buttons). 0 is remapped to 1 so a real ID
     /// never collides with the "none" sentinel.
@@ -91,10 +125,15 @@ pub const Context = struct {
         return if (v == 0) 1 else v;
     }
 
-    pub fn begin(self: *Context, input: Input) void {
+    /// Frame start. `dt` is the wall time since the last *rendered* frame, in
+    /// seconds — under frame-on-demand that is not the display interval, and
+    /// the animation store is written to expect exactly that.
+    pub fn begin(self: *Context, input: Input, dt: f32) void {
         self.input = input;
         self.hot_id = 0;
         self.next_len = 0;
+        self.anim.tickGeneration();
+        self.anim.advance(dt);
         if (input.tab and self.focusables_len > 0) {
             self.focus_id = self.tabTarget(input.shift);
             self.focus_ring_visible = true;
@@ -122,8 +161,9 @@ pub const Context = struct {
     /// report the visual + fired result. `rect` is the widget's logical-px hit
     /// area. A disabled widget is inert and unfocusable but still occupies its
     /// space.
-    pub fn interact(self: *Context, wid: u64, rect: draw.Rect, disabled: bool) Interaction {
-        if (!disabled and self.next_len < max_focusables) {
+    pub fn interact(self: *Context, wid: u64, rect: draw.Rect, opts: Interact) Interaction {
+        const disabled = opts.disabled;
+        if (!disabled and opts.focusable and self.next_len < max_focusables) {
             self.next[self.next_len] = wid;
             self.next_len += 1;
         }
@@ -137,14 +177,18 @@ pub const Context = struct {
             // or two events arriving before one repaint) still fires.
             if (hit and self.input.pressed) {
                 self.active_id = wid;
-                self.focus_id = wid;
-                self.focus_ring_visible = false; // mouse focus shows no ring
+                // A non-focusable part (a segmented option) must not take
+                // focus off the group it belongs to.
+                if (opts.focusable) {
+                    self.focus_id = wid;
+                    self.focus_ring_visible = false; // mouse focus shows no ring
+                }
             }
             if (self.active_id == wid and self.input.released) {
                 if (hit) fired = true; // release-inside fires; release-outside cancels
                 self.active_id = 0; // a release always ends the active state
             }
-            if (self.focus_id == wid and self.input.activate) {
+            if (opts.focusable and self.focus_id == wid and self.input.activate) {
                 fired = true; // Space/Enter on the focused widget
             }
         }
@@ -155,6 +199,7 @@ pub const Context = struct {
             .pressed = self.active_id == wid and hit,
             .hovered = hit and self.active_id == 0,
             .focused = self.focus_id == wid and self.focus_ring_visible,
+            .has_focus = !disabled and opts.focusable and self.focus_id == wid,
             .fired = fired,
         };
     }
@@ -189,8 +234,8 @@ const outside: [2]f32 = .{ 300, 15 };
 test "hover sets hovered + hot, fires nothing" {
     var ctx: Context = .{};
     const id = Context.id("a", 0);
-    ctx.begin(.{ .mouse = inside });
-    const it = ctx.interact(id, box, false);
+    ctx.begin(.{ .mouse = inside }, 0);
+    const it = ctx.interact(id, box, .{});
     _ = ctx.end();
     try testing.expect(it.hovered and !it.pressed and !it.fired);
     try testing.expectEqual(id, ctx.hot_id);
@@ -199,14 +244,14 @@ test "hover sets hovered + hot, fires nothing" {
 test "click inside: press arms, release fires" {
     var ctx: Context = .{};
     const id = Context.id("a", 0);
-    ctx.begin(.{ .mouse = inside, .mouse_down = true, .pressed = true });
-    const down = ctx.interact(id, box, false);
+    ctx.begin(.{ .mouse = inside, .mouse_down = true, .pressed = true }, 0);
+    const down = ctx.interact(id, box, .{});
     _ = ctx.end();
     try testing.expect(!down.fired and down.pressed);
     try testing.expectEqual(id, ctx.active_id);
 
-    ctx.begin(.{ .mouse = inside, .released = true });
-    const up = ctx.interact(id, box, false);
+    ctx.begin(.{ .mouse = inside, .released = true }, 0);
+    const up = ctx.interact(id, box, .{});
     _ = ctx.end();
     try testing.expect(up.fired);
     try testing.expectEqual(@as(u64, 0), ctx.active_id);
@@ -215,13 +260,13 @@ test "click inside: press arms, release fires" {
 test "release outside cancels" {
     var ctx: Context = .{};
     const id = Context.id("a", 0);
-    ctx.begin(.{ .mouse = inside, .mouse_down = true, .pressed = true });
-    _ = ctx.interact(id, box, false);
+    ctx.begin(.{ .mouse = inside, .mouse_down = true, .pressed = true }, 0);
+    _ = ctx.interact(id, box, .{});
     _ = ctx.end();
     try testing.expectEqual(id, ctx.active_id);
 
-    ctx.begin(.{ .mouse = outside, .released = true });
-    const up = ctx.interact(id, box, false);
+    ctx.begin(.{ .mouse = outside, .released = true }, 0);
+    const up = ctx.interact(id, box, .{});
     _ = ctx.end();
     try testing.expect(!up.fired);
     try testing.expectEqual(@as(u64, 0), ctx.active_id);
@@ -230,18 +275,18 @@ test "release outside cancels" {
 test "drag off then back on still fires (armed across frames)" {
     var ctx: Context = .{};
     const id = Context.id("a", 0);
-    ctx.begin(.{ .mouse = inside, .mouse_down = true, .pressed = true });
-    _ = ctx.interact(id, box, false);
+    ctx.begin(.{ .mouse = inside, .mouse_down = true, .pressed = true }, 0);
+    _ = ctx.interact(id, box, .{});
     _ = ctx.end();
     // held, dragged outside: still active, not pressed-look, no fire
-    ctx.begin(.{ .mouse = outside, .mouse_down = true });
-    const off = ctx.interact(id, box, false);
+    ctx.begin(.{ .mouse = outside, .mouse_down = true }, 0);
+    const off = ctx.interact(id, box, .{});
     _ = ctx.end();
     try testing.expect(!off.pressed and !off.fired);
     try testing.expectEqual(id, ctx.active_id);
     // dragged back and released inside: fires
-    ctx.begin(.{ .mouse = inside, .released = true });
-    const up = ctx.interact(id, box, false);
+    ctx.begin(.{ .mouse = inside, .released = true }, 0);
+    const up = ctx.interact(id, box, .{});
     _ = ctx.end();
     try testing.expect(up.fired);
 }
@@ -249,8 +294,8 @@ test "drag off then back on still fires (armed across frames)" {
 test "press and release in one frame fires" {
     var ctx: Context = .{};
     const id = Context.id("a", 0);
-    ctx.begin(.{ .mouse = inside, .pressed = true, .released = true });
-    const it = ctx.interact(id, box, false);
+    ctx.begin(.{ .mouse = inside, .pressed = true, .released = true }, 0);
+    const it = ctx.interact(id, box, .{});
     _ = ctx.end();
     try testing.expect(it.fired);
     try testing.expectEqual(@as(u64, 0), ctx.active_id);
@@ -259,8 +304,8 @@ test "press and release in one frame fires" {
 test "disabled is inert and unfocusable" {
     var ctx: Context = .{};
     const id = Context.id("a", 0);
-    ctx.begin(.{ .mouse = inside, .pressed = true });
-    const it = ctx.interact(id, box, true);
+    ctx.begin(.{ .mouse = inside, .pressed = true }, 0);
+    const it = ctx.interact(id, box, .{ .disabled = true });
     _ = ctx.end();
     try testing.expect(!it.hovered and !it.pressed and !it.fired);
     try testing.expectEqual(@as(u64, 0), ctx.active_id);
@@ -270,10 +315,10 @@ test "disabled is inert and unfocusable" {
 const test_ids = [_]u64{ Context.id("a", 0), Context.id("b", 0), Context.id("c", 0) };
 
 fn runFrame(ctx: *Context, input: Input, ids: []const u64) void {
-    ctx.begin(input);
+    ctx.begin(input, 0);
     var x: f32 = 0;
     for (ids) |wid| {
-        _ = ctx.interact(wid, .{ .x = x, .y = 0, .w = 40, .h = 20 }, false);
+        _ = ctx.interact(wid, .{ .x = x, .y = 0, .w = 40, .h = 20 }, .{});
         x += 50;
     }
     _ = ctx.end();
@@ -304,15 +349,15 @@ test "mouse focus shows no ring; Space activates the focused widget" {
     var ctx: Context = .{};
     const a = test_ids[0];
     // click focuses without a ring
-    ctx.begin(.{ .mouse = .{ 20, 10 }, .pressed = true });
-    _ = ctx.interact(a, .{ .x = 0, .y = 0, .w = 40, .h = 20 }, false);
+    ctx.begin(.{ .mouse = .{ 20, 10 }, .pressed = true }, 0);
+    _ = ctx.interact(a, .{ .x = 0, .y = 0, .w = 40, .h = 20 }, .{});
     _ = ctx.end();
     try testing.expectEqual(a, ctx.focus_id);
     try testing.expect(!ctx.focus_ring_visible);
 
     // Space on the focused widget fires
-    ctx.begin(.{ .activate = true });
-    const it = ctx.interact(a, .{ .x = 0, .y = 0, .w = 40, .h = 20 }, false);
+    ctx.begin(.{ .activate = true }, 0);
+    const it = ctx.interact(a, .{ .x = 0, .y = 0, .w = 40, .h = 20 }, .{});
     _ = ctx.end();
     try testing.expect(it.fired);
 }
