@@ -108,6 +108,11 @@ const REORDER_MOVE_THRESHOLD_PX = 4;
  *  grabbing cursor and to suppress text selection during the drag. */
 const REORDERING_CLASS = 'sk-table-reordering';
 
+/** Marks the cells of the slice currently being dragged, so it tints for the length
+ *  of the drag — the "what am I moving" half of the feedback, paired with the
+ *  drop-indicator line's "where will it land". View-only; cleared on drop. */
+const DRAG_CELL_ATTR = 'data-cell-dragging';
+
 /**
  * The slots for a measured table, Notion-shaped: two full-length append rails (a
  * `+` down the right to add a column, a `+` along the bottom to add a row) that
@@ -554,6 +559,7 @@ export function attachTableChrome({
         document.body.classList.remove(REORDERING_CLASS);
         el.classList.remove('is-dragging');
         indicator?.remove();
+        for (const c of table.querySelectorAll(`[${DRAG_CELL_ATTR}]`)) c.removeAttribute(DRAG_CELL_ATTR);
       }
     };
     const onMove = (ev: PointerEvent): void => {
@@ -563,6 +569,10 @@ export function attachTableChrome({
         blockSurface.clearCaret();
         document.body.classList.add(REORDERING_CLASS);
         el.classList.add('is-dragging');
+        // Tint the slice in flight so it's clear WHAT is moving, alongside the drop
+        // line that shows WHERE. Both cleared on drop (cleanup).
+        const sliceKey = kind === 'col' ? 'data-cell-col' : 'data-cell-row';
+        for (const c of table.querySelectorAll(`[${sliceKey}="${from}"]`)) c.setAttribute(DRAG_CELL_ATTR, '');
         indicator = document.createElement('div');
         indicator.className = `${SLOT_CLASS} ${SLOT_CLASS}--drop-${kind}`;
         layer.appendChild(indicator);
@@ -573,7 +583,7 @@ export function attachTableChrome({
       let to = nearestBoundary(edges, pos);
       if (kind === 'row') to = Math.max(1, to); // never drop above the pinned header
       dropTo = to;
-      const r = dropIndicatorRect(geom, kind, to);
+      const r = dropIndicatorRect(geom, kind, to, 3);
       indicator!.style.transform = `translate(${r.x}px, ${r.y}px)`;
       indicator!.style.width = `${r.width}px`;
       indicator!.style.height = `${r.height}px`;

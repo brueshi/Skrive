@@ -114,10 +114,14 @@ describe('dragging a column handle reorders the column', () => {
 
     handle.dispatchEvent(new MouseEvent('pointerdown', { clientX: 0, clientY: 0, button: 0, bubbles: true }));
     scroller.dispatchEvent(new MouseEvent('pointermove', { clientX: 60, clientY: 0, bubbles: true }));
+    // Mid-drag the source column is tinted (feedback for what is moving).
+    expect(surfaceHost.querySelectorAll('[data-cell-col="2"][data-cell-dragging]').length).toBeGreaterThan(0);
     window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
 
     // Column 2 (c) dragged to the front boundary: order becomes c, a, b.
     expect(headerText()).toEqual(['c', 'a', 'b']);
+    // The drag tint is cleared on drop.
+    expect(surfaceHost.querySelectorAll('[data-cell-dragging]').length).toBe(0);
 
     // The click the browser fires after a drag is swallowed — no menu re-open — so
     // the moved column stays grip-selected at its new index 0.
