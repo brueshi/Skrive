@@ -368,6 +368,10 @@ function AppearancePane() {
 function EditorPane() {
   const lineMeasure = usePreferencesStore((s) => s.lineMeasure);
   const setLineMeasure = usePreferencesStore((s) => s.setLineMeasure);
+  const showMeasureRule = usePreferencesStore((s) => s.showMeasureRule);
+  const setShowMeasureRule = usePreferencesStore((s) => s.setShowMeasureRule);
+  const showRuledLines = usePreferencesStore((s) => s.showRuledLines);
+  const setShowRuledLines = usePreferencesStore((s) => s.setShowRuledLines);
   const smartTypography = usePreferencesStore((s) => s.smartTypography);
   const setSmartTypography = usePreferencesStore((s) => s.setSmartTypography);
 
@@ -392,6 +396,28 @@ function EditorPane() {
                 { id: 'full', label: 'Full' }
               ]}
               ariaLabel="Line measure"
+            />
+          }
+        />
+        <SettingRow
+          label="Measure rule"
+          desc="A hairline at the writing column's edge."
+          control={
+            <Toggle
+              checked={showMeasureRule}
+              onChange={setShowMeasureRule}
+              ariaLabel="Measure rule"
+            />
+          }
+        />
+        <SettingRow
+          label="Ruled lines"
+          desc="Notebook-style lines behind the text."
+          control={
+            <Toggle
+              checked={showRuledLines}
+              onChange={setShowRuledLines}
+              ariaLabel="Ruled lines"
             />
           }
         />

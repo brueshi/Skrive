@@ -18,6 +18,7 @@ import {
 import { IconPanels } from '../icons/IconPanels';
 import { platformShortcut } from '../../lib/commands/shortcut-display';
 import { Tooltip } from '../ui/Tooltip';
+import { usePreferencesStore } from '../../stores/preferences';
 import type { LineMeasure } from '@skrive/shared';
 
 /** Radio rows for the per-document measure override. `null` = follow the
@@ -51,6 +52,14 @@ export function ViewMenu() {
   const docLineMeasure = useProjectStore(selectLiveDocLineMeasure);
   const setLiveDocLineMeasure = useProjectStore(
     (s) => s.setLiveDocLineMeasure
+  );
+  const showMeasureRule = usePreferencesStore((s) => s.showMeasureRule);
+  const setShowMeasureRule = usePreferencesStore(
+    (s) => s.setShowMeasureRule
+  );
+  const showRuledLines = usePreferencesStore((s) => s.showRuledLines);
+  const setShowRuledLines = usePreferencesStore(
+    (s) => s.setShowRuledLines
   );
 
   if (!activeTab) return null;
@@ -123,6 +132,21 @@ export function ViewMenu() {
               </span>
             </span>
             <span className="ctx-shortcut">{platformShortcut('⌘⇧H')}</span>
+          </DropdownMenu.CheckboxItem>
+          <DropdownMenu.Separator className="ctx-sep" />
+          <DropdownMenu.CheckboxItem
+            className="ctx-item"
+            checked={showMeasureRule}
+            onCheckedChange={() => setShowMeasureRule(!showMeasureRule)}
+          >
+            <span className="ctx-label">Measure rule</span>
+          </DropdownMenu.CheckboxItem>
+          <DropdownMenu.CheckboxItem
+            className="ctx-item"
+            checked={showRuledLines}
+            onCheckedChange={() => setShowRuledLines(!showRuledLines)}
+          >
+            <span className="ctx-label">Ruled lines</span>
           </DropdownMenu.CheckboxItem>
           {hasMeasureHome && (
             <>

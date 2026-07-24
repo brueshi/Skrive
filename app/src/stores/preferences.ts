@@ -56,6 +56,8 @@ type PreferencesActions = {
   setWordCountMetric(value: WordCountMetric): void;
 
   setLineMeasure(value: LineMeasure): void;
+  setShowMeasureRule(value: boolean): void;
+  setShowRuledLines(value: boolean): void;
   setSmartTypography(value: boolean): void;
   setFormatOnSave(value: boolean): void;
   setAutosaveIdleDelayMs(value: number): void;
@@ -114,6 +116,8 @@ function snapshot(state: PreferencesState): AppUiState {
     surfaceSwitchingEnabled: state.surfaceSwitchingEnabled,
     markerMode: state.markerMode,
     lineMeasure: state.lineMeasure,
+    showMeasureRule: state.showMeasureRule,
+    showRuledLines: state.showRuledLines,
     smartTypography: state.smartTypography,
     formatOnSave: state.formatOnSave,
     autosaveIdleDelayMs: state.autosaveIdleDelayMs,
@@ -255,6 +259,16 @@ export const usePreferencesStore = create<
   setLineMeasure(value) {
     if (get().lineMeasure === value) return;
     set({ lineMeasure: value });
+    scheduleSave(get);
+  },
+  setShowMeasureRule(value) {
+    if (get().showMeasureRule === value) return;
+    set({ showMeasureRule: value });
+    scheduleSave(get);
+  },
+  setShowRuledLines(value) {
+    if (get().showRuledLines === value) return;
+    set({ showRuledLines: value });
     scheduleSave(get);
   },
   setSmartTypography(value) {

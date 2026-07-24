@@ -20,6 +20,7 @@ import { flushActiveEditor } from '../../components/editor/active-editor';
 import { getActiveBlockMenu } from '../../components/editor/active-surface';
 import { INSERT_CATALOG, dispatchInsert } from '../../components/editor/menus/insert-catalog';
 import { useProjectStore, logProjectError } from '../../stores/project';
+import { usePreferencesStore } from '../../stores/preferences';
 import { useFindStore } from '../../stores/find';
 import { peekVisit } from '../../stores/working-set';
 import { fileMode } from '../../stores/save';
@@ -735,6 +736,26 @@ export function buildRegistry(deps: CommandDeps): {
       when: whenDocMeasureHome,
       run: () => useProjectStore.getState().setLiveDocLineMeasure(value)
     })),
+    {
+      id: 'view.toggleMeasureRule',
+      label: 'Toggle measure rule',
+      group: 'View',
+      when: whenLiveDoc,
+      run: () => {
+        const s = usePreferencesStore.getState();
+        s.setShowMeasureRule(!s.showMeasureRule);
+      }
+    },
+    {
+      id: 'view.toggleRuledLines',
+      label: 'Toggle ruled lines',
+      group: 'View',
+      when: whenLiveDoc,
+      run: () => {
+        const s = usePreferencesStore.getState();
+        s.setShowRuledLines(!s.showRuledLines);
+      }
+    },
 
     // ============ Insert (block surface affordances) ============
     // Generated from INSERT_CATALOG so the palette Insert group, the toolbar
