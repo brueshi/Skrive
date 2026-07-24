@@ -746,16 +746,6 @@ export function buildRegistry(deps: CommandDeps): {
         s.setShowMeasureRule(!s.showMeasureRule);
       }
     },
-    {
-      id: 'view.toggleRuledLines',
-      label: 'Toggle ruled lines',
-      group: 'View',
-      when: whenLiveDoc,
-      run: () => {
-        const s = usePreferencesStore.getState();
-        s.setShowRuledLines(!s.showRuledLines);
-      }
-    },
 
     // ============ Insert (block surface affordances) ============
     // Generated from INSERT_CATALOG so the palette Insert group, the toolbar

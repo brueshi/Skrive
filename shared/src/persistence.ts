@@ -256,8 +256,6 @@ export type AppUiState = {
   lineMeasure: LineMeasure;
   /** Paint a hairline at the writing column's edge (the measure rule). */
   showMeasureRule: boolean;
-  /** Paint baseline-spaced ruled lines behind the writing surface. */
-  showRuledLines: boolean;
   /** Curly quotes, em dashes, and ellipses substituted as you type. */
   smartTypography: boolean;
   /** Normalize Markdown spacing when a file is written to disk. */
@@ -310,7 +308,6 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   markerMode: 'recessed',
   lineMeasure: 'normal',
   showMeasureRule: false,
-  showRuledLines: false,
   smartTypography: true,
   formatOnSave: false,
   autosaveIdleDelayMs: 500,
