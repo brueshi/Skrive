@@ -601,3 +601,306 @@ frame-on-demand-safe and settling in ~150 ms), a Windows smoke build for
 curiosity, and a settings-card composition authored with zero absolute
 coordinates. The button is hand-placed today precisely because one button can
 be; a kit cannot, which is what Stage 4 is for.
+
+## 2026-07-24 — Stage 4: layout and the small kit
+
+**Branch:** `joe/skr-233-zig-ui-lab-hand-drawn-interface-research`
+(recreated off `main` — the Stage 3 branch had been merged and deleted).
+**Commit:** `9a7a554`
+
+**Toolchain.** All pins unchanged: Zig 0.16.0, sokol-zig `54776d6`, sokol-shdc
+`87a6914`. No new dependency, no re-vendor, no shader change — Stage 4 adds
+2,997 lines of `ui/` on top of a renderer it never touched.
+
+**What was built.**
+- `ui/layout.zig` — flexbox-lite. Row/column `Box`es with per-side padding, a
+  gap, per-child main-axis sizing (`fixed` / `content` / `grow`) and cross-axis
+  alignment (start / center / end / stretch), plus `Fit.content` containers that
+  shrink to their children. The vocabulary was chosen by reading
+  `app/src/components/ui/*.module.css` and the `.settings-row` rules in
+  `app/src/index.css` and transcribing what is actually there: two directions,
+  one gap, per-side padding, three sizing modes, four alignments. Nothing else
+  appears in the shipped kit — no wrapping, no percentages, no `order`, no
+  auto-margins. `justify-content: space-between` is not a feature here because
+  it is not one there either: the real row achieves it with `flex: 1` on the
+  text block, which is a grow child.
+- `ui/anim.zig` — the per-ID animation store, ~90 lines of substance. An entry
+  is `{key, current, target, remaining}`; `value(key, target)` retargets and
+  reads, `advance(dt)` steps every in-flight entry by exponential decay
+  (tau = 22ms), `animating()` reports whether anything is still moving.
+- `ui/widgets.zig` — `toggle()` and `segmented()`, both on Stage 3's
+  hot/active/focus machinery, plus `buttonWidth`/`segmentedWidth` (a layout box
+  needs a child's natural size before the child draws) and forced-state
+  showcase renderers. Each widget is split into a `*Interact` half that is pure
+  over the context and a drawing half that calls it — the same instinct as
+  Stage 3's `end()` returning the cursor, and the thing that makes the
+  mechanics testable without a GPU.
+- `main.zig` — a `card` scene (key `9`, `--card`), Left/Right plumbed into the
+  input snapshot, a dt clock measured from the last *rendered* frame, the
+  after-build animation dirty check, a `card` bench phase and an
+  `idle-card-after-toggle` phase that flips the toggle on entry so the bench can
+  measure an animation it is not allowed to type at.
+- Tests — `zig build test` now runs **33** (was 9): 10 for layout arithmetic, 6
+  for the animation store, 8 for the new widgets, and Stage 3's 9 carried
+  forward through the two signature changes.
+
+**The layout design call, and why it is not dvui's.** dvui's `BoxWidget` keeps
+`packed_children / total_weight / min_space_taken` from the previous frame and
+distributes grow space against those, calling `refresh()` when this frame
+diverges; the long Dear ImGui layout thread lands in the same place, and its
+contributors describe the one-frame lag as the accepted price of letting
+children be emitted before the container knows its own content. That price is
+much higher here. Both of those libraries render continuously, so a frame of
+lag is invisible — this lab renders on demand, where a layout that is wrong on
+the frame an event arrives needs a *second* repaint that nothing would
+schedule. It is the same trap Stage 3 avoided by hit-testing this frame instead
+of last frame, and the second time the frame-on-demand requirement has forced a
+different architecture than the reference implementations use.
+
+So a `Box` takes its children as declarations up front (the third option in
+that ImGui thread), resolves them in one measure+arrange pass, and hands back
+rects the caller draws into: widgets are emitted *after* the arithmetic instead
+of during it. No layout state survives the call. **The cost is real and it is
+the honest weakness of the idiom:** a child's natural size is the caller's to
+supply, so this cannot infer a nested subtree's intrinsic size the way a
+retained tree can. At kit scale that is a `measureText` call — `buttonWidth()`
+and `segmentedWidth()` exist precisely to pay it — but a deep tree of unknown
+content would want either dvui's lag or a real two-pass tree.
+
+**The animation store, and where it lives.** In `Context`, as a field, in its
+own file. Keyed by widget identity, same lifetime as hot/active/focus, and
+every widget already holds the context — a second store threaded through the
+Painter would have been ceremony. Its own file because `context.zig` is
+identity + input and this is identity + time, with no shared invariants.
+
+Its shape is deliberately not dvui's either. dvui stores a tween (start_val,
+end_val, start_time, end_time, easing fn) and deletes it when the clock runs
+out, which is right for a one-shot. It is wrong for a control: retargeting a
+tween mid-flight either restarts it from a new origin or makes the caller
+rewrite `start_val` by hand. A toggle flicked twice quickly does exactly that.
+So an entry here is a *retargetable* value and the interpolation is exponential
+decay, which has no notion of an origin at all — flick it back mid-slide and
+the knob turns around from wherever it is. There is a unit test for that.
+
+**The trap, and how termination actually works.** An animation is the obvious
+way to break `idle = 0 presents`: mark the frame dirty every frame and you have
+a permanent max-fps loop, the same shape as the Stage 2 HUD's once-a-second
+timer. Two decisions handle it. (1) Termination is by **clock, not by an
+epsilon**: a retarget sets `remaining = 150ms` and the entry snaps to its
+target when that runs out. An epsilon test on a decay curve is asymptotic, and
+with unlucky units (the knob's press-stretch is in pixels, the segmented
+thumb's position is in option-indices) it can take arbitrarily long to
+converge — a clock guarantees the settle time regardless of scale. After 150ms
+at tau = 22ms the residual is e^-6.8, ~0.1% of the jump, far under a device
+pixel. (2) The dirty flag is set **after the scene is built**, not during
+`begin()`, because a widget retargets while drawing: an in-flight value asks
+for the next frame, and the frame that lands on the target asks for nothing.
+Exponential decay also happens to be frame-rate independent, which matters
+concretely here — this window fluctuates between 60 and 120Hz depending on
+whether it is frontmost, and a per-frame `cur += delta * 0.2` would visibly
+animate at two speeds.
+
+**The design smell the plan asked me to watch for — and it showed up exactly
+where the plan predicted.** The segmented control is a radiogroup: *one* Tab
+stop whose options are chosen with arrow keys, but every option still needs its
+own hit test, hover, and press. Stage 3's `interact()` fused "is a keyboard
+target" with "is interactive," which cannot express that. Two additions, both
+routed through `context.zig` rather than bolted onto the widget:
+
+1. `interact(id, rect, opts)` gained `opts.focusable` (and `disabled` moved
+   into the same struct). A non-focusable part registers no Tab stop *and does
+   not steal focus on press* — that second half is what keeps a click on an
+   option leaving focus on the group, without which arrows would stop working
+   after any mouse selection. Pinned by a test.
+2. `Input` gained `nav_prev` / `nav_next`, and `Interaction` gained `has_focus`
+   (the keyboard-target fact, as distinct from `focused`, which stays
+   :focus-visible and only true when focus arrived by keyboard).
+
+Honest read: this is a small, well-motivated widening rather than a wart — one
+option struct and two edges — but it is the first time a widget needed the
+primitive changed, and the *shape* of the need (composite widgets are one focus
+target made of many hit targets) is the shape that recurs for menus, tab bars,
+lists, and toolbars. A retained tree gets this for free from parent/child
+containment. If this lab ever grew, that is where the pressure would come from,
+not from drawing.
+
+**Measurements (macOS daily driver, ReleaseFast, 1200x800 @ 2x, via `--bench`).**
+Draw-call and present counts are the load-independent invariants and are clean;
+the frame averages carry the standing environmental caveats (below).
+- Every scene, including both new ones: **1 draw call.** The `card` scene is
+  311 quads. Shapes, glyphs, toggle knobs, and
+  segmented thumbs all still share the single batch — the `flush()` seam
+  remains unused since Stage 1.
+- `card`: 311 quads, **1 draw call**, build 542us. The layout arithmetic is
+  invisible in the numbers: the whole scene resolves 5 nested boxes (page,
+  card, three rows, three text columns, one segmented strip) per frame and the
+  build cost sits between `settings` (394 quads, 660us) and `buttons` (114
+  quads, 231us) — i.e. it tracks quad count, not box count. Immediate-mode
+  layout at kit scale is free.
+- **The animation criterion, both halves, measured.** The
+  `idle-card-after-toggle` phase flips the toggle on entry and then sits still:
+  **10 presents during the 1s settle window** (the transition repainting itself
+  — 150ms at this run's 60Hz cadence is 9 frames plus the frame the flip
+  dirtied), then **0 presents over the following 15s**. The animation runs and
+  then genuinely stops asking for frames. This was the number I was most
+  watchful of, and it is the one that would have silently become a permanent
+  max-fps loop if the dirty flag had been set anywhere but after the build.
+- Frame-on-demand also re-confirmed unchanged on the carried scenes: **0
+  presents over 15s** in all three of the stress, settings, and buttons idle
+  phases.
+- Carried baselines re-confirmed: stress-large 14.32ms (Stage 1: 14.3, Stage 2:
+  14.48), stress-large-shadows 24.59 (23.3 / 23.34), stress-small 16.37,
+  toast 16.90, settings 16.88, text-wall 17.89, buttons 16.84 — all 1 draw
+  call, all quad counts identical to Stage 3 (74 / 394 / 2,338 / 114).
+- Atlas census after all phases: **1024², 225 glyphs cached, 9.2% occupied,
+  0 growth events** (Stage 3: 131 glyphs, 5.3%). The +94 glyphs are the card's
+  prose and the showcase's new labels; still no growth, still one texture, so
+  still one draw call.
+
+**Two measurement caveats, unchanged from Stage 3 and both environmental.**
+Every light scene in this run reads 16.7-16.9ms — that is the display link
+cadencing at 60Hz, not a cost: `toast` at 74 quads and `text-wall` at 2,338
+quads report the same frame average, which is only possible if both are
+vsync-bound. Stage 3 saw the same thing on some phases and 120Hz on others,
+depending on whether the shell-launched window was genuinely frontmost. And the
+CPU build averages run 2-4x Stage 2's on ambient daily-driver load (settings
+build 660us here vs 345us in this session's own baseline run of the *identical*
+Stage 3 binary, taken 40 minutes earlier) — which is why that baseline run
+exists at all: it prices the machine, not the code. Both runs are in the
+session record; the delta between them is load, not Stage 4.
+
+**How it feels — and the honest limit of my verification, again.** Same as
+Stage 3: I cannot hand-drive the window from the agent shell, so the claims
+rest on three legs and I am naming the gap rather than papering it.
+1. *Mechanics* — verified deterministically by 33 headless tests: the toggle
+   flips on release-inside and cancels on release-outside, Space flips the
+   focused one, a disabled one is inert, identity survives the bound value
+   changing mid-gesture (the Stage 3 dynamic-label lesson, tested this time
+   rather than discovered); the segmented control is one Tab stop, a click on
+   an option leaves focus on the group, arrows wrap in both directions and do
+   nothing when unfocused.
+2. *Visuals* — `stage4-widgets-showcase-lab.png` next to
+   `stage4-widgets-web-reference.png` (the shipped Toggle/Segmented CSS in
+   Chromium over the same Inter files, dpr 2, states written out explicitly
+   since a static capture cannot trigger `:hover`/`:active`). Eyeballed: track
+   colours, knob geometry, press-stretch, radii, thumb shadow, and the focus
+   ring all line up. **One real divergence, and it is the same one Stage 2
+   found:** the shipped active segment steps to weight 600 and reads
+   distinctly bolder; the lab carries Regular and Medium only, so the active
+   option reads through colour alone and the strip is visibly flatter. That is
+   a font-inventory gap, not a rendering one — vendoring Inter SemiBold fixes
+   it, and Stage 5 should, since the benchmark is a weight-for-weight
+   comparison.
+3. *Animation* — the transition is 150ms, which a shell-driven `screencapture`
+   cannot reliably land inside, so the in-between states are shown as a
+   deterministic ladder (0, ¼, ½, ¾, 1) rendered through the identical paint
+   path the animation drives, and *that* it runs is measured by the bench's
+   settle-window present count rather than photographed. Both halves are
+   evidence; neither is a caught frame, and I am not going to describe it as
+   one.
+
+What remains genuinely unverified by me is whether the toggle *feels* right
+under a fingertip — whether tau = 22ms with a hard 150ms stop reads as crisp or
+as slightly rubbery next to the shipped `cubic-bezier(0.16, 1, 0.3, 1)` over
+160ms. Those are the same family and close in duration, so my expectation is
+"very near," but this is precisely the judgement that has to be made by eye.
+Key `9`. If it wants to be snappier, `anim.tau` is one number.
+
+**Two deliberate scope calls, both visible in the screenshots.**
+- *Hover does not animate.* The shipped CSS transitions the track colour over
+  110ms on hover; the lab steps it. The plan named "the toggle knob and the
+  segmented thumb" as the first animation and I kept to exactly that. The store
+  would handle it in two lines per widget — it is a scope call, not a
+  limitation.
+- *Inset shadows are approximated.* The toggle's sunken-track rim
+  (`inset 0 0 0 1px`) becomes a 1px border and the knob's 0-blur 0.5px shadow
+  ring becomes a 0.5px border — the same pixels by another route. The second
+  rim layer (`inset 0 1px 1.5px`, a blurred inner top shadow) has no equivalent
+  in a shader that draws no inset blur, so it is dropped rather than faked. At
+  23px tall the difference is not visible in the side-by-side, but it is a real
+  gap in the shape shader and Stage 5's token pass will meet it again.
+
+**Windows smoke test (curiosity, not a gate).** `zig build
+-Dtarget=x86_64-windows -Doptimize=ReleaseFast` now produces a 1.8MB
+`zig-ui.exe` (+ pdb), linking `d3d11`/`dxgi` through sokol as decision 4.4
+predicted. It did not build first try, and the single thing in the way is worth
+recording: **not one line of the renderer, the widget layer, or the layout
+code — only argument parsing.** Zig 0.16's `std.process.Args.Iterator.init` is
+`@compileError` on Windows (the command line arrives as one WTF-16 string that
+must be split and re-encoded); `initAllocator` is the cross-platform form and a
+no-op wrapper on posix. One line, and the D3D11 build fell out. Everything
+above the platform layer is genuinely portable, which is the answer decision
+4.4 was fishing for. **Not run on the Windows box** — I cannot execute a
+Windows binary from this session, so there is no screenshot; the executable and
+the finding are what this stage produced, and running it is Joe's if he is
+curious.
+
+**What fought back.**
+- *Nothing in the layout maths, because the tests caught it.* Two of my own
+  arithmetic slips (a divider's gap counted once in a comment and twice in the
+  expectation; a segmented track width off by 2px) were caught by the unit
+  tests within a minute of writing them. Worth noting because layout is exactly
+  the domain that looks right on screen while being subtly wrong, and where a
+  screenshot is not a test.
+- *`screencapture` refuses the window right after an AppleScript resize.* The
+  window-id capture trick from Stage 3 works reliably on a settled window and
+  returns "could not create image from window" for several seconds after a
+  programmatic resize (surface reallocation, presumably). Bringing the window
+  frontmost first and waiting ~3s fixed it. That is how the narrow-window
+  screenshot got taken, and the resize itself is a real exercise of the layout
+  code, not a mock.
+- *The Zig 0.16 Windows arg iterator* (above) — 20 minutes of the session, and
+  the only cross-platform friction in ~3,000 lines.
+- Nothing else in Zig 0.16 bit. `std.debug.assert`, tagged unions in a const
+  array, and returning an anonymous struct from a function all behaved.
+
+**Screenshots** in `docs/zig-ui-lab/`:
+- `stage4-card-lab.png` — the deliverable: the settings card at 1200x800, laid
+  out with zero absolute coordinates.
+- `stage4-card-narrow-lab.png` — the same scene with the window resized to
+  720x600 (via System Events, so it goes through the real resize path). The
+  content column narrows, the text blocks shrink, the controls keep their size
+  — `flex: 1` and `flex-shrink: 0` doing their jobs.
+- `stage4-widgets-showcase-lab.png` — every state of button / toggle /
+  segmented, plus the mid-transition ladder.
+- `stage4-widgets-web-reference.png` — the shipped Toggle + Segmented CSS in
+  Chromium over the same Inter files.
+
+**Exit criteria.**
+- *The settings card is authored with zero absolute coordinates; adding a
+  fourth row is a ~three-line change:* **pass, and better than asked.** There is
+  no literal coordinate in `buildCardScene` — the page column centres itself in
+  the live window size, the card takes the space under the heading and then
+  shrinks to its rows, and every row and text block comes out of a Box. Rows
+  are a data array with a tagged-union control, so a fourth row is **one line**.
+- *Toggling animates smoothly, then idles at 0 presents:* **pass**, both halves
+  measured — see the settle-window numbers above.
+- *Toggle and segmented feel right:* **mechanics verified** (33/33 tests),
+  **visuals verified** against a Chromium reference with one honest divergence
+  (font weight inventory), **tactile pass owed to Joe**. Called the same way
+  Stage 3 called it.
+- *`--bench` runs clean end to end with fresh numbers alongside the carried
+  baselines:* **pass**, and the log records both this run and a same-session
+  baseline run of the unmodified Stage 3 binary so the load is legible.
+- *Isolation:* **pass** — repo-wide grep finds `zig-ui` only under `labs/` plus
+  the two lab docs; `bun run typecheck` untouched; `rm -rf labs/` still breaks
+  nothing.
+- *One draw call:* **pass**, every scene.
+
+**Deviations from the plan.** None requiring sign-off; nothing in section 4 was
+touched. Three additive choices, logged rather than silent: the `focusable`
+option and the two nav edges (the plan explicitly sanctioned this and asked for
+it to be flagged — done, above); the `*Interact` / draw split in the widgets,
+which exists to make the mechanics testable headless; and the `initAllocator`
+change, which is a portability bug fix the Windows smoke test surfaced.
+
+**Next session (Stage 5, the honest benchmark).** `ui/tokens.zig` transcribed
+from `app/src/components/ui/tokens.css` + `app/src/index.css`, the Stage 3/4
+widgets restyled off it, IconButton, and the side-by-side against the shipped
+kit at identical logical size. Stage 4 leaves it two concrete gifts and one
+concrete debt: the layout module means the benchmark scene can be a real
+settings section rather than hand-placed rects; `segmentedWidth`/`buttonWidth`
+mean sizing is already token-drivable. The debt is the font weights — the
+comparison is weight-for-weight, and the lab currently carries two of the four
+the kit uses (400/500 against 450/500/600). Vendor Inter SemiBold and Light
+before shooting anything for the verdict.
