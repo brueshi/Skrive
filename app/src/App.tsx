@@ -117,15 +117,15 @@ export function App() {
     }
   }, [theme]);
 
-  // Ruling toggles, stamped as root attributes so the rules are gated
-  // purely in CSS — toggling repaints once; nothing runs per keystroke.
+  // The measure rule, stamped as a root attribute so the hairline is
+  // gated purely in CSS — toggling repaints once; nothing per keystroke.
   const showMeasureRule = usePreferencesStore((s) => s.showMeasureRule);
-  const showRuledLines = usePreferencesStore((s) => s.showRuledLines);
   useEffect(() => {
-    const root = document.documentElement;
-    root.toggleAttribute('data-measure-rule', showMeasureRule);
-    root.toggleAttribute('data-ruled-lines', showRuledLines);
-  }, [showMeasureRule, showRuledLines]);
+    document.documentElement.toggleAttribute(
+      'data-measure-rule',
+      showMeasureRule
+    );
+  }, [showMeasureRule]);
 
   // Phase-12b cold-open measurement. Logs the time from React mount
   // (recorded in main.tsx via window.__skriveMountStart) to the first

@@ -41,12 +41,10 @@
   line-height: var(--skrive-editor-line-height);
 }
 
-/* ---- Ruling (line + width ruling). Both gated by root attributes the
-   App stamps from the two prefs; pure static paint, nothing per keystroke.
-   Colors ride --skrive-rule softened toward transparent so the ruling
-   reads quieter than panel hairlines in both themes. ---- */
-
-/* Vertical measure rule: a hairline at the writing column's right edge.
+/* Vertical measure rule: a hairline at the writing column's right edge,
+   gated by a root attribute the App stamps from the pref — pure static
+   paint, nothing per keystroke. Rides --skrive-rule softened toward
+   transparent so it reads quieter than panel hairlines in both themes.
    A positioned pseudo-element, not a border — the column's width and the
    text's wrap point stay exactly where they were. Inset by the surface's
    horizontal padding so it sits on the text column edge, not the box edge. */
@@ -63,29 +61,6 @@
   width: 1px;
   background: color-mix(in srgb, var(--skrive-rule) 70%, transparent);
   pointer-events: none;
-}
-
-/* Horizontal ruled lines: a repeating background whose row height tracks
-   the editor's computed line box (line-height x font-size), so it stays
-   aligned as either pref changes. Paragraph text sits on the grid; blocks
-   with their own scale (headings, code) ride over it — accepted, the grid
-   stays calm and stationary. content-box origin starts the first line at
-   the first text line, not the padding edge. */
-:root[data-ruled-lines] .block-editor-surface {
-  --skrive-ruling-row: calc(
-    var(--skrive-editor-line-height) * var(--skrive-editor-font-size)
-  );
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent calc(var(--skrive-ruling-row) - 1px),
-    color-mix(in srgb, var(--skrive-rule) 55%, transparent)
-      calc(var(--skrive-ruling-row) - 1px),
-    color-mix(in srgb, var(--skrive-rule) 55%, transparent)
-      var(--skrive-ruling-row)
-  );
-  background-origin: content-box;
-  background-clip: content-box;
 }
 
 /* The host is the focused contenteditable; opt out of the app's global

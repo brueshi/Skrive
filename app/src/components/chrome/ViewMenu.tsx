@@ -57,10 +57,6 @@ export function ViewMenu() {
   const setShowMeasureRule = usePreferencesStore(
     (s) => s.setShowMeasureRule
   );
-  const showRuledLines = usePreferencesStore((s) => s.showRuledLines);
-  const setShowRuledLines = usePreferencesStore(
-    (s) => s.setShowRuledLines
-  );
 
   if (!activeTab) return null;
 
@@ -140,13 +136,6 @@ export function ViewMenu() {
             onCheckedChange={() => setShowMeasureRule(!showMeasureRule)}
           >
             <span className="ctx-label">Measure rule</span>
-          </DropdownMenu.CheckboxItem>
-          <DropdownMenu.CheckboxItem
-            className="ctx-item"
-            checked={showRuledLines}
-            onCheckedChange={() => setShowRuledLines(!showRuledLines)}
-          >
-            <span className="ctx-label">Ruled lines</span>
           </DropdownMenu.CheckboxItem>
           {hasMeasureHome && (
             <>

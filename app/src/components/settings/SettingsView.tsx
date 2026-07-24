@@ -370,8 +370,6 @@ function EditorPane() {
   const setLineMeasure = usePreferencesStore((s) => s.setLineMeasure);
   const showMeasureRule = usePreferencesStore((s) => s.showMeasureRule);
   const setShowMeasureRule = usePreferencesStore((s) => s.setShowMeasureRule);
-  const showRuledLines = usePreferencesStore((s) => s.showRuledLines);
-  const setShowRuledLines = usePreferencesStore((s) => s.setShowRuledLines);
   const smartTypography = usePreferencesStore((s) => s.smartTypography);
   const setSmartTypography = usePreferencesStore((s) => s.setSmartTypography);
 
@@ -407,17 +405,6 @@ function EditorPane() {
               checked={showMeasureRule}
               onChange={setShowMeasureRule}
               ariaLabel="Measure rule"
-            />
-          }
-        />
-        <SettingRow
-          label="Ruled lines"
-          desc="Notebook-style lines behind the text."
-          control={
-            <Toggle
-              checked={showRuledLines}
-              onChange={setShowRuledLines}
-              ariaLabel="Ruled lines"
             />
           }
         />
