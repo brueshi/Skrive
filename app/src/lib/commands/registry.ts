@@ -114,6 +114,12 @@ export const COMMAND_GROUP_ORDER: CommandGroup[] = [
 
 const whenManifestOpen = () => useProjectStore.getState().manifest !== null;
 const whenLiveDoc = () => useProjectStore.getState().liveDoc !== null;
+/** The per-document measure override persists in folio docMeta or `.md`
+ *  frontmatter — text/view docs have neither, so the commands hide. */
+const whenDocMeasureHome = () => {
+  const doc = useProjectStore.getState().liveDoc;
+  return doc !== null && (doc.mode === 'markdown' || doc.mode === 'rich');
+};
 const whenLiveDocAndManifest = () => {
   const s = useProjectStore.getState();
   return s.manifest !== null && s.liveDoc !== null;
@@ -712,6 +718,23 @@ export function buildRegistry(deps: CommandDeps): {
         s.setLiveDocLayoutMode(doc.path, next);
       }
     },
+    // Per-document measure override (mirrors the View-menu radio group;
+    // palette-only, no chords — the View group's are spoken for).
+    ...(
+      [
+        ['Default', null],
+        ['Narrow', 'narrow'],
+        ['Normal', 'normal'],
+        ['Wide', 'wide'],
+        ['Full', 'full']
+      ] as const
+    ).map<Command>(([label, value]) => ({
+      id: `view.docMeasure.${value ?? 'default'}`,
+      label: `Document measure: ${label}`,
+      group: 'View',
+      when: whenDocMeasureHome,
+      run: () => useProjectStore.getState().setLiveDocLineMeasure(value)
+    })),
 
     // ============ Insert (block surface affordances) ============
     // Generated from INSERT_CATALOG so the palette Insert group, the toolbar

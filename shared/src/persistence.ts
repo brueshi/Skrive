@@ -171,6 +171,22 @@ export type MarkerMode = 'raw' | 'recessed' | 'concealed';
  *  view shares one physical column); 'full' lifts the cap entirely. */
 export type LineMeasure = 'narrow' | 'normal' | 'wide' | 'full';
 
+const LINE_MEASURES: readonly LineMeasure[] = [
+  'narrow',
+  'normal',
+  'wide',
+  'full'
+];
+
+/** Normalize an untrusted per-document override (folio docMeta key or
+ *  frontmatter value) to a LineMeasure, or null when absent/invalid.
+ *  Invalid values are ignored at read time, never rewritten on disk. */
+export function parseLineMeasure(value: unknown): LineMeasure | null {
+  return LINE_MEASURES.includes(value as LineMeasure)
+    ? (value as LineMeasure)
+    : null;
+}
+
 /** The figure the word-count chip displays (SKR-53). */
 export type WordCountMetric = 'words' | 'time' | 'chars';
 

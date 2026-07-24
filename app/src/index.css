@@ -3577,6 +3577,16 @@ body {
   gap: 1.25rem;
 }
 
+/* Selected mark for a radio row (document measure): a quiet dot in the
+   trailing slot — the ctx-meta voice, not a loud check glyph. */
+.ctx-radio-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--skrive-fg);
+}
+
 /* Meta text on a view-menu row (e.g. "· git", "· 3"). Sits between
    the label and the shortcut, in muted weight. */
 .ctx-meta {

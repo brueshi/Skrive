@@ -7,6 +7,10 @@
 
 import { useEffect } from 'react';
 import { usePreferencesStore } from '../stores/preferences';
+import {
+  selectLiveDocLineMeasure,
+  useProjectStore
+} from '../stores/project';
 import type { LineMeasure } from '@skrive/shared';
 import { resolveEditorFontStack } from './typography';
 
@@ -70,6 +74,9 @@ export function useTypographyVars(): void {
     (s) => s.editorLineHeightX100
   );
   const lineMeasure = usePreferencesStore((s) => s.lineMeasure);
+  // Per-document override (folio docMeta / frontmatter). Changes only on
+  // doc switch or an explicit override edit — never per keystroke.
+  const docLineMeasure = useProjectStore(selectLiveDocLineMeasure);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -82,13 +89,14 @@ export function useTypographyVars(): void {
     );
     root.style.setProperty(
       '--skrive-measure',
-      resolveMeasureCss(lineMeasure, stack, editorFontSize)
+      resolveMeasureCss(docLineMeasure ?? lineMeasure, stack, editorFontSize)
     );
   }, [
     editorFont,
     editorCustomFontFamily,
     editorFontSize,
     editorLineHeightX100,
-    lineMeasure
+    lineMeasure,
+    docLineMeasure
   ]);
 }

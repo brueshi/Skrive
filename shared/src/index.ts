@@ -123,5 +123,6 @@ export {
   DEFAULT_SPLIT_DIVIDER_RATIO,
   WORKING_SET_CAP,
   defaultProjectUiState,
-  migrateProjectUiState
+  migrateProjectUiState,
+  parseLineMeasure
 } from './persistence';
