@@ -30,6 +30,52 @@ describe('model <-> folio round-trip (wave gate)', () => {
     expect(serializeFolio(modelToFolio(reloaded, identity))).toBe(serializeFolio(richFixture));
   });
 
+  it('carries per-column table widths across the model <-> folio seam', () => {
+    const model: BlockNode[] = [
+      {
+        id: 't3a2b3c4d5',
+        type: 'table',
+        durable: false,
+        src: null,
+        gapBefore: null,
+        dirty: false,
+        align: [null, null],
+        widths: [4, 1],
+        rows: [
+          [[{ kind: 'text', text: 'A', marks: {} }], [{ kind: 'text', text: 'B', marks: {} }]],
+          [[{ kind: 'text', text: '1', marks: {} }], [{ kind: 'text', text: '2', marks: {} }]]
+        ]
+      }
+    ];
+    const doc: Document = { blocks: model, trailingGap: '' };
+    const folio = modelToFolio(doc, identity);
+    expect(folio.blocks[0]).toMatchObject({ type: 'table', widths: [4, 1] });
+    // Back to the model, the widths survive unchanged.
+    const back = folioToModel(folio).blocks[0];
+    expect(back?.type).toBe('table');
+    if (back?.type === 'table') expect(back.widths).toEqual([4, 1]);
+  });
+
+  it('leaves a width-free table without a widths field on either side', () => {
+    const model: BlockNode[] = [
+      {
+        id: 't4a2b3c4d5',
+        type: 'table',
+        durable: false,
+        src: null,
+        gapBefore: null,
+        dirty: false,
+        align: [null],
+        rows: [[[{ kind: 'text', text: 'A', marks: {} }]]]
+      }
+    ];
+    const folio = modelToFolio({ blocks: model, trailingGap: '' }, identity);
+    expect('widths' in folio.blocks[0]!).toBe(false);
+    const back = folioToModel(folio).blocks[0];
+    expect(back?.type).toBe('table');
+    if (back?.type === 'table') expect('widths' in back).toBe(false);
+  });
+
   it('persists every block id (not just durable ones)', () => {
     const model = folioToModel(richFixture);
     const folio = modelToFolio(model, identity);

@@ -40,7 +40,7 @@ export type TableGeometry = {
  *  an append carries the index a new row/column is inserted AT — the row/column
  *  count — which is exactly what insertTableRowAt / insertTableColumnAt take. */
 export type GutterSlot = {
-  kind: 'col-handle' | 'row-handle' | 'col-append' | 'row-append';
+  kind: 'col-handle' | 'row-handle' | 'col-append' | 'row-append' | 'col-resize';
   index: number;
   x: number;
   y: number;
@@ -66,7 +66,11 @@ export const GUTTER_METRICS = {
   /** Short dimension of an append rail (the full-length `+` lanes). */
   railThickness: 16,
   /** Gap between an append rail and the table's edge. */
-  railGap: 4
+  railGap: 4,
+  /** Width of the invisible grab strip centred on an interior column boundary (the
+   *  resize affordance). Thin, so it reads as the border rather than as a column,
+   *  and sits within the cell padding on either side of the 1px rule. */
+  resizeGrab: 9
 } as const;
 
 export type GutterMetrics = typeof GUTTER_METRICS;
@@ -82,6 +86,19 @@ const ZONE_SLACK = 10;
  *  delay (cancelled the instant the pointer returns) keeps a near-miss on a handle
  *  or a dip through the gutter from tearing the chrome down and back up. */
 const HIDE_DELAY_MS = 140;
+
+/** Minimum width, in px, a resize drag leaves a column — keeps every column
+ *  grabbable and its handle hittable, and stops a neighbour from collapsing. */
+const MIN_COLUMN_PX = 40;
+
+/** Pointer travel, in px, before a boundary press becomes a resize drag. Below it a
+ *  press-and-release stays a click, so a stray click on the border strip never
+ *  converts an auto-layout table to explicit widths (a surprise undo step). */
+const RESIZE_MOVE_THRESHOLD_PX = 3;
+
+/** Body class held for the duration of a resize drag, so the col-resize cursor and
+ *  the drawn boundary line persist even as the pointer leaves the thin grab strip. */
+const RESIZING_CLASS = 'sk-col-resizing';
 
 /**
  * The slots for a measured table, Notion-shaped: two full-length append rails (a
@@ -184,6 +201,84 @@ export function tableHandleSlot(
   };
 }
 
+/**
+ * A thin grab strip centred on every INTERIOR column boundary — the resize
+ * affordances (SKR-270). A boundary sits between column `i` and `i + 1`, at
+ * `colEdges[i + 1]`; the slot's `index` is the left column `i`, which is what the
+ * drag trades against its right neighbour. The two outer edges are not boundaries
+ * (there is no neighbour to trade with), so a table with fewer than two columns
+ * yields none. Full table height, so the strip reads as the whole border.
+ *
+ * Pure: no DOM, no measurement.
+ */
+export function tableResizeSlots(geom: TableGeometry, m: GutterMetrics = GUTTER_METRICS): GutterSlot[] {
+  const { box, colEdges } = geom;
+  const cols = colEdges.length - 1;
+  if (cols < 2) return [];
+  const slots: GutterSlot[] = [];
+  for (let i = 0; i < cols - 1; i++) {
+    const edge = colEdges[i + 1]!;
+    slots.push({
+      kind: 'col-resize',
+      index: i,
+      x: edge - m.resizeGrab / 2,
+      y: box.y,
+      width: m.resizeGrab,
+      height: box.height
+    });
+  }
+  return slots;
+}
+
+/**
+ * Trade width between column `boundary` and its right neighbour by `deltaPx`,
+ * clamped so neither falls below `minPx`. Every other column is untouched and the
+ * pair's combined width is conserved, so the table's total width never changes —
+ * the writer-ergonomic model where resizing a column steals from its neighbour
+ * rather than growing the table past the writing measure. Returns a fresh array;
+ * a boundary out of range yields an unchanged copy. Pure; unit-tested without
+ * layout.
+ */
+export function resizeColumnWidths(
+  widths: number[],
+  boundary: number,
+  deltaPx: number,
+  minPx: number
+): number[] {
+  const next = widths.slice();
+  const i = boundary;
+  const j = boundary + 1;
+  if (i < 0 || j >= widths.length) return next;
+  const a = widths[i]!;
+  const b = widths[j]!;
+  // The pair already at/under the floor has no room to trade — leave it be rather
+  // than push a column negative.
+  if (a <= minPx && b <= minPx) return next;
+  // Clamp so column i stays >= min (delta not below -(a-min)) and column j stays
+  // >= min (delta not above b-min).
+  const delta = Math.max(-(a - minPx), Math.min(deltaPx, b - minPx));
+  next[i] = a + delta;
+  next[j] = b - delta;
+  return next;
+}
+
+/**
+ * Normalize pixel widths to fractional weights that sum to ~1, rounded to 4 dp for
+ * a tidy, stable `.folio` value — so an identical drag commits an identical array
+ * and earns no extra undo step. The renderer re-normalizes defensively, so the
+ * rounded sum need not be exactly 1. A degenerate all-zero input falls back to
+ * equal weights. Pure.
+ */
+export function normalizeWidths(widths: number[]): number[] {
+  let total = 0;
+  for (const w of widths) if (w > 0) total += w;
+  if (total <= 0) {
+    const equal = widths.length ? 1 / widths.length : 1;
+    return widths.map(() => equal);
+  }
+  return widths.map((w) => Math.round(((w > 0 ? w : 0) / total) * 1e4) / 1e4);
+}
+
 /** A viewport-space rectangle: the pointer hit-test region. */
 export type HoverZone = { left: number; top: number; right: number; bottom: number };
 
@@ -266,8 +361,32 @@ const SLOT_LABELS: Record<GutterSlot['kind'], (index: number) => string> = {
   'col-append': () => 'Add column',
   'row-append': () => 'Add row',
   'col-handle': (i) => `Select column ${i + 1}`,
-  'row-handle': (i) => `Select row ${i + 1}`
+  'row-handle': (i) => `Select row ${i + 1}`,
+  'col-resize': (i) => `Resize column ${i + 1}`
 };
+
+/** Preview a resize by writing fractional widths straight onto the live table's
+ *  `<colgroup>` — no model mutation, no reconcile, no serialize (that lands once on
+ *  pointerup). Mirrors how render.ts builds the colgroup, so the drag preview and
+ *  the committed result look identical; the commit's reconcile then replaces this
+ *  element wholesale, discarding these transient styles. Creates the colgroup (and
+ *  opts the table into fixed layout) on the first move of a width-free table. */
+function applyLiveColWidths(table: HTMLTableElement, widths: number[]): void {
+  let total = 0;
+  for (const w of widths) if (w > 0) total += w;
+  if (total <= 0) return;
+  let colgroup = table.querySelector<HTMLTableColElement>(':scope > colgroup');
+  if (!colgroup) {
+    colgroup = document.createElement('colgroup');
+    for (let i = 0; i < widths.length; i++) colgroup.appendChild(document.createElement('col'));
+    table.insertBefore(colgroup, table.firstChild);
+  }
+  table.classList.add('has-col-widths');
+  const cols = colgroup.children;
+  for (let i = 0; i < widths.length && i < cols.length; i++) {
+    (cols[i] as HTMLElement).style.width = `${((widths[i]! > 0 ? widths[i]! : 0) / total) * 100}%`;
+  }
+}
 
 /** Wire table hover chrome to a surface. Returns a handle whose destroy() removes
  *  every listener and slot. Mirrors attachDecorationOverlay's lifecycle. */
@@ -337,6 +456,82 @@ export function attachTableChrome({
     layer.appendChild(el);
   };
 
+  /** Run a column-resize drag from a boundary press. Pointer capture + pointer
+   *  events (a real drag, so the motionless-press pointerup gotcha does not apply).
+   *  The columns and the drawn line follow the pointer live by mutating the DOM
+   *  directly; the model is committed once, on release, as a single undo step. A
+   *  press that never crosses the move threshold stays a click and commits nothing,
+   *  so a stray tap on the border never rewrites an auto table's widths. */
+  const beginColumnResize = (e: PointerEvent, blockId: string, table: HTMLTableElement, slot: GutterSlot, el: HTMLElement): void => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const header = table.rows[0];
+    if (!header || header.cells.length < 2) return;
+    const startWidths = Array.from(header.cells, (c) => c.getBoundingClientRect().width);
+    const startX = e.clientX;
+    const boundary = slot.index;
+    let current = startWidths;
+    let moved = false;
+    try {
+      el.setPointerCapture(e.pointerId);
+    } catch {
+      /* capture is best-effort; the window-less path still works */
+    }
+    document.body.classList.add(RESIZING_CLASS);
+    el.classList.add('is-resizing');
+
+    const onMove = (ev: PointerEvent): void => {
+      const delta = ev.clientX - startX;
+      if (!moved && Math.abs(delta) < RESIZE_MOVE_THRESHOLD_PX) return;
+      // On the transition from press to drag, drop the caret the press left in the
+      // cell — a blinking insertion point under a column resize reads as a bug. A
+      // sub-threshold press stays a click and never reaches here, so a plain click
+      // near a border leaves the caret alone.
+      if (!moved) blockSurface.clearCaret();
+      moved = true;
+      current = resizeColumnWidths(startWidths, boundary, delta, MIN_COLUMN_PX);
+      applyLiveColWidths(table, current);
+      // The drawn line rides with the boundary it moved (clamped delta), so it stays
+      // pinned to the border the columns actually shifted to.
+      const applied = current[boundary]! - startWidths[boundary]!;
+      el.style.transform = `translate(${slot.x + applied}px, ${slot.y}px)`;
+    };
+    const end = (): void => {
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', end);
+      el.removeEventListener('pointercancel', end);
+      try {
+        el.releasePointerCapture(e.pointerId);
+      } catch {
+        /* already released */
+      }
+      document.body.classList.remove(RESIZING_CLASS);
+      el.classList.remove('is-resizing');
+      if (moved) blockSurface.setTableColumnWidths(blockId, normalizeWidths(current));
+    };
+    el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+  };
+
+  /** Build one resize strip. Not a button and not click-wired: it is a drag
+   *  affordance (a caret never lands here — it sits on the border, in the cells'
+   *  padding), so it carries only the pointerdown that starts the drag. */
+  const renderResizeSlot = (blockId: string, table: HTMLTableElement, slot: GutterSlot): void => {
+    const el = document.createElement('div');
+    el.className = `${SLOT_CLASS} ${SLOT_CLASS}--col-resize`;
+    el.style.transform = `translate(${slot.x}px, ${slot.y}px)`;
+    el.style.width = `${slot.width}px`;
+    el.style.height = `${slot.height}px`;
+    // Pointer-only refinement; the column menu (B2b) carries the keyboard/AT path.
+    el.setAttribute('aria-hidden', 'true');
+    el.addEventListener('pointerdown', (ev) => beginColumnResize(ev, blockId, table, slot, el));
+    // A press here must not steal the caret before the drag arms.
+    el.addEventListener('mousedown', (ev) => ev.preventDefault());
+    layer.appendChild(el);
+  };
+
   /** Render one table's chrome. `hovered` tables get the full set (rails + the
    *  hover handles); a table that only carries a selection gets just its selected
    *  handle, so the selection stays visible with the mouse away. */
@@ -363,6 +558,11 @@ export function attachTableChrome({
       }
     }
     for (const slot of slots) renderSlot(blockId, slot);
+    // Resize strips are a hover-only refinement on the interior column boundaries;
+    // they carry a drag, not a click, so they render on their own path.
+    if (hovered) {
+      for (const slot of tableResizeSlots(geom)) renderResizeSlot(blockId, table, slot);
+    }
   };
 
   const paint = (): void => {

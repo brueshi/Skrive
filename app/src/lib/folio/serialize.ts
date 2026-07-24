@@ -92,6 +92,7 @@ function orderBlock(b: FolioBlock): Record<string, unknown> {
         id: b.id,
         type: b.type,
         align: b.align,
+        ...(b.widths ? { widths: b.widths } : {}),
         rows: b.rows.map((row) => row.map((cell) => cell.map(orderInline)))
       };
   }

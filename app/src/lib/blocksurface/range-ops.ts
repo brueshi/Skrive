@@ -587,9 +587,12 @@ export function insertTableRow(blocks: BlockNode[], tableId: string, index: numb
 /**
  * Insert one empty column into a table at `index` (clamped to `[0, colCount]`). An
  * empty cell is spliced into every row and a `null` (no-alignment) entry into
- * `align`, so the delimiter row stays the same width as the header. A ragged row
- * shorter than `index` gains its cell at its own end (splice clamps) — the row is
- * left ragged, never padded. Null when `tableId` is not a table.
+ * `align`, so the delimiter row stays the same width as the header. When the table
+ * carries explicit `widths`, the new column takes the average of the existing
+ * weights (so it reads as a typical column) and is spliced in lockstep — widths
+ * are relative and normalized at render, so no renormalization is needed. A ragged
+ * row shorter than `index` gains its cell at its own end (splice clamps) — the row
+ * is left ragged, never padded. Null when `tableId` is not a table.
  */
 export function insertTableColumn(blocks: BlockNode[], tableId: string, index: number): BlockNode[] | null {
   const table = findBlockById(blocks, tableId);
@@ -605,7 +608,8 @@ export function insertTableColumn(blocks: BlockNode[], tableId: string, index: n
     });
     const align = [...b.align];
     align.splice(at, 0, null);
-    return { ...b, align, rows, dirty: true } as BlockNode;
+    const widths = spliceColumnWidth(b.widths, at);
+    return { ...b, align, ...(widths ? { widths } : {}), rows, dirty: true } as BlockNode;
   });
 }
 
@@ -628,12 +632,14 @@ export function removeTableRow(blocks: BlockNode[], tableId: string, index: numb
 }
 
 /**
- * Remove column `index` from a table: drop that cell from every row and its
- * `align` entry, keeping the delimiter row the header's width. A ragged row with
- * no cell at `index` is untouched (splice on a short row is a no-op) — raggedness
- * is preserved, not repaired. Returns null when `tableId` is not a table
- * OR the table has a single column (removal would leave zero columns); the surface
- * routes that null to whole-table deletion.
+ * Remove column `index` from a table: drop that cell from every row, its `align`
+ * entry, and (when present) its `widths` weight — keeping all three the header's
+ * width. The surviving weights are left as-is; render renormalizes, so the other
+ * columns keep their relative proportions. A ragged row with no cell at `index` is
+ * untouched (splice on a short row is a no-op) — raggedness is preserved, not
+ * repaired. Returns null when `tableId` is not a table OR the table has a single
+ * column (removal would leave zero columns); the surface routes that null to
+ * whole-table deletion.
  */
 export function removeTableColumn(blocks: BlockNode[], tableId: string, index: number): BlockNode[] | null {
   const table = findBlockById(blocks, tableId);
@@ -650,7 +656,8 @@ export function removeTableColumn(blocks: BlockNode[], tableId: string, index: n
     });
     const align = [...b.align];
     align.splice(index, 1);
-    return { ...b, align, rows, dirty: true } as BlockNode;
+    const widths = dropColumnWidth(b.widths, index);
+    return { ...b, align, ...(widths ? { widths } : {}), rows, dirty: true } as BlockNode;
   });
 }
 
@@ -680,6 +687,60 @@ export function setColumnAlignment(
     next[col] = align;
     return { ...b, align: next, dirty: true } as BlockNode;
   });
+}
+
+/**
+ * Replace a table's per-column width weights — the drag-resize commit. `widths`
+ * must match the header's column count and be all-positive finite numbers; a
+ * length mismatch, a bad entry, or a set equal to the current one returns null
+ * (the last so re-committing identical widths earns no undo step). Weights are
+ * relative (the renderer normalizes them), so the caller passes whatever
+ * proportions the drag produced. `.folio`-only: `.md` never serializes widths, so
+ * byte-stable GFM is untouched. Null also when `tableId` is not a table.
+ */
+export function setTableColumnWidths(
+  blocks: BlockNode[],
+  tableId: string,
+  widths: number[]
+): BlockNode[] | null {
+  const table = findBlockById(blocks, tableId);
+  if (!table || table.type !== 'table') return null;
+  const cols = table.rows[0]?.length ?? 0;
+  if (cols === 0 || widths.length !== cols) return null;
+  if (!widths.every((w) => Number.isFinite(w) && w > 0)) return null;
+  if (widthsEqual(table.widths, widths)) return null;
+  return updateBlockById(blocks, tableId, (b) => {
+    if (b.type !== 'table') return b;
+    return { ...b, widths: [...widths], dirty: true } as BlockNode;
+  });
+}
+
+// Splice a weight for a newly inserted column, in lockstep with `align`/`rows`.
+// No-op (undefined) on a width-free table — it stays under auto layout. The new
+// column takes the average of the existing weights so it reads as a typical
+// column; render normalizes, so the sum need not stay fixed.
+function spliceColumnWidth(widths: number[] | undefined, at: number): number[] | undefined {
+  if (!widths) return undefined;
+  const next = [...widths];
+  const avg = next.length ? next.reduce((sum, w) => sum + w, 0) / next.length : 1;
+  next.splice(at, 0, avg);
+  return next;
+}
+
+// Drop the weight for a removed column. No-op (undefined) on a width-free table.
+function dropColumnWidth(widths: number[] | undefined, index: number): number[] | undefined {
+  if (!widths) return undefined;
+  const next = [...widths];
+  next.splice(index, 1);
+  return next;
+}
+
+// Exact element-wise equality (weights round-trip verbatim, so no epsilon), with
+// an absent array never equal to a present one.
+function widthsEqual(a: number[] | undefined, b: number[]): boolean {
+  if (!a || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 // Re-export so callers that need a fresh id for any future split path have it.

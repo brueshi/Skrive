@@ -346,6 +346,29 @@ export function renderBlock(
       break;
     case 'table': {
       el = document.createElement('table');
+      // Explicit per-column widths (folio-only; `.md` is width-free) switch the
+      // table to fixed layout via a <colgroup>. Absent or malformed widths keep
+      // the browser's auto layout — the default for every `.md`-imported or
+      // freshly-inserted table, so this path is purely additive. Weights are
+      // relative and normalized here (ops never renormalize on a column splice).
+      const cols = block.rows[0]?.length ?? 0;
+      const widths = block.widths;
+      if (widths && widths.length === cols && cols > 0) {
+        let total = 0;
+        for (const w of widths) if (w > 0) total += w;
+        if (total > 0) {
+          el.classList.add('has-col-widths');
+          const colgroup = document.createElement('colgroup');
+          for (let c = 0; c < cols; c++) {
+            const raw = widths[c] ?? 0;
+            const w = raw > 0 ? raw : 0;
+            const colEl = document.createElement('col');
+            colEl.style.width = `${(w / total) * 100}%`;
+            colgroup.appendChild(colEl);
+          }
+          el.appendChild(colgroup);
+        }
+      }
       const tbody = document.createElement('tbody');
       block.rows.forEach((row, r) => {
         const tr = document.createElement('tr');

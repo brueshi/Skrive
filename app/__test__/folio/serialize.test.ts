@@ -23,6 +23,41 @@ describe('serializeFolio / parseFolio round-trip', () => {
     expect(serializeFolio(parseFolio(text))).toBe(text);
   });
 
+  it('persists per-column table widths natively (folio-only, no Markdown equivalent)', () => {
+    const doc: FolioDocument = {
+      ...emptyFixture,
+      blocks: [
+        {
+          id: 't2a2b3c4d5',
+          type: 'table',
+          align: ['left', null],
+          widths: [3, 1],
+          rows: [
+            [
+              [{ kind: 'text', text: 'A', marks: {} }],
+              [{ kind: 'text', text: 'B', marks: {} }]
+            ],
+            [
+              [{ kind: 'text', text: '1', marks: {} }],
+              [{ kind: 'text', text: '2', marks: {} }]
+            ]
+          ]
+        }
+      ]
+    };
+    const text = serializeFolio(doc);
+    expect(text).toContain('"widths"');
+    expect(parseFolio(text)).toEqual(doc);
+    // widths sits between align and rows in the serialized key order.
+    expect(text.indexOf('"align"')).toBeLessThan(text.indexOf('"widths"'));
+    expect(text.indexOf('"widths"')).toBeLessThan(text.indexOf('"rows"'));
+  });
+
+  it('never invents a widths key for a width-free table (absent stays absent)', () => {
+    // richFixture's table carries no widths; a round-trip must not add the key.
+    expect(serializeFolio(richFixture)).not.toContain('"widths"');
+  });
+
   it('persists the underline mark natively (no Markdown equivalent exists)', () => {
     const doc: FolioDocument = {
       ...emptyFixture,
