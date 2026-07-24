@@ -100,6 +100,14 @@ const RESIZE_MOVE_THRESHOLD_PX = 3;
  *  the drawn boundary line persist even as the pointer leaves the thin grab strip. */
 const RESIZING_CLASS = 'sk-col-resizing';
 
+/** Pointer travel, in px, before a handle press becomes a reorder drag. Below it the
+ *  press stays a click that selects the slice and opens its menu (SKR-266 B2). */
+const REORDER_MOVE_THRESHOLD_PX = 4;
+
+/** Body class held while a row/column is being dragged to a new position, for the
+ *  grabbing cursor and to suppress text selection during the drag. */
+const REORDERING_CLASS = 'sk-table-reordering';
+
 /**
  * The slots for a measured table, Notion-shaped: two full-length append rails (a
  * `+` down the right to add a column, a `+` along the bottom to add a row) that
@@ -279,6 +287,41 @@ export function normalizeWidths(widths: number[]): number[] {
   return widths.map((w) => Math.round(((w > 0 ? w : 0) / total) * 1e4) / 1e4);
 }
 
+/** The index of the boundary edge nearest `pos` — an argmin over `edges`. Turns a
+ *  reorder drag's pointer position (in the edges' coordinate space) into a drop
+ *  target: the boundary the moved row/column would land at. Pure. */
+export function nearestBoundary(edges: number[], pos: number): number {
+  let best = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < edges.length; i++) {
+    const d = Math.abs(edges[i]! - pos);
+    if (d < bestDist) {
+      bestDist = d;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/** A drop-indicator line: a thin bar at column/row boundary `boundary` (an index
+ *  into `colEdges`/`rowEdges`), spanning the table's cross axis. Pure; the drag
+ *  positions an element from it. */
+export type DropIndicator = { x: number; y: number; width: number; height: number };
+export function dropIndicatorRect(
+  geom: TableGeometry,
+  kind: 'row' | 'col',
+  boundary: number,
+  thickness = 2
+): DropIndicator {
+  const { box, colEdges, rowEdges } = geom;
+  if (kind === 'col') {
+    const i = Math.max(0, Math.min(boundary, colEdges.length - 1));
+    return { x: colEdges[i]! - thickness / 2, y: box.y, width: thickness, height: box.height };
+  }
+  const i = Math.max(0, Math.min(boundary, rowEdges.length - 1));
+  return { x: box.x, y: rowEdges[i]! - thickness / 2, width: box.width, height: thickness };
+}
+
 /** A viewport-space rectangle: the pointer hit-test region. */
 export type HoverZone = { left: number; top: number; right: number; bottom: number };
 
@@ -408,6 +451,13 @@ export function attachTableChrome({
   let rafId = 0;
   let hideTimer = 0;
   let destroyed = false;
+  // A handle press that became a reorder drag must swallow the click the browser
+  // fires on release, so a drag doesn't also select the slice and open its menu.
+  let suppressClick = false;
+  // The teardown for an in-flight reorder gesture. Held at attach scope so a click
+  // (which WKWebView fires even when it drops the pointerup on a motionless press)
+  // and destroy() can both tidy a gesture's window listeners — no leak on a tap.
+  let activeReorderCleanup: (() => void) | null = null;
 
   const clear = (): void => {
     layer.textContent = '';
@@ -421,7 +471,7 @@ export function attachTableChrome({
     slot.index === selection.index;
 
   /** Build one slot's button and append it. */
-  const renderSlot = (blockId: string, slot: GutterSlot): void => {
+  const renderSlot = (blockId: string, table: HTMLTableElement, slot: GutterSlot): void => {
     const el = document.createElement('button');
     el.type = 'button';
     el.className = `${SLOT_CLASS} ${SLOT_CLASS}--${slot.kind}`;
@@ -434,6 +484,17 @@ export function attachTableChrome({
     // Bound to click, NOT pointerup: WKWebView drops pointerup on a motionless
     // press, and the Chromium latency gate is blind to that difference.
     el.addEventListener('click', (e) => {
+      // A click that closes a motionless press tidies any reorder gesture whose
+      // pointerup WKWebView may have dropped; then the press acts as a plain click.
+      activeReorderCleanup?.();
+      if (suppressClick) {
+        // The click that follows a reorder drag: swallow it so the drop doesn't
+        // also select the slice and open its menu.
+        suppressClick = false;
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       e.preventDefault();
       switch (slot.kind) {
         case 'col-append':
@@ -450,10 +511,87 @@ export function attachTableChrome({
           break;
       }
     });
+    // A handle is also a reorder grip: a press that crosses the move threshold drags
+    // the row/column to a new position (the header row's handle is click-only).
+    if (slot.kind === 'col-handle' || slot.kind === 'row-handle') {
+      el.addEventListener('pointerdown', (ev) => beginHandleReorder(ev, blockId, table, slot, el));
+    }
     // Keep a press on the chrome from stealing the caret out of the cell before the
     // op runs.
     el.addEventListener('mousedown', (e) => e.preventDefault());
     layer.appendChild(el);
+  };
+
+  /** Drag a row or column handle to a new position (SKR-271). The press stays a
+   *  click (select + menu) until it crosses the move threshold, at which point it
+   *  becomes a reorder: a drop-indicator line tracks the nearest boundary and the
+   *  move commits once on release as a single undo step. The header row's handle
+   *  never drags (pinned) and nothing drops above the header. Listens on the
+   *  scroller/window rather than capturing the tiny handle, so a drag that wanders
+   *  off the grip still tracks; cleanup runs on pointerup, pointercancel, or — if
+   *  WKWebView drops the pointerup on a motionless press — the ensuing click. */
+  const beginHandleReorder = (e: PointerEvent, blockId: string, table: HTMLTableElement, slot: GutterSlot, el: HTMLElement): void => {
+    if (e.button !== 0) return;
+    const kind: 'row' | 'col' = slot.kind === 'col-handle' ? 'col' : 'row';
+    if (kind === 'row' && slot.index === 0) return; // header pinned: not draggable
+    activeReorderCleanup?.(); // tidy any prior gesture that leaked
+    const geom = measureTable(table, scroller.getBoundingClientRect(), scroller.scrollLeft, scroller.scrollTop);
+    if (!geom) return;
+    const edges = kind === 'col' ? geom.colEdges : geom.rowEdges;
+    const from = slot.index;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let moved = false;
+    let dropTo = from;
+    let indicator: HTMLElement | null = null;
+
+    const cleanup = (): void => {
+      scroller.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      activeReorderCleanup = null;
+      if (moved) {
+        document.body.classList.remove(REORDERING_CLASS);
+        el.classList.remove('is-dragging');
+        indicator?.remove();
+      }
+    };
+    const onMove = (ev: PointerEvent): void => {
+      if (!moved) {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < REORDER_MOVE_THRESHOLD_PX) return;
+        moved = true;
+        blockSurface.clearCaret();
+        document.body.classList.add(REORDERING_CLASS);
+        el.classList.add('is-dragging');
+        indicator = document.createElement('div');
+        indicator.className = `${SLOT_CLASS} ${SLOT_CLASS}--drop-${kind}`;
+        layer.appendChild(indicator);
+      }
+      const host = scroller.getBoundingClientRect();
+      const pos =
+        kind === 'col' ? ev.clientX - host.left + scroller.scrollLeft : ev.clientY - host.top + scroller.scrollTop;
+      let to = nearestBoundary(edges, pos);
+      if (kind === 'row') to = Math.max(1, to); // never drop above the pinned header
+      dropTo = to;
+      const r = dropIndicatorRect(geom, kind, to);
+      indicator!.style.transform = `translate(${r.x}px, ${r.y}px)`;
+      indicator!.style.width = `${r.width}px`;
+      indicator!.style.height = `${r.height}px`;
+    };
+    const onUp = (): void => {
+      const didMove = moved;
+      const to = dropTo;
+      cleanup();
+      if (didMove) {
+        suppressClick = true;
+        if (kind === 'col') blockSurface.moveTableColumnAt(blockId, from, to);
+        else blockSurface.moveTableRowAt(blockId, from, to);
+      }
+    };
+    activeReorderCleanup = cleanup;
+    scroller.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
   };
 
   /** Run a column-resize drag from a boundary press. Pointer capture + pointer
@@ -557,7 +695,7 @@ export function attachTableChrome({
         if (s) slots.push(s);
       }
     }
-    for (const slot of slots) renderSlot(blockId, slot);
+    for (const slot of slots) renderSlot(blockId, table, slot);
     // Resize strips are a hover-only refinement on the interior column boundaries;
     // they carry a drag, not a click, so they render on their own path.
     if (hovered) {
@@ -721,6 +859,7 @@ export function attachTableChrome({
       surface.removeEventListener('focusin', onFocusIn);
       window.removeEventListener('resize', onReflow);
       resizeObserver?.disconnect();
+      activeReorderCleanup?.(); // remove any in-flight reorder's window listeners
       if (scheduled) cancelAnimationFrame(rafId);
       cancelHide();
       active = null;

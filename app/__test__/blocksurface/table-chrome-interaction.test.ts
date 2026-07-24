@@ -95,3 +95,50 @@ describe('the selected handle persists with the pointer away', () => {
     expect(handle!.classList.contains('is-selected')).toBe(true);
   });
 });
+
+describe('dragging a column handle reorders the column', () => {
+  // jsdom rects are zero, so the drop boundary resolves to 0 regardless of the
+  // pointer's x — fine here: we assert the click-vs-drag state machine (a drag
+  // commits a move and swallows the click), not the pixel drop target (unit-tested).
+  const headerText = (): string[] => {
+    const t = surface.getDocument().blocks.find((b) => b.type === 'table')!;
+    if (t.type !== 'table') throw new Error('no table');
+    return t.rows[0]!.map((cell) => cell.map((n) => (n.kind === 'text' ? n.text : '')).join(''));
+  };
+
+  it('commits a column move on drag and swallows the trailing click', () => {
+    hover(cell(0, 2)); // surface column 2's handle (c)
+    const handle = colHandle()!;
+    expect(handle).not.toBeNull();
+    const tableId = surface.getDocument().blocks.find((b) => b.type === 'table')!.id;
+
+    handle.dispatchEvent(new MouseEvent('pointerdown', { clientX: 0, clientY: 0, button: 0, bubbles: true }));
+    scroller.dispatchEvent(new MouseEvent('pointermove', { clientX: 60, clientY: 0, bubbles: true }));
+    window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+
+    // Column 2 (c) dragged to the front boundary: order becomes c, a, b.
+    expect(headerText()).toEqual(['c', 'a', 'b']);
+
+    // The click the browser fires after a drag is swallowed — no menu re-open — so
+    // the moved column stays grip-selected at its new index 0.
+    handle.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(surface.getTableSelection()).toEqual({ tableId, kind: 'col', index: 0 });
+  });
+
+  it('a plain click (no drag past the threshold) still selects and does not reorder', () => {
+    hover(cell(0, 1));
+    const handle = colHandle()!;
+    handle.dispatchEvent(new MouseEvent('pointerdown', { clientX: 0, clientY: 0, button: 0, bubbles: true }));
+    // A sub-threshold jiggle, then release: stays a click.
+    scroller.dispatchEvent(new MouseEvent('pointermove', { clientX: 2, clientY: 0, bubbles: true }));
+    window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    handle.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+    expect(headerText()).toEqual(['a', 'b', 'c']); // unchanged
+    expect(surface.getTableSelection()).toEqual({
+      tableId: surface.getDocument().blocks.find((b) => b.type === 'table')!.id,
+      kind: 'col',
+      index: 1
+    });
+  });
+});

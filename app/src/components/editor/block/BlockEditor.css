@@ -774,3 +774,29 @@ body.sk-col-resizing {
     transition: none;
   }
 }
+
+/* Drag-to-reorder (SKR-271): the drop-indicator line that tracks the nearest
+   boundary while a row/column handle is dragged, an accent bar spanning the table's
+   cross axis. Inert — the pointer is captured by the drag, not this line. */
+.sk-table-chrome--drop-col,
+.sk-table-chrome--drop-row {
+  background: var(--skrive-accent);
+  border-radius: 1px;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--skrive-accent) 30%, transparent);
+}
+
+/* The handle being dragged stays accent-lit for the length of the drag, so the eye
+   keeps hold of the slice in flight. */
+.sk-table-chrome--col-handle.is-dragging,
+.sk-table-chrome--row-handle.is-dragging {
+  background: var(--skrive-accent);
+  opacity: 1;
+}
+
+/* Held on <body> while a row/column is dragged: a grabbing cursor and no stray
+   text selection, even as the pointer leaves the handle. */
+body.sk-table-reordering {
+  cursor: grabbing;
+  user-select: none;
+}
