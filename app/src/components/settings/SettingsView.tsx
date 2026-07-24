@@ -15,6 +15,10 @@ import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import type { UpdaterStatus } from '@skrive/shared';
+import {
+  LINE_MEASURE_CUSTOM_MAX_CH,
+  LINE_MEASURE_CUSTOM_MIN_CH
+} from '@skrive/shared';
 import { usePreferencesStore } from '../../stores/preferences';
 import {
   AUTOSAVE_IDLE_MAX_MS,
@@ -368,6 +372,12 @@ function AppearancePane() {
 function EditorPane() {
   const lineMeasure = usePreferencesStore((s) => s.lineMeasure);
   const setLineMeasure = usePreferencesStore((s) => s.setLineMeasure);
+  const lineMeasureCustomCh = usePreferencesStore(
+    (s) => s.lineMeasureCustomCh
+  );
+  const setLineMeasureCustomCh = usePreferencesStore(
+    (s) => s.setLineMeasureCustomCh
+  );
   const showMeasureRule = usePreferencesStore((s) => s.showMeasureRule);
   const setShowMeasureRule = usePreferencesStore((s) => s.setShowMeasureRule);
   const smartTypography = usePreferencesStore((s) => s.smartTypography);
@@ -391,12 +401,30 @@ function EditorPane() {
                 { id: 'narrow', label: 'Narrow' },
                 { id: 'normal', label: 'Normal' },
                 { id: 'wide', label: 'Wide' },
-                { id: 'full', label: 'Full' }
+                { id: 'full', label: 'Full' },
+                { id: 'custom', label: 'Custom' }
               ]}
               ariaLabel="Line measure"
             />
           }
         />
+        {lineMeasure === 'custom' && (
+          <SettingRow
+            label="Custom measure"
+            desc="Column width in characters of the editor font."
+            control={
+              <Stepper
+                value={lineMeasureCustomCh}
+                onChange={setLineMeasureCustomCh}
+                min={LINE_MEASURE_CUSTOM_MIN_CH}
+                max={LINE_MEASURE_CUSTOM_MAX_CH}
+                step={5}
+                format={(v) => `${v} ch`}
+                ariaLabel="Custom measure"
+              />
+            }
+          />
+        )}
         <SettingRow
           label="Measure rule"
           desc="A hairline at the writing column's edge."

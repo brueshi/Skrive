@@ -15,7 +15,8 @@ import {
   DEFAULT_RECENT_PROJECTS_CAP,
   type AppUiState,
   type EditorFontId,
-  type LineMeasure,
+  clampLineMeasureCh,
+  type LineMeasureSetting,
   type NewFileLocation,
   type NewFileNaming,
   type RecentProject,
@@ -55,7 +56,10 @@ type PreferencesActions = {
   setShowWordCount(value: boolean): void;
   setWordCountMetric(value: WordCountMetric): void;
 
-  setLineMeasure(value: LineMeasure): void;
+  setLineMeasure(value: LineMeasureSetting): void;
+  /** Set the custom column width (clamped, whole ch) and make it the
+   *  active measure — adjusting the number IS choosing Custom. */
+  setLineMeasureCustomCh(value: number): void;
   setShowMeasureRule(value: boolean): void;
   setSmartTypography(value: boolean): void;
   setFormatOnSave(value: boolean): void;
@@ -115,6 +119,7 @@ function snapshot(state: PreferencesState): AppUiState {
     surfaceSwitchingEnabled: state.surfaceSwitchingEnabled,
     markerMode: state.markerMode,
     lineMeasure: state.lineMeasure,
+    lineMeasureCustomCh: state.lineMeasureCustomCh,
     showMeasureRule: state.showMeasureRule,
     smartTypography: state.smartTypography,
     formatOnSave: state.formatOnSave,
@@ -257,6 +262,15 @@ export const usePreferencesStore = create<
   setLineMeasure(value) {
     if (get().lineMeasure === value) return;
     set({ lineMeasure: value });
+    scheduleSave(get);
+  },
+  setLineMeasureCustomCh(value) {
+    const clamped = clampLineMeasureCh(value);
+    const s = get();
+    if (s.lineMeasureCustomCh === clamped && s.lineMeasure === 'custom') {
+      return;
+    }
+    set({ lineMeasureCustomCh: clamped, lineMeasure: 'custom' });
     scheduleSave(get);
   },
   setShowMeasureRule(value) {

@@ -171,6 +171,23 @@ export type MarkerMode = 'raw' | 'recessed' | 'concealed';
  *  view shares one physical column); 'full' lifts the cap entirely. */
 export type LineMeasure = 'narrow' | 'normal' | 'wide' | 'full';
 
+/** What the global measure pref stores: a preset, or 'custom' backed by
+ *  `lineMeasureCustomCh`. Per-document overrides stay preset-only — a doc
+ *  pointing at the app-global custom number would couple documents to
+ *  app state. */
+export type LineMeasureSetting = LineMeasure | 'custom';
+
+export const LINE_MEASURE_CUSTOM_MIN_CH = 40;
+export const LINE_MEASURE_CUSTOM_MAX_CH = 120;
+
+/** Clamp a custom measure to the stepper's range, on whole ch. */
+export function clampLineMeasureCh(value: number): number {
+  return Math.min(
+    LINE_MEASURE_CUSTOM_MAX_CH,
+    Math.max(LINE_MEASURE_CUSTOM_MIN_CH, Math.round(value))
+  );
+}
+
 const LINE_MEASURES: readonly LineMeasure[] = [
   'narrow',
   'normal',
@@ -253,7 +270,10 @@ export type AppUiState = {
   //      Settings page reads and writes; unwired ones still round-trip. ----
 
   /** Width of the centered writing column. */
-  lineMeasure: LineMeasure;
+  lineMeasure: LineMeasureSetting;
+  /** The column width in ch when `lineMeasure` is 'custom'. Kept when a
+   *  preset is active so switching back to Custom restores the last value. */
+  lineMeasureCustomCh: number;
   /** Paint a hairline at the writing column's edge (the measure rule). */
   showMeasureRule: boolean;
   /** Curly quotes, em dashes, and ellipses substituted as you type. */
@@ -307,6 +327,7 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   surfaceSwitchingEnabled: true,
   markerMode: 'recessed',
   lineMeasure: 'normal',
+  lineMeasureCustomCh: 70,
   showMeasureRule: false,
   smartTypography: true,
   formatOnSave: false,
