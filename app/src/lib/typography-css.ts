@@ -11,7 +11,11 @@ import {
   selectLiveDocLineMeasure,
   useProjectStore
 } from '../stores/project';
-import type { LineMeasure } from '@skrive/shared';
+import {
+  clampLineMeasureCh,
+  type LineMeasure,
+  type LineMeasureSetting
+} from '@skrive/shared';
 import { resolveEditorFontStack } from './typography';
 
 /** Writing-column widths per measure, in ch of the editor face. The
@@ -20,7 +24,7 @@ import { resolveEditorFontStack } from './typography';
  *  block editor, raw source view, and preview set different faces —
  *  a px var keeps every view on one physical column. 'full' has no
  *  entry; it lifts the cap. */
-const MEASURE_CH: Record<Exclude<LineMeasure, 'full'>, number> = {
+export const MEASURE_CH: Record<Exclude<LineMeasure, 'full'>, number> = {
   narrow: 55,
   normal: 70,
   wide: 90
@@ -54,14 +58,18 @@ export function chWidthPx(stack: string, sizePx: number): number {
 }
 
 /** The CSS length for `--skrive-measure`: a px cap derived from the
- *  ch preset and the current editor face, or an uncapped column. */
+ *  ch count (preset or clamped custom) and the current editor face, or
+ *  an uncapped column. */
 export function resolveMeasureCss(
-  measure: LineMeasure,
+  measure: LineMeasureSetting,
   stack: string,
-  sizePx: number
+  sizePx: number,
+  customCh: number
 ): string {
   if (measure === 'full') return '100%';
-  return `${Math.round(chWidthPx(stack, sizePx) * MEASURE_CH[measure])}px`;
+  const ch =
+    measure === 'custom' ? clampLineMeasureCh(customCh) : MEASURE_CH[measure];
+  return `${Math.round(chWidthPx(stack, sizePx) * ch)}px`;
 }
 
 export function useTypographyVars(): void {
@@ -74,6 +82,9 @@ export function useTypographyVars(): void {
     (s) => s.editorLineHeightX100
   );
   const lineMeasure = usePreferencesStore((s) => s.lineMeasure);
+  const lineMeasureCustomCh = usePreferencesStore(
+    (s) => s.lineMeasureCustomCh
+  );
   // Per-document override (folio docMeta / frontmatter). Changes only on
   // doc switch or an explicit override edit — never per keystroke.
   const docLineMeasure = useProjectStore(selectLiveDocLineMeasure);
@@ -89,7 +100,12 @@ export function useTypographyVars(): void {
     );
     root.style.setProperty(
       '--skrive-measure',
-      resolveMeasureCss(docLineMeasure ?? lineMeasure, stack, editorFontSize)
+      resolveMeasureCss(
+        docLineMeasure ?? lineMeasure,
+        stack,
+        editorFontSize,
+        lineMeasureCustomCh
+      )
     );
   }, [
     editorFont,
@@ -97,6 +113,7 @@ export function useTypographyVars(): void {
     editorFontSize,
     editorLineHeightX100,
     lineMeasure,
+    lineMeasureCustomCh,
     docLineMeasure
   ]);
 }

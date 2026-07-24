@@ -13,6 +13,7 @@ import {
   type CommandDeps
 } from '../src/lib/commands/registry';
 import { useProjectStore, type LiveDoc } from '../src/stores/project';
+import { usePreferencesStore } from '../src/stores/preferences';
 
 const noop = () => {};
 const STUB_DEPS: CommandDeps = {
@@ -257,5 +258,42 @@ describe('dispatchKey defers to an upstream preventDefault', () => {
     const ev = fakeEvent({ code: 'KeyB', meta: true, shift: true });
     expect(dispatchKey(ev, bindings)).toBe(true);
     expect(useProjectStore.getState().backlinksPanelOpen).toBe(true);
+  });
+});
+
+// Palette-only measure nudges: entering Custom from a preset seeds at that
+// preset's ch so the first step feels continuous; Full only narrows (it is
+// already uncapped); everything clamps to the stepper range.
+describe('measure nudge commands', () => {
+  const { commands } = buildRegistry(STUB_DEPS);
+  const wider = commands.find((c) => c.id === 'view.measureWider');
+  const narrower = commands.find((c) => c.id === 'view.measureNarrower');
+
+  it('enters custom from a preset, seeded at the preset ch', () => {
+    usePreferencesStore.setState({
+      lineMeasure: 'normal',
+      lineMeasureCustomCh: 70
+    });
+    wider?.run();
+    expect(usePreferencesStore.getState().lineMeasure).toBe('custom');
+    expect(usePreferencesStore.getState().lineMeasureCustomCh).toBe(75);
+  });
+
+  it('steps an active custom value and clamps at the floor', () => {
+    usePreferencesStore.setState({
+      lineMeasure: 'custom',
+      lineMeasureCustomCh: 42
+    });
+    narrower?.run();
+    expect(usePreferencesStore.getState().lineMeasureCustomCh).toBe(40);
+  });
+
+  it('wider from full no-ops; narrower re-enters at the ceiling', () => {
+    usePreferencesStore.setState({ lineMeasure: 'full' });
+    wider?.run();
+    expect(usePreferencesStore.getState().lineMeasure).toBe('full');
+    narrower?.run();
+    expect(usePreferencesStore.getState().lineMeasure).toBe('custom');
+    expect(usePreferencesStore.getState().lineMeasureCustomCh).toBe(120);
   });
 });

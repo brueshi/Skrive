@@ -97,6 +97,7 @@ export type {
   EditorFontId,
   LayoutMode,
   LineMeasure,
+  LineMeasureSetting,
   MarkerMode,
   NewFileLocation,
   NewFileNaming,
@@ -122,6 +123,9 @@ export {
   DEFAULT_SIDEBAR_WIDTH,
   DEFAULT_SPLIT_DIVIDER_RATIO,
   WORKING_SET_CAP,
+  LINE_MEASURE_CUSTOM_MAX_CH,
+  LINE_MEASURE_CUSTOM_MIN_CH,
+  clampLineMeasureCh,
   defaultProjectUiState,
   migrateProjectUiState,
   parseLineMeasure

@@ -21,6 +21,8 @@ import { getActiveBlockMenu } from '../../components/editor/active-surface';
 import { INSERT_CATALOG, dispatchInsert } from '../../components/editor/menus/insert-catalog';
 import { useProjectStore, logProjectError } from '../../stores/project';
 import { usePreferencesStore } from '../../stores/preferences';
+import { MEASURE_CH } from '../typography-css';
+import { LINE_MEASURE_CUSTOM_MAX_CH } from '@skrive/shared';
 import { useFindStore } from '../../stores/find';
 import { peekVisit } from '../../stores/working-set';
 import { fileMode } from '../../stores/save';
@@ -121,6 +123,26 @@ const whenDocMeasureHome = () => {
   const doc = useProjectStore.getState().liveDoc;
   return doc !== null && (doc.mode === 'markdown' || doc.mode === 'rich');
 };
+
+const MEASURE_NUDGE_CH = 5;
+
+/** Step the global measure by one stepper notch, entering Custom from a
+ *  preset seeded at that preset's ch so the first nudge feels continuous.
+ *  Widening from Full no-ops — Full is already uncapped, and dropping to
+ *  the custom ceiling would narrow the column. */
+function nudgeMeasure(deltaCh: number): void {
+  const p = usePreferencesStore.getState();
+  if (p.lineMeasure === 'full') {
+    if (deltaCh > 0) return;
+    p.setLineMeasureCustomCh(LINE_MEASURE_CUSTOM_MAX_CH);
+    return;
+  }
+  const seed =
+    p.lineMeasure === 'custom'
+      ? p.lineMeasureCustomCh
+      : MEASURE_CH[p.lineMeasure];
+  p.setLineMeasureCustomCh(seed + deltaCh);
+}
 const whenLiveDocAndManifest = () => {
   const s = useProjectStore.getState();
   return s.manifest !== null && s.liveDoc !== null;
@@ -736,6 +758,20 @@ export function buildRegistry(deps: CommandDeps): {
       when: whenDocMeasureHome,
       run: () => useProjectStore.getState().setLiveDocLineMeasure(value)
     })),
+    {
+      id: 'view.measureWider',
+      label: 'Measure: wider',
+      group: 'View',
+      when: whenLiveDoc,
+      run: () => nudgeMeasure(MEASURE_NUDGE_CH)
+    },
+    {
+      id: 'view.measureNarrower',
+      label: 'Measure: narrower',
+      group: 'View',
+      when: whenLiveDoc,
+      run: () => nudgeMeasure(-MEASURE_NUDGE_CH)
+    },
     {
       id: 'view.toggleMeasureRule',
       label: 'Toggle measure rule',

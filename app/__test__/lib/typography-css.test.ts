@@ -18,16 +18,23 @@ describe('chWidthPx', () => {
 describe('resolveMeasureCss', () => {
   it('caps the column at the preset ch count in px', () => {
     // 55ch / 70ch / 90ch at the 8.5px fallback ch.
-    expect(resolveMeasureCss('narrow', STACK, 17)).toBe('468px');
-    expect(resolveMeasureCss('normal', STACK, 17)).toBe('595px');
-    expect(resolveMeasureCss('wide', STACK, 17)).toBe('765px');
+    expect(resolveMeasureCss('narrow', STACK, 17, 70)).toBe('468px');
+    expect(resolveMeasureCss('normal', STACK, 17, 70)).toBe('595px');
+    expect(resolveMeasureCss('wide', STACK, 17, 70)).toBe('765px');
   });
 
   it('scales with the editor font size', () => {
-    expect(resolveMeasureCss('normal', STACK, 20)).toBe('700px');
+    expect(resolveMeasureCss('normal', STACK, 20, 70)).toBe('700px');
   });
 
   it('lifts the cap entirely on full', () => {
-    expect(resolveMeasureCss('full', STACK, 17)).toBe('100%');
+    expect(resolveMeasureCss('full', STACK, 17, 70)).toBe('100%');
+  });
+
+  it('uses the custom ch value, clamped to the stepper range', () => {
+    expect(resolveMeasureCss('custom', STACK, 17, 80)).toBe('680px');
+    // 200 clamps to 120, 10 clamps to 40.
+    expect(resolveMeasureCss('custom', STACK, 17, 200)).toBe('1020px');
+    expect(resolveMeasureCss('custom', STACK, 17, 10)).toBe('340px');
   });
 });
