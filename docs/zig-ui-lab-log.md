@@ -799,12 +799,17 @@ rest on three legs and I am naming the gap rather than papering it.
    evidence; neither is a caught frame, and I am not going to describe it as
    one.
 
-What remains genuinely unverified by me is whether the toggle *feels* right
-under a fingertip — whether tau = 22ms with a hard 150ms stop reads as crisp or
-as slightly rubbery next to the shipped `cubic-bezier(0.16, 1, 0.3, 1)` over
-160ms. Those are the same family and close in duration, so my expectation is
-"very near," but this is precisely the judgement that has to be made by eye.
-Key `9`. If it wants to be snappier, `anim.tau` is one number.
+What remained unverified by me was whether the toggle *feels* right under a
+fingertip — whether tau = 22ms with a hard 150ms stop reads as crisp or as
+slightly rubbery next to the shipped `cubic-bezier(0.16, 1, 0.3, 1)` over 160ms.
+Those are the same family and close in duration, so my expectation was "very
+near," but it is the judgement that has to be made by eye.
+
+**Joe ran it on the daily driver at the end of the session and the verdict was
+that it runs well** — no change asked for to the timing, the press-stretch, or
+the segmented keyboard. So the tactile leg is closed by the person who can
+close it, and the animation constants stand as shipped: tau = 22ms, 150ms hard
+settle. (If a later stage wants it snappier, `anim.tau` is one number.)
 
 **Two deliberate scope calls, both visible in the screenshots.**
 - *Hover does not animate.* The shipped CSS transitions the track colour over
@@ -875,10 +880,12 @@ curious.
   are a data array with a tagged-union control, so a fourth row is **one line**.
 - *Toggling animates smoothly, then idles at 0 presents:* **pass**, both halves
   measured — see the settle-window numbers above.
-- *Toggle and segmented feel right:* **mechanics verified** (33/33 tests),
-  **visuals verified** against a Chromium reference with one honest divergence
-  (font weight inventory), **tactile pass owed to Joe**. Called the same way
-  Stage 3 called it.
+- *Toggle and segmented feel right:* **pass, all three legs.** Mechanics
+  verified (33/33 tests), visuals verified against a Chromium reference with
+  one honest divergence (font weight inventory), and the tactile pass done by
+  Joe at the keyboard in-session — it runs well, nothing changed. This is the
+  first stage where the feel criterion is fully closed rather than
+  design-argued; Stage 3's is still owed.
 - *`--bench` runs clean end to end with fresh numbers alongside the carried
   baselines:* **pass**, and the log records both this run and a same-session
   baseline run of the unmodified Stage 3 binary so the load is legible.
