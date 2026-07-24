@@ -166,9 +166,10 @@ export type SurfaceId = 'text' | 'rich';
  *  renderer no longer reads `AppUiState.markerMode`. */
 export type MarkerMode = 'raw' | 'recessed' | 'concealed';
 
-/** Width of the centered writing column. A reading-comfort knob; the
- *  exact measures are resolved at the editor surface (Stage 2 wiring). */
-export type LineMeasure = 'narrow' | 'normal' | 'wide';
+/** Width of the centered writing column. A reading-comfort knob expressed
+ *  in ch of the editor face (resolved to px in typography-css so every
+ *  view shares one physical column); 'full' lifts the cap entirely. */
+export type LineMeasure = 'narrow' | 'normal' | 'wide' | 'full';
 
 /** The figure the word-count chip displays (SKR-53). */
 export type WordCountMetric = 'words' | 'time' | 'chars';

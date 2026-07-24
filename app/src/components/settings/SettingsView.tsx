@@ -388,7 +388,8 @@ function EditorPane() {
               options={[
                 { id: 'narrow', label: 'Narrow' },
                 { id: 'normal', label: 'Normal' },
-                { id: 'wide', label: 'Wide' }
+                { id: 'wide', label: 'Wide' },
+                { id: 'full', label: 'Full' }
               ]}
               ariaLabel="Line measure"
             />
