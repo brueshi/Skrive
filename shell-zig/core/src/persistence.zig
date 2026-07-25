@@ -10,13 +10,16 @@
 //! the reserved `host:` channel — see dispatch.zig.
 //!
 //! Lenient load-with-defaults, like the oracle. Two deliberate, non-
-//! corpus-tested simplifications (logged): app-state load merges the file
-//! over the embedded default by key but does NOT replicate the oracle's
-//! exhaustive per-field type whitelisting (`sanitizeAppState`) — porting
-//! that defensive renderer-coupled validation is the scope-creep the kill
-//! criterion warns against, and the core writes its own well-formed files;
-//! project-state load returns the stored object as-is rather than porting
-//! `sanitizeProjectState`.
+//! corpus-tested simplifications (logged): app-state load fills gaps from the
+//! embedded default but does NOT replicate the oracle's exhaustive per-field
+//! type whitelisting (`sanitizeAppState`) — porting that defensive renderer-
+//! coupled validation is the scope-creep the kill criterion warns against, and
+//! the core writes its own well-formed files; project-state load returns the
+//! stored object as-is rather than porting `sanitizeProjectState`.
+//!
+//! Load is deliberately not a key filter either: the stored file's keys all
+//! survive, so a pref the renderer has and this core doesn't still round-trips
+//! (SKR-273). See `mergeAppState`.
 
 const std = @import("std");
 const dispatch = @import("dispatch.zig");
@@ -39,8 +42,15 @@ pub const PersistenceError = error{
 /// reflected here is a (logged) coupling the dual-shell period pays. The
 /// shell owns load-with-defaults, so the core has to embed this; there is
 /// no app-side seam to read it from.
+///
+/// The lockstep is no longer trust-based: `app/__test__/shell/app-state-default-
+/// parity.test.ts` parses this literal and asserts deep equality with the shared
+/// default, so a new pref that misses the shell fails the suite. It had drifted
+/// twice before that existed (SKR-273) — a fresh install got line-height 1.7
+/// instead of 1.5, and an autosave debounce of 0ms, which meant a write on every
+/// edit rather than after a 500ms pause.
 const DEFAULT_APP_STATE =
-    \\{"schemaVersion":1,"lastOpenedProject":null,"recentProjects":[],"license":null,"firstRunMs":null,"launchCount":0,"seenFeedbackPrompt":false,"personalDictionary":[],"skipDeleteConfirmation":false,"recentFiles":[],"editorFont":"editorial","editorCustomFontFamily":"","editorFontSize":17,"editorLineHeightX100":170,"autoUpdateOnLaunch":true,"theme":"light","showOutlineRail":true,"defaultSurface":"rich","surfaceSwitchingEnabled":true,"markerMode":"recessed","lineMeasure":"normal","lineMeasureCustomCh":70,"showMeasureRule":false,"smartTypography":true,"formatOnSave":false,"autosaveIdleDelayMs":0,"newFileLocation":"activeFolder","newFileNaming":"title","slugFormat":"kebab-case","gitHistoryEnabled":true,"seedFrontmatter":true,"frontmatterFields":["title","date","tags"],"dateFormat":"YYYY-MM-DD"}
+    \\{"schemaVersion":1,"lastOpenedProject":null,"recentProjects":[],"license":null,"firstRunMs":null,"launchCount":0,"seenFeedbackPrompt":false,"personalDictionary":[],"skipDeleteConfirmation":false,"recentFiles":[],"editorFont":"editorial","editorCustomFontFamily":"","editorFontSize":17,"editorLineHeightX100":150,"autoUpdateOnLaunch":true,"theme":"light","showOutlineRail":true,"showWordCount":true,"wordCountMetric":"words","defaultSurface":"rich","surfaceSwitchingEnabled":true,"markerMode":"recessed","lineMeasure":"normal","lineMeasureCustomCh":70,"showMeasureRule":false,"smartTypography":true,"formatOnSave":false,"autosaveIdleDelayMs":500,"newFileLocation":"activeFolder","newFileNaming":"title","slugFormat":"kebab-case","gitHistoryEnabled":true,"seedFrontmatter":true,"frontmatterFields":["title","date","tags"],"dateFormat":"YYYY-MM-DD"}
 ;
 
 pub const commands = [_]Command{
@@ -81,12 +91,22 @@ fn handleLoadAppState(ctx: *const Context, a: std.mem.Allocator, payload: std.js
     return mergeAppState(a, raw) catch DEFAULT_APP_STATE;
 }
 
-/// Merge the stored file over the embedded default by key (default key
-/// order preserved, file values win), forcing `schemaVersion:1`. A
-/// non-object or a future schemaVersion falls back to the default.
+/// Merge the stored file over the embedded default (default key order
+/// preserved, file values win), forcing `schemaVersion:1`. A non-object or a
+/// future schemaVersion falls back to the default.
+///
+/// The default is a FLOOR, not a whitelist: every key in the stored file
+/// survives, including ones this core has never heard of. It used to iterate
+/// the default's keys instead, which silently dropped any persisted pref
+/// missing from the embedded copy — so a renderer pref the shell hadn't caught
+/// up to could not be saved at all (SKR-273: showWordCount / wordCountMetric
+/// were exactly that). The renderer spreads loaded state over its own defaults
+/// and ignores what it doesn't know, so passing an unrecognized key through is
+/// strictly safer than eating it. Keys the file doesn't carry still come from
+/// the default; unknown ones land after it, in file order.
 fn mergeAppState(a: std.mem.Allocator, raw: []const u8) ![]const u8 {
     const default_parsed = try std.json.parseFromSlice(std.json.Value, a, DEFAULT_APP_STATE, .{});
-    var merged = default_parsed.value; // object; we overwrite values in place
+    var merged = default_parsed.value; // object; the file's keys go over it
 
     const file_parsed = std.json.parseFromSlice(std.json.Value, a, raw, .{}) catch return DEFAULT_APP_STATE;
     if (file_parsed.value != .object) return DEFAULT_APP_STATE;
@@ -96,11 +116,9 @@ fn mergeAppState(a: std.mem.Allocator, raw: []const u8) ![]const u8 {
         if (v == .integer and v.integer > 1) return DEFAULT_APP_STATE;
     }
 
-    var it = merged.object.iterator();
+    var it = file_obj.iterator();
     while (it.next()) |entry| {
-        if (file_obj.get(entry.key_ptr.*)) |file_val| {
-            entry.value_ptr.* = file_val;
-        }
+        try merged.object.put(a, entry.key_ptr.*, entry.value_ptr.*);
     }
     try merged.object.put(a, "schemaVersion", .{ .integer = 1 });
 
@@ -198,6 +216,30 @@ test "mergeAppState fills missing fields from the default and forces v1" {
     // A field absent from the sparse file is taken from the default.
     try testing.expectEqualStrings("editorial", parsed.value.object.get("editorFont").?.string);
     try testing.expectEqual(@as(i64, 1), parsed.value.object.get("schemaVersion").?.integer);
+}
+
+test "mergeAppState keeps a stored key the embedded default does not have" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // The SKR-273 regression: the merge used to iterate the DEFAULT's keys, so a
+    // pref the renderer had and this core didn't was dropped on load — meaning it
+    // could never be persisted at all. Any future pref is this case.
+    const merged = try mergeAppState(a, "{\"schemaVersion\":1,\"somethingNewer\":false}");
+    const parsed = try std.json.parseFromSlice(std.json.Value, a, merged, .{});
+    try testing.expectEqual(false, parsed.value.object.get("somethingNewer").?.bool);
+    // ...without losing the defaults it fills in around it.
+    try testing.expectEqualStrings("editorial", parsed.value.object.get("editorFont").?.string);
+}
+
+test "mergeAppState round-trips the prefs SKR-273 was dropping" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const merged = try mergeAppState(a, "{\"schemaVersion\":1,\"showWordCount\":false,\"wordCountMetric\":\"characters\"}");
+    const parsed = try std.json.parseFromSlice(std.json.Value, a, merged, .{});
+    try testing.expectEqual(false, parsed.value.object.get("showWordCount").?.bool);
+    try testing.expectEqualStrings("characters", parsed.value.object.get("wordCountMetric").?.string);
 }
 
 test "mergeAppState rejects a future schemaVersion to the default" {
