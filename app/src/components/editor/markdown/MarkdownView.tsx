@@ -15,6 +15,7 @@ import { Preview } from '../Preview';
 import { WordCountBadge } from '../WordCountBadge';
 import { computeWordCount } from '../../../lib/frontmatter';
 import { usePreferencesStore } from '../../../stores/preferences';
+import { useProjectStore } from '../../../stores/project';
 import './MarkdownView.css';
 
 type Props = {
@@ -128,6 +129,10 @@ export function MarkdownView({
   // raw and split, and follows the settled body in preview. Recomputed only
   // when the mirror text changes, never per render.
   const showWordCount = usePreferencesStore((s) => s.showWordCount);
+  // Focus mode strips the ambient readouts (SKR-52). Gated at the render site,
+  // not inside the badge, so the count recompute stops with it. The outline rail
+  // on this path is Preview's to gate — it mounts the rail, so it owns that one.
+  const focusMode = useProjectStore((s) => s.focusMode);
   const viewRef = useRef<HTMLDivElement>(null);
 
   // Preview mode has no textarea to focus. Focus the preview's own scroller instead,
@@ -141,10 +146,10 @@ export function MarkdownView({
 
   const counts = useMemo(
     () =>
-      showWordCount
+      showWordCount && !focusMode
         ? { words: computeWordCount(liveBody), chars: liveBody.length }
         : null,
-    [showWordCount, liveBody]
+    [showWordCount, focusMode, liveBody]
   );
   const badge = counts && <WordCountBadge counts={counts} scopeRef={viewRef} />;
 

@@ -1,8 +1,13 @@
+// @vitest-environment jsdom
+//
 // Invariants for the central command + binding registry. These exist
 // because the audit (Phase 13) found a binding that was advertised in
 // the palette but never bound (⌘⇧W → close project). The whole point
 // of the registry is making that class of drift impossible — tests
 // here pin the invariants.
+//
+// jsdom, because one predicate reads the live DOM: focus mode's Escape exit
+// stands down while a dismissable layer is open.
 
 import { describe, expect, it } from 'vitest';
 import {
@@ -295,5 +300,60 @@ describe('measure nudge commands', () => {
     narrower?.run();
     expect(usePreferencesStore.getState().lineMeasure).toBe('custom');
     expect(usePreferencesStore.getState().lineMeasureCustomCh).toBe(120);
+  });
+});
+
+// Focus mode: a mode, so the grammar puts it on a chord + a palette command + a
+// View-menu checkbox and nowhere near the toolbar. Escape is its way out, and
+// that entry has to stay inert unless the mode is actually on — otherwise every
+// Escape in the app would drop the writer out of nothing.
+describe('focus mode (⌘⇧D)', () => {
+  const { commands, bindings } = buildRegistry(STUB_DEPS);
+  const binding = bindings.find((b) => b.commandId === 'view.toggleFocusMode');
+  const command = commands.find((c) => c.id === 'view.toggleFocusMode');
+  const escape = bindings.find(
+    (b) => b.scope === 'window' && b.chord.code === 'Escape'
+  );
+
+  it('binds ⌘⇧D in the View group, twinned with a palette command', () => {
+    expect(binding).toBeDefined();
+    expect(binding?.scope).toBe('window');
+    expect(binding?.group).toBe('View');
+    expect(binding?.display).toBe('⌘⇧D');
+    expect(binding?.run).toBeTypeOf('function');
+    expect(command?.shortcut).toBe('⌘⇧D');
+  });
+
+  it('toggles the mode when run', () => {
+    useProjectStore.setState({
+      liveDoc: { path: 'a.folio' } as unknown as LiveDoc,
+      focusMode: false,
+      sidebarVisibleBeforeFocus: null,
+      sidebarVisible: true
+    });
+    binding?.run?.();
+    expect(useProjectStore.getState().focusMode).toBe(true);
+    command?.run();
+    expect(useProjectStore.getState().focusMode).toBe(false);
+  });
+
+  it('Escape only exits while the mode is on', () => {
+    useProjectStore.setState({ focusMode: false });
+    expect(escape?.when?.()).toBe(false);
+    useProjectStore.setState({ focusMode: true });
+    expect(escape?.when?.()).toBe(true);
+  });
+
+  it('Escape stands down while a dialog or menu owns the key', () => {
+    useProjectStore.setState({ focusMode: true });
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    document.body.appendChild(dialog);
+    // Radix dismisses on Escape without preventDefault, so the dispatcher's
+    // defaultPrevented guard can't catch this one — the predicate has to.
+    expect(escape?.when?.()).toBe(false);
+    dialog.remove();
+    expect(escape?.when?.()).toBe(true);
+    useProjectStore.setState({ focusMode: false });
   });
 });

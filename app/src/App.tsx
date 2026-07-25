@@ -127,6 +127,15 @@ export function App() {
     );
   }, [showMeasureRule]);
 
+  // Focus mode, stamped the same way: one root attribute gates every
+  // chrome-hiding rule in CSS, so entering the mode is a single repaint and
+  // the components themselves stay unaware of it. The block dimming rides
+  // the same attribute (see BlockEditor.css + attachFocusActive).
+  const focusMode = useProjectStore((s) => s.focusMode);
+  useEffect(() => {
+    document.documentElement.toggleAttribute('data-focus-mode', focusMode);
+  }, [focusMode]);
+
   // Phase-12b cold-open measurement. Logs the time from React mount
   // (recorded in main.tsx via window.__skriveMountStart) to the first
   // render where `manifest` is non-null — i.e. an auto-opened project

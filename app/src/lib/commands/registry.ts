@@ -143,6 +143,15 @@ function nudgeMeasure(deltaCh: number): void {
       : MEASURE_CH[p.lineMeasure];
   p.setLineMeasureCustomCh(seed + deltaCh);
 }
+/** Focus mode's Escape exit. Gated on the mode being on AND on no dismissable
+ *  layer being open: Radix dialogs and menus handle Escape without calling
+ *  preventDefault on the native event, so dispatchKey's defaultPrevented guard
+ *  can't see them — dismissing the palette would otherwise also drop the mode.
+ *  A live layer is always in the DOM, so its presence is the reliable tell. */
+const whenFocusMode = () =>
+  useProjectStore.getState().focusMode &&
+  document.querySelector('[role="dialog"],[role="menu"]') === null;
+
 const whenLiveDocAndManifest = () => {
   const s = useProjectStore.getState();
   return s.manifest !== null && s.liveDoc !== null;
@@ -410,6 +419,30 @@ export function buildRegistry(deps: CommandDeps): {
         const next = order[(order.indexOf(doc.layoutMode) + 1) % order.length]!;
         s.setLiveDocLayoutMode(doc.path, next);
       }
+    },
+    {
+      chord: { code: 'KeyD', mod: true, shift: true },
+      display: '⌘⇧D',
+      scope: 'window',
+      group: 'View',
+      label: 'Focus mode',
+      commandId: 'view.toggleFocusMode',
+      when: whenLiveDoc,
+      run: () => useProjectStore.getState().toggleFocusMode()
+    },
+    {
+      // Escape leaves focus mode — the universal way out, so the writer is never
+      // stuck in stripped chrome hunting for the chord. Window-scope and gated on
+      // the mode being on, so it is inert otherwise; a surface or menu that already
+      // consumed the key called preventDefault, and dispatchKey honours that
+      // (SKR-171) — dismissing the bubble never also drops out of the mode.
+      chord: { code: 'Escape' },
+      display: 'Esc',
+      scope: 'window',
+      group: 'View',
+      label: 'Leave focus mode',
+      when: whenFocusMode,
+      run: () => useProjectStore.getState().setFocusMode(false)
     },
 
     // ============ Project ============
@@ -740,6 +773,14 @@ export function buildRegistry(deps: CommandDeps): {
         const next = order[(order.indexOf(doc.layoutMode) + 1) % order.length]!;
         s.setLiveDocLayoutMode(doc.path, next);
       }
+    },
+    {
+      id: 'view.toggleFocusMode',
+      label: 'Focus mode',
+      group: 'View',
+      shortcut: get('view.toggleFocusMode'),
+      when: whenLiveDoc,
+      run: () => useProjectStore.getState().toggleFocusMode()
     },
     // Per-document measure override (mirrors the View-menu radio group;
     // palette-only, no chords — the View group's are spoken for).

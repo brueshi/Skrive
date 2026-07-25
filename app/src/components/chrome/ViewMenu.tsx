@@ -57,6 +57,8 @@ export function ViewMenu() {
   const setShowMeasureRule = usePreferencesStore(
     (s) => s.setShowMeasureRule
   );
+  const focusMode = useProjectStore((s) => s.focusMode);
+  const toggleFocusMode = useProjectStore((s) => s.toggleFocusMode);
 
   if (!activeTab) return null;
 
@@ -130,6 +132,14 @@ export function ViewMenu() {
             <span className="ctx-shortcut">{platformShortcut('⌘⇧H')}</span>
           </DropdownMenu.CheckboxItem>
           <DropdownMenu.Separator className="ctx-sep" />
+          <DropdownMenu.CheckboxItem
+            className="ctx-item"
+            checked={focusMode}
+            onCheckedChange={() => toggleFocusMode()}
+          >
+            <span className="ctx-label">Focus</span>
+            <span className="ctx-shortcut">{platformShortcut('⌘⇧D')}</span>
+          </DropdownMenu.CheckboxItem>
           <DropdownMenu.CheckboxItem
             className="ctx-item"
             checked={showMeasureRule}

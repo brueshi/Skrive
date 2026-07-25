@@ -29,6 +29,7 @@ import { renderMarkdown } from '../../lib/preview/markdown';
 import { skriveAssetResolver } from '../../lib/preview/imageResolver';
 import { isSafeUrl } from '../../lib/security/urls';
 import { OutlineRail } from './OutlineRail';
+import { useProjectStore } from '../../stores/project';
 
 type Props = {
   body: string;
@@ -83,8 +84,14 @@ export function Preview({
   filePath = null,
   projectRoot = '',
   onInternalLink,
-  showRail = false
+  showRail: showRailRequested = false
 }: Props) {
+  // Focus mode strips the ambient readouts (SKR-52). Gated here, where the rail
+  // is actually mounted, rather than in the caller's `showRail` — that way the
+  // rail's heading scan and ResizeObserver stop with it no matter who mounts
+  // this, and a second caller can't forget.
+  const focusMode = useProjectStore((s) => s.focusMode);
+  const showRail = showRailRequested && !focusMode;
   const html = useMemo(
     () =>
       renderMarkdown(body, {
