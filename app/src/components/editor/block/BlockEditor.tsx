@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BlockSurface, DocHistory } from '../../../lib/blocksurface';
 import { attachCustomCaret } from '../../../lib/blocksurface/caret';
 import { attachDecorationOverlay } from '../../../lib/blocksurface/decoration-overlay';
+import { attachFocusActive } from '../../../lib/blocksurface/focus-active';
 import { attachTableChrome } from '../../../lib/blocksurface/table-chrome';
 import { attachCodeHighlight } from '../../../lib/blocksurface/highlight/code-highlight';
 import { attachFootnotePeek } from '../../../lib/blocksurface/footnote-peek';
@@ -74,20 +75,33 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
     findTarget: BlockFindTarget;
   } | null>(null);
   const showWordCount = usePreferencesStore((s) => s.showWordCount);
+  const focusMode = useProjectStore((s) => s.focusMode);
   const [counts, setCounts] = useState<LiveCounts | null>(null);
 
   // Live counts off the surface DOM (SKR-53): per-block incremental via
   // MutationObserver, rAF-coalesced — real-time without touching the
   // keystroke hot path. Detached entirely while the badge is toggled off.
   useEffect(() => {
-    if (!showWordCount) {
+    if (!showWordCount || focusMode) {
       setCounts(null);
       return;
     }
     const host = hostRef.current;
     if (!host) return;
     return attachLiveCounts(host, setCounts);
-  }, [showWordCount]);
+  }, [showWordCount, focusMode]);
+
+  // Focus mode's active-block marker (SKR-52). Attached only while the mode is
+  // on — off, there is no listener at all. Depends on `ctx` because it needs the
+  // constructed surface's structural-change signal, so it can only run once the
+  // mount effect below has published one.
+  useEffect(() => {
+    if (!focusMode || !ctx) return;
+    const host = hostRef.current;
+    if (!host) return;
+    const handle = attachFocusActive({ surface: host, blockSurface: ctx.surface });
+    return () => handle.destroy();
+  }, [focusMode, ctx]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -213,12 +227,18 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
           scroll offset, so no block-id plumbing is needed; renderKey stays
           constant and structural edits reach it through its ResizeObserver +
           element-identity path (see the rail's Props comment). */}
-      <OutlineRail
-        scrollerRef={bodyRef}
-        contentRef={hostRef}
-        renderKey=""
-      />
-      {showWordCount && counts && (
+      {/* Focus mode strips both ambient readouts by unmounting them, not by
+          hiding them in CSS: their observers (the rail's ResizeObserver, the
+          counts' MutationObserver) then stop too, so the mode costs less than
+          normal editing rather than more. */}
+      {!focusMode && (
+        <OutlineRail
+          scrollerRef={bodyRef}
+          contentRef={hostRef}
+          renderKey=""
+        />
+      )}
+      {showWordCount && !focusMode && counts && (
         <WordCountBadge counts={counts} scopeRef={bodyRef} />
       )}
       {ctx && <FindBar target={ctx.findTarget} />}

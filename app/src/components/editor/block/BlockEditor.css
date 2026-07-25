@@ -63,6 +63,34 @@
   pointer-events: none;
 }
 
+/* ---- Focus mode dimming. Gated by the root attribute the App stamps from the
+   transient `focusMode` state; the lit block is marked by attachFocusActive off
+   the rAF-coalesced selection signal, never per keystroke.
+
+   TOP-LEVEL blocks only (`>`), because opacity compounds: a dimmed list could
+   never host an undimmed item. So a caret anywhere inside a list keeps the whole
+   list lit, which reads correctly — a list is one thought.
+
+   Dimming by opacity rather than color so tables, images, and code dim with the
+   prose instead of only text recoloring. The transition is unconditional (it
+   costs nothing while no opacity changes) so both the mode toggle and each caret
+   move between blocks fade rather than snap. ---- */
+.block-editor-surface > [data-block-id] {
+  transition: opacity var(--skrive-duration-standard) var(--skrive-easing);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .block-editor-surface > [data-block-id] {
+    transition: none;
+  }
+}
+
+:root[data-focus-mode]
+  .block-editor-surface
+  > [data-block-id]:not(.is-focus-active) {
+  opacity: var(--skrive-focus-dim);
+}
+
 /* The host is the focused contenteditable; opt out of the app's global
    :focus-visible ring (index.css) so there is no box around the writing area.
    Higher specificity than the global rule, so it wins regardless of load order. */

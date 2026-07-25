@@ -281,6 +281,18 @@ type State = {
    *  (Settings then opens on its default / last-in-session section). */
   settingsSection: SettingsSection | null;
 
+  /** Deep-writing mode: chrome stripped, everything but the block under the
+   *  caret dimmed. Transient like `activeView` — a mode you enter for a
+   *  session, not a setting, so it never persists and every launch starts
+   *  out of it. */
+  focusMode: boolean;
+
+  /** Sidebar visibility as it stood when focus mode was entered, so exiting
+   *  restores the chrome the writer had rather than a default. Null whenever
+   *  focus mode is off. Focus mode hides the rail through this state (not
+   *  CSS) so ⌘[ keeps working while the mode is on. */
+  sidebarVisibleBeforeFocus: boolean | null;
+
   /** Most recent project-wide lint report. Refreshed after open and
    *  after any watcher event resolves. Null between project loads.
    *
@@ -395,6 +407,11 @@ type Actions = {
   openSettings(section?: SettingsSection): void;
   /** Consume the one-shot `settingsSection` deep-link. */
   clearSettingsSection(): void;
+
+  /** Enter or leave deep-writing mode. Entering remembers the sidebar's
+   *  visibility and hides the rail; leaving puts it back. */
+  setFocusMode(v: boolean): void;
+  toggleFocusMode(): void;
 
   /** Flush any pending project-state debounce immediately. Used by
    *  the beforeunload handler and project close. Safe to call when no
@@ -699,7 +716,15 @@ function snapshotProjectState(state: State): ProjectUiState | null {
       state.manifest.root,
     lastOpenedMs: Date.now(),
     sidebar: {
-      visible: state.sidebarVisible,
+      // Focus mode hides the rail as a transient effect of the mode, so the
+      // pre-focus value is what gets persisted — otherwise any save that lands
+      // while the mode is on (a document switch, a pin) would bake the hidden
+      // rail into the project, and quitting from focus mode would reopen
+      // without a sidebar.
+      visible:
+        state.focusMode && state.sidebarVisibleBeforeFocus !== null
+          ? state.sidebarVisibleBeforeFocus
+          : state.sidebarVisible,
       width: state.sidebarWidth,
       pinned: state.pinned,
       sortKey: state.sortKey,
@@ -1134,6 +1159,8 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
   renameModalPath: null,
   activeView: 'editor',
   settingsSection: null,
+  focusMode: false,
+  sidebarVisibleBeforeFocus: null,
   lintReport: null,
 
   unsubscribeWatch: null,
@@ -1770,6 +1797,41 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
 
   clearSettingsSection() {
     if (get().settingsSection !== null) set({ settingsSection: null });
+  },
+
+  // ============================ Focus mode ============================
+
+  setFocusMode(v: boolean) {
+    const state = get();
+    if (state.focusMode === v) return;
+    if (v) {
+      // Remember the rail, then hide it by writing the same field ⌘[ writes —
+      // so it collapses with the drawer animation it always has, and ⌘[ keeps
+      // working inside the mode rather than becoming a dead chord. Deliberately
+      // NOT through setSidebarVisible: that schedules a persist, and this hide
+      // is transient (see snapshotProjectState).
+      set({
+        focusMode: true,
+        sidebarVisibleBeforeFocus: state.sidebarVisible,
+        sidebarVisible: false
+      });
+      return;
+    }
+    // Leaving: put the rail back as it was — unless the writer re-showed it
+    // during the session, in which case their later intent wins.
+    const remembered = state.sidebarVisibleBeforeFocus;
+    set({
+      focusMode: false,
+      sidebarVisibleBeforeFocus: null,
+      sidebarVisible:
+        remembered !== null && !state.sidebarVisible
+          ? remembered
+          : state.sidebarVisible
+    });
+  },
+
+  toggleFocusMode() {
+    get().setFocusMode(!get().focusMode);
   },
 
   // ============================ Project state flush ============================

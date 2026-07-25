@@ -189,6 +189,11 @@
     0 1px 3px light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.3));
   --skrive-overlay-scrim: rgba(0, 0, 0, 0.35);
 
+  /* Focus mode's recessed opacity for every block but the one being written.
+     Low enough to read as "not where I am", high enough that the surrounding
+     paragraphs stay legible when glanced at — dimming, not hiding. */
+  --skrive-focus-dim: 0.32;
+
   /* Motion. Quick = chrome state changes; standard = modal entrance/
      exit; slow = sidebar collapse (the heaviest weight that animates).
      Easing-default is symmetric Material; easing-out is for entrance
@@ -346,6 +351,71 @@ body {
 .app-root .resize-handle:hover::before,
 .app-root .resize-handle.dragging::before {
   background: var(--skrive-fg);
+}
+
+/* ===================== Focus mode ===================== */
+
+/* Deep-writing mode: chrome stripped to leave the writing. Everything here is
+   gated on the root attribute App stamps from the transient `focusMode` state,
+   so entering the mode is one repaint and no component has to know about it.
+   The sidebar is NOT hidden here — the store hides it through `sidebarVisible`
+   so it animates like ⌘[ and that chord keeps working inside the mode.
+   The per-block dimming lives in BlockEditor.css. */
+
+/* The header band STAYS, deliberately: on macOS it is the window's drag lane
+   with the traffic lights floating over it (hiddenInset), and on the frameless
+   Windows host it draws the minimize/maximize/close buttons. Hiding it would
+   cost a writer the ability to move — or close — their own window. So its
+   contents go and the band remains, reading as blank shell above the text. Its
+   bottom rule goes too, or the empty band reads as a stray line. */
+:root[data-focus-mode] .app-root .header {
+  border-bottom-color: transparent;
+}
+
+:root[data-focus-mode] .header-left,
+:root[data-focus-mode] .header-right,
+:root[data-focus-mode] .front-title-slot {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--skrive-duration-standard) var(--skrive-easing);
+}
+
+/* Revealed by pointing at the band, so the sidebar toggle, title, and View menu
+   are one gesture away without leaving the mode. Keyboard access never depended
+   on this — the palette and the chords stay live throughout. */
+:root[data-focus-mode] .app-root .header:hover .header-left,
+:root[data-focus-mode] .app-root .header:hover .header-right,
+:root[data-focus-mode] .app-root .header:hover .front-title-slot {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-focus-mode] .header-left,
+  :root[data-focus-mode] .header-right,
+  :root[data-focus-mode] .front-title-slot {
+    transition: none;
+  }
+}
+
+/* The toolbar band. Formatting stays reachable from the selection bubble and the
+   palette, so nothing becomes unavailable — it stops taking up the page. */
+:root[data-focus-mode] .editor-bar {
+  display: none;
+}
+
+/* The rail's collapsed reveal strip: with the sidebar hidden this is the one
+   remaining sliver of navigation chrome, and it defeats the point. */
+:root[data-focus-mode] .app-root .resize-handle {
+  display: none;
+}
+
+/* Right-hand panels. Their open state is left alone, so whatever was open comes
+   back on exit. */
+:root[data-focus-mode] .bl-panel,
+:root[data-focus-mode] .fm-panel,
+:root[data-focus-mode] .hi-panel {
+  display: none;
 }
 
 /* ===================== Header (overlay title bar) ===================== */
