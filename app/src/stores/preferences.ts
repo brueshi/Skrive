@@ -17,10 +17,7 @@ import {
   type EditorFontId,
   clampLineMeasureCh,
   type LineMeasureSetting,
-  type NewFileLocation,
-  type NewFileNaming,
   type RecentProject,
-  type SlugFormat,
   type ThemeId,
   type WordCountMetric
 } from '@skrive/shared';
@@ -64,17 +61,11 @@ type PreferencesActions = {
   setSmartTypography(value: boolean): void;
   setFormatOnSave(value: boolean): void;
   setAutosaveIdleDelayMs(value: number): void;
-  setNewFileLocation(value: NewFileLocation): void;
-  setNewFileNaming(value: NewFileNaming): void;
-  setSlugFormat(value: SlugFormat): void;
   /** Persist the git-history preference. Pure: it only stores the value.
    *  Project-side coordination (pushing it to the shell and refreshing the
    *  open project's history) lives in the project store's action of the
    *  same name, which calls this. */
   setGitHistoryEnabled(value: boolean): void;
-  setSeedFrontmatter(value: boolean): void;
-  setFrontmatterFields(value: string[]): void;
-  setDateFormat(value: string): void;
 
   addDictionaryWord(word: string): void;
   removeDictionaryWord(word: string): void;
@@ -299,38 +290,9 @@ export const usePreferencesStore = create<
     set({ autosaveIdleDelayMs: clamped });
     scheduleSave(get);
   },
-  setNewFileLocation(value) {
-    if (get().newFileLocation === value) return;
-    set({ newFileLocation: value });
-    scheduleSave(get);
-  },
-  setNewFileNaming(value) {
-    if (get().newFileNaming === value) return;
-    set({ newFileNaming: value });
-    scheduleSave(get);
-  },
-  setSlugFormat(value) {
-    if (get().slugFormat === value) return;
-    set({ slugFormat: value });
-    scheduleSave(get);
-  },
   setGitHistoryEnabled(value) {
     if (get().gitHistoryEnabled === value) return;
     set({ gitHistoryEnabled: value });
-    scheduleSave(get);
-  },
-  setSeedFrontmatter(value) {
-    if (get().seedFrontmatter === value) return;
-    set({ seedFrontmatter: value });
-    scheduleSave(get);
-  },
-  setFrontmatterFields(value) {
-    set({ frontmatterFields: value });
-    scheduleSave(get);
-  },
-  setDateFormat(value) {
-    if (get().dateFormat === value) return;
-    set({ dateFormat: value });
     scheduleSave(get);
   },
 
