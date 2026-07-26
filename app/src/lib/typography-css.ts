@@ -17,6 +17,7 @@ import {
   type LineMeasureSetting
 } from '@skrive/shared';
 import { resolveEditorFontStack } from './typography';
+import { bundledFont } from './typography-registry';
 
 /** Writing-column widths per measure, in ch of the editor face. The
  *  value is resolved to px here rather than emitted as a raw `ch`
@@ -33,10 +34,18 @@ export const MEASURE_CH: Record<Exclude<LineMeasure, 'full'>, number> = {
 let measureCanvas: HTMLCanvasElement | null = null;
 const chWidthCache = new Map<string, number>();
 
+/** Drop a cached measurement so the next call re-measures. Needed when a
+ *  bundled face finishes loading: the cached width for that key came from
+ *  whatever fallback was resolvable at the time. */
+export function invalidateChWidth(stack: string, sizePx: number): void {
+  chWidthCache.delete(`${sizePx}|${stack}`);
+}
+
 /** Width of one ch (the "0" glyph) for a font, in px. Cached per
- *  stack+size; the editor faces are system stacks that are available
- *  at first paint, so a one-shot measure is safe. If bundled faces
- *  ever load asynchronously, re-measure on `document.fonts.ready`. */
+ *  stack+size. System stacks resolve at first paint, but a bundled face
+ *  may not have loaded yet — until it does, measureText reports the
+ *  fallback's "0". `useTypographyVars` invalidates and re-measures once
+ *  the real face is available. */
 export function chWidthPx(stack: string, sizePx: number): number {
   const key = `${sizePx}|${stack}`;
   const cached = chWidthCache.get(key);
@@ -92,21 +101,52 @@ export function useTypographyVars(): void {
   useEffect(() => {
     const root = document.documentElement;
     const stack = resolveEditorFontStack(editorFont, editorCustomFontFamily);
-    root.style.setProperty('--skrive-editor-font', stack);
-    root.style.setProperty('--skrive-editor-font-size', `${editorFontSize}px`);
-    root.style.setProperty(
-      '--skrive-editor-line-height',
-      String(editorLineHeightX100 / 100)
-    );
-    root.style.setProperty(
-      '--skrive-measure',
-      resolveMeasureCss(
-        docLineMeasure ?? lineMeasure,
-        stack,
-        editorFontSize,
-        lineMeasureCustomCh
-      )
-    );
+
+    const apply = () => {
+      root.style.setProperty('--skrive-editor-font', stack);
+      root.style.setProperty('--skrive-editor-font-size', `${editorFontSize}px`);
+      root.style.setProperty(
+        '--skrive-editor-line-height',
+        String(editorLineHeightX100 / 100)
+      );
+      root.style.setProperty(
+        '--skrive-measure',
+        resolveMeasureCss(
+          docLineMeasure ?? lineMeasure,
+          stack,
+          editorFontSize,
+          lineMeasureCustomCh
+        )
+      );
+    };
+
+    // Paint immediately. For a bundled face this sizes the column from the
+    // fallback's metrics, which is wrong but close, and is corrected below
+    // rather than leaving the column unset until the font arrives.
+    apply();
+
+    const family = bundledFont(editorFont)?.cssFamily;
+    if (!family || typeof document === 'undefined' || !document.fonts) return;
+
+    // The measured width of "0" changes the moment the real face lands, and
+    // the writing column is derived from it. Re-measure then — but ignore a
+    // load that resolves after the font has already changed again, or the
+    // column would be sized for a face no longer selected.
+    let cancelled = false;
+    document.fonts
+      .load(`${editorFontSize}px "${family}"`)
+      .then(() => {
+        if (cancelled) return;
+        invalidateChWidth(stack, editorFontSize);
+        apply();
+      })
+      .catch(() => {
+        // A face that fails to load keeps the fallback metrics already
+        // applied, which match what is actually rendering.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [
     editorFont,
     editorCustomFontFamily,

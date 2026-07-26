@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import type { UpdaterStatus } from '@skrive/shared';
+import type { EditorFontId, UpdaterStatus } from '@skrive/shared';
 import {
   LINE_MEASURE_CUSTOM_MAX_CH,
   LINE_MEASURE_CUSTOM_MIN_CH
@@ -34,8 +34,10 @@ import {
   EDITOR_FONT_PRESETS,
   FONT_SIZE_STEPS,
   LINE_HEIGHT_STEPS_X100,
-  lineHeightLabel
+  lineHeightLabel,
+  resolveEditorFontStack
 } from '../../lib/typography';
+import { BUNDLED_FONTS } from '../../lib/typography-registry';
 import { notify } from '../../lib/notify';
 import { openFeedbackForm } from '../../lib/feedback';
 import {
@@ -255,6 +257,34 @@ function GeneralPane() {
   );
 }
 
+/** A line of prose in the selected face, so the choice can be made by
+ *  reading rather than by name. Sized a little above the editor's default so
+ *  the letterforms are legible in a settings row, and exercising italic,
+ *  bold, and figures because that is where faces differ most. */
+function FontSpecimen({
+  font,
+  customFamily
+}: {
+  font: EditorFontId;
+  customFamily: string;
+}) {
+  const preset = EDITOR_FONT_PRESETS.find((p) => p.id === font);
+  return (
+    <div className="settings-font-specimen-block">
+      <p
+        className="settings-font-specimen"
+        style={{ fontFamily: resolveEditorFontStack(font, customFamily) }}
+      >
+        Good type gets out of the way. You notice the sentence, not the
+        letters — the <em>shape</em> of an argument, the{' '}
+        <strong>weight</strong> of a claim, a date like 1849 sitting quietly
+        in the line.
+      </p>
+      {preset && <p className="settings-font-note">{preset.subtext}</p>}
+    </div>
+  );
+}
+
 function AppearancePane() {
   const theme = usePreferencesStore((s) => s.theme);
   const setTheme = usePreferencesStore((s) => s.setTheme);
@@ -293,7 +323,8 @@ function AppearancePane() {
               onChange={setEditorFont}
               options={EDITOR_FONT_PRESETS.map((p) => ({
                 id: p.id,
-                label: p.label
+                label: p.label,
+                group: p.group
               }))}
               ariaLabel="Reading font"
             />
@@ -313,6 +344,7 @@ function AppearancePane() {
             }
           />
         )}
+        <FontSpecimen font={editorFont} customFamily={customFamily} />
         <SettingRow
           label="Text size"
           desc="Base reading size for your prose."
@@ -995,6 +1027,23 @@ function AboutPane({
           >
             Reveal preferences in Finder
           </Button>
+        </div>
+      </SettingsSection>
+      <SettingsSection cap="Fonts">
+        <div className="settings-card-pad">
+          <p className="settings-card-blurb">
+            Skrive bundles these writing faces, each under the SIL Open Font
+            License 1.1. The full license ships beside the font files inside
+            the app.
+          </p>
+          <ul className="settings-credit-list">
+            {BUNDLED_FONTS.map((font) => (
+              <li key={font.id} className="settings-credit-row">
+                <span className="settings-credit-name">{font.label}</span>
+                <span className="settings-credit-by">{font.credit}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </SettingsSection>
       <SettingsSection cap="Diagnostics">

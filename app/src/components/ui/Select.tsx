@@ -6,7 +6,36 @@ import styles from './Select.module.css';
 // apply in the current context — pair it with SettingRow's `dimmed` for the
 // visual cue.
 
-type Option<T extends string> = { id: T; label: string };
+// `group` is optional: options without one render flat, exactly as before.
+// When any option carries a group, the list renders under <optgroup>
+// headings in first-appearance order — so the caller controls grouping by
+// ordering its options, not by passing a separate structure.
+type Option<T extends string> = { id: T; label: string; group?: string };
+
+type OptionRun<T extends string> =
+  | { kind: 'bare'; option: Option<T> }
+  | { kind: 'group'; group: string; options: Option<T>[] };
+
+/** Collapse a flat option list into runs. Ungrouped options render bare;
+ *  consecutive options sharing a group collect under one heading. Order is
+ *  preserved throughout, and a group name that recurs after a gap opens a
+ *  second heading rather than reordering the list to merge them. */
+function groupOptions<T extends string>(options: Option<T>[]): OptionRun<T>[] {
+  const runs: OptionRun<T>[] = [];
+  for (const opt of options) {
+    if (opt.group === undefined) {
+      runs.push({ kind: 'bare', option: opt });
+      continue;
+    }
+    const last = runs[runs.length - 1];
+    if (last?.kind === 'group' && last.group === opt.group) {
+      last.options.push(opt);
+    } else {
+      runs.push({ kind: 'group', group: opt.group, options: [opt] });
+    }
+  }
+  return runs;
+}
 
 export function Select<T extends string>({
   value,
@@ -30,11 +59,21 @@ export function Select<T extends string>({
         disabled={disabled}
         onChange={(e) => onChange(e.target.value as T)}
       >
-        {options.map((opt) => (
-          <option key={opt.id} value={opt.id}>
-            {opt.label}
-          </option>
-        ))}
+        {groupOptions(options).map((run) =>
+          run.kind === 'bare' ? (
+            <option key={run.option.id} value={run.option.id}>
+              {run.option.label}
+            </option>
+          ) : (
+            <optgroup key={run.group} label={run.group}>
+              {run.options.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
+                </option>
+              ))}
+            </optgroup>
+          )
+        )}
       </select>
       <svg
         className={styles.caret}

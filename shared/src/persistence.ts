@@ -138,7 +138,25 @@ export type RecentFile = {
   openedMs: number;
 };
 
+/** The selected reading face. The first group is bundled with the app (see
+ *  app/src/lib/typography-registry.ts); the second resolves to a system font
+ *  stack, which is the only way to offer faces we cannot redistribute, such
+ *  as Palatino. 'custom' takes an arbitrary family from
+ *  `editorCustomFontFamily`. Unknown values fall back to the default, so a
+ *  face retired in a later version degrades rather than breaking the editor. */
 export type EditorFontId =
+  // Bundled, openly licensed.
+  | 'literata'
+  | 'newsreader'
+  | 'source-serif-4'
+  | 'eb-garamond'
+  | 'alegreya'
+  | 'inter'
+  | 'source-sans-3'
+  | 'atkinson-hyperlegible'
+  | 'jetbrains-mono'
+  | 'monaspace-neon'
+  // System stacks.
   | 'editorial'
   | 'classic'
   | 'screen'
