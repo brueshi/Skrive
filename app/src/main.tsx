@@ -7,6 +7,9 @@ import { perfEnabled } from './lib/perf';
 import { installCrashLog } from './lib/crash-log';
 import './index.css';
 import './components/ui/tokens.css';
+// Bundled writing faces. The declarations are lazy — nothing is fetched
+// until a face is actually rendered in.
+import './assets/fonts/fonts.css';
 
 // Forward uncaught renderer errors to the host's local crash log. Installed
 // before render so a crash during mount is still captured.

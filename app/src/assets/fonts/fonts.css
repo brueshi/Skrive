@@ -1,0 +1,178 @@
+/*
+ * Bundled writing faces. Every family here is openly licensed (OFL 1.1) and
+ * ships with its license beside its files in this directory, which is what
+ * the license requires — see the credits block in Settings › About.
+ *
+ * Nothing is fetched from the network. The files are part of the app bundle
+ * and are served by the shell's own scheme handler, so the picker works
+ * offline and no font choice is observable outside the machine.
+ *
+ * These declarations are lazy: a browser only fetches a face once something
+ * actually renders in it. Fourteen unselected families cost disk and nothing
+ * else — no startup work, no memory, no effect on typing latency.
+ *
+ * Weight ranges are narrow on purpose. Most families are instanced to
+ * 400–700 (regular through bold, the only weights the editor renders) with
+ * the optical-size axis pinned to the default reading size; the editor
+ * exposes 14–22px, a band across which optical interpolation is close to
+ * imperceptible but costs 30–50% of every file. Source Sans 3 and Monaspace
+ * keep their full axis ranges because they declare a Reserved Font Name, and
+ * retaining that name means shipping the face unmodified.
+ */
+
+/* Serif ------------------------------------------------------------------ */
+
+@font-face {
+  font-family: 'Literata';
+  src: url('./literata/literata-roman.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Literata';
+  src: url('./literata/literata-italic.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Newsreader';
+  src: url('./newsreader/newsreader-roman.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Newsreader';
+  src: url('./newsreader/newsreader-italic.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Source Serif 4';
+  src: url('./source-serif-4/source-serif-4-roman.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Source Serif 4';
+  src: url('./source-serif-4/source-serif-4-italic.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'EB Garamond';
+  src: url('./eb-garamond/eb-garamond-roman.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'EB Garamond';
+  src: url('./eb-garamond/eb-garamond-italic.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Alegreya';
+  src: url('./alegreya/alegreya-roman.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Alegreya';
+  src: url('./alegreya/alegreya-italic.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Sans ------------------------------------------------------------------- */
+
+@font-face {
+  font-family: 'Inter';
+  src: url('./inter/inter-roman.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('./inter/inter-italic.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Full axis range: 'Source' is a Reserved Font Name, so the face ships
+   unmodified apart from the woff2 container. */
+@font-face {
+  font-family: 'Source Sans 3';
+  src: url('./source-sans-3/source-sans-3-roman.woff2') format('woff2');
+  font-weight: 200 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Source Sans 3';
+  src: url('./source-sans-3/source-sans-3-italic.woff2') format('woff2');
+  font-weight: 200 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Atkinson Hyperlegible Next';
+  src: url('./atkinson-hyperlegible/atkinson-hyperlegible-roman.woff2')
+    format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Atkinson Hyperlegible Next';
+  src: url('./atkinson-hyperlegible/atkinson-hyperlegible-italic.woff2')
+    format('woff2');
+  font-weight: 400 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Mono ------------------------------------------------------------------- */
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('./jetbrains-mono/jetbrains-mono-roman.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('./jetbrains-mono/jetbrains-mono-italic.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* One file covers both styles: Monaspace reaches its italic through a slant
+   axis rather than a separate face, so the oblique range is declared and the
+   browser drives `slnt` from it. Full axis range retained — 'Monaspace' is a
+   Reserved Font Name. */
+@font-face {
+  font-family: 'Monaspace Neon Var';
+  src: url('./monaspace-neon/monaspace-neon.woff2') format('woff2');
+  font-weight: 200 800;
+  font-style: oblique 0deg 11deg;
+  font-display: swap;
+}

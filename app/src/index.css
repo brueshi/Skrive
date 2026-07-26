@@ -4009,6 +4009,63 @@ body {
 
 /* Segmented / Toggle / Stepper / Select moved to components/ui (SKR-212). */
 
+/* ---- Font specimen ---- */
+.settings-font-specimen-block {
+  padding: 16px 18px;
+  border-top: 1px solid var(--settings-hair);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Family comes from an inline style so the specimen tracks the picker
+   without a variable round-trip. Sized above the editor default because a
+   settings row is read at a glance, not at length. */
+.settings-font-specimen {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--skrive-fg);
+  /* Optical sizing is pinned in the bundled faces, but system stacks may
+     still carry the axis — let it apply where it exists. */
+  font-optical-sizing: auto;
+}
+
+.settings-font-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 16px;
+  color: var(--skrive-muted);
+}
+
+/* ---- Credits ---- */
+.settings-credit-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-credit-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 12.5px;
+  line-height: 16px;
+}
+
+.settings-credit-name {
+  color: var(--skrive-fg);
+}
+
+.settings-credit-by {
+  color: var(--skrive-muted);
+  text-align: right;
+}
+
 /* ---- Theme tiles ---- */
 .settings-theme-block {
   padding: 16px 18px;
