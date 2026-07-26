@@ -41,7 +41,6 @@ import { BUNDLED_FONTS } from '../../lib/typography-registry';
 import { notify } from '../../lib/notify';
 import { openFeedbackForm } from '../../lib/feedback';
 import {
-  FieldChips,
   MonoInput,
   Segmented,
   Select,
@@ -557,77 +556,17 @@ function DictionarySection() {
 }
 
 function WritingFilesPane() {
-  const newFileLocation = usePreferencesStore((s) => s.newFileLocation);
-  const setNewFileLocation = usePreferencesStore((s) => s.setNewFileLocation);
-  const newFileNaming = usePreferencesStore((s) => s.newFileNaming);
-  const setNewFileNaming = usePreferencesStore((s) => s.setNewFileNaming);
-  const slugFormat = usePreferencesStore((s) => s.slugFormat);
-  const setSlugFormat = usePreferencesStore((s) => s.setSlugFormat);
   const idleDelay = usePreferencesStore((s) => s.autosaveIdleDelayMs);
   const setIdleDelay = usePreferencesStore((s) => s.setAutosaveIdleDelayMs);
   const formatOnSave = usePreferencesStore((s) => s.formatOnSave);
   const setFormatOnSave = usePreferencesStore((s) => s.setFormatOnSave);
-  const seed = usePreferencesStore((s) => s.seedFrontmatter);
-  const setSeed = usePreferencesStore((s) => s.setSeedFrontmatter);
-  const fields = usePreferencesStore((s) => s.frontmatterFields);
-  const setFields = usePreferencesStore((s) => s.setFrontmatterFields);
-  const dateFormat = usePreferencesStore((s) => s.dateFormat);
-  const setDateFormat = usePreferencesStore((s) => s.setDateFormat);
 
   return (
     <>
       <PaneHead
         title="Writing & Files"
-        sub="How documents are named, saved, and seeded on disk."
+        sub="How your work is written to disk."
       />
-      <SettingsSection cap="Files">
-        <SettingRow
-          label="New file location"
-          desc="Where new documents are created."
-          control={
-            <Select
-              value={newFileLocation}
-              onChange={setNewFileLocation}
-              options={[
-                { id: 'activeFolder', label: 'Same folder as active' },
-                { id: 'projectRoot', label: 'Project root' }
-              ]}
-              ariaLabel="New file location"
-            />
-          }
-        />
-        <SettingRow
-          label="Name new files from"
-          desc="The filename is derived as you write the title."
-          control={
-            <Select
-              value={newFileNaming}
-              onChange={setNewFileNaming}
-              options={[
-                { id: 'title', label: 'Document title' },
-                { id: 'untitled', label: 'Untitled' }
-              ]}
-              ariaLabel="Name new files from"
-            />
-          }
-        />
-        <SettingRow
-          label="Slug format"
-          desc="Used for heading anchors and wiki links."
-          control={
-            <Select
-              value={slugFormat}
-              onChange={setSlugFormat}
-              options={[
-                { id: 'kebab-case', label: 'kebab-case' },
-                { id: 'snake_case', label: 'snake_case' }
-              ]}
-              ariaLabel="Slug format"
-            />
-          }
-        />
-      </SettingsSection>
-
       <SettingsSection cap="Saving">
         <SettingRow
           label="Idle delay"
@@ -652,39 +591,6 @@ function WritingFilesPane() {
               checked={formatOnSave}
               onChange={setFormatOnSave}
               ariaLabel="Format on save"
-            />
-          }
-        />
-      </SettingsSection>
-
-      <SettingsSection cap="Frontmatter">
-        <SettingRow
-          label="Seed new files"
-          desc="Start new documents with a frontmatter block."
-          control={
-            <Toggle
-              checked={seed}
-              onChange={setSeed}
-              ariaLabel="Seed new files with frontmatter"
-            />
-          }
-        />
-        <SettingRow
-          label="Default fields"
-          desc="Inserted into every new document."
-          dimmed={!seed}
-          control={<FieldChips fields={fields} onChange={setFields} />}
-        />
-        <SettingRow
-          label="Date format"
-          desc="For the seeded date field."
-          dimmed={!seed}
-          control={
-            <MonoInput
-              value={dateFormat}
-              onChange={setDateFormat}
-              ariaLabel="Date format"
-              width={130}
             />
           }
         />

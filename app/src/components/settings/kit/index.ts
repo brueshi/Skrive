@@ -6,4 +6,4 @@ export { Segmented } from '../../ui/Segmented';
 export { Toggle } from '../../ui/Toggle';
 export { Stepper } from '../../ui/Stepper';
 export { Select } from '../../ui/Select';
-export { ThemeTiles, FieldChips, MonoInput } from './controls';
+export { ThemeTiles, MonoInput } from './controls';
