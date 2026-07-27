@@ -184,6 +184,13 @@ export type SurfaceId = 'text' | 'rich';
  *  renderer no longer reads `AppUiState.markerMode`. */
 export type MarkerMode = 'raw' | 'recessed' | 'concealed';
 
+/** File format a daily note is created as. `.md` is plain Markdown that any
+ *  editor can open; `.folio` is the native rich format, which keeps block
+ *  identity and the constructs Markdown cannot carry. Existing notes are
+ *  never converted when this changes — it only decides what the next one is
+ *  created as. */
+export type DailyNoteFormat = 'md' | 'folio';
+
 /** Width of the centered writing column. A reading-comfort knob expressed
  *  in ch of the editor face (resolved to px in typography-css so every
  *  view shares one physical column); 'full' lifts the cap entirely. */
@@ -317,6 +324,18 @@ export type AppUiState = {
   frontmatterFields: string[];
   /** strftime-ish token string for the seeded `date` field. */
   dateFormat: string;
+  /** What a daily note is created as. Plain Markdown by default — a daily
+   *  note is the file most likely to be read somewhere other than Skrive. */
+  dailyNotesFormat: DailyNoteFormat;
+  /** Project-relative folder holding daily notes. Empty means the project
+   *  root. */
+  dailyNotesFolder: string;
+  /** Token pattern naming a daily note's file (see lib/date-format).
+   *  Slashes nest, so `YYYY/MM/DD` files by year and month. */
+  dailyNotesDateFormat: string;
+  /** Markdown a daily note is created with. `{{date}}` expands to the
+   *  note's date rendered through `dailyNotesDateFormat`. */
+  dailyNotesTemplate: string;
 };
 
 export const DEFAULT_RECENT_PROJECTS_CAP = 10;
@@ -356,7 +375,11 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   gitHistoryEnabled: true,
   seedFrontmatter: true,
   frontmatterFields: ['title', 'date', 'tags'],
-  dateFormat: 'YYYY-MM-DD'
+  dateFormat: 'YYYY-MM-DD',
+  dailyNotesFormat: 'md',
+  dailyNotesFolder: 'Daily',
+  dailyNotesDateFormat: 'YYYY-MM-DD',
+  dailyNotesTemplate: '# {{date}}\n\n'
 };
 
 export const DEFAULT_SIDEBAR_WIDTH = 260;

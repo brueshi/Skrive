@@ -4009,6 +4009,16 @@ body {
 
 /* Segmented / Toggle / Stepper / Select moved to components/ui (SKR-212). */
 
+/* ---- Daily note template ---- */
+.settings-template-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 76px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 /* ---- Font specimen ---- */
 .settings-font-specimen-block {
   padding: 16px 18px;

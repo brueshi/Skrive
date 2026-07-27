@@ -323,6 +323,23 @@ export function buildRegistry(deps: CommandDeps): {
       }
     },
     {
+      // ⌘⇧T, mnemonically "today". Chosen over ⌘⇧N and ⌘⇧J because it is the
+      // one that reads as the thing it does; ⌘⇧D is focus mode.
+      chord: { code: 'KeyT', mod: true, shift: true },
+      display: '⌘⇧T',
+      scope: 'window',
+      group: 'File',
+      label: "Open today's note",
+      commandId: 'daily.openToday',
+      when: whenManifestOpen,
+      run: () => {
+        void useProjectStore
+          .getState()
+          .openDailyNote()
+          .catch((err) => logProjectError('openDailyNote (binding)', err));
+      }
+    },
+    {
       chord: { code: 'F2' },
       display: 'F2',
       scope: 'window',
@@ -616,6 +633,19 @@ export function buildRegistry(deps: CommandDeps): {
       shortcut: get('file.search'),
       when: whenManifestOpen,
       run: () => deps.toggleSearch()
+    },
+    {
+      id: 'daily.openToday',
+      label: "Open today's note",
+      group: 'File',
+      shortcut: get('daily.openToday'),
+      when: whenManifestOpen,
+      run: () => {
+        void useProjectStore
+          .getState()
+          .openDailyNote()
+          .catch((err) => logProjectError('openDailyNote (command)', err));
+      }
     },
     {
       id: 'edit.find',

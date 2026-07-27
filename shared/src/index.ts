@@ -94,6 +94,7 @@ export type { LintFinding, ProjectLintReport } from './lint';
 export type {
   AppUiState,
   CursorPosition,
+  DailyNoteFormat,
   EditorFontId,
   LayoutMode,
   LineMeasure,

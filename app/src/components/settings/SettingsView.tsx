@@ -14,7 +14,11 @@ import { useEffect, useState } from 'react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import type { EditorFontId, UpdaterStatus } from '@skrive/shared';
+import type {
+  DailyNoteFormat,
+  EditorFontId,
+  UpdaterStatus
+} from '@skrive/shared';
 import {
   LINE_MEASURE_CUSTOM_MAX_CH,
   LINE_MEASURE_CUSTOM_MIN_CH
@@ -38,6 +42,8 @@ import {
   resolveEditorFontStack
 } from '../../lib/typography';
 import { BUNDLED_FONTS } from '../../lib/typography-registry';
+import { dailyNotePath } from '../../lib/daily-notes';
+import { Textarea } from '../ui/Input';
 import { notify } from '../../lib/notify';
 import { openFeedbackForm } from '../../lib/feedback';
 import {
@@ -560,6 +566,18 @@ function WritingFilesPane() {
   const setIdleDelay = usePreferencesStore((s) => s.setAutosaveIdleDelayMs);
   const formatOnSave = usePreferencesStore((s) => s.formatOnSave);
   const setFormatOnSave = usePreferencesStore((s) => s.setFormatOnSave);
+  const dailyFormat = usePreferencesStore((s) => s.dailyNotesFormat);
+  const setDailyFormat = usePreferencesStore((s) => s.setDailyNotesFormat);
+  const dailyFolder = usePreferencesStore((s) => s.dailyNotesFolder);
+  const setDailyFolder = usePreferencesStore((s) => s.setDailyNotesFolder);
+  const dailyDateFormat = usePreferencesStore((s) => s.dailyNotesDateFormat);
+  const setDailyDateFormat = usePreferencesStore(
+    (s) => s.setDailyNotesDateFormat
+  );
+  const dailyTemplate = usePreferencesStore((s) => s.dailyNotesTemplate);
+  const setDailyTemplate = usePreferencesStore(
+    (s) => s.setDailyNotesTemplate
+  );
 
   return (
     <>
@@ -595,7 +613,98 @@ function WritingFilesPane() {
           }
         />
       </SettingsSection>
+
+      <SettingsSection cap="Daily notes">
+        <SettingRow
+          label="Format"
+          desc="Markdown opens anywhere; Folio is the native format and keeps what Markdown can't carry. Notes already written are never converted."
+          control={
+            <Segmented
+              value={dailyFormat}
+              onChange={setDailyFormat}
+              options={[
+                { id: 'md', label: 'Markdown' },
+                { id: 'folio', label: 'Folio' }
+              ]}
+              ariaLabel="Daily note format"
+            />
+          }
+        />
+        <SettingRow
+          label="Folder"
+          desc="Where daily notes are filed. Leave empty for the project root."
+          control={
+            <MonoInput
+              value={dailyFolder}
+              onChange={setDailyFolder}
+              ariaLabel="Daily notes folder"
+              width={170}
+            />
+          }
+        />
+        <SettingRow
+          label="File name"
+          desc="YYYY, MM, DD for numbers; MMMM and dddd for month and day names. Wrap literal text in [brackets]. A slash nests into folders."
+          control={
+            <MonoInput
+              value={dailyDateFormat}
+              onChange={setDailyDateFormat}
+              ariaLabel="Daily note file name"
+              width={170}
+            />
+          }
+        />
+        <DailyNotePreview
+          folder={dailyFolder}
+          pattern={dailyDateFormat}
+          format={dailyFormat}
+        />
+        <div className="settings-card-pad">
+          <p className="settings-card-blurb">
+            Template — what a new daily note starts with.{' '}
+            <span className="settings-value-mono">{'{{date}}'}</span> becomes
+            the note&rsquo;s own date. Existing notes are never rewritten.
+          </p>
+          <Textarea
+            className="settings-template-input"
+            aria-label="Daily note template"
+            rows={4}
+            spellCheck={false}
+            value={dailyTemplate}
+            onChange={(e) => setDailyTemplate(e.target.value)}
+          />
+        </div>
+      </SettingsSection>
     </>
+  );
+}
+
+/** Shows the path today's note resolves to. A token pattern is hard to read
+ *  back, and the failure it guards against is silent: a pattern that yields
+ *  no usable filename would otherwise only surface when the command refuses
+ *  to open anything. */
+function DailyNotePreview({
+  folder,
+  pattern,
+  format
+}: {
+  folder: string;
+  pattern: string;
+  format: DailyNoteFormat;
+}) {
+  const resolved = dailyNotePath(new Date(), folder, pattern, format);
+  return (
+    <SettingRow
+      label="Today"
+      desc="The file this resolves to right now."
+      control={
+        <span
+          className={resolved ? 'settings-value-mono' : 'settings-row-desc'}
+        >
+          {resolved ?? 'No usable file name'}
+        </span>
+      }
+    />
   );
 }
 

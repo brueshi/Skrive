@@ -14,6 +14,7 @@ import {
   DEFAULT_APP_UI_STATE,
   DEFAULT_RECENT_PROJECTS_CAP,
   type AppUiState,
+  type DailyNoteFormat,
   type EditorFontId,
   clampLineMeasureCh,
   type LineMeasureSetting,
@@ -66,6 +67,10 @@ type PreferencesActions = {
    *  open project's history) lives in the project store's action of the
    *  same name, which calls this. */
   setGitHistoryEnabled(value: boolean): void;
+  setDailyNotesFormat(value: DailyNoteFormat): void;
+  setDailyNotesFolder(value: string): void;
+  setDailyNotesDateFormat(value: string): void;
+  setDailyNotesTemplate(value: string): void;
 
   addDictionaryWord(word: string): void;
   removeDictionaryWord(word: string): void;
@@ -121,7 +126,11 @@ function snapshot(state: PreferencesState): AppUiState {
     gitHistoryEnabled: state.gitHistoryEnabled,
     seedFrontmatter: state.seedFrontmatter,
     frontmatterFields: state.frontmatterFields,
-    dateFormat: state.dateFormat
+    dateFormat: state.dateFormat,
+    dailyNotesFormat: state.dailyNotesFormat,
+    dailyNotesFolder: state.dailyNotesFolder,
+    dailyNotesDateFormat: state.dailyNotesDateFormat,
+    dailyNotesTemplate: state.dailyNotesTemplate
   };
 }
 
@@ -293,6 +302,26 @@ export const usePreferencesStore = create<
   setGitHistoryEnabled(value) {
     if (get().gitHistoryEnabled === value) return;
     set({ gitHistoryEnabled: value });
+    scheduleSave(get);
+  },
+  setDailyNotesFormat(value) {
+    if (get().dailyNotesFormat === value) return;
+    set({ dailyNotesFormat: value });
+    scheduleSave(get);
+  },
+  setDailyNotesFolder(value) {
+    if (get().dailyNotesFolder === value) return;
+    set({ dailyNotesFolder: value });
+    scheduleSave(get);
+  },
+  setDailyNotesDateFormat(value) {
+    if (get().dailyNotesDateFormat === value) return;
+    set({ dailyNotesDateFormat: value });
+    scheduleSave(get);
+  },
+  setDailyNotesTemplate(value) {
+    if (get().dailyNotesTemplate === value) return;
+    set({ dailyNotesTemplate: value });
     scheduleSave(get);
   },
 
