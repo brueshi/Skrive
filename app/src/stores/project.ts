@@ -950,6 +950,25 @@ function modelSyncBody(mode: EditorMode, payload: string): string {
 // the path with an empty body (folio content is not the Markdown model's
 // concern, see modelSyncBody). Shared by fresh-document creation and the
 // `.md`/import -> `.folio` conversion, which differ only in how `doc` is built.
+/** Build a `.folio` daily note from the rendered template. The template is
+ *  authored as Markdown whichever format the note ends up in, so it is
+ *  parsed through the same import path a `.md` -> `.folio` upgrade uses.
+ *
+ *  An empty template would parse to a document with no blocks at all, which
+ *  opens with nowhere to put the caret — so it falls back to the single
+ *  empty paragraph a fresh folio document starts on. */
+function folioFromTemplate(seed: string, createdAt: Date): FolioDocument {
+  const { model, title } = sourceToModel(seed, 'markdown');
+  const doc = modelToFolio(model, {
+    docId: generateDocId(),
+    docMeta: { title, createdAt: createdAt.toISOString() }
+  });
+  if (doc.blocks.length === 0) {
+    doc.blocks = [{ id: generateBlockId(), type: 'paragraph', inline: [] }];
+  }
+  return doc;
+}
+
 async function writeFolioAndOpen(
   get: () => State & Actions,
   manifestRoot: string,
@@ -1617,7 +1636,8 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
     const relPath = dailyNotePath(
       now,
       prefs.dailyNotesFolder,
-      prefs.dailyNotesDateFormat
+      prefs.dailyNotesDateFormat,
+      prefs.dailyNotesFormat
     );
     if (!relPath) {
       notify.error(
@@ -1655,13 +1675,19 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
         prefs.dailyNotesDateFormat
       );
       // What the model is told must match what is actually on disk: newFile
-      // left an empty file, and the template only lands if the write below
+      // left an empty file, and the body below only lands if its write
       // succeeds.
       let onDisk = '';
-      if (seed.length > 0) {
+      const body =
+        prefs.dailyNotesFormat === 'folio'
+          ? serializeFolio(folioFromTemplate(seed, now))
+          : seed;
+      if (body.length > 0) {
         try {
-          await window.skrive.fs.writeFile(manifest.root, relPath, seed);
-          onDisk = seed;
+          await window.skrive.fs.writeFile(manifest.root, relPath, body);
+          // A `.folio` file's text is a container, not prose — the model
+          // indexes it empty, matching writeFolioAndOpen.
+          onDisk = prefs.dailyNotesFormat === 'folio' ? '' : seed;
         } catch (err) {
           // The note exists and is empty. Say so, but still open it rather
           // than stranding the writer on an error for a file now sitting
