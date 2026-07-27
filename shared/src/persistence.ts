@@ -317,6 +317,15 @@ export type AppUiState = {
   frontmatterFields: string[];
   /** strftime-ish token string for the seeded `date` field. */
   dateFormat: string;
+  /** Project-relative folder holding daily notes. Empty means the project
+   *  root. */
+  dailyNotesFolder: string;
+  /** Token pattern naming a daily note's file (see lib/date-format).
+   *  Slashes nest, so `YYYY/MM/DD` files by year and month. */
+  dailyNotesDateFormat: string;
+  /** Markdown a daily note is created with. `{{date}}` expands to the
+   *  note's date rendered through `dailyNotesDateFormat`. */
+  dailyNotesTemplate: string;
 };
 
 export const DEFAULT_RECENT_PROJECTS_CAP = 10;
@@ -356,7 +365,10 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   gitHistoryEnabled: true,
   seedFrontmatter: true,
   frontmatterFields: ['title', 'date', 'tags'],
-  dateFormat: 'YYYY-MM-DD'
+  dateFormat: 'YYYY-MM-DD',
+  dailyNotesFolder: 'Daily',
+  dailyNotesDateFormat: 'YYYY-MM-DD',
+  dailyNotesTemplate: '# {{date}}\n\n'
 };
 
 export const DEFAULT_SIDEBAR_WIDTH = 260;

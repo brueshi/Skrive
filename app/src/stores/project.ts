@@ -79,6 +79,7 @@ import { runProjectLint } from '../lib/lint';
 import type { LintWorkerResponse } from '../lib/lint/lint-worker-protocol';
 import { flushActiveEditor } from '../components/editor/active-editor';
 import { notify } from '../lib/notify';
+import { dailyNotePath, renderDailyTemplate } from '../lib/daily-notes';
 import { logDuration, now as perfNow } from '../lib/perf';
 import {
   projectModel,
@@ -365,6 +366,9 @@ type Actions = {
   /** Create a fresh, empty native `.folio` document (mints a docId + createdAt),
    *  then open it. The extension is appended if absent. */
   createFolioDocument(relPath: string): Promise<void>;
+  /** Open today's daily note, creating it from the template if it is not
+   *  there yet. Plain `.md`, in the configured folder and name pattern. */
+  openDailyNote(): Promise<void>;
   createDirectory(relPath: string): Promise<void>;
   /** Export a native `.folio` document to an open format (Markdown / HTML / TXT /
    *  RTF), writing the result into the project folder beside the source. Honest,
@@ -1600,6 +1604,77 @@ export const useProjectStore = create<State & Actions>((set, get) => ({
       blocks: [{ id: generateBlockId(), type: 'paragraph', inline: [] }]
     };
     await writeFolioAndOpen(get, manifest.root, normalized, doc);
+  },
+
+  async openDailyNote() {
+    const { manifest } = get();
+    if (!manifest) return;
+    const prefs = usePreferencesStore.getState();
+    // One timestamp for both the path and the template: computing them
+    // separately could straddle midnight and file a note under one date
+    // while heading it with another.
+    const now = new Date();
+    const relPath = dailyNotePath(
+      now,
+      prefs.dailyNotesFolder,
+      prefs.dailyNotesDateFormat
+    );
+    if (!relPath) {
+      notify.error(
+        "Couldn't open today's note",
+        'The daily note name pattern is empty or produces no usable filename.'
+      );
+      return;
+    }
+
+    // Claim the path with an exclusive create rather than checking the
+    // manifest and then writing. The manifest is a scan snapshot, so a note
+    // created since the last scan — by another editor, a sync client, or
+    // yesterday's session — would look absent, and writing the template
+    // over it would destroy what was already there.
+    let created = false;
+    try {
+      await window.skrive.fs.newFile(manifest.root, relPath);
+      created = true;
+    } catch {
+      // Either the note already exists, which is the ordinary case, or the
+      // create genuinely failed. Reading tells them apart: a note we can
+      // read is one to open, not one to complain about.
+      try {
+        await window.skrive.fs.readFile(manifest.root, relPath);
+      } catch (readErr) {
+        notify.error("Couldn't open today's note", readErr);
+        return;
+      }
+    }
+
+    if (created) {
+      const seed = renderDailyTemplate(
+        prefs.dailyNotesTemplate,
+        now,
+        prefs.dailyNotesDateFormat
+      );
+      // What the model is told must match what is actually on disk: newFile
+      // left an empty file, and the template only lands if the write below
+      // succeeds.
+      let onDisk = '';
+      if (seed.length > 0) {
+        try {
+          await window.skrive.fs.writeFile(manifest.root, relPath, seed);
+          onDisk = seed;
+        } catch (err) {
+          // The note exists and is empty. Say so, but still open it rather
+          // than stranding the writer on an error for a file now sitting
+          // there ready to write in.
+          notify.error("Couldn't apply the daily note template", err);
+        }
+      }
+      // Awaited: openDoc needs the entry in the manifest, and the client
+      // guarantees the model update lands before this resolves.
+      await projectModel()?.upsert(relPath, onDisk);
+    }
+
+    await get().openDoc(relPath);
   },
 
   async exportDocument(path: string, format: ExportFormatId) {
