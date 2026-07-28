@@ -39,11 +39,12 @@ final class SpellingService {
     }
 
     /// Accumulates one batch's per-request answers and fires once they are all
-    /// in. `@unchecked Sendable` is deliberate and narrow: the checker calls
-    /// back on an arbitrary thread, so the box must cross threads, but every
-    /// mutation below happens inside a `DispatchQueue.main.async` hop — the box
-    /// is only ever touched on the main queue.
-    private final class Collector: @unchecked Sendable {
+    /// in. Main-actor isolated, which makes it implicitly Sendable: the checker's
+    /// callbacks arrive on an arbitrary thread, so the box must be safe to
+    /// capture there, and isolation gives that without an `@unchecked` promise
+    /// this file would then have to keep by hand.
+    @MainActor
+    private final class Collector {
         private let expected: Int
         private let completion: ([String: [Span]]) -> Void
         private var answers: [String: [Span]] = [:]
@@ -72,9 +73,7 @@ final class SpellingService {
             completion([:])
             return
         }
-        let collector = Collector(expected: requests.count) { answers in
-            MainActor.assumeIsolated { completion(answers) }
-        }
+        let collector = Collector(expected: requests.count, completion: completion)
         let types = NSTextCheckingResult.CheckingType.spelling.rawValue
         for request in requests {
             let length = (request.text as NSString).length
@@ -90,9 +89,21 @@ final class SpellingService {
                 types: types,
                 options: nil,
                 inSpellDocumentWithTag: documentTag
-            ) { _, results, _, _ in
-                // Background thread. Reduce to plain values here: an
-                // NSTextCheckingResult is not Sendable and must not cross.
+            ) { @Sendable _, results, _, _ in
+                // `@Sendable` is load-bearing, not decoration. This closure runs
+                // on one of the checker's own operation-queue threads, but the
+                // enclosing type is @MainActor, so without it Swift 6 infers the
+                // closure to be main-actor isolated too — and then inserts an
+                // executor check that the ObjC completion trips the instant it
+                // calls back off-main. That check is a SIGTRAP: it took the whole
+                // host down on the first spellcheck, twice, once through an
+                // explicit MainActor.assumeIsolated and once through the
+                // compiler's own inference. @Sendable makes the closure
+                // non-isolated, which is the truth about where it runs.
+                //
+                // So: reduce to plain values here — an NSTextCheckingResult is
+                // not Sendable and must not cross — then HOP to the main actor
+                // below rather than assuming anything about this thread.
                 let spans: [Span] = results.compactMap { result in
                     guard result.resultType == .spelling else { return nil }
                     let range = result.range
@@ -102,11 +113,8 @@ final class SpellingService {
                         end: range.location + range.length
                     )
                 }
-                DispatchQueue.main.async {
-                    MainActor.assumeIsolated {
-                        collector.add(id: request.id, spans: spans)
-                    }
-                }
+                let id = request.id
+                Task { @MainActor in collector.add(id: id, spans: spans) }
             }
         }
     }
