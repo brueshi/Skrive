@@ -13,6 +13,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { setActiveEditorFlush } from '../active-editor';
+import { usePreferencesStore } from '../../../stores/preferences';
 import { FindBar } from '../find/FindBar';
 import { TextareaFindTarget } from '../find/FindTarget';
 import { TextareaHighlighter } from '../find/TextareaHighlighter';
@@ -66,6 +67,7 @@ export function RawSourceView({
 }: Props): React.ReactElement {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const viewRef = useRef<HTMLDivElement>(null);
+  const spellcheck = usePreferencesStore((s) => s.spellcheck);
   const [findTarget, setFindTarget] = useState<TextareaFindTarget | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -174,8 +176,17 @@ export function RawSourceView({
         ref={textareaRef}
         className="raw-source-textarea"
         defaultValue={body}
-        spellCheck={false}
+        // A plain textarea has none of the block surface's problem: nothing
+        // re-renders its text nodes behind the engine, so WebKit's own markers
+        // live and its context menu offers real corrections. Markdown therefore
+        // gets native spellchecking rather than the bespoke checker, honoring the
+        // same preference. One consequence worth knowing: this consults the OS
+        // dictionary, so a word taught to Skrive in a `.folio` document is not
+        // known here until it is taught to the Mac as well.
+        spellCheck={spellcheck}
         autoComplete="off"
+        // Autocorrect stays off everywhere, deliberately: unlike spellcheck,
+        // which is passive until invoked, it rewrites text while you type.
         autoCorrect="off"
         autoCapitalize="off"
         aria-label={ariaLabel}
