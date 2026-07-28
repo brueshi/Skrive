@@ -20,6 +20,7 @@ import { BLOCK_ID_ATTR, BlockViewRegistry, CODE_LANG_CLASS, FOOTNOTE_REF_ATTR, o
 import type { AssetResolver } from './render';
 import { DecorationStore } from './decorations';
 import { HighlightBus } from './highlight/highlight-bus';
+import { SpellBus } from '../spellcheck/spell-bus';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
 import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertTableColumn, insertTableRow, mergeBackward, mergeForward, moveTableColumn, moveTableRow, removeBlocks, removeFootnote, removeTableColumn, removeTableRow, replaceAcross, setColumnAlignment, setTableColumnWidths } from './range-ops';
@@ -284,6 +285,12 @@ export class BlockSurface {
   // painter subscribes and repaints the colour mirror off-thread. Gated to code
   // blocks at the call site, so a prose keystroke never touches it.
   private readonly _highlight = new HighlightBus();
+  // Spellcheck invalidation channel. Poked from the same two hooks the decoration
+  // overlay rides — an in-place leaf edit and a structural reconcile — because a
+  // block's text is exactly what the checker caches its answer against. Gated to
+  // prose at the call site; inert (one null check) until a controller subscribes,
+  // which only happens on a host that has a spelling oracle.
+  private readonly _spell = new SpellBus();
   // Structural-re-render listeners (table hover chrome). Notified from reconcile,
   // which is where block elements are rebuilt or removed and any geometry an
   // overlay measured goes stale. Empty until an overlay subscribes.
@@ -471,6 +478,13 @@ export class BlockSurface {
    *  the editor subscribes and repaints code blocks' colour mirrors off-thread. */
   get highlight(): HighlightBus {
     return this._highlight;
+  }
+
+  /** The spellcheck invalidation channel. The checker wired in the editor
+   *  subscribes, re-checks changed prose against the host's spelling oracle once
+   *  typing settles, and paints misspellings into the decoration store. */
+  get spell(): SpellBus {
+    return this._spell;
   }
 
   /** Subscribe to structural re-renders — passes that rebuild, add, or remove
@@ -5568,6 +5582,9 @@ export class BlockSurface {
     // painter debounces the actual (off-thread) work. Gated here so only code
     // edits reach the highlight bus — prose typing pays a single type check.
     if (top?.type === 'code_block') this._highlight.invalidate(leafId);
+    // Prose, conversely, is what the spellchecker cares about — the same type
+    // check, read the other way. The controller debounces; this is a Set insert.
+    else this._spell.invalidate(leafId);
   }
 
   private reconcile(): void {
@@ -5607,6 +5624,9 @@ export class BlockSurface {
     // Likewise reassess every code block's highlight: a reconcile rebuilds code
     // blocks' elements (dropping their mirrors) and can add or remove blocks.
     this._highlight.invalidate(null);
+    // And re-check spelling: a structural pass splits, merges, adds and removes
+    // prose blocks, so which text sits under which id is no longer settled.
+    this._spell.invalidate(null);
     // And any overlay measuring block geometry directly: the elements it measured
     // may have just been replaced.
     for (const fn of this.structureListeners) fn();
