@@ -141,6 +141,9 @@ export function attachSpellcheck({
   // Blocks whose text changed since the last pass: their cached answers are
   // dropped at the next flush. A full reassess (structural pass) is `true`.
   const dirty = new Set<string>();
+  // The text of each block currently awaiting an answer, so a pass that runs
+  // while a slow host is still thinking does not ask the same question twice.
+  const inFlight = new Map<string, string>();
   let reassessAll = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let deadline = 0;
@@ -237,6 +240,9 @@ export function attachSpellcheck({
     const requests: SpellCheckRequest[] = [];
     for (const leaf of leaves) {
       if (answers.get(leaf.id)?.text === leaf.text) continue;
+      // Already asked, same text: a slow host would otherwise be asked again on
+      // the next pass, doubling traffic for an answer already on its way.
+      if (inFlight.get(leaf.id) === leaf.text) continue;
       if (!isCheckable(leaf.text)) {
         answers.set(leaf.id, { text: leaf.text, ranges: [] });
         continue;
@@ -252,6 +258,7 @@ export function attachSpellcheck({
     // The text each request was made against, so an answer that arrives after
     // the writer has moved on is discarded rather than painted at stale offsets.
     const asked = new Map(requests.map((r) => [r.id, r.text]));
+    for (const [id, text] of asked) inFlight.set(id, text);
     let results;
     try {
       results = await provider.check(requests);
@@ -259,6 +266,10 @@ export function attachSpellcheck({
       // A failed check is not an error the writer should see: the squiggles for
       // these blocks simply do not appear, and the next pass asks again.
       return;
+    } finally {
+      // Only clear entries this pass owns — a newer pass may have re-asked about
+      // the same block with different text.
+      for (const [id, text] of asked) if (inFlight.get(id) === text) inFlight.delete(id);
     }
     if (destroyed) return;
     for (const result of results) {
