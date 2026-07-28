@@ -4326,6 +4326,14 @@ export class BlockSurface {
     const rightEl = renderBlock(rightBlock, this.resolveAsset);
     t.blockEl.after(rightEl);
     this.registry.set(rightBlock.id, rightEl);
+    // Record BOTH halves as rendered. Every other in-place DOM write does this;
+    // this path did not, and undo paid for it: renderedFrom still pointed at the
+    // PRE-split object, which is exactly the object undo restores, so reconcile
+    // compared it against itself, saw no change, and left the truncated left half
+    // on screen. The model was correct the whole time — the writer just watched
+    // the tail of their paragraph disappear (SKR-280).
+    this.markRenderedInPlace(leftBlock.id);
+    this.markRenderedInPlace(rightBlock.id);
     setCaret(rightEl, 0);
     this.scheduleSerialize();
   }
