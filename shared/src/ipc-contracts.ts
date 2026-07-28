@@ -23,8 +23,10 @@ export const ENVELOPE_VERSION = 1;
  *  commands are added or removed. v1 = the pre-Stage-0.4 surface with
  *  shell-side linkGraph/search and project:open/getManifest; v2 = text
  *  analysis lives in the renderer's project-model worker and the shell
- *  exposes project:snapshot instead. */
-export const SKRIVE_CONTRACT_VERSION = 2;
+ *  exposes project:snapshot instead; v3 = adds the host spelling oracle
+ *  (`spell:*`), which only some hosts implement — see the `spell`
+ *  namespace on the interface below. */
+export const SKRIVE_CONTRACT_VERSION = 3;
 
 /** Hard cap on a serialized request. Oversize requests are rejected
  *  with PAYLOAD_TOO_LARGE before parsing. */
@@ -448,6 +450,21 @@ export type UpdaterStatus =
   | { kind: 'ready'; version: string }
   | { kind: 'error'; message: string };
 
+/** One block of prose handed to the host's spelling oracle. `id` is opaque to
+ *  the host — it echoes back on the result so the caller can match a reply to
+ *  the block it asked about (and drop one whose text has since changed). */
+export type SpellCheckRequest = { id: string; text: string };
+
+/** A misspelled span within one request's `text`, as a half-open `[start, end)`
+ *  range in UTF-16 code units — the units JS strings are indexed by, so a range
+ *  slices the same string the caller sent with no conversion. Hosts whose
+ *  spelling API speaks location/length convert at their own boundary. */
+export type SpellRange = { start: number; end: number };
+
+/** The misspellings found in one request, in order. An empty `ranges` means the
+ *  text checked clean. */
+export type SpellCheckResult = { id: string; ranges: SpellRange[] };
+
 // ============================ The IPC surface ============================
 
 export interface SkriveIpc {
@@ -672,5 +689,32 @@ export interface SkriveIpc {
      *  Settings "Reveal diagnostics" button. The user grabs the logs and
      *  sends them in by hand; there is no automatic upload. */
     reveal(): Promise<void>;
+  };
+  /** The host's spelling oracle. The writing surface paints its own squiggles as
+   *  decorations (WebKit's native markers cannot survive the model-first
+   *  re-render), but the judgement of what is misspelled — and the suggestions
+   *  for fixing it — stays with the platform checker, so it follows the user's
+   *  system languages and the words they have taught their Mac.
+   *
+   *  OPTIONAL SURFACE: a host that has no checker implements none of these, and
+   *  every call rejects with UNKNOWN_COMMAND. `available()` is the honest probe
+   *  callers use once at startup; it resolves false rather than rejecting, and
+   *  the feature then stays quietly off instead of erroring per keystroke. */
+  spell: {
+    /** True when this host implements the rest of this namespace. */
+    available(): Promise<boolean>;
+    /** Check a batch of prose blocks. Results come back per request `id`; the
+     *  host may answer in any order. Batched because a settled edit usually
+     *  dirties several blocks at once and one round trip beats N. */
+    check(requests: SpellCheckRequest[]): Promise<SpellCheckResult[]>;
+    /** Ordered correction candidates for one misspelled word, best first.
+     *  Called lazily — only when the writer opens the correction menu. */
+    suggest(word: string): Promise<string[]>;
+    /** Teach the OS checker a word permanently (the system-wide "Learn
+     *  Spelling"). Skrive's own personal dictionary is separate and lives in
+     *  preferences; this is the platform half the writer already expects. */
+    learn(word: string): Promise<void>;
+    /** Suppress a word for the rest of this session without learning it. */
+    ignore(word: string): Promise<void>;
   };
 }

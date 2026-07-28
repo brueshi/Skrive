@@ -64,7 +64,17 @@ export const NATIVE_COMMANDS = new Set<string>([
   'updater:current',
   'updater:downloadAndInstall',
   'log:append',
-  'log:reveal'
+  'log:reveal',
+  // The host spelling oracle. Native on every host so the renderer's probe gets
+  // a truthful answer: macOS answers from NSSpellChecker, a host without a
+  // checker replies UNKNOWN_COMMAND and the feature stays off. Routing these to
+  // the mock instead would resolve `{}` and quietly claim "no misspellings"
+  // forever, which reads as a broken checker rather than an absent one.
+  'spell:available',
+  'spell:check',
+  'spell:suggest',
+  'spell:learn',
+  'spell:ignore'
 ]);
 
 const BODIES: Record<string, string> = {

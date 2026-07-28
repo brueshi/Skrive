@@ -20,6 +20,8 @@ import type {
   ProjectSnapshot,
   SkriveIpc,
   SkrivePlatform,
+  SpellCheckRequest,
+  SpellCheckResult,
   UpdaterStatus
 } from './ipc-contracts';
 
@@ -247,6 +249,37 @@ export function createSkriveBridge(transport: SkriveTransport): SkriveIpc {
       },
       reveal: async () => {
         await invoke('log:reveal');
+      }
+    },
+    spell: {
+      // The one call that must never reject: a host without a checker answers
+      // nothing for it (unknown command), and "no checker" is a normal state,
+      // not an error. Every other call in this namespace is only ever made
+      // after this one has resolved true.
+      available: async () => {
+        try {
+          return (
+            (await invoke<{ available?: boolean }>('spell:available'))
+              .available === true
+          );
+        } catch {
+          return false;
+        }
+      },
+      check: async (requests: SpellCheckRequest[]) =>
+        (
+          await invoke<{ results: SpellCheckResult[] }>('spell:check', {
+            requests
+          })
+        ).results,
+      suggest: async (word: string) =>
+        (await invoke<{ suggestions: string[] }>('spell:suggest', { word }))
+          .suggestions,
+      learn: async (word: string) => {
+        await invoke('spell:learn', { word });
+      },
+      ignore: async (word: string) => {
+        await invoke('spell:ignore', { word });
       }
     }
   };

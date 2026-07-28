@@ -49,6 +49,9 @@ export type {
   SearchOptions,
   SkriveIpc,
   SkrivePlatform,
+  SpellCheckRequest,
+  SpellCheckResult,
+  SpellRange,
   UpdaterStatus,
   WordOp
 } from './ipc-contracts';
