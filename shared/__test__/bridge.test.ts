@@ -304,3 +304,41 @@ describe('persistence', () => {
     expect(lastCall().cmd).toBe('persistence:revealUserData');
   });
 });
+
+describe('spell', () => {
+  it('available is true only when the host says so', async () => {
+    transport.stub('spell:available', { available: true });
+    await expect(bridge.spell.available()).resolves.toBe(true);
+    expect(lastCall()).toEqual({ cmd: 'spell:available', payload: {} });
+  });
+
+  it('available resolves false — never rejects — on a host without a checker', async () => {
+    // The whole point of the probe: an absent oracle is a normal state, so a
+    // rejected command must not surface as an error to the caller.
+    transport.stubError('spell:available', 'UNKNOWN_COMMAND');
+    await expect(bridge.spell.available()).resolves.toBe(false);
+  });
+
+  it('available is false when the host answers without the flag', async () => {
+    await expect(bridge.spell.available()).resolves.toBe(false);
+  });
+
+  it('check sends the batch and unwraps { results }', async () => {
+    const results = [{ id: 'b1', ranges: [{ start: 4, end: 11 }] }];
+    transport.stub('spell:check', { results });
+    const requests = [{ id: 'b1', text: 'The teh cat' }];
+    await expect(bridge.spell.check(requests)).resolves.toEqual(results);
+    expect(lastCall()).toEqual({ cmd: 'spell:check', payload: { requests } });
+  });
+
+  it('suggest unwraps { suggestions }', async () => {
+    transport.stub('spell:suggest', { suggestions: ['the', 'ten'] });
+    await expect(bridge.spell.suggest('teh')).resolves.toEqual(['the', 'ten']);
+    expect(lastCall()).toEqual({ cmd: 'spell:suggest', payload: { word: 'teh' } });
+  });
+
+  it('ignore is a void word command', async () => {
+    await bridge.spell.ignore('atticus');
+    expect(lastCall()).toEqual({ cmd: 'spell:ignore', payload: { word: 'atticus' } });
+  });
+});

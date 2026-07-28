@@ -329,6 +329,16 @@
 /* Code-block language picker (SKR-262). Reuses the slash menu's surface + row
    styling, but pins a filter input above a scrolling list instead of scrolling the
    whole popover — so the search box stays put as the language list narrows. */
+/* The spelling correction menu: narrower than the command menus because its rows
+   are single words, and lifted like the other popover surfaces rather than the
+   flat float. It opens at the pointer, so it never needs a caret gap. */
+.spell-menu {
+  min-width: 11rem;
+  max-width: 18rem;
+  border-radius: var(--skrive-radius-lg, 12px);
+  box-shadow: var(--skrive-shadow-sheet);
+}
+
 .code-lang-menu {
   display: flex;
   flex-direction: column;

@@ -419,6 +419,8 @@ function EditorPane() {
   const setShowMeasureRule = usePreferencesStore((s) => s.setShowMeasureRule);
   const smartTypography = usePreferencesStore((s) => s.smartTypography);
   const setSmartTypography = usePreferencesStore((s) => s.setSmartTypography);
+  const spellcheck = usePreferencesStore((s) => s.spellcheck);
+  const setSpellcheck = usePreferencesStore((s) => s.setSpellcheck);
 
   return (
     <>
@@ -481,6 +483,17 @@ function EditorPane() {
               checked={smartTypography}
               onChange={setSmartTypography}
               ariaLabel="Smart typography"
+            />
+          }
+        />
+        <SettingRow
+          label="Check spelling"
+          desc="Underline misspelled words as you write."
+          control={
+            <Toggle
+              checked={spellcheck}
+              onChange={setSpellcheck}
+              ariaLabel="Check spelling"
             />
           }
         />

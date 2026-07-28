@@ -155,8 +155,10 @@ function renderInlineNode(node: InlineNode, resolveAsset: AssetResolver): Node {
   const marks: InlineMarks = node.marks;
   if (marks.code) {
     const codeEl = wrap('code', dom);
-    // Code is code, not prose: no spellcheck squiggles inside inline code
-    // (SKR-191; the surface itself has spellcheck on).
+    // Code is code, not prose: never squiggle inside an inline code span. The
+    // bespoke checker enforces this at the source, by masking code before the
+    // text is judged; the attribute stays as belt and braces for any host text
+    // service that inspects the DOM directly.
     codeEl.setAttribute('spellcheck', 'false');
     dom = codeEl;
   }
@@ -252,8 +254,9 @@ export function renderBlock(
       break;
     case 'code_block': {
       el = document.createElement('pre');
-      // Code is code, not prose: the surface's spellcheck (SKR-191) stops at
-      // the fence.
+      // Code is code, not prose: checking stops at the fence. The bespoke
+      // checker never walks a code block at all; the attribute is belt and
+      // braces for host text services that read the DOM.
       el.setAttribute('spellcheck', 'false');
       // The language drives syntax highlighting (SKR-262) and the fenced info
       // string on export; the highlight painter reads it from here. Empty means

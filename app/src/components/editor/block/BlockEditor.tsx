@@ -11,7 +11,7 @@
 // persistent EditorBar band (SKR-123), which reads this controller from the
 // active-surface registry rather than rendering it inside the editor.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { BlockSurface, DocHistory } from '../../../lib/blocksurface';
 import { attachCustomCaret } from '../../../lib/blocksurface/caret';
 import { attachDecorationOverlay } from '../../../lib/blocksurface/decoration-overlay';
@@ -19,6 +19,9 @@ import { attachFocusActive } from '../../../lib/blocksurface/focus-active';
 import { attachTableChrome } from '../../../lib/blocksurface/table-chrome';
 import { attachCodeHighlight } from '../../../lib/blocksurface/highlight/code-highlight';
 import { attachFootnotePeek } from '../../../lib/blocksurface/footnote-peek';
+import { attachSpellcheck, type SpellcheckHandle } from '../../../lib/spellcheck/checker';
+import { SpellDictionary } from '../../../lib/spellcheck/dictionary';
+import { hostSpellProvider } from '../../../lib/spellcheck/provider';
 import { installDecorationDevHarness } from '../../../lib/blocksurface/decoration-dev';
 import type { Document } from '../../../lib/blockmodel';
 import { setActiveEditorFlush } from '../active-editor';
@@ -30,6 +33,7 @@ import { BlockSlashMenu } from '../menus/BlockSlashMenu';
 import { BlockTableMenu } from '../menus/BlockTableMenu';
 import { BlockTagMenu } from '../menus/BlockTagMenu';
 import { CodeLangMenu } from '../menus/CodeLangMenu';
+import { SpellMenu, type SpellMenuTarget } from '../menus/SpellMenu';
 import { FindBar } from '../find/FindBar';
 import { BlockFindTarget } from '../find/FindTarget';
 import { OutlineRail } from '../OutlineRail';
@@ -77,6 +81,20 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
   const showWordCount = usePreferencesStore((s) => s.showWordCount);
   const focusMode = useProjectStore((s) => s.focusMode);
   const [counts, setCounts] = useState<LiveCounts | null>(null);
+  const spellcheckOn = usePreferencesStore((s) => s.spellcheck);
+  const personalDictionary = usePreferencesStore((s) => s.personalDictionary);
+  const projectWords = useProjectStore((s) => s.manifest?.config.dictionary.projectWords);
+  // The two word lists as one membership test, rebuilt only when either changes.
+  // Held in a ref as well so the checker reads the CURRENT dictionary on every
+  // paint without being rebuilt when a word is taught.
+  const dictionary = useMemo(
+    () => new SpellDictionary(personalDictionary, projectWords ?? []),
+    [personalDictionary, projectWords]
+  );
+  const dictionaryRef = useRef(dictionary);
+  dictionaryRef.current = dictionary;
+  const [spellcheck, setSpellcheck] = useState<SpellcheckHandle | null>(null);
+  const [spellTarget, setSpellTarget] = useState<SpellMenuTarget | null>(null);
 
   // Live counts off the surface DOM (SKR-53): per-block incremental via
   // MutationObserver, rAF-coalesced — real-time without touching the
@@ -102,6 +120,42 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
     const handle = attachFocusActive({ surface: host, blockSurface: ctx.surface });
     return () => handle.destroy();
   }, [focusMode, ctx]);
+
+  // Spellchecking. Attached only when the writer wants it AND this host has a
+  // spelling oracle to ask — a host without one leaves the surface exactly as it
+  // was, with no controller, no listeners and no round trips. The provider probe
+  // is async, so the effect guards against resolving after unmount.
+  useEffect(() => {
+    if (!spellcheckOn || !ctx) return;
+    const host = hostRef.current;
+    const scroller = bodyRef.current;
+    if (!host || !scroller) return;
+    let handle: SpellcheckHandle | null = null;
+    let cancelled = false;
+    void hostSpellProvider().then((provider) => {
+      if (cancelled || !provider) return;
+      handle = attachSpellcheck({
+        surface: host,
+        scroller,
+        blockSurface: ctx.surface,
+        provider,
+        dictionary: () => dictionaryRef.current
+      });
+      setSpellcheck(handle);
+    });
+    return () => {
+      cancelled = true;
+      handle?.destroy();
+      setSpellcheck(null);
+      setSpellTarget(null);
+    };
+  }, [spellcheckOn, ctx]);
+
+  // Teaching a word only filters answers that are already cached, so a change to
+  // either dictionary repaints rather than re-checking.
+  useEffect(() => {
+    spellcheck?.repaint();
+  }, [dictionary, spellcheck]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -209,6 +263,18 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
         onClick={(e) => {
           if (e.target === e.currentTarget) ctx?.surface.placeCaretNearPoint(e.clientX, e.clientY);
         }}
+        // A right-click is the platform's menu unless it landed on a squiggle:
+        // only then is the default prevented and Skrive's correction menu opened.
+        // Everything else about right-clicking the document is unchanged.
+        onContextMenu={(e) => {
+          if (!spellcheck || !ctx) return;
+          const at = ctx.surface.positionAtPoint(e.clientX, e.clientY);
+          if (!at) return;
+          const hit = spellcheck.misspellingAt(at.blockId, at.offset);
+          if (!hit) return;
+          e.preventDefault();
+          setSpellTarget({ blockId: at.blockId, ...hit, x: e.clientX, y: e.clientY });
+        }}
       >
         <div ref={hostRef} className="block-editor-surface" />
         {/* Decoration overlay layer: highlights / squiggles painted over the text
@@ -248,6 +314,14 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
       {ctx && <BlockTableMenu surface={ctx.surface} />}
       {ctx && <BlockTagMenu surface={ctx.surface} />}
       {ctx && <CodeLangMenu surface={ctx.surface} />}
+      {ctx && spellcheck && (
+        <SpellMenu
+          surface={ctx.surface}
+          spellcheck={spellcheck}
+          target={spellTarget}
+          onClose={() => setSpellTarget(null)}
+        />
+      )}
     </div>
   );
 }

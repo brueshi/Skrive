@@ -60,6 +60,8 @@ type PreferencesActions = {
   setLineMeasureCustomCh(value: number): void;
   setShowMeasureRule(value: boolean): void;
   setSmartTypography(value: boolean): void;
+  /** Turn the writing surface's spellchecking on or off. */
+  setSpellcheck(value: boolean): void;
   setFormatOnSave(value: boolean): void;
   setAutosaveIdleDelayMs(value: number): void;
   /** Persist the git-history preference. Pure: it only stores the value.
@@ -118,6 +120,7 @@ function snapshot(state: PreferencesState): AppUiState {
     lineMeasureCustomCh: state.lineMeasureCustomCh,
     showMeasureRule: state.showMeasureRule,
     smartTypography: state.smartTypography,
+    spellcheck: state.spellcheck,
     formatOnSave: state.formatOnSave,
     autosaveIdleDelayMs: state.autosaveIdleDelayMs,
     newFileLocation: state.newFileLocation,
@@ -281,6 +284,11 @@ export const usePreferencesStore = create<
   setSmartTypography(value) {
     if (get().smartTypography === value) return;
     set({ smartTypography: value });
+    scheduleSave(get);
+  },
+  setSpellcheck(value) {
+    if (get().spellcheck === value) return;
+    set({ spellcheck: value });
     scheduleSave(get);
   },
   setFormatOnSave(value) {

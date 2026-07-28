@@ -20,6 +20,7 @@ import { BLOCK_ID_ATTR, BlockViewRegistry, CODE_LANG_CLASS, FOOTNOTE_REF_ATTR, o
 import type { AssetResolver } from './render';
 import { DecorationStore } from './decorations';
 import { HighlightBus } from './highlight/highlight-bus';
+import { SpellBus } from '../spellcheck/spell-bus';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
 import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertTableColumn, insertTableRow, mergeBackward, mergeForward, moveTableColumn, moveTableRow, removeBlocks, removeFootnote, removeTableColumn, removeTableRow, replaceAcross, setColumnAlignment, setTableColumnWidths } from './range-ops';
@@ -284,6 +285,12 @@ export class BlockSurface {
   // painter subscribes and repaints the colour mirror off-thread. Gated to code
   // blocks at the call site, so a prose keystroke never touches it.
   private readonly _highlight = new HighlightBus();
+  // Spellcheck invalidation channel. Poked from the same two hooks the decoration
+  // overlay rides — an in-place leaf edit and a structural reconcile — because a
+  // block's text is exactly what the checker caches its answer against. Gated to
+  // prose at the call site; inert (one null check) until a controller subscribes,
+  // which only happens on a host that has a spelling oracle.
+  private readonly _spell = new SpellBus();
   // Structural-re-render listeners (table hover chrome). Notified from reconcile,
   // which is where block elements are rebuilt or removed and any geometry an
   // overlay measured goes stale. Empty until an overlay subscribes.
@@ -415,18 +422,15 @@ export class BlockSurface {
     this.resolveAsset = opts.resolveAsset ?? ((url) => url);
 
     this.container.contentEditable = 'true';
-    // Spellcheck stays OFF — decided deliberately, twice (SKR-191). The
-    // writer-first answer is ON, and 2026-07-09 shipped the full enable
-    // (attribute on, corrections mapped onto the model, host continuous-checking
-    // default + Spelling menu). Shell verification then showed WebKit cannot
-    // keep squiggles alive over this surface: the as-you-type marking pass
-    // rides WebKit's native TypingCommand — preventDefaulted here by design —
-    // and its markers die with every reconcile/renderInlineInto DOM rebuild, so
-    // squiggles appeared only on the caret word and vanished on Enter. Re-check
-    // heuristics (attribute flip, selection hop) each hit another face of the
-    // same wall. Reliable squiggles need native-typing readback or a bespoke
-    // checker painted as decorations — the SKR-242 spike. applyReplacementText
-    // (below) stays: correct, spec'd, and required the day squiggles land.
+    // The NATIVE spellchecker stays off, and now stays off for good: Skrive
+    // paints its own squiggles as decorations instead. WebKit's markers cannot
+    // survive this surface — the as-you-type marking pass rides WebKit's native
+    // TypingCommand, which is preventDefaulted here by design, and the markers it
+    // leaves die with every renderInlineInto DOM rebuild, so squiggles appeared
+    // only on the caret word and vanished on Enter. The bespoke checker
+    // (lib/spellcheck) asks the host's spelling oracle off the keystroke path and
+    // paints into the decoration store, which is built to survive re-render.
+    // Turning this attribute back on would paint a second, broken set underneath.
     this.container.spellcheck = false;
     // Disable the OS text services that fire on word boundaries (autocorrect /
     // capitalization / smart substitution). Unlike spellcheck — which is passive
@@ -471,6 +475,13 @@ export class BlockSurface {
    *  the editor subscribes and repaints code blocks' colour mirrors off-thread. */
   get highlight(): HighlightBus {
     return this._highlight;
+  }
+
+  /** The spellcheck invalidation channel. The checker wired in the editor
+   *  subscribes, re-checks changed prose against the host's spelling oracle once
+   *  typing settles, and paints misspellings into the decoration store. */
+  get spell(): SpellBus {
+    return this._spell;
   }
 
   /** Subscribe to structural re-renders — passes that rebuild, add, or remove
@@ -730,6 +741,24 @@ export class BlockSurface {
    *  the find bar captures this on open so Esc can restore the caret. */
   readSelectionRange(): DocRange | null {
     return readSelection(this.container);
+  }
+
+  /** The block and flat offset under a viewport point, or null when the point is
+   *  not over inline text in a block leaf (chrome, a table cell, a code block, or
+   *  a platform without caret-from-point). Read-only: unlike a click it moves
+   *  nothing. The spellcheck correction menu asks this to find out whether a
+   *  right-click landed on a squiggle. */
+  positionAtPoint(x: number, y: number): { blockId: string; offset: number } | null {
+    const point = this.resolveCaretPoint(x, y);
+    if (!point || !this.container.contains(point.node)) return null;
+    const el = point.node instanceof HTMLElement ? point.node : point.node.parentElement;
+    // A cell carries coordinates rather than a block id, so the block walk would
+    // resolve the whole table — refuse instead of answering wrongly.
+    if (el?.closest('[data-cell-row]')) return null;
+    const blockEl = el?.closest(`[${BLOCK_ID_ATTR}]`) as HTMLElement | null;
+    const blockId = blockEl?.getAttribute(BLOCK_ID_ATTR);
+    if (!blockEl || blockId == null) return null;
+    return { blockId, offset: flatOffsetFromDOM(blockEl, point.node, point.offset) };
   }
 
   /** Place the selection from a DocRange, taking focus back first (so it commits in
@@ -5568,6 +5597,9 @@ export class BlockSurface {
     // painter debounces the actual (off-thread) work. Gated here so only code
     // edits reach the highlight bus — prose typing pays a single type check.
     if (top?.type === 'code_block') this._highlight.invalidate(leafId);
+    // Prose, conversely, is what the spellchecker cares about — the same type
+    // check, read the other way. The controller debounces; this is a Set insert.
+    else this._spell.invalidate(leafId);
   }
 
   private reconcile(): void {
@@ -5607,6 +5639,9 @@ export class BlockSurface {
     // Likewise reassess every code block's highlight: a reconcile rebuilds code
     // blocks' elements (dropping their mirrors) and can add or remove blocks.
     this._highlight.invalidate(null);
+    // And re-check spelling: a structural pass splits, merges, adds and removes
+    // prose blocks, so which text sits under which id is no longer settled.
+    this._spell.invalidate(null);
     // And any overlay measuring block geometry directly: the elements it measured
     // may have just been replaced.
     for (const fn of this.structureListeners) fn();

@@ -41,6 +41,10 @@ final class CoreBridge {
     nonisolated(unsafe) private var core: OpaquePointer?
     private weak var webView: WKWebView?
     private let activeProject: ActiveProject
+    /// The host spelling oracle behind `spell:*`. Owned per window so its
+    /// spell-document tag (and therefore its session ignores) matches the
+    /// window's lifetime.
+    private let spelling = SpellingService()
     // Updater hooks, set by AppDelegate (which owns the SPUUpdater + driver).
     // The contract-driven flow now runs on the Zig shell: the renderer triggers
     // checks / downloads / installs and the driver streams status back through
@@ -149,6 +153,26 @@ final class CoreBridge {
         case "window:toggleZoom":
             handleWindowToggleZoom()
             return true
+        case "spell:available":
+            // The renderer's startup probe. Answering true here is what turns
+            // the bespoke checker on; a host without this case replies
+            // UNKNOWN_COMMAND and the feature stays quietly off.
+            replyToRenderer(id: id, result: ["available": true])
+            return true
+        case "spell:check":
+            handleSpellCheck(id: id, payload: payload)
+            return true
+        case "spell:suggest":
+            let word = payload["word"] as? String ?? ""
+            replyToRenderer(
+                id: id,
+                result: ["suggestions": spelling.suggestions(for: word)]
+            )
+            return true
+        case "spell:ignore":
+            if let word = payload["word"] as? String { spelling.ignore(word) }
+            replyToRenderer(id: id, result: [:])
+            return true
         case "app:version":
             // Host-owned per the contract: return the bundle's real version
             // (stamped from package.json), the same value Sparkle compares
@@ -204,6 +228,30 @@ final class CoreBridge {
         pb.clearContents()
         pb.setString(payload["text"] as? String ?? "", forType: .string)
         replyToRenderer(id: id, result: [:])
+    }
+
+    /// Batch spellcheck. The reply is deferred: `requestChecking` runs off the
+    /// main thread and answers per block, so the envelope goes out once the
+    /// whole batch is in. Malformed entries are dropped rather than failing the
+    /// batch — a checker is an enhancement, and the renderer treats a missing
+    /// id as "not checked yet" and asks again on the next settle.
+    private func handleSpellCheck(id: Int, payload: [String: Any]) {
+        let entries = payload["requests"] as? [[String: Any]] ?? []
+        let requests: [SpellingService.Request] = entries.compactMap { entry in
+            guard let blockId = entry["id"] as? String,
+                let text = entry["text"] as? String
+            else { return nil }
+            return SpellingService.Request(id: blockId, text: text)
+        }
+        spelling.check(requests) { [weak self] answers in
+            let results: [[String: Any]] = answers.map { blockId, spans in
+                [
+                    "id": blockId,
+                    "ranges": spans.map { ["start": $0.start, "end": $0.end] }
+                ]
+            }
+            self?.replyToRenderer(id: id, result: ["results": results])
+        }
     }
 
     private func handleClipboardReadText(id: Int) {
