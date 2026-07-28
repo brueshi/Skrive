@@ -46,9 +46,12 @@ export type SpellcheckHandle = {
    *  correction menu asks this to decide whether a right-click hit a squiggle. */
   misspellingAt(blockId: string, offset: number): { start: number; end: number; word: string } | null;
   /** Drop every cached answer and re-check what is on screen. Called after the
-   *  writer teaches or ignores a word, since both change what "misspelled"
-   *  means. */
+   *  writer teaches or ignores a word at the OS level, since that changes what
+   *  the oracle itself will say. */
   invalidateAll(): void;
+  /** Repaint from cached answers without re-asking anything — what a change to
+   *  Skrive's own dictionaries needs, since those only filter answers. */
+  repaint(): void;
   destroy(): void;
 };
 
@@ -293,6 +296,9 @@ export function attachSpellcheck({
     },
     invalidateAll() {
       answers.clear();
+      schedule(VIEW_DEBOUNCE_MS);
+    },
+    repaint() {
       schedule(VIEW_DEBOUNCE_MS);
     },
     destroy() {

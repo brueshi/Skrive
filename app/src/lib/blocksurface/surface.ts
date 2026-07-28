@@ -422,18 +422,15 @@ export class BlockSurface {
     this.resolveAsset = opts.resolveAsset ?? ((url) => url);
 
     this.container.contentEditable = 'true';
-    // Spellcheck stays OFF — decided deliberately, twice (SKR-191). The
-    // writer-first answer is ON, and 2026-07-09 shipped the full enable
-    // (attribute on, corrections mapped onto the model, host continuous-checking
-    // default + Spelling menu). Shell verification then showed WebKit cannot
-    // keep squiggles alive over this surface: the as-you-type marking pass
-    // rides WebKit's native TypingCommand — preventDefaulted here by design —
-    // and its markers die with every reconcile/renderInlineInto DOM rebuild, so
-    // squiggles appeared only on the caret word and vanished on Enter. Re-check
-    // heuristics (attribute flip, selection hop) each hit another face of the
-    // same wall. Reliable squiggles need native-typing readback or a bespoke
-    // checker painted as decorations — the SKR-242 spike. applyReplacementText
-    // (below) stays: correct, spec'd, and required the day squiggles land.
+    // The NATIVE spellchecker stays off, and now stays off for good: Skrive
+    // paints its own squiggles as decorations instead. WebKit's markers cannot
+    // survive this surface — the as-you-type marking pass rides WebKit's native
+    // TypingCommand, which is preventDefaulted here by design, and the markers it
+    // leaves die with every renderInlineInto DOM rebuild, so squiggles appeared
+    // only on the caret word and vanished on Enter. The bespoke checker
+    // (lib/spellcheck) asks the host's spelling oracle off the keystroke path and
+    // paints into the decoration store, which is built to survive re-render.
+    // Turning this attribute back on would paint a second, broken set underneath.
     this.container.spellcheck = false;
     // Disable the OS text services that fire on word boundaries (autocorrect /
     // capitalization / smart substitution). Unlike spellcheck — which is passive

@@ -303,6 +303,10 @@ export type AppUiState = {
   showMeasureRule: boolean;
   /** Curly quotes, em dashes, and ellipses substituted as you type. */
   smartTypography: boolean;
+  /** Underline misspelled words while writing. Off leaves the surface exactly
+   *  as it was before spellcheck existed: no checking, no round trips, no
+   *  squiggles. Hosts without a spelling oracle ignore it. */
+  spellcheck: boolean;
   /** Normalize Markdown spacing when a file is written to disk. */
   formatOnSave: boolean;
   /** Debounce (ms) between the last keystroke and an autosave flush. */
@@ -367,6 +371,7 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   lineMeasureCustomCh: 70,
   showMeasureRule: false,
   smartTypography: true,
+  spellcheck: true,
   formatOnSave: false,
   autosaveIdleDelayMs: 500,
   newFileLocation: 'activeFolder',

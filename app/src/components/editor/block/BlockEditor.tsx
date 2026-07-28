@@ -11,7 +11,7 @@
 // persistent EditorBar band (SKR-123), which reads this controller from the
 // active-surface registry rather than rendering it inside the editor.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { BlockSurface, DocHistory } from '../../../lib/blocksurface';
 import { attachCustomCaret } from '../../../lib/blocksurface/caret';
 import { attachDecorationOverlay } from '../../../lib/blocksurface/decoration-overlay';
@@ -19,6 +19,9 @@ import { attachFocusActive } from '../../../lib/blocksurface/focus-active';
 import { attachTableChrome } from '../../../lib/blocksurface/table-chrome';
 import { attachCodeHighlight } from '../../../lib/blocksurface/highlight/code-highlight';
 import { attachFootnotePeek } from '../../../lib/blocksurface/footnote-peek';
+import { attachSpellcheck, type SpellcheckHandle } from '../../../lib/spellcheck/checker';
+import { SpellDictionary } from '../../../lib/spellcheck/dictionary';
+import { hostSpellProvider } from '../../../lib/spellcheck/provider';
 import { installDecorationDevHarness } from '../../../lib/blocksurface/decoration-dev';
 import type { Document } from '../../../lib/blockmodel';
 import { setActiveEditorFlush } from '../active-editor';
@@ -77,6 +80,19 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
   const showWordCount = usePreferencesStore((s) => s.showWordCount);
   const focusMode = useProjectStore((s) => s.focusMode);
   const [counts, setCounts] = useState<LiveCounts | null>(null);
+  const spellcheckOn = usePreferencesStore((s) => s.spellcheck);
+  const personalDictionary = usePreferencesStore((s) => s.personalDictionary);
+  const projectWords = useProjectStore((s) => s.manifest?.config.dictionary.projectWords);
+  // The two word lists as one membership test, rebuilt only when either changes.
+  // Held in a ref as well so the checker reads the CURRENT dictionary on every
+  // paint without being rebuilt when a word is taught.
+  const dictionary = useMemo(
+    () => new SpellDictionary(personalDictionary, projectWords ?? []),
+    [personalDictionary, projectWords]
+  );
+  const dictionaryRef = useRef(dictionary);
+  dictionaryRef.current = dictionary;
+  const spellcheckRef = useRef<SpellcheckHandle | null>(null);
 
   // Live counts off the surface DOM (SKR-53): per-block incremental via
   // MutationObserver, rAF-coalesced — real-time without touching the
@@ -102,6 +118,39 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
     const handle = attachFocusActive({ surface: host, blockSurface: ctx.surface });
     return () => handle.destroy();
   }, [focusMode, ctx]);
+
+  // Spellchecking. Attached only when the writer wants it AND this host has a
+  // spelling oracle to ask — a host without one leaves the surface exactly as it
+  // was, with no controller, no listeners and no round trips. The provider probe
+  // is async, so the effect guards against resolving after unmount.
+  useEffect(() => {
+    if (!spellcheckOn || !ctx) return;
+    const host = hostRef.current;
+    const scroller = bodyRef.current;
+    if (!host || !scroller) return;
+    let cancelled = false;
+    void hostSpellProvider().then((provider) => {
+      if (cancelled || !provider) return;
+      spellcheckRef.current = attachSpellcheck({
+        surface: host,
+        scroller,
+        blockSurface: ctx.surface,
+        provider,
+        dictionary: () => dictionaryRef.current
+      });
+    });
+    return () => {
+      cancelled = true;
+      spellcheckRef.current?.destroy();
+      spellcheckRef.current = null;
+    };
+  }, [spellcheckOn, ctx]);
+
+  // Teaching a word only filters answers that are already cached, so a change to
+  // either dictionary repaints rather than re-checking.
+  useEffect(() => {
+    spellcheckRef.current?.repaint();
+  }, [dictionary]);
 
   useEffect(() => {
     const host = hostRef.current;
