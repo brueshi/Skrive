@@ -33,6 +33,7 @@ import { BlockSlashMenu } from '../menus/BlockSlashMenu';
 import { BlockTableMenu } from '../menus/BlockTableMenu';
 import { BlockTagMenu } from '../menus/BlockTagMenu';
 import { CodeLangMenu } from '../menus/CodeLangMenu';
+import { SpellMenu, type SpellMenuTarget } from '../menus/SpellMenu';
 import { FindBar } from '../find/FindBar';
 import { BlockFindTarget } from '../find/FindTarget';
 import { OutlineRail } from '../OutlineRail';
@@ -92,7 +93,8 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
   );
   const dictionaryRef = useRef(dictionary);
   dictionaryRef.current = dictionary;
-  const spellcheckRef = useRef<SpellcheckHandle | null>(null);
+  const [spellcheck, setSpellcheck] = useState<SpellcheckHandle | null>(null);
+  const [spellTarget, setSpellTarget] = useState<SpellMenuTarget | null>(null);
 
   // Live counts off the surface DOM (SKR-53): per-block incremental via
   // MutationObserver, rAF-coalesced — real-time without touching the
@@ -128,29 +130,32 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
     const host = hostRef.current;
     const scroller = bodyRef.current;
     if (!host || !scroller) return;
+    let handle: SpellcheckHandle | null = null;
     let cancelled = false;
     void hostSpellProvider().then((provider) => {
       if (cancelled || !provider) return;
-      spellcheckRef.current = attachSpellcheck({
+      handle = attachSpellcheck({
         surface: host,
         scroller,
         blockSurface: ctx.surface,
         provider,
         dictionary: () => dictionaryRef.current
       });
+      setSpellcheck(handle);
     });
     return () => {
       cancelled = true;
-      spellcheckRef.current?.destroy();
-      spellcheckRef.current = null;
+      handle?.destroy();
+      setSpellcheck(null);
+      setSpellTarget(null);
     };
   }, [spellcheckOn, ctx]);
 
   // Teaching a word only filters answers that are already cached, so a change to
   // either dictionary repaints rather than re-checking.
   useEffect(() => {
-    spellcheckRef.current?.repaint();
-  }, [dictionary]);
+    spellcheck?.repaint();
+  }, [dictionary, spellcheck]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -258,6 +263,18 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
         onClick={(e) => {
           if (e.target === e.currentTarget) ctx?.surface.placeCaretNearPoint(e.clientX, e.clientY);
         }}
+        // A right-click is the platform's menu unless it landed on a squiggle:
+        // only then is the default prevented and Skrive's correction menu opened.
+        // Everything else about right-clicking the document is unchanged.
+        onContextMenu={(e) => {
+          if (!spellcheck || !ctx) return;
+          const at = ctx.surface.positionAtPoint(e.clientX, e.clientY);
+          if (!at) return;
+          const hit = spellcheck.misspellingAt(at.blockId, at.offset);
+          if (!hit) return;
+          e.preventDefault();
+          setSpellTarget({ blockId: at.blockId, ...hit, x: e.clientX, y: e.clientY });
+        }}
       >
         <div ref={hostRef} className="block-editor-surface" />
         {/* Decoration overlay layer: highlights / squiggles painted over the text
@@ -297,6 +314,14 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
       {ctx && <BlockTableMenu surface={ctx.surface} />}
       {ctx && <BlockTagMenu surface={ctx.surface} />}
       {ctx && <CodeLangMenu surface={ctx.surface} />}
+      {ctx && spellcheck && (
+        <SpellMenu
+          surface={ctx.surface}
+          spellcheck={spellcheck}
+          target={spellTarget}
+          onClose={() => setSpellTarget(null)}
+        />
+      )}
     </div>
   );
 }

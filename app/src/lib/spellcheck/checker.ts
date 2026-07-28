@@ -52,6 +52,11 @@ export type SpellcheckHandle = {
   /** Repaint from cached answers without re-asking anything — what a change to
    *  Skrive's own dictionaries needs, since those only filter answers. */
   repaint(): void;
+  /** Correction candidates for a word, best first. The correction menu's only
+   *  route to the oracle, so the provider stays behind this façade. */
+  suggest(word: string): Promise<string[]>;
+  /** Stop flagging a word for the rest of the session, then re-check. */
+  ignore(word: string): Promise<void>;
   destroy(): void;
 };
 
@@ -299,6 +304,16 @@ export function attachSpellcheck({
       schedule(VIEW_DEBOUNCE_MS);
     },
     repaint() {
+      schedule(VIEW_DEBOUNCE_MS);
+    },
+    suggest(word) {
+      return provider.suggest(word);
+    },
+    async ignore(word) {
+      await provider.ignore(word);
+      // The oracle itself will now answer differently, so cached answers are
+      // stale rather than merely filtered.
+      answers.clear();
       schedule(VIEW_DEBOUNCE_MS);
     },
     destroy() {

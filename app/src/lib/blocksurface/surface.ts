@@ -743,6 +743,24 @@ export class BlockSurface {
     return readSelection(this.container);
   }
 
+  /** The block and flat offset under a viewport point, or null when the point is
+   *  not over inline text in a block leaf (chrome, a table cell, a code block, or
+   *  a platform without caret-from-point). Read-only: unlike a click it moves
+   *  nothing. The spellcheck correction menu asks this to find out whether a
+   *  right-click landed on a squiggle. */
+  positionAtPoint(x: number, y: number): { blockId: string; offset: number } | null {
+    const point = this.resolveCaretPoint(x, y);
+    if (!point || !this.container.contains(point.node)) return null;
+    const el = point.node instanceof HTMLElement ? point.node : point.node.parentElement;
+    // A cell carries coordinates rather than a block id, so the block walk would
+    // resolve the whole table — refuse instead of answering wrongly.
+    if (el?.closest('[data-cell-row]')) return null;
+    const blockEl = el?.closest(`[${BLOCK_ID_ATTR}]`) as HTMLElement | null;
+    const blockId = blockEl?.getAttribute(BLOCK_ID_ATTR);
+    if (!blockEl || blockId == null) return null;
+    return { blockId, offset: flatOffsetFromDOM(blockEl, point.node, point.offset) };
+  }
+
   /** Place the selection from a DocRange, taking focus back first (so it commits in
    *  WKWebView). Used to restore the pre-find caret on Esc and to jump into a match
    *  on commit. A no-op when the range's leaves are gone (the block was deleted). */

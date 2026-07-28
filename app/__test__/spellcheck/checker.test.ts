@@ -40,7 +40,6 @@ function fakeProvider(misspelled: string[]) {
       return Promise.resolve(results);
     },
     suggest: () => Promise.resolve([]),
-    learn: () => Promise.resolve(),
     ignore: () => Promise.resolve()
   };
   return { provider, asked };
@@ -190,6 +189,18 @@ describe('attachSpellcheck', () => {
     expect(asked).toHaveLength(2);
   });
 
+  it('ignoring a word re-asks the oracle, since the oracle itself changed', async () => {
+    const surface = new BlockSurface({ container, doc: parseDocument('the teh cat\n') });
+    const { provider, asked } = fakeProvider(['teh']);
+    const spellcheck = attach(surface, provider);
+    await settle();
+    expect(asked).toHaveLength(1);
+
+    await spellcheck.ignore('teh');
+    await settle();
+    expect(asked).toHaveLength(2);
+  });
+
   it('clears its squiggles on destroy', async () => {
     const surface = new BlockSurface({ container, doc: parseDocument('the teh cat\n') });
     const { provider } = fakeProvider(['teh']);
@@ -215,7 +226,6 @@ describe('attachSpellcheck', () => {
             resolve(requests.map((r) => ({ id: r.id, ranges: [{ start: 4, end: 7 }] })));
         }),
       suggest: () => Promise.resolve([]),
-      learn: () => Promise.resolve(),
       ignore: () => Promise.resolve()
     };
     attach(surface, provider);

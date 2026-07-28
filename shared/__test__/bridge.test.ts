@@ -337,9 +337,7 @@ describe('spell', () => {
     expect(lastCall()).toEqual({ cmd: 'spell:suggest', payload: { word: 'teh' } });
   });
 
-  it('learn and ignore are void word commands', async () => {
-    await bridge.spell.learn('Skrive');
-    expect(lastCall()).toEqual({ cmd: 'spell:learn', payload: { word: 'Skrive' } });
+  it('ignore is a void word command', async () => {
     await bridge.spell.ignore('atticus');
     expect(lastCall()).toEqual({ cmd: 'spell:ignore', payload: { word: 'atticus' } });
   });

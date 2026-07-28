@@ -710,11 +710,10 @@ export interface SkriveIpc {
     /** Ordered correction candidates for one misspelled word, best first.
      *  Called lazily — only when the writer opens the correction menu. */
     suggest(word: string): Promise<string[]>;
-    /** Teach the OS checker a word permanently (the system-wide "Learn
-     *  Spelling"). Skrive's own personal dictionary is separate and lives in
-     *  preferences; this is the platform half the writer already expects. */
-    learn(word: string): Promise<void>;
-    /** Suppress a word for the rest of this session without learning it. */
+    /** Suppress a word for the rest of this session. Teaching a word
+     *  permanently is Skrive's own personal dictionary, not the platform's: it
+     *  is visible and editable in Settings, and it never writes to the system
+     *  dictionary behind the writer's back. */
     ignore(word: string): Promise<void>;
   };
 }

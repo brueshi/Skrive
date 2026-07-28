@@ -14,8 +14,6 @@ export interface SpellProvider {
   check(requests: SpellCheckRequest[]): Promise<SpellCheckResult[]>;
   /** Correction candidates for one word, best first. */
   suggest(word: string): Promise<string[]>;
-  /** Teach the platform checker a word permanently. */
-  learn(word: string): Promise<void>;
   /** Suppress a word for this session. */
   ignore(word: string): Promise<void>;
 }
@@ -40,7 +38,6 @@ export function hostSpellProvider(): Promise<SpellProvider | null> {
     return {
       check: (requests) => spell.check(requests),
       suggest: (word) => spell.suggest(word),
-      learn: (word) => spell.learn(word),
       ignore: (word) => spell.ignore(word)
     };
   })();

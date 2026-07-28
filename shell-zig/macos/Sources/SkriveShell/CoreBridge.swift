@@ -169,10 +169,6 @@ final class CoreBridge {
                 result: ["suggestions": spelling.suggestions(for: word)]
             )
             return true
-        case "spell:learn":
-            if let word = payload["word"] as? String { spelling.learn(word) }
-            replyToRenderer(id: id, result: [:])
-            return true
         case "spell:ignore":
             if let word = payload["word"] as? String { spelling.ignore(word) }
             replyToRenderer(id: id, result: [:])

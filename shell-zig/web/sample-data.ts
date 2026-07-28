@@ -73,7 +73,6 @@ export const NATIVE_COMMANDS = new Set<string>([
   'spell:available',
   'spell:check',
   'spell:suggest',
-  'spell:learn',
   'spell:ignore'
 ]);
 

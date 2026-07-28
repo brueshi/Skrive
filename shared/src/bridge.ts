@@ -275,9 +275,6 @@ export function createSkriveBridge(transport: SkriveTransport): SkriveIpc {
       suggest: async (word: string) =>
         (await invoke<{ suggestions: string[] }>('spell:suggest', { word }))
           .suggestions,
-      learn: async (word: string) => {
-        await invoke('spell:learn', { word });
-      },
       ignore: async (word: string) => {
         await invoke('spell:ignore', { word });
       }

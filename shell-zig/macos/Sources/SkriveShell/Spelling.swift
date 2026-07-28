@@ -14,8 +14,8 @@ import Foundation
 /// Checking uses `requestChecking`, the asynchronous API: it does the work off
 /// the host's main thread and calls back when done, so a settled edit in a long
 /// document never stalls the window (and never risks a cold-start XPC spin-up on
-/// the main thread). Suggestions / learn / ignore are user-initiated one-shots
-/// and stay synchronous on main, where AppKit wants them.
+/// the main thread). Suggestions and ignore are user-initiated one-shots and stay
+/// synchronous on main, where AppKit wants them.
 @MainActor
 final class SpellingService {
     /// One tag for this window's checker session. It is what makes `ignore`
@@ -123,15 +123,6 @@ final class SpellingService {
             language: nil,
             inSpellDocumentWithTag: documentTag
         ) ?? []
-    }
-
-    /// Teach the OS checker a word permanently — the system-wide "Learn
-    /// Spelling". Skrive's own personal dictionary is a separate, project-side
-    /// list; the renderer decides which of the two an "Add to dictionary" click
-    /// writes to.
-    func learn(_ word: String) {
-        guard !word.isEmpty else { return }
-        NSSpellChecker.shared.learnWord(word)
     }
 
     /// Suppress a word for this session only, scoped to our spell-document tag.
