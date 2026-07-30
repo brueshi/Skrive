@@ -13,23 +13,43 @@ import type { OutlineHeading } from '../../lib/preview/outline';
 
 type Props = {
   headings: OutlineHeading[];
+  /** Heading indices to render, in document order — the fold-aware view of
+   *  the list. Rows inside a collapsed section are absent, not hidden. */
+  order: number[];
+  /** Indices whose sections are collapsed. */
+  folded: ReadonlySet<number>;
+  /** Indices with nested headings under them, and so a twisty. */
+  expandable: ReadonlySet<number>;
   /** Row carrying the highlight: the keyboard cursor, or the active
    *  section when the reader hasn't navigated with the keyboard. */
   selectedIndex: number;
   /** Section the reader is currently in; marked even when the keyboard
-   *  cursor has moved elsewhere. */
+   *  cursor has moved elsewhere. Already resolved to a visible row by the
+   *  rail, so scrolling into a collapsed section marks the fold head. */
   activeIndex: number;
-  /** Stable DOM id for the option at `index`, referenced by the rail's
+  /** Stable DOM id for the row at `index`, referenced by the rail's
    *  `aria-activedescendant`. */
   optionId: (index: number) => string;
   onJump: (index: number) => void;
+  onToggleFold: (index: number) => void;
   /** Positioning supplied by the rail (the clamped vertical `top`). */
   style?: CSSProperties;
 };
 
 export const OutlinePopover = forwardRef<HTMLDivElement, Props>(
   function OutlinePopover(
-    { headings, selectedIndex, activeIndex, optionId, onJump, style },
+    {
+      headings,
+      order,
+      folded,
+      expandable,
+      selectedIndex,
+      activeIndex,
+      optionId,
+      onJump,
+      onToggleFold,
+      style
+    },
     ref
   ) {
     const reduced = useReducedMotion();
@@ -46,25 +66,54 @@ export const OutlinePopover = forwardRef<HTMLDivElement, Props>(
           reduced ? { duration: 0 } : { duration: 0.14, ease: [0.16, 1, 0.3, 1] }
         }
       >
-        {headings.map((h, i) => (
-          <button
-            type="button"
-            key={`${i}-${h.id}`}
-            id={optionId(i)}
-            role="option"
-            aria-selected={i === selectedIndex}
-            aria-current={i === activeIndex ? 'true' : undefined}
-            className="outline-popover-row"
-            data-depth={Math.min(h.depth, 6)}
-            data-selected={i === selectedIndex || undefined}
-            tabIndex={-1}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onJump(i)}
-            title={h.text}
-          >
-            {h.text || '—'}
-          </button>
-        ))}
+        {order.map((i) => {
+          const h = headings[i];
+          if (!h) return null;
+          const canFold = expandable.has(i);
+          const isFolded = folded.has(i);
+          return (
+            <button
+              type="button"
+              key={h.key}
+              id={optionId(i)}
+              role="treeitem"
+              aria-level={Math.min(h.depth, 6)}
+              // Only a row with something under it has an expanded state;
+              // on a leaf the attribute would claim a twisty that is not
+              // there.
+              aria-expanded={canFold ? !isFolded : undefined}
+              aria-selected={i === selectedIndex}
+              aria-current={i === activeIndex ? 'true' : undefined}
+              className="outline-popover-row"
+              data-depth={Math.min(h.depth, 6)}
+              data-selected={i === selectedIndex || undefined}
+              data-foldable={canFold || undefined}
+              data-folded={isFolded || undefined}
+              tabIndex={-1}
+              onMouseDown={(e) => e.preventDefault()}
+              // One handler for the whole row, discriminating on where the
+              // click landed. The twisty is a plain span rather than a
+              // nested button: a treeitem must not contain its own
+              // interactive descendants, and this also keeps the fold on a
+              // real click event — WKWebView drops pointerup on a press
+              // that never moves.
+              onClick={(e) => {
+                if (
+                  canFold &&
+                  (e.target as Element).closest('.outline-popover-twisty')
+                ) {
+                  onToggleFold(i);
+                  return;
+                }
+                onJump(i);
+              }}
+              title={h.text}
+            >
+              <span className="outline-popover-twisty" aria-hidden="true" />
+              <span className="outline-popover-label">{h.text || '—'}</span>
+            </button>
+          );
+        })}
       </motion.div>
     );
   }

@@ -81,6 +81,7 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
     findTarget: BlockFindTarget;
   } | null>(null);
   const showWordCount = usePreferencesStore((s) => s.showWordCount);
+  const showOutlineRail = usePreferencesStore((s) => s.showOutlineRail);
   const focusMode = useProjectStore((s) => s.focusMode);
   const [counts, setCounts] = useState<LiveCounts | null>(null);
   const spellcheckOn = usePreferencesStore((s) => s.spellcheck);
@@ -97,6 +98,15 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
   dictionaryRef.current = dictionary;
   const [spellcheck, setSpellcheck] = useState<SpellcheckHandle | null>(null);
   const [spellTarget, setSpellTarget] = useState<SpellMenuTarget | null>(null);
+
+  // The outline rail's structural signal. Bound here rather than handed the
+  // method directly (which would lose its receiver), and memoized on `ctx` so
+  // the rail's measure effect re-subscribes when the surface is built and not
+  // on every render.
+  const subscribeStructure = useMemo(
+    () => (ctx ? (fn: () => void) => ctx.surface.onStructureChange(fn) : undefined),
+    [ctx]
+  );
 
   // Live counts off the surface DOM (SKR-53): per-block incremental via
   // MutationObserver, rAF-coalesced — real-time without touching the
@@ -306,20 +316,23 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
         <div ref={blockChromeRef} className="block-chrome-layer" />
         <div ref={caretRef} className="skrive-caret" aria-hidden="true" />
       </div>
-      {/* Document-structure rail (SKR-229), same component the Markdown preview
+      {/* Document-structure rail, the same component the Markdown preview
           mounts. It measures the surface's real h1-h6 elements and navigates by
-          scroll offset, so no block-id plumbing is needed; renderKey stays
-          constant and structural edits reach it through its ResizeObserver +
-          element-identity path (see the rail's Props comment). */}
+          scroll offset, so no block-id plumbing is needed. renderKey stays
+          constant because this surface reconciles in place and never re-keys;
+          the outline instead tracks edits through onStructureChange, which
+          fires on exactly the passes that add, remove, or replace blocks. */}
       {/* Focus mode strips both ambient readouts by unmounting them, not by
           hiding them in CSS: their observers (the rail's ResizeObserver, the
           counts' MutationObserver) then stop too, so the mode costs less than
-          normal editing rather than more. */}
-      {!focusMode && (
+          normal editing rather than more. The preference is read here, where
+          the rail actually mounts, for the same reason. */}
+      {showOutlineRail && !focusMode && (
         <OutlineRail
           scrollerRef={bodyRef}
           contentRef={hostRef}
           renderKey=""
+          subscribeStructure={subscribeStructure}
         />
       )}
       {showWordCount && !focusMode && counts && (

@@ -129,9 +129,13 @@ export function MarkdownView({
   // raw and split, and follows the settled body in preview. Recomputed only
   // when the mirror text changes, never per render.
   const showWordCount = usePreferencesStore((s) => s.showWordCount);
+  // Whether the rail is wanted at all. Preview owns the focus-mode gate,
+  // since it mounts the rail, but the preference belongs to whoever decides
+  // the rail is applicable — split and raw layouts have no rendered headings
+  // to point at, so the two conditions meet here.
+  const showOutlineRail = usePreferencesStore((s) => s.showOutlineRail);
   // Focus mode strips the ambient readouts (SKR-52). Gated at the render site,
-  // not inside the badge, so the count recompute stops with it. The outline rail
-  // on this path is Preview's to gate — it mounts the rail, so it owns that one.
+  // not inside the badge, so the count recompute stops with it.
   const focusMode = useProjectStore((s) => s.focusMode);
   const viewRef = useRef<HTMLDivElement>(null);
 
@@ -170,7 +174,7 @@ export function MarkdownView({
       filePath={filePath}
       projectRoot={projectRoot}
       onInternalLink={onInternalLink}
-      showRail={layoutMode === 'preview'}
+      showRail={layoutMode === 'preview' && showOutlineRail}
     />
   );
 

@@ -3,7 +3,13 @@
 // reader is currently inside.
 
 import { describe, expect, it } from 'vitest';
-import { activeHeadingIndex } from '../../src/lib/preview/outline';
+import {
+  activeHeadingIndex,
+  hasChildren,
+  nearestVisible,
+  sectionEnd,
+  visibleIndices
+} from '../../src/lib/preview/outline';
 
 // A 2000px document in an 800px viewport, headings at 0 / 600 / 1400.
 const TOPS = [0, 600, 1400];
@@ -50,5 +56,109 @@ describe('activeHeadingIndex', () => {
     // With no slack (offset == the 16px scroll margin) the same
     // undershoot would wrongly select heading 0.
     expect(activeHeadingIndex(TOPS, 583, CLIENT, SCROLL_HEIGHT, 16)).toBe(0);
+  });
+});
+
+// A conventional document:
+//   0 h1 Title
+//   1   h2 Intro
+//   2     h3 Background
+//   3   h2 Method
+//   4 h1 Appendix
+const DEPTHS = [1, 2, 3, 2, 1];
+
+describe('sectionEnd', () => {
+  it('runs a section to the next heading at or above its depth', () => {
+    expect(sectionEnd(DEPTHS, 0)).toBe(4); // Title holds 1..3
+    expect(sectionEnd(DEPTHS, 1)).toBe(3); // Intro holds Background
+    expect(sectionEnd(DEPTHS, 3)).toBe(4); // Method holds nothing
+  });
+
+  it('ends a leaf section immediately after itself', () => {
+    expect(sectionEnd(DEPTHS, 2)).toBe(3);
+  });
+
+  it('runs the last heading to the end of the list', () => {
+    expect(sectionEnd(DEPTHS, 4)).toBe(5);
+  });
+
+  it('returns a usable slice end for an out-of-range index', () => {
+    expect(sectionEnd(DEPTHS, 9)).toBe(10);
+    expect(sectionEnd([], 0)).toBe(1);
+  });
+
+  it('tolerates a skipped level', () => {
+    // h1 straight to h3, with no h2 in between: the h3 is still a child.
+    expect(sectionEnd([1, 3, 1], 0)).toBe(2);
+  });
+
+  it('tolerates a document that starts deep and rises above its opening', () => {
+    // h3 first, then h1: the h1 is not a descendant of the h3.
+    expect(sectionEnd([3, 1, 2], 0)).toBe(1);
+    expect(sectionEnd([3, 1, 2], 1)).toBe(3);
+  });
+});
+
+describe('hasChildren', () => {
+  it('is true only for headings with a nested heading under them', () => {
+    expect(DEPTHS.map((_, i) => hasChildren(DEPTHS, i))).toEqual([
+      true, // Title
+      true, // Intro
+      false, // Background
+      false, // Method
+      false // Appendix
+    ]);
+  });
+});
+
+describe('visibleIndices', () => {
+  it('shows everything when nothing is folded', () => {
+    expect(visibleIndices(DEPTHS, new Set())).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it('keeps a folded heading and hides only its section', () => {
+    expect(visibleIndices(DEPTHS, new Set([1]))).toEqual([0, 1, 3, 4]);
+  });
+
+  it('collapses a whole subtree when an ancestor folds', () => {
+    expect(visibleIndices(DEPTHS, new Set([0]))).toEqual([0, 4]);
+  });
+
+  it('does not double-count a fold nested inside a folded section', () => {
+    // Intro is already swallowed by Title's fold; folding it too changes
+    // nothing, and must not skip past Appendix.
+    expect(visibleIndices(DEPTHS, new Set([0, 1]))).toEqual([0, 4]);
+  });
+
+  it('ignores a fold on a heading with no children', () => {
+    expect(visibleIndices(DEPTHS, new Set([2]))).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it('returns nothing for an empty document', () => {
+    expect(visibleIndices([], new Set())).toEqual([]);
+  });
+});
+
+describe('nearestVisible', () => {
+  it('returns the heading itself when it is visible', () => {
+    const visible = new Set(visibleIndices(DEPTHS, new Set([1])));
+    expect(nearestVisible(3, visible)).toBe(3);
+  });
+
+  it('falls back to the fold that swallowed the heading', () => {
+    // Background (2) is hidden inside folded Intro (1).
+    const visible = new Set(visibleIndices(DEPTHS, new Set([1])));
+    expect(nearestVisible(2, visible)).toBe(1);
+  });
+
+  it('climbs to the outermost fold through nested collapses', () => {
+    // Title folded swallows Intro and Background alike.
+    const visible = new Set(visibleIndices(DEPTHS, new Set([0])));
+    expect(nearestVisible(2, visible)).toBe(0);
+  });
+
+  it('returns -1 when there is nothing at or before the index', () => {
+    expect(nearestVisible(-1, new Set([0]))).toBe(-1);
+    expect(nearestVisible(3, new Set())).toBe(-1);
   });
 });

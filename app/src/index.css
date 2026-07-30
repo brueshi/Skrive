@@ -2290,16 +2290,44 @@ body {
   box-shadow: inset -2px 0 0 var(--skrive-focus-ring);
 }
 
+/* A faint track behind the ticks, so the rail reads as a thing you can
+   reach for rather than an unannounced hover target. Barely there at
+   rest; it comes up on hover and while scrubbing. */
+.outline-rail::before {
+  content: '';
+  position: absolute;
+  top: var(--outline-track-inset, 16px);
+  bottom: var(--outline-track-inset, 16px);
+  right: 10px;
+  width: 1px;
+  border-radius: 1px;
+  background: var(--skrive-rule);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.outline-rail[data-open]::before,
+.outline-rail[data-scrubbing]::before {
+  opacity: 0.9;
+}
+
 .outline-tick {
   position: absolute;
   right: 10px;
-  height: 2px;
+  /* A hairline, not a lozenge. At 2px with a 2px radius the ends were
+     fully rounded and the bar read soft; a 1px rule with a barely-there
+     radius draws a crisp line, which is what a document map wants. */
+  height: 1px;
   padding: 0;
   border: 0;
-  border-radius: 2px;
+  border-radius: 0.5px;
   appearance: none;
   background: var(--skrive-muted);
-  opacity: 0.4;
+  /* Depth reads through weight as well as length. At these sizes a 3px
+     difference in width is nearly invisible on its own, so the deeper
+     levels also recede in contrast — the top level stays the thing your
+     eye lands on first. */
+  opacity: calc(var(--outline-tick-rest, 0.4) + var(--outline-tick-lift, 0));
   /* The `top` is the tick's center; translate up by half so the bar
      sits on its computed position. */
   transform: translateY(-50%);
@@ -2307,43 +2335,71 @@ body {
   cursor: pointer;
 }
 
-/* Invisible, taller hit area so a 2px bar is comfortably clickable
-   without making the bar itself thick. */
+/* Invisible, taller hit area so a hairline is comfortably clickable
+   without making the line itself thick. */
 .outline-tick::before {
   content: '';
   position: absolute;
   inset: -6px -6px;
 }
 
-/* Width encodes depth: top-level headings read as the longest bars,
-   nested ones taper in. */
-.outline-tick[data-depth='1'] { width: 16px; }
-.outline-tick[data-depth='2'] { width: 13px; }
-.outline-tick[data-depth='3'] { width: 10px; }
-.outline-tick[data-depth='4'] { width: 8px; }
-.outline-tick[data-depth='5'] { width: 7px; }
-.outline-tick[data-depth='6'] { width: 6px; }
+/* Width and weight encode depth together: top-level headings read as the
+   longest, firmest bars and nested ones taper and recede. Every tick is
+   right-anchored, so a deeper heading's left edge steps inward — the same
+   direction the popover indents its rows.
 
-.outline-tick:hover {
-  opacity: 0.7;
+   A hairline needs more contrast than a 2px bar to read as a definite
+   line rather than a smudge, so the resting weights sit higher than they
+   did when the ticks were thicker. */
+.outline-tick[data-depth='1'] { width: 16px; --outline-tick-rest: 0.72; }
+.outline-tick[data-depth='2'] { width: 13px; --outline-tick-rest: 0.6; }
+.outline-tick[data-depth='3'] { width: 10px; --outline-tick-rest: 0.5; }
+.outline-tick[data-depth='4'] { width: 8px; --outline-tick-rest: 0.44; }
+.outline-tick[data-depth='5'] { width: 7px; --outline-tick-rest: 0.38; }
+.outline-tick[data-depth='6'] { width: 6px; --outline-tick-rest: 0.35; }
+
+/* Hovering the strip brings the whole cluster up, so the map is legible
+   while you are aiming at it rather than only the bar under the cursor.
+   Applied as a lift on the inherited custom property rather than an
+   opacity override, so it composes with each depth's resting weight and
+   — the reason it matters — does not outrank the active tick's own rule
+   on specificity and quietly dim the mark whenever the card is open. */
+.outline-rail[data-open] {
+  --outline-tick-lift: 0.2;
 }
 
-/* The current section: a neutral bar at full strength, a hair taller and
-   a consistent width so it reads as "you are here" through weight and
-   contrast rather than colour. */
+.outline-tick:hover {
+  opacity: 0.85;
+}
+
+/* The current section: full contrast, and the one place a tick is not a
+   hairline. Against 1px rules, contrast alone was not quite enough to
+   find the mark at a glance, so it doubles to a solid 2px rule.
+
+   Width, though, never changes. That was the part worth fixing: the old
+   active state forced 18px, wider than an h1, so whichever heading you
+   were reading became the widest bar in a strip whose job is showing
+   depth by width. Height is also not transitioned, so the mark snaps
+   between ticks rather than animating, and it grows symmetrically about
+   the tick's center, so nothing around it shifts. */
 .outline-tick[data-active] {
-  width: 18px;
-  height: 3px;
   background: var(--skrive-fg);
   opacity: 1;
+  height: 2px;
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  /* Colour and contrast only. Width and height are pointedly absent: they
+     are what made the strip twitch as the active section changed, and the
+     mark is better off snapping between ticks than sliding. */
   .outline-tick {
     transition:
       opacity var(--skrive-duration-quick) var(--skrive-easing),
-      width var(--skrive-duration-quick) var(--skrive-easing),
       background-color var(--skrive-duration-quick) var(--skrive-easing);
+  }
+
+  .outline-rail::before {
+    transition: opacity var(--skrive-duration-standard) var(--skrive-easing);
   }
 }
 
@@ -2353,6 +2409,9 @@ body {
    is set inline by the rail (anchored to the pointer/selected tick and
    clamped within the pane). It's a DOM child of the rail so hovering it
    counts as hovering the rail and keeps it open. */
+/* Sheet voice, the same as the rest of the popup family: the shipped
+   toast's lift and radius rather than the hand-rolled shadow and card
+   radius this predated them with. */
 .outline-popover {
   position: absolute;
   right: 100%;
@@ -2360,17 +2419,20 @@ body {
   width: 16rem;
   max-height: 70%;
   overflow-y: auto;
-  padding: 6px;
+  overscroll-behavior: contain;
+  padding: 7px;
   background: var(--skrive-bg);
   border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-card-radius);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  border-radius: var(--skrive-radius-xl);
+  box-shadow: var(--skrive-shadow-sheet);
   font-family: var(--skrive-ui-font);
 }
 
 .outline-popover-row {
   position: relative;
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   width: 100%;
   text-align: left;
   appearance: none;
@@ -2383,27 +2445,129 @@ body {
   padding: 5px 8px;
   border-radius: var(--skrive-radius-sm);
   cursor: pointer;
-  /* One line with an ellipsis, like the design mock. */
+}
+
+/* One line with an ellipsis. On the flex row the label has to be allowed
+   to shrink below its content width before it will truncate. */
+.outline-popover-label {
+  min-width: 0;
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Indent by depth; the top level reads a touch heavier as the title. */
-.outline-popover-row[data-depth='1'] { padding-left: 8px; font-weight: 600; }
-.outline-popover-row[data-depth='2'] { padding-left: 18px; }
-.outline-popover-row[data-depth='3'] { padding-left: 28px; }
-.outline-popover-row[data-depth='4'] { padding-left: 38px; }
-.outline-popover-row[data-depth='5'] { padding-left: 48px; }
-.outline-popover-row[data-depth='6'] { padding-left: 58px; }
+/* Fold twisty. Always occupies its slot so labels stay aligned whether or
+   not a row has children; only rows that can fold draw the triangle. */
+.outline-popover-twisty {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  position: relative;
+}
 
+/* A stroked chevron rather than a filled triangle: it matches the weight
+   of the type it sits beside and the chevron language already used for
+   summoning surfaces, where a solid arrowhead would read as heavier
+   furniture than a row of section names wants. */
+.outline-popover-row[data-foldable] .outline-popover-twisty::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 1px;
+  width: 4.5px;
+  height: 4.5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  border-radius: 0.5px;
+  /* Expanded: pointing down at the rows it reveals. */
+  transform: translate(0, -60%) rotate(45deg);
+}
+
+/* Folded: pointing right, at the section it is holding closed. */
+.outline-popover-row[data-foldable][data-folded] .outline-popover-twisty::before {
+  transform: translate(-1px, -50%) rotate(-45deg);
+}
+
+/* The twisty is the fold target inside an otherwise jump-to-heading row,
+   so give it a hit area larger than the 10px glyph. */
+.outline-popover-row[data-foldable] .outline-popover-twisty::after {
+  content: '';
+  position: absolute;
+  inset: -5px -3px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .outline-popover-row[data-foldable] .outline-popover-twisty::before {
+    transition:
+      transform var(--skrive-duration-quick) var(--skrive-easing),
+      opacity var(--skrive-duration-quick) var(--skrive-easing);
+  }
+
+  .outline-popover-row {
+    transition: background-color var(--skrive-duration-quick) var(--skrive-easing);
+  }
+}
+
+/* Indent by depth. The ladder is tighter than the old 10px-per-level,
+   which spent a third of a 16rem card on whitespace by depth 4 and left
+   deep headings with almost no room to read. The twisty sits inside the
+   indent, so a foldable row and a leaf at the same level still align. */
+.outline-popover-row[data-depth='1'] { padding-left: 8px; }
+.outline-popover-row[data-depth='2'] { padding-left: 16px; }
+.outline-popover-row[data-depth='3'] { padding-left: 24px; }
+.outline-popover-row[data-depth='4'] { padding-left: 32px; }
+.outline-popover-row[data-depth='5'] { padding-left: 38px; }
+.outline-popover-row[data-depth='6'] { padding-left: 44px; }
+
+/* Level reads through type, not just indent, so the hierarchy survives
+   the tighter ladder: top-level sections carry weight and full colour,
+   deeper ones step back in both. */
+.outline-popover-row[data-depth='1'] { font-weight: 600; color: var(--skrive-fg); }
+.outline-popover-row[data-depth='2'] { font-weight: 500; color: var(--skrive-fg); }
+.outline-popover-row[data-depth='3'],
+.outline-popover-row[data-depth='4'],
+.outline-popover-row[data-depth='5'],
+.outline-popover-row[data-depth='6'] {
+  font-weight: 400;
+  color: color-mix(in srgb, var(--skrive-fg) 72%, var(--skrive-bg));
+}
+
+/* A top-level section gets air above it, so the card groups into sections
+   instead of reading as one undifferentiated column. Not on the first
+   row — that would just pad the card's top edge unevenly. */
+.outline-popover-row[data-depth='1']:not(:first-child) {
+  margin-top: 5px;
+}
+
+/* Both states sit lighter than they first shipped. The card is a quiet
+   list of section names, and a fill heavy enough to read as a pressed
+   control turned every glance at the outline into a glance at a widget. */
 .outline-popover-row:hover {
-  background: color-mix(in srgb, var(--skrive-fg) 6%, transparent);
+  background: color-mix(in srgb, var(--skrive-fg) 4%, transparent);
 }
 
 /* The selected row: keyboard cursor, or the active section by default. */
 .outline-popover-row[data-selected] {
-  background: color-mix(in srgb, var(--skrive-fg) 10%, transparent);
+  background: color-mix(in srgb, var(--skrive-fg) 6.5%, transparent);
+}
+
+/* Hovering a row surfaces its twisty; at rest the card stays a clean list
+   of labels rather than a column of controls. The current row keeps its
+   twisty up, since that is the section you are most likely to fold. */
+.outline-popover-row[data-foldable] .outline-popover-twisty::before {
+  opacity: 0.45;
+}
+
+.outline-popover-row[data-foldable]:hover .outline-popover-twisty::before,
+.outline-popover-row[data-foldable][data-selected] .outline-popover-twisty::before {
+  opacity: 1;
+}
+
+/* A folded section keeps its twisty lit whatever the pointer is doing —
+   it is the only sign that rows are hidden underneath. */
+.outline-popover-row[data-foldable][data-folded] .outline-popover-twisty::before {
+  opacity: 1;
 }
 
 /* The section actually being read, marked even when the keyboard cursor
@@ -2415,11 +2579,15 @@ body {
   content: '';
   position: absolute;
   left: 0;
-  top: 5px;
-  bottom: 5px;
-  width: 2px;
+  top: 6px;
+  bottom: 6px;
+  /* Narrower, shorter and lighter than it was. At full muted weight and
+     the row's whole height it read as a hard bracket clamping the row,
+     which is far more emphasis than "this is the section you are in"
+     needs next to an already-tinted background. */
+  width: 1.5px;
   border-radius: 1px;
-  background: var(--skrive-muted);
+  background: color-mix(in srgb, var(--skrive-muted) 55%, transparent);
 }
 
 .preview-inner {
