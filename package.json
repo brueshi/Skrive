@@ -17,7 +17,8 @@
     "typecheck": "tsc -p shared/tsconfig.json && tsc -p app/tsconfig.json",
     "perf:fixture": "bun scripts/build-perf-fixture.ts",
     "parity:check": "(cd shell-zig/core && zig build) && bun ./scripts/run-parity-fixtures.ts",
-    "test:latency": "playwright test -c harness/playwright.config.ts"
+    "test:latency": "playwright test -c harness/playwright.config.ts",
+    "smoke:macos": "bash shell-zig/smoke-macos.sh"
   },
   "license": "SEE LICENSE IN LICENSE",
   "dependencies": {

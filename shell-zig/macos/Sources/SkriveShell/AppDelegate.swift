@@ -50,6 +50,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     // evidence for the 1.1 done-criteria without a screen.
     private let diagEnabled = ProcessInfo.processInfo.environment["SKRIVE_DIAG"] == "1"
 
+    // Smoke mode (SKRIVE_SMOKE=1): the diagnostics above, plus an automatic
+    // quit once the self-test has reported. Implies SKRIVE_DIAG.
+    //
+    // The quit is the point, not tidiness: it routes through
+    // applicationShouldTerminate, so a run exercises the pre-quit flush and its
+    // ack round trip, and the flush duration it logs tells the caller whether
+    // the renderer answered or the 2s backstop fired. It also means the process
+    // ends by itself, so a runner can wait on the exit code instead of killing
+    // the app and learning nothing about how it shuts down.
+    private let smokeEnabled = ProcessInfo.processInfo.environment["SKRIVE_SMOKE"] == "1"
+
     // Update-UI preview harness (SKRIVE_UPDATER_DEMO=1): once the renderer is
     // up, emit a scripted updater:status sequence so the custom update card and
     // toasts can be seen without a real newer release. Observe-only — clicking
@@ -366,7 +377,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         if bridge == nil { return .terminateNow }
         if quitting { return .terminateLater }   // a second Cmd-Q mid-flush
         quitting = true
-        let start = diagEnabled ? Date() : nil
+        // Smoke runs need this timing too: it is how the caller tells a real
+        // flush ack apart from the 2s backstop firing on a wedged renderer.
+        let start = (diagEnabled || smokeEnabled) ? Date() : nil
         bridge.beginFlush {
             if let start {
                 NSLog("[skrive] pre-quit flush took %.0f ms",
@@ -391,7 +404,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             )
         )
 
-        if diagEnabled {
+        if diagEnabled || smokeEnabled {
             controller.add(self, name: "skriveDiag")
             controller.addUserScript(
                 WKUserScript(
@@ -514,7 +527,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         rendererLoaded = true
         applyTitlebarInset()
         runUpdaterDemoIfRequested()
-        guard diagEnabled else { return }
+        guard diagEnabled || smokeEnabled else { return }
         // Give the React boot sequence (loadAppState -> snapshot -> worker
         // -> render) time to settle before probing.
         // The bundled sample project's absolute path, as a JS string literal
@@ -595,6 +608,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     ) {
         if message.name == "skriveDiag", let line = message.body as? String {
             print("[diag] \(line)")
+            // In smoke mode the self-test's report is the end of the run: quit
+            // through the normal path so the pre-quit flush and its ack are
+            // exercised, and the process supplies its own exit code. A short
+            // delay lets the console relay drain any error logged alongside the
+            // report, which would otherwise be lost with the process.
+            if smokeEnabled, line.hasPrefix("SELFTEST ") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    NSApp.terminate(nil)
+                }
+            }
             return
         }
         guard message.name == "skriveInvoke",
