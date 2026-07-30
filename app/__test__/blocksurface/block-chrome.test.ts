@@ -9,6 +9,7 @@ import {
   blockChromeSlots,
   blockDropEdges,
   blockDropIndicatorRect,
+  blocksInSweep,
   blockHoverZone,
   type BlockGeometry,
   type BlockSlot
@@ -180,5 +181,36 @@ describe('blockDropIndicatorRect', () => {
   it('returns null for a boundary that does not exist', () => {
     expect(blockDropIndicatorRect(stack(), 4)).toBeNull();
     expect(blockDropIndicatorRect([], 0)).toBeNull();
+  });
+});
+
+describe('blocksInSweep', () => {
+  it('selects the blocks a downward sweep crosses', () => {
+    expect(blocksInSweep(stack(), 205, 265)).toEqual([0, 2]);
+  });
+
+  it('selects the same run swept upward', () => {
+    // The span is normalized, so direction never changes the result.
+    expect(blocksInSweep(stack(), 265, 205)).toEqual(blocksInSweep(stack(), 205, 265));
+  });
+
+  it('takes a block the sweep merely brushes', () => {
+    // Gesturing at a range, not measuring one: overlapping at all counts.
+    expect(blocksInSweep(stack(), 219, 221), 'clips the end of 0 and the start of 1').toEqual([0, 1]);
+  });
+
+  it('selects a single block for a sweep inside it', () => {
+    expect(blocksInSweep(stack(), 230, 250)).toEqual([1, 1]);
+  });
+
+  it('is always contiguous, covering anything spanned', () => {
+    const [first, last] = blocksInSweep(stack(), 205, 275)!;
+    expect(last - first + 1, 'every block between the ends is included').toBe(3);
+  });
+
+  it('returns null for a sweep entirely off the document', () => {
+    expect(blocksInSweep(stack(), 0, 100), 'above everything').toBeNull();
+    expect(blocksInSweep(stack(), 400, 500), 'below everything').toBeNull();
+    expect(blocksInSweep([], 0, 100), 'no blocks at all').toBeNull();
   });
 });

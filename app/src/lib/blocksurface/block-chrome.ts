@@ -73,6 +73,16 @@ const DRAG_BLOCK_ATTR = 'data-block-dragging';
  *  display-gathered into a document-end footer, so they sit outside the reorder. */
 const FOOTNOTE_DEF_CLASS = 'sk-footnote-def';
 
+/** Vertical travel, in px, before a gutter press becomes a block sweep. Below it
+ *  the press stays whatever it was — a margin click that places a caret — so the
+ *  existing gesture is untouched. Larger than the reorder's threshold: a sweep
+ *  starts on empty margin where a small drift is likelier to be a stray hand. */
+const SWEEP_MOVE_THRESHOLD_PX = 6;
+
+/** Body class held for the length of a sweep, to suppress text selection while the
+ *  pointer crosses prose. */
+const SWEEPING_CLASS = 'sk-block-sweeping';
+
 /** One painted affordance, positioned in the scroller's content coordinate space. */
 export type BlockSlot = {
   kind: 'grip' | 'insert';
@@ -183,6 +193,30 @@ export function blockDropIndicatorRect(
   return { x, y: y - thickness / 2, width: right - x, height: thickness };
 }
 
+/**
+ * The indices of the blocks a vertical sweep covers, given their boxes in document
+ * order and the two y positions the gesture spans. A block counts as covered when
+ * the swept span overlaps it at all, so brushing the edge of a block takes it —
+ * the writer is gesturing at a range, not measuring one.
+ *
+ * The span is normalized, so sweeping upward selects the same run as sweeping
+ * down. Always contiguous: it returns a `[first, last]` pair, or null when the
+ * sweep touches nothing (entirely in the space above or below the document).
+ */
+export function blocksInSweep(boxes: ContentBox[], y0: number, y1: number): [number, number] | null {
+  const top = Math.min(y0, y1);
+  const bottom = Math.max(y0, y1);
+  let first = -1;
+  let last = -1;
+  for (let i = 0; i < boxes.length; i++) {
+    const b = boxes[i]!;
+    if (b.y + b.height < top || b.y > bottom) continue; // no overlap
+    if (first < 0) first = i;
+    last = i;
+  }
+  return first < 0 ? null : [first, last];
+}
+
 /** Measure a block element into the scroller's content coordinate space, reading
  *  the first line's height from the element's first client rect — a wrapped
  *  paragraph reports one rect per line, so the first is the line the chrome aligns
@@ -244,6 +278,11 @@ export function attachBlockChrome({
   // WKWebView fires even when it drops the pointerup on a motionless press) and
   // destroy() can both tidy a gesture's window listeners — no leak on a tap.
   let activeReorderCleanup: (() => void) | null = null;
+  // The teardown for an in-flight gutter sweep, and whether the click closing it
+  // must be swallowed so the scroller's margin-click handler doesn't place a caret
+  // and dissolve the range the sweep just made.
+  let activeSweepCleanup: (() => void) | null = null;
+  let suppressGutterClick = false;
 
   const clear = (): void => {
     layer.textContent = '';
@@ -474,6 +513,79 @@ export function attachBlockChrome({
 
   const onPointerLeave = (): void => scheduleHide();
 
+  /** Is this point left of where the block text starts — the gutter the grip and
+   *  `+` live in? The surface's own left padding is part of it: the chrome
+   *  straddles the surface's edge, so the band a writer reads as "the margin"
+   *  runs from outside the surface to where the prose actually begins. */
+  const inGutter = (clientX: number, blocks: { box: ContentBox }[]): boolean => {
+    const first = blocks[0];
+    if (!first) return false;
+    const hostRect = scroller.getBoundingClientRect();
+    const textLeft = hostRect.left - scroller.scrollLeft + first.box.x;
+    return clientX < textLeft;
+  };
+
+  /** Sweep down the gutter to select a contiguous run of blocks. The press does
+   *  NOT take over immediately: below the threshold it stays whatever it would
+   *  have been (a caret placement in the margin), so a plain click in the gutter
+   *  is unchanged. Once it crosses, the DOM selection is dropped and the gesture
+   *  owns the range.
+   *
+   *  A band over the prose was rejected: a drag beginning in the text is already
+   *  text selection, and a modifier-held one would collide with the reorder drag
+   *  as well as being undiscoverable. */
+  const beginSweep = (e: PointerEvent): void => {
+    if (e.button !== 0) return;
+    if (layer.contains(e.target as Node)) return; // a grip or + press owns itself
+    const blocks = draggableBlocks();
+    if (!inGutter(e.clientX, blocks)) return;
+    activeSweepCleanup?.();
+    const boxes = blocks.map((b) => b.box);
+    const hostRect = scroller.getBoundingClientRect();
+    const startY = e.clientY;
+    const startContentY = startY - hostRect.top + scroller.scrollTop;
+    let swept = false;
+
+    const cleanup = (): void => {
+      scroller.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      activeSweepCleanup = null;
+      if (swept) document.body.classList.remove(SWEEPING_CLASS);
+    };
+    const onMove = (ev: PointerEvent): void => {
+      if (!swept) {
+        if (Math.abs(ev.clientY - startY) < SWEEP_MOVE_THRESHOLD_PX) return;
+        swept = true;
+        document.body.classList.add(SWEEPING_CLASS);
+      }
+      const y = ev.clientY - hostRect.top + scroller.scrollTop;
+      const span = blocksInSweep(boxes, startContentY, y);
+      blockSurface.selectBlockRange(span ? blocks.slice(span[0], span[1] + 1).map((b) => b.id) : []);
+    };
+    const onUp = (): void => {
+      const didSweep = swept;
+      cleanup();
+      // Swallow the click that closes the gesture, or the scroller's margin-click
+      // handler would place a caret and dissolve the range just selected.
+      if (didSweep) suppressGutterClick = true;
+    };
+    activeSweepCleanup = cleanup;
+    scroller.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
+
+  // Capture phase, so the suppression beats the scroller's own click handler
+  // (React's onClick, which routes a margin click to caret placement).
+  const onClickCapture = (e: MouseEvent): void => {
+    activeSweepCleanup?.();
+    if (!suppressGutterClick) return;
+    suppressGutterClick = false;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
   const onReflow = (): void => {
     if (active || selected.size > 0) schedule();
   };
@@ -500,6 +612,8 @@ export function attachBlockChrome({
   // reason the caret and the decoration overlay need none.
   scroller.addEventListener('pointerover', onPointerOver);
   scroller.addEventListener('pointerleave', onPointerLeave);
+  scroller.addEventListener('pointerdown', beginSweep);
+  scroller.addEventListener('click', onClickCapture, true);
   window.addEventListener('resize', onReflow);
   const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onReflow) : null;
   resizeObserver?.observe(surface);
@@ -511,8 +625,12 @@ export function attachBlockChrome({
       unsubscribeSelection();
       scroller.removeEventListener('pointerover', onPointerOver);
       scroller.removeEventListener('pointerleave', onPointerLeave);
+      scroller.removeEventListener('pointerdown', beginSweep);
+      scroller.removeEventListener('click', onClickCapture, true);
       window.removeEventListener('resize', onReflow);
       resizeObserver?.disconnect();
+      activeReorderCleanup?.(); // remove any in-flight gesture's window listeners
+      activeSweepCleanup?.();
       if (scheduled) cancelAnimationFrame(rafId);
       cancelHide();
       active = null;

@@ -34,6 +34,12 @@ function model(s: BlockSurface): string[] {
 function painted(): string[] {
   return Array.from(container.querySelectorAll(':scope > [data-block-id]')).map((el) => el.textContent ?? '');
 }
+/** Drive a real keydown through the surface's handler, the way the block-selection
+ *  suite does: the delete path is owned by the key routing, not a public method. */
+function key(s: BlockSurface, init: KeyboardEventInit): void {
+  const e = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+  (s as unknown as { onKeyDown: (e: Event) => void }).onKeyDown(e);
+}
 function idOf(s: BlockSurface, text: string): string {
   const b = s.getDocument().blocks.find((x) => (x.type === 'paragraph' || x.type === 'heading') && plain(x.inline) === text);
   if (!b) throw new Error(`no top-level block: ${text}`);
@@ -140,5 +146,62 @@ describe('block selection channel', () => {
     expect(s.getSelectedBlockIds().length).toBe(1);
     s.insertBlockAbove(idOf(s, 'b'));
     expect(s.getSelectedBlockIds(), 'the caret moved to the new block').toEqual([]);
+  });
+});
+
+describe('block range selection', () => {
+  it('selects a contiguous run and rings every block in it', () => {
+    const s = surfaceFor('a\n\nb\n\nc\n');
+    s.selectBlockRange([idOf(s, 'a'), idOf(s, 'b')]);
+    expect(s.getSelectedBlockIds()).toEqual([idOf(s, 'a'), idOf(s, 'b')]);
+    expect(container.querySelectorAll('[data-block-selected]').length, 'both are ringed').toBe(2);
+  });
+
+  it('dissolves to nothing on an empty range', () => {
+    const s = surfaceFor('a\n\nb\n');
+    s.selectBlockRange([idOf(s, 'a')]);
+    s.selectBlockRange([]);
+    expect(s.getSelectedBlockIds()).toEqual([]);
+    expect(container.querySelectorAll('[data-block-selected]').length).toBe(0);
+  });
+
+  it('deletes the whole range in one undo step', () => {
+    const s = surfaceFor('a\n\nb\n\nc\n\nd\n');
+    s.selectBlockRange([idOf(s, 'b'), idOf(s, 'c')]);
+    key(s, { key: 'Backspace' });
+    expect(model(s)).toEqual(['a', 'd']);
+    expect(painted()).toEqual(['a', 'd']);
+    s.undo();
+    expect(model(s), 'one undo brings the whole range back').toEqual(['a', 'b', 'c', 'd']);
+    expect(painted()).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('applies a mark across every block in the range', () => {
+    const s = surfaceFor('a\n\nb\n');
+    s.selectBlockRange([idOf(s, 'a'), idOf(s, 'b')]);
+    s.toggleMark('strong');
+    for (const block of s.getDocument().blocks) {
+      if (block.type !== 'paragraph') continue;
+      expect(block.inline.every((n) => n.kind !== 'text' || n.marks.strong), 'fully marked').toBe(true);
+    }
+  });
+
+  it('retypes every block in the range with Turn into', () => {
+    const s = surfaceFor('a\n\nb\n');
+    s.selectBlockRange([idOf(s, 'a'), idOf(s, 'b')]);
+    s.setBlockType({ kind: 'heading', level: 2 });
+    expect(s.getDocument().blocks.map((b) => b.type)).toEqual(['heading', 'heading']);
+  });
+
+  it('marks the prose inside a selected list without choking on a barrier', () => {
+    // A range can hold blocks that cannot carry a mark. Those yield no leaves, so
+    // the command applies to the prose and skips the rest rather than refusing.
+    const s = surfaceFor('- one\n- two\n\n---\n\ntail\n');
+    const ids = s.getDocument().blocks.map((b) => b.id);
+    s.selectBlockRange(ids);
+    s.toggleMark('em');
+    const list = s.getDocument().blocks.find((b) => b.type === 'bullet_list');
+    expect(list?.type).toBe('bullet_list');
+    expect(s.getDocument().blocks.map((b) => b.type), 'the divider is untouched').toContain('horizontal_rule');
   });
 });

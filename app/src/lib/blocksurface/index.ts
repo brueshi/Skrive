@@ -66,6 +66,7 @@ export {
   blockDropEdges,
   blockDropIndicatorRect,
   blockHoverZone,
+  blocksInSweep,
   BLOCK_CHROME_METRICS,
   type BlockSlot,
   type BlockGeometry,

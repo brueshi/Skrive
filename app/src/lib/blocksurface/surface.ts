@@ -1284,7 +1284,37 @@ export class BlockSurface {
    *  order, each clamped to its in-block range. A leaf the selection only grazes
    *  at offset 0 (the classic triple-click bleed into the next block) contributes
    *  nothing and is dropped, so marks land only where text is really selected. */
+  /** Every inline-text leaf inside the given top-level blocks, in document order,
+   *  each covered end to end. Descends into containers, so selecting a list yields
+   *  its items' paragraphs. Barriers (code / table / divider) yield nothing, which
+   *  is what lets a mark command skip them for free rather than refusing the whole
+   *  gesture because one block in the range cannot carry a mark. */
+  private leavesWithinBlocks(ids: readonly string[]): Array<{ leaf: InlineTextBlock; start: number; end: number }> {
+    const out: Array<{ leaf: InlineTextBlock; start: number; end: number }> = [];
+    const walk = (nodes: BlockNode[]): void => {
+      for (const b of nodes) {
+        if (isInlineText(b)) {
+          const end = inlineLength(b.inline);
+          if (end > 0) out.push({ leaf: b, start: 0, end });
+        } else if (b.type === 'blockquote' || b.type === 'footnote_definition') walk(b.children);
+        else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
+          for (const item of b.items) walk(item.children);
+        }
+      }
+    };
+    const wanted = new Set(ids);
+    walk(this.doc.blocks.filter((b) => wanted.has(b.id)));
+    return out;
+  }
+
   private selectedLeaves(): Array<{ leaf: InlineTextBlock; start: number; end: number }> {
+    // A block selection has no DOM range to read — it deliberately clears the live
+    // selection and holds the ids itself — so resolve its leaves from the model.
+    // This is what makes the mark and Turn-into commands work across a gutter
+    // sweep: both already map over whatever selectedLeaves yields, so a swept
+    // range needs no command of its own. Whole leaves, since a block selected as a
+    // unit has no partial offsets.
+    if (this.blockSel.length > 0) return this.leavesWithinBlocks(this.blockSel);
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return [];
     const range = sel.getRangeAt(0);
@@ -4606,6 +4636,26 @@ export class BlockSurface {
    *  no selection of its own. */
   selectBlockAt(id: string): void {
     this.selectBlock(id);
+  }
+
+  /** Select a contiguous run of top-level blocks — the gutter sweep. Not a new
+   *  selection model: it writes the same authoritative state a single-block
+   *  selection uses, which was built plural from the start, so delete, type-over
+   *  and the ring all carry over unchanged.
+   *
+   *  Clears to nothing on an empty list, so a sweep that resolves to no blocks
+   *  dissolves the selection rather than leaving a stale one lit. */
+  selectBlockRange(ids: readonly string[]): void {
+    if (ids.length === 0) {
+      this.clearBlockSelectionState();
+      return;
+    }
+    this.blockSel = [...ids];
+    this.renderBlockSelection();
+    window.getSelection()?.removeAllRanges();
+    this.container.focus();
+    this.emitSelection();
+    this.notifyBlockSelection();
   }
 
   /** Insert an empty paragraph above a top-level block (the `+` beside the grip)

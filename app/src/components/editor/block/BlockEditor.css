@@ -934,6 +934,13 @@ body.sk-block-reordering {
   user-select: none;
 }
 
+/* A gutter sweep crosses prose on its way down, so text selection is suppressed
+   for the length of the gesture — otherwise the drag paints a text highlight
+   underneath the block range it is actually selecting. */
+body.sk-block-sweeping {
+  user-select: none;
+}
+
 /* Column resize (SKR-270): a thin invisible grab strip centred on each interior
    column boundary. It advertises with the col-resize cursor and shows only a faint
    accent line while hovered or dragging, so a hovered table stays calm. The strip
