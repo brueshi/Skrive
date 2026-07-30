@@ -811,5 +811,88 @@ export function moveTableColumn(blocks: BlockNode[], tableId: string, from: numb
   });
 }
 
+/**
+ * Clear the captured seam on the given ids, leaving every other field — including
+ * `dirty` and `src` — untouched.
+ *
+ * A `gapBefore` is the VERBATIM bytes at the seam before a block, and the
+ * serializer honours it wherever the block ends up (`gapForSeam`). That is right
+ * while a block stays put and wrong the moment it moves: a block carrying `"\n\n"`
+ * dropped at the top of the document would open the file with a blank line, and the
+ * old first block (seam `null`, which renders as `''` only at index 0) would glue
+ * itself to whatever now precedes it. Nulling the disturbed seams hands them back
+ * to the reconstruction rule — nothing before the first block, a blank line
+ * otherwise — which is the canonical spacing a reorder should produce.
+ *
+ * `dirty` deliberately stays as it was: the block's BODY has not changed, so a
+ * clean block goes on emitting its `src` byte-pristine. Only the seam moved.
+ */
+function clearSeams(blocks: BlockNode[], ids: Set<string>): BlockNode[] {
+  return blocks.map((b) => (ids.has(b.id) && b.gapBefore != null ? { ...b, gapBefore: null } : b));
+}
+
+/**
+ * Move a top-level block to a new position (grip drag-to-reorder). `to` is an
+ * insertion BOUNDARY in `[0, blocks.length]` — the drop line between blocks, not a
+ * final index — so it maps straight from where the drop indicator sits, exactly as
+ * `moveTableRow`'s does. The moved block lands at `to > from ? to - 1 : to`.
+ *
+ * Top-level only, by design: the grip is a top-level affordance, so `id` must name
+ * a block in `blocks` itself. A nested block (a list item's paragraph, a quote's
+ * child) returns null rather than being lifted out of its container — that would be
+ * an outdent wearing a reorder's clothes, and `list-ops` already owns outdenting.
+ *
+ * Returns null when `id` is not a top-level block, `to` is out of range, or the
+ * boundary flanks the block (`to === from` or `to === from + 1`), so a no-op drag
+ * earns no undo step.
+ */
+export function moveBlock(blocks: BlockNode[], id: string, to: number): BlockNode[] | null {
+  const from = blocks.findIndex((b) => b.id === id);
+  if (from < 0) return null; // not top-level (or gone)
+  if (to < 0 || to > blocks.length) return null;
+  if (to === from || to === from + 1) return null; // flanking boundaries: no move
+  const insertAt = to > from ? to - 1 : to;
+  // The three seams a move disturbs, captured BEFORE the splice while the old
+  // neighbourhood is still readable: the block's own, the one that closes the gap
+  // it left behind, and the one it now sits in front of. Any of these may be
+  // absent (moving from or to the end of the document).
+  const disturbed = new Set<string>([id]);
+  const vacated = blocks[from + 1];
+  if (vacated) disturbed.add(vacated.id);
+  const displaced = blocks[to];
+  if (displaced) disturbed.add(displaced.id);
+  return clearSeams(spliceMove(blocks, from, insertAt), disturbed);
+}
+
+/**
+ * Insert a fresh empty paragraph immediately before a top-level block (the `+`
+ * beside the grip), with the caret landing in it. Top-level only, for the same
+ * reason `moveBlock` is: this is the grip's companion affordance.
+ *
+ * The displaced block's captured seam is cleared — it described the gap to a
+ * predecessor that is no longer there.
+ *
+ * Note the paragraph is invisible in serialized Markdown until it holds text: an
+ * empty paragraph has no Markdown form and the serializer drops it whole, seam and
+ * all. It is real in the model and in `.folio` (where a blank line the writer typed
+ * genuinely belongs), and it materializes in `.md` the moment it is typed into.
+ */
+export function insertBlockBefore(blocks: BlockNode[], id: string): RangeResult | null {
+  const at = blocks.findIndex((b) => b.id === id);
+  if (at < 0) return null; // not top-level (or gone)
+  const para: BlockNode = {
+    type: 'paragraph',
+    id: generateBlockId(),
+    durable: false,
+    src: null,
+    gapBefore: null,
+    dirty: true,
+    inline: []
+  };
+  const next = blocks.slice();
+  next.splice(at, 0, para);
+  return { blocks: clearSeams(next, new Set([id])), caret: { id: para.id, offset: 0 } };
+}
+
 // Re-export so callers that need a fresh id for any future split path have it.
 export { generateBlockId };
