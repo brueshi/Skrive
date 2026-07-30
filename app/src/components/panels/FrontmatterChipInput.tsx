@@ -15,6 +15,7 @@
 // only edit contract that preserves punctuation.
 
 import { useEffect, useRef, useState } from 'react';
+import { Input } from '../ui/Input';
 
 type Props = {
   value: string[];
@@ -118,7 +119,7 @@ export function FrontmatterChipInput({
     <div className="chip-group" role="list">
       {value.map((chip, i) =>
         editingIndex === i ? (
-          <input
+          <Input
             key={`edit-${i}`}
             ref={editInputRef}
             className="chip-edit"

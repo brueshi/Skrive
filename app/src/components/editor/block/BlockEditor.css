@@ -334,7 +334,7 @@
 }
 
 .block-editor-surface a {
-  color: var(--skrive-accent, #2563eb);
+  color: var(--skrive-accent);
   text-decoration: underline;
 }
 

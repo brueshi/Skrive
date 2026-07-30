@@ -46,6 +46,15 @@
      as a solid background (the destructive button's hover). */
   --skrive-danger: light-dark(#a84030, #df7e6f);
   --skrive-danger-fill: light-dark(#a84030, #c0503e);
+  /* The foreground that sits ON -danger-fill. Scheme-independent by design: the
+     fill is a deep red in both themes, so its text is white in both. A literal
+     rather than a light-dark pair, because there is nothing to switch. */
+  --skrive-on-danger-fill: #fff;
+
+  /* Status. Soft sage — a calm "active" mark, deliberately not the indigo
+     accent, which carries selection and interaction meaning elsewhere. One
+     value for both schemes: it reads on the light rail and the dark one. */
+  --skrive-status-ok: #a9c79b;
 
   /* ---- Icon tones (theme-tuned filled icons) ----
      The folder + document glyphs are the one place we depart from the
@@ -135,7 +144,15 @@
   /* Radius. Existing convention preserved: xs for embedded chrome
      (inline code, close-button hover); sm for small icon buttons,
      chips, inputs; md for prominent controls (modal buttons, mode
-     toggle, panel containers, tab tops). */
+     toggle, panel containers, tab tops).
+
+     BELOW the scale is a category, not a set of violations. Hairlines, ticks,
+     tone stripes and drawn glyph bars — elements 1-3px across — carry 1px or
+     2px corners because that is GEOMETRY, not a design-system corner: xs on a
+     2px bar is a semicircle, which is a different shape rather than a
+     softer one. Those literals are correct and a sweep should leave them.
+     A radius is a scale question only once the element is big enough to have
+     a corner to round. */
   --skrive-radius-xs: 4px;
   --skrive-radius-sm: 6px;
   --skrive-radius-md: 8px;
@@ -779,7 +796,7 @@ body {
 
 /* Close follows the Windows convention: red wash on hover, light glyph. */
 .window-control-close:hover {
-  color: #fff;
+  color: var(--skrive-on-danger-fill);
   background: var(--skrive-danger-fill);
 }
 
@@ -1002,37 +1019,22 @@ body {
   color: var(--skrive-muted);
 }
 
+/* Placement, plus one deliberate retune. The dismiss button is the IconButton
+   primitive, which owns its square, ink and hover; this class says WHERE it
+   sits in the sheet.
+
+   The hover fill is turned off so the × itself brightens and no box appears
+   behind it — an owner call for this button specifically. It is done by
+   retuning the component token rather than out-specificity-ing the primitive's
+   rule, which is exactly what the component tier is for: the look changes in
+   one place and the primitive's CSS is never fought. A dialog's close button
+   sits on an otherwise empty sheet corner with nothing to align its box to,
+   which is why it reads differently here than in a dense row of chrome. */
 .modal-dismiss {
   position: absolute;
   top: 0.75rem;
   right: 0.75rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--skrive-muted);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0.55;
-  transition:
-    opacity var(--skrive-duration-quick) var(--skrive-easing),
-    background var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.modal-dismiss:hover:not(:disabled) {
-  opacity: 1;
-  background: color-mix(in srgb, var(--skrive-muted) 16%, transparent);
-}
-
-.modal-dismiss:disabled {
-  opacity: 0.3;
-  cursor: default;
+  --icon-button-bg-hover: transparent;
 }
 
 .app-body {
@@ -2658,7 +2660,24 @@ body {
   white-space: nowrap;
 }
 
-.diff-scroll-toggle,
+/* Segmented convergence, decided: three of the four non-primitive segmented
+   controls STAY as they are. Do not re-open this without a reason.
+
+   Icon-only ones (.diff-mode-toggle here, the sidebar's All-view switch in
+   AllList): the primitive's options are `{ id, label: string }` — it renders
+   text and has no slot for an icon or the Tooltip an icon-only control needs to
+   say what it does. Converging them means widening the primitive's API, which
+   is a decision about what Segmented IS rather than cleanup.
+
+   The Markdown layout switch (.md-layout-toggle, EditorBar.css): converged onto
+   the primitive and then REVERTED on the owner's judgement — the primitive's
+   framer-motion thumb did not feel as good as the bespoke measured one. Its
+   0.26s curve is deliberate and the duplication is accepted with eyes open.
+   Feel beat de-duplication here; a future sweep that converges it again will be
+   making the same mistake, not finding a missed one.
+
+   The diff scroll-sync switch DID converge — it is plain text with no motion
+   anyone tuned. */
 .diff-mode-toggle {
   display: inline-flex;
   border: 1px solid var(--skrive-rule);
@@ -2666,34 +2685,14 @@ body {
   overflow: hidden;
 }
 
-.diff-scroll-button {
-  background: transparent;
-  border: none;
-  color: var(--skrive-muted);
-  cursor: pointer;
-  height: 24px;
-  padding: 0 0.5rem;
-  font: inherit;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: lowercase;
-  transition:
-    color var(--skrive-duration-quick) var(--skrive-easing),
-    background-color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.diff-scroll-button + .diff-scroll-button,
 .diff-mode-button + .diff-mode-button {
   border-left: 1px solid var(--skrive-rule);
 }
 
-.diff-scroll-button:hover,
 .diff-mode-button:hover {
   color: var(--skrive-fg);
 }
 
-.diff-scroll-button.active,
 .diff-mode-button.active {
   color: var(--skrive-fg);
   background: var(--skrive-rule);
@@ -3105,7 +3104,7 @@ body {
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  border-radius: 9px;
+  border-radius: var(--skrive-radius-pill);
   background: var(--bl-pill-bg);
   font-size: 11px;
   font-weight: 600;
@@ -3225,7 +3224,7 @@ body {
   display: inline-flex;
   align-items: center;
   padding: 0 6px;
-  border-radius: 5px;
+  border-radius: var(--skrive-radius-sm);
   background: var(--bl-pill-bg);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px;
@@ -3248,7 +3247,7 @@ body {
   display: inline-flex;
   align-items: center;
   padding: 0 6px;
-  border-radius: 5px;
+  border-radius: var(--skrive-radius-sm);
   font-size: 10px;
   font-weight: 500;
   text-transform: uppercase;
@@ -3539,17 +3538,17 @@ body {
   color: var(--skrive-fg);
 }
 
+/* The inline chip editor is the Input primitive; this retunes its SCALE for a
+   dense chip row and lets it size to content, which the primitive (width:100%)
+   does not. Border, background, radius and the focus glow come from the
+   primitive — it previously had no focus style at all, so it now speaks the
+   app's one focus language instead of the browser's. */
 .chip-edit {
-  background: var(--skrive-bg);
-  border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-radius-sm);
-  color: var(--skrive-fg);
-  font: inherit;
-  font-size: 12px;
-  padding: 0.2rem 0.4rem;
-  min-width: 4rem;
   width: auto;
-  box-sizing: border-box;
+  min-width: 4rem;
+  --input-font-size: 12px;
+  --input-pad-y: 0.2rem;
+  --input-pad-x: 0.4rem;
 }
 
 /* The chip-pending input nests inside a .chip-group container that
@@ -3852,8 +3851,7 @@ body {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  /* Soft sage — a calm "license active" status, not the indigo accent. */
-  background: #a9c79b;
+  background: var(--skrive-status-ok);
   flex-shrink: 0;
 }
 
@@ -4124,8 +4122,13 @@ body {
 .theme-preview-line:nth-child(2) { width: 90%; }
 .theme-preview-line:nth-child(3) { width: 75%; }
 
-/* Each preview paints its own scheme so the choice is legible at a
-   glance regardless of the active theme. System splits light/dark. */
+/* Each preview paints its own scheme so the choice is legible at a glance
+   regardless of the active theme. System splits light/dark.
+
+   The literals below are the POINT and must not be tokenized: a swatch showing
+   "dark" has to stay dark while the app is light, so wiring it to --skrive-bg
+   would collapse all three tiles into the active theme and make the picker
+   useless. They are copies of the scheme values by necessity, not by neglect. */
 .theme-preview--light {
   background: #ffffff;
   color: #4c5ba6;
@@ -4212,22 +4215,6 @@ body {
 .chip-add:hover {
   color: var(--skrive-fg);
   border-color: var(--skrive-muted);
-}
-
-.chip-input {
-  height: 26px;
-  width: 80px;
-  padding: 0 8px;
-  border: 1px solid var(--skrive-focus-ring);
-  border-radius: var(--skrive-radius-sm);
-  background: var(--skrive-bg);
-  color: var(--skrive-fg);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-}
-
-.chip-input:focus {
-  outline: none;
 }
 
 /* ---- Shared field inputs / buttons (carried from the modal era) ---- */
@@ -4796,7 +4783,7 @@ body {
   margin: -0.25rem 0 1.25rem;
   padding: 0.75rem 0.875rem;
   background: color-mix(in srgb, var(--skrive-muted) 7%, transparent);
-  border-radius: 10px;
+  border-radius: var(--skrive-radius-md);
   color: var(--skrive-muted);
   font-family: var(--skrive-mono-font, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 0.75rem;
@@ -5439,7 +5426,7 @@ body {
   height: 20px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--skrive-radius-sm);
   background: transparent;
   color: var(--skrive-muted);
   font-size: 15px;
@@ -5479,7 +5466,7 @@ body {
   margin-top: 0.6875rem;
   padding: 0.3125rem 0.6875rem;
   border: 1px solid var(--skrive-rule);
-  border-radius: 8px;
+  border-radius: var(--skrive-radius-md);
   background: var(--skrive-bg);
   color: var(--skrive-fg);
   font-family: var(--skrive-ui-font);

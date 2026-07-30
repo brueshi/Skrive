@@ -7,10 +7,13 @@
  * No `light-dark()` here: these reference semantic tokens that already resolve
  * per scheme, so the component tier is scheme-agnostic by construction. */
 :root {
-  /* Button — design lifted from the .modal-button language it replaced.
-     9px radius pairs with the sheet frame's 16px (an off-scale value Stage 4
-     of SKR-207 revisits). */
-  --button-radius: 9px;
+  /* Button — design lifted from the .modal-button language it replaced. The
+     radius is `md`, matching --input-radius: a button and a text field sit side
+     by side in every dialog, and a 1px difference in their corners is the kind
+     of mismatch you feel without being able to name. (It was 9px, off-scale, on
+     the theory that it paired with the sheet frame's 16px; matching the control
+     it stands next to beats matching the frame it sits inside.) */
+  --button-radius: var(--skrive-radius-md);
   --button-font-size: 0.8125rem;
   --button-pad-y: 0.5rem;
   --button-pad-x: 1.1rem;

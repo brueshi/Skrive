@@ -63,7 +63,7 @@
   }
   .danger.primary:not(:disabled):hover {
     --button-bg: var(--button-danger-bg-hover);
-    --button-fg: #fff;
+    --button-fg: var(--skrive-on-danger-fill);
   }
   .danger:not(.primary) {
     --button-fg: var(--button-danger-fg);

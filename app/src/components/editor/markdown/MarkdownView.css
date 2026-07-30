@@ -61,5 +61,5 @@
 
 .md-split-divider:hover::before,
 .md-split-divider:active::before {
-  background: var(--skrive-accent, #6b6b8a);
+  background: var(--skrive-accent);
 }
