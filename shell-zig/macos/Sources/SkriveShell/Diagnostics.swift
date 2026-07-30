@@ -150,6 +150,44 @@ enum Diagnostics {
         }
       } catch (e) { result.lintWorkerError = String(e); }
 
+      // Spelling oracle round-trip. This is the assertion that catches the
+      // Swift-6 executor-isolation SIGTRAPs: both crashes fired the INSTANT the
+      // NSSpellChecker completion handler ran, so merely having the namespace is
+      // not evidence — the check must actually come back. A host with no oracle
+      // (Windows today) legitimately reports available:false and is not a
+      // failure; the judge treats the two cases differently.
+      try {
+        const spell = window.skrive.spell;
+        result.spellNamespace = !!spell;
+        if (spell) {
+          result.spellAvailable = await spell.available();
+          if (result.spellAvailable) {
+            // "teh" is misspelled, "the" and "cat" are not, so a correct oracle
+            // returns exactly one range and it covers offsets 4-7.
+            const checked = await spell.check([{ id: 'smoke', text: 'the teh cat' }]);
+            const ranges = (checked && checked[0] && checked[0].ranges) || [];
+            result.spellRangeCount = ranges.length;
+            result.spellRangeCoversTeh =
+              ranges.length === 1 && ranges[0].start === 4 && ranges[0].end === 7;
+            const suggestions = await spell.suggest('teh');
+            result.spellSuggestCount = Array.isArray(suggestions) ? suggestions.length : -1;
+          }
+        }
+      } catch (e) { result.spellError = String(e); }
+
+      // Painted blocks, INFORMATIONAL only. The app boots to its welcome state
+      // and opens nothing, so zero is the expected value on a clean run; making
+      // a document mount would mean driving the UI, which this harness
+      // deliberately does not do. Reported because a non-zero count on a run
+      // that restored a session is useful signal, not because it is a gate.
+      //
+      // The blank-screen dep race is caught without it: a module graph that
+      // fails to load never mounts React at all, so rootChildren is 0 and the
+      // console relay counts the load error.
+      try {
+        result.blockCount = document.querySelectorAll('[data-block-id]').length;
+      } catch (e) { result.blockCountError = String(e); }
+
       window.webkit.messageHandlers.skriveDiag.postMessage('SELFTEST ' + JSON.stringify(result));
     })();
     """
