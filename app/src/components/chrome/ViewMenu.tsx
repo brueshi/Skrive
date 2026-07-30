@@ -57,6 +57,10 @@ export function ViewMenu() {
   const setShowMeasureRule = usePreferencesStore(
     (s) => s.setShowMeasureRule
   );
+  const showOutlineRail = usePreferencesStore((s) => s.showOutlineRail);
+  const setShowOutlineRail = usePreferencesStore(
+    (s) => s.setShowOutlineRail
+  );
   const focusMode = useProjectStore((s) => s.focusMode);
   const toggleFocusMode = useProjectStore((s) => s.toggleFocusMode);
 
@@ -146,6 +150,13 @@ export function ViewMenu() {
             onCheckedChange={() => setShowMeasureRule(!showMeasureRule)}
           >
             <span className="ctx-label">Measure rule</span>
+          </DropdownMenu.CheckboxItem>
+          <DropdownMenu.CheckboxItem
+            className="ctx-item"
+            checked={showOutlineRail}
+            onCheckedChange={() => setShowOutlineRail(!showOutlineRail)}
+          >
+            <span className="ctx-label">Document outline</span>
           </DropdownMenu.CheckboxItem>
           {hasMeasureHome && (
             <>

@@ -853,6 +853,16 @@ export function buildRegistry(deps: CommandDeps): {
         s.setShowMeasureRule(!s.showMeasureRule);
       }
     },
+    {
+      id: 'view.toggleOutlineRail',
+      label: 'Toggle document outline',
+      group: 'View',
+      when: whenLiveDoc,
+      run: () => {
+        const s = usePreferencesStore.getState();
+        s.setShowOutlineRail(!s.showOutlineRail);
+      }
+    },
 
     // ============ Insert (block surface affordances) ============
     // Generated from INSERT_CATALOG so the palette Insert group, the toolbar
