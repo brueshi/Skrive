@@ -34,11 +34,26 @@ type Props = {
    * levels, or texts (see `headingStructureKey` in Preview.tsx) — and
    * triggers a full re-measure. Paragraph-only edits keep it stable;
    * offset shifts from reflow (images decoding, pane resize) reach us
-   * through the ResizeObserver path instead. The Rich surface passes a
-   * constant and relies entirely on that resize path, so structural
-   * changes there must still be detected by the observer callback.
+   * through the ResizeObserver path instead.
+   *
+   * Only meaningful for content that is replaced wholesale (the preview's
+   * innerHTML swap). A surface that reconciles its DOM in place has no
+   * honest key to offer and passes `subscribeStructure` instead.
    */
   renderKey: string;
+  /**
+   * Structural-change subscription for surfaces reconciled in place. The
+   * block surface calls back on exactly the passes that add, remove, or
+   * replace block elements — the edits that can change the outline —
+   * which is the signal `renderKey` cannot carry there.
+   *
+   * Without it the only structural trigger is the ResizeObserver, which
+   * infers "the headings changed" from "the content got taller". Edits
+   * that keep the height identical (renaming a heading that doesn't
+   * rewrap, reordering two equal-height blocks) never fire it and leave
+   * the strip stale. Returns an unsubscribe.
+   */
+  subscribeStructure?: (fn: () => void) => () => void;
 };
 
 // Headings need at least this many to be worth a rail; one heading is
@@ -84,7 +99,12 @@ function queryHeadingEls(content: HTMLElement): HTMLElement[] {
   );
 }
 
-export function OutlineRail({ scrollerRef, contentRef, renderKey }: Props) {
+export function OutlineRail({
+  scrollerRef,
+  contentRef,
+  renderKey,
+  subscribeStructure
+}: Props) {
   const [headings, setHeadings] = useState<OutlineHeading[]>([]);
   // The rail spans the scroller, so its height is the scroller's visible
   // height — used to center the tick cluster.
@@ -232,14 +252,32 @@ export function OutlineRail({ scrollerRef, contentRef, renderKey }: Props) {
     const ro = new ResizeObserver(onResize);
     ro.observe(content);
     ro.observe(scroller);
+
+    // Structural re-renders, for surfaces that reconcile in place. Deferred
+    // to the next frame rather than measured inline: the callback fires
+    // synchronously from the middle of the reconcile pass, so reading
+    // layout there would force a synchronous reflow on an edit — and the
+    // freshly-swapped elements haven't been laid out yet anyway. Coalesced,
+    // because one pass can rebuild many blocks.
+    let structureRaf: number | null = null;
+    const unsubscribeStructure = subscribeStructure?.(() => {
+      if (structureRaf != null) return;
+      structureRaf = requestAnimationFrame(() => {
+        structureRaf = null;
+        measure();
+      });
+    });
+
     return () => {
       cancelAnimationFrame(firstRaf);
       if (leadingRaf != null) cancelAnimationFrame(leadingRaf);
+      if (structureRaf != null) cancelAnimationFrame(structureRaf);
       if (trailingTimer) clearTimeout(trailingTimer);
       measureRef.current = null;
       ro.disconnect();
+      unsubscribeStructure?.();
     };
-  }, [renderKey, scrollerRef, contentRef]);
+  }, [renderKey, scrollerRef, contentRef, subscribeStructure]);
 
   // Track the active section as the reader scrolls. Cheap: it reuses the
   // cached offsets and only recomputes an index, throttled to a frame.
