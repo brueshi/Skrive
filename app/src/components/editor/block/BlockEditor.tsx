@@ -16,6 +16,7 @@ import { BlockSurface, DocHistory } from '../../../lib/blocksurface';
 import { attachCustomCaret } from '../../../lib/blocksurface/caret';
 import { attachDecorationOverlay } from '../../../lib/blocksurface/decoration-overlay';
 import { attachFocusActive } from '../../../lib/blocksurface/focus-active';
+import { attachBlockChrome } from '../../../lib/blocksurface/block-chrome';
 import { attachTableChrome } from '../../../lib/blocksurface/table-chrome';
 import { attachCodeHighlight } from '../../../lib/blocksurface/highlight/code-highlight';
 import { attachFootnotePeek } from '../../../lib/blocksurface/footnote-peek';
@@ -71,6 +72,7 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
   const caretRef = useRef<HTMLDivElement>(null);
   const decorationRef = useRef<HTMLDivElement>(null);
   const tableChromeRef = useRef<HTMLDivElement>(null);
+  const blockChromeRef = useRef<HTMLDivElement>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const [ctx, setCtx] = useState<{
@@ -163,7 +165,8 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
     const caretEl = caretRef.current;
     const decorationEl = decorationRef.current;
     const tableChromeEl = tableChromeRef.current;
-    if (!host || !scroller || !caretEl || !decorationEl || !tableChromeEl) return;
+    const blockChromeEl = blockChromeRef.current;
+    if (!host || !scroller || !caretEl || !decorationEl || !tableChromeEl || !blockChromeEl) return;
     const surface = new BlockSurface({
       container: host,
       doc,
@@ -209,6 +212,16 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
       layer: tableChromeEl,
       blockSurface: surface
     });
+    // Per-block hover chrome: the grip and + beside the hovered block. Same layer
+    // model and lifecycle as the table chrome one level up, measuring real block
+    // geometry (a block's height is whatever its wrapped text needs) and rebuilding
+    // off the structural-change signal rather than the keystroke path.
+    const blockChrome = attachBlockChrome({
+      surface: host,
+      scroller,
+      layer: blockChromeEl,
+      blockSurface: surface
+    });
     // Footnote hover peek (SKR-56): shows a reference's definition text on hover.
     // View-only, delegated off the host; the ref<->def jump lives in the surface.
     const footnotePeek = attachFootnotePeek(host);
@@ -234,6 +247,7 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
       caret.destroy();
       decorations.destroy();
       tableChrome.destroy();
+      blockChrome.destroy();
       highlight.destroy();
       footnotePeek.destroy();
       teardownDevHarness?.();
@@ -286,6 +300,10 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
             are never buried; the layer itself is pointer-transparent and only
             its buttons take input. */}
         <div ref={tableChromeRef} className="block-table-chrome-layer" />
+        {/* Per-block hover chrome: the grip and + in the left gutter. Same
+            content coordinate space and the same pointer-transparent layer as
+            the table gutters above it. */}
+        <div ref={blockChromeRef} className="block-chrome-layer" />
         <div ref={caretRef} className="skrive-caret" aria-hidden="true" />
       </div>
       {/* Document-structure rail (SKR-229), same component the Markdown preview

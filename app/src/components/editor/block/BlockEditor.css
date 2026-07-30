@@ -779,6 +779,168 @@
   }
 }
 
+/* Per-block chrome: the same layer model as the table gutters one level up — an
+   inert overlay pinned at the scroller's content origin, with each slot
+   transform-positioned in content coordinates so it rides the scroll for free and
+   never sits inside the contenteditable. Only the grip and + take pointer input. */
+.block-chrome-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.sk-block-chrome {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* The grip: deliberately the table row/column handle's bar, not a second visual
+   idea. A block grip and a table row grip sit inches apart in the same document,
+   so they share a language — a quiet rounded bar that reads as "this is a thing
+   you can grab", brightening to the accent on hover to advertise itself. */
+.sk-block-chrome--grip {
+  padding: 0;
+  border: none;
+  background: var(--skrive-rule);
+  border-radius: 999px;
+  /* Faint on a hovered block, so pointing at a paragraph reads as calm rather
+     than as the margin lighting up. The layer only builds slots for the hovered
+     and selected blocks, so this never applies to a whole document at once. */
+  opacity: 0.55;
+  cursor: grab;
+  pointer-events: auto;
+  transition: background-color 120ms ease, opacity 120ms ease;
+}
+
+.sk-block-chrome--grip:hover,
+.sk-block-chrome--grip:focus-visible {
+  background: var(--skrive-accent);
+  opacity: 1;
+}
+
+/* A selected block's grip stays accent-filled with the pointer away — its
+   persistence is what marks the block selected — with the same faint accent ring
+   the table handles use to separate selected from merely hovered. */
+.sk-block-chrome--grip.is-selected {
+  background: var(--skrive-accent);
+  opacity: 1;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--skrive-accent) 30%, transparent);
+}
+
+/* The +: the append rail's treatment at button scale — a soft-lifted square in the
+   toast's visual language with a drawn + centred in it. */
+.sk-block-chrome--insert {
+  padding: 0;
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-sm, 6px);
+  background: var(--skrive-bg);
+  box-shadow: var(--skrive-shadow-sheet);
+  color: var(--skrive-accent);
+  opacity: 0.55;
+  cursor: pointer;
+  pointer-events: auto;
+  /* Opacity only: `transform` is what POSITIONS each slot, so transitioning it
+     would animate the button sliding into place on every reflow. */
+  transition: opacity 120ms ease;
+}
+
+.sk-block-chrome--insert:hover,
+.sk-block-chrome--insert:focus-visible {
+  opacity: 1;
+}
+
+/* The +, drawn rather than shipped as an asset: two centred bars. */
+.sk-block-chrome--insert::before,
+.sk-block-chrome--insert::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  background: currentColor;
+  border-radius: 1px;
+  transform: translate(-50%, -50%);
+}
+
+.sk-block-chrome--insert::before {
+  width: 9px;
+  height: 1.5px;
+}
+
+.sk-block-chrome--insert::after {
+  width: 1.5px;
+  height: 9px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk-block-chrome--grip,
+  .sk-block-chrome--insert {
+    transition: none;
+  }
+}
+
+/* The drop indicator: the table drop line's treatment, run horizontally across the
+   writing measure. A dot at each end so it reads unmistakably as "the block lands
+   here" rather than as a rule belonging to the block above or below it. */
+.sk-block-chrome--drop {
+  background: var(--skrive-accent);
+  border-radius: 2px;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--skrive-accent) 35%, transparent),
+    0 0 6px color-mix(in srgb, var(--skrive-accent) 45%, transparent);
+}
+
+.sk-block-chrome--drop::before,
+.sk-block-chrome--drop::after {
+  content: '';
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--skrive-accent);
+  top: 50%;
+}
+
+.sk-block-chrome--drop::before {
+  left: -4px;
+  transform: translateY(-50%);
+}
+
+.sk-block-chrome--drop::after {
+  right: -4px;
+  transform: translateY(-50%);
+}
+
+/* The block in flight recedes for the length of the drag — the "what is moving"
+   half of the feedback. Dimming rather than tinting, because a block is prose the
+   writer is reading and an accent wash across a whole paragraph is loud where a
+   wash across one table row is not. View-only, cleared on drop. */
+.block-editor-surface [data-block-dragging] {
+  opacity: 0.4;
+}
+
+/* The grip being dragged stays accent-lit, so the eye keeps hold of the block in
+   flight, and the cursor stays grabbing even as the pointer leaves the grip. */
+.sk-block-chrome--grip.is-dragging {
+  background: var(--skrive-accent);
+  opacity: 1;
+  cursor: grabbing;
+}
+
+body.sk-block-reordering {
+  cursor: grabbing;
+  user-select: none;
+}
+
+/* A gutter sweep crosses prose on its way down, so text selection is suppressed
+   for the length of the gesture — otherwise the drag paints a text highlight
+   underneath the block range it is actually selecting. */
+body.sk-block-sweeping {
+  user-select: none;
+}
+
 /* Column resize (SKR-270): a thin invisible grab strip centred on each interior
    column boundary. It advertises with the col-resize cursor and shows only a faint
    accent line while hovered or dragging, so a hovered table stays calm. The strip

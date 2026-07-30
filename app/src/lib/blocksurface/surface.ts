@@ -23,7 +23,7 @@ import { HighlightBus } from './highlight/highlight-bus';
 import { SpellBus } from '../spellcheck/spell-bus';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
-import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertTableColumn, insertTableRow, mergeBackward, mergeForward, moveTableColumn, moveTableRow, removeBlocks, removeFootnote, removeTableColumn, removeTableRow, replaceAcross, setColumnAlignment, setTableColumnWidths } from './range-ops';
+import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertBlockBefore, insertTableColumn, insertTableRow, mergeBackward, mergeForward, moveBlock, moveTableColumn, moveTableRow, removeBlocks, removeFootnote, removeTableColumn, removeTableRow, replaceAcross, setColumnAlignment, setTableColumnWidths } from './range-ops';
 import { blockIndexOf, findBlockById, updateBlockById, updateBlockInTop } from './tree';
 import { enterInContainer, exitContainer, splitBlockAt, type StructuralResult } from './structural';
 import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
@@ -298,6 +298,11 @@ export class BlockSurface {
   // Table row/column selection-change listeners (the chrome keeps the selected
   // handle lit off this). Empty until the chrome subscribes.
   private readonly tableSelectionListeners = new Set<() => void>();
+  // Block selection-change listeners (the per-block chrome keeps the selected
+  // block's grip lit off this). A channel of its own rather than a share of
+  // onSelectionChange, which is a single-callback setter already claimed by the
+  // editor component. Empty until the chrome subscribes.
+  private readonly blockSelectionListeners = new Set<() => void>();
   private readonly onDocChange?: (doc: Document) => void;
   private debounceTimer: number | null = null;
   // The deferred idle-callback handle for the cold path, and whether the doc has
@@ -1279,7 +1284,37 @@ export class BlockSurface {
    *  order, each clamped to its in-block range. A leaf the selection only grazes
    *  at offset 0 (the classic triple-click bleed into the next block) contributes
    *  nothing and is dropped, so marks land only where text is really selected. */
+  /** Every inline-text leaf inside the given top-level blocks, in document order,
+   *  each covered end to end. Descends into containers, so selecting a list yields
+   *  its items' paragraphs. Barriers (code / table / divider) yield nothing, which
+   *  is what lets a mark command skip them for free rather than refusing the whole
+   *  gesture because one block in the range cannot carry a mark. */
+  private leavesWithinBlocks(ids: readonly string[]): Array<{ leaf: InlineTextBlock; start: number; end: number }> {
+    const out: Array<{ leaf: InlineTextBlock; start: number; end: number }> = [];
+    const walk = (nodes: BlockNode[]): void => {
+      for (const b of nodes) {
+        if (isInlineText(b)) {
+          const end = inlineLength(b.inline);
+          if (end > 0) out.push({ leaf: b, start: 0, end });
+        } else if (b.type === 'blockquote' || b.type === 'footnote_definition') walk(b.children);
+        else if (b.type === 'bullet_list' || b.type === 'ordered_list') {
+          for (const item of b.items) walk(item.children);
+        }
+      }
+    };
+    const wanted = new Set(ids);
+    walk(this.doc.blocks.filter((b) => wanted.has(b.id)));
+    return out;
+  }
+
   private selectedLeaves(): Array<{ leaf: InlineTextBlock; start: number; end: number }> {
+    // A block selection has no DOM range to read — it deliberately clears the live
+    // selection and holds the ids itself — so resolve its leaves from the model.
+    // This is what makes the mark and Turn-into commands work across a gutter
+    // sweep: both already map over whatever selectedLeaves yields, so a swept
+    // range needs no command of its own. Whole leaves, since a block selected as a
+    // unit has no partial offsets.
+    if (this.blockSel.length > 0) return this.leavesWithinBlocks(this.blockSel);
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return [];
     const range = sel.getRangeAt(0);
@@ -4593,6 +4628,84 @@ export class BlockSurface {
     window.getSelection()?.removeAllRanges();
     this.container.focus();
     this.emitSelection();
+    this.notifyBlockSelection();
+  }
+
+  /** Select a block as a unit from outside the surface — the grip's click. Same
+   *  state and the same ring as the in-surface gestures produce; the chrome owns
+   *  no selection of its own. */
+  selectBlockAt(id: string): void {
+    this.selectBlock(id);
+  }
+
+  /** Select a contiguous run of top-level blocks — the gutter sweep. Not a new
+   *  selection model: it writes the same authoritative state a single-block
+   *  selection uses, which was built plural from the start, so delete, type-over
+   *  and the ring all carry over unchanged.
+   *
+   *  Clears to nothing on an empty list, so a sweep that resolves to no blocks
+   *  dissolves the selection rather than leaving a stale one lit. */
+  selectBlockRange(ids: readonly string[]): void {
+    if (ids.length === 0) {
+      this.clearBlockSelectionState();
+      return;
+    }
+    this.blockSel = [...ids];
+    this.renderBlockSelection();
+    window.getSelection()?.removeAllRanges();
+    this.container.focus();
+    this.emitSelection();
+    this.notifyBlockSelection();
+  }
+
+  /** Insert an empty paragraph above a top-level block (the `+` beside the grip)
+   *  and put the caret in it. One doc assignment, so one undo step. No-ops when
+   *  `id` is not a top-level block. */
+  insertBlockAbove(id: string): void {
+    const r = insertBlockBefore(this.doc.blocks, id);
+    if (!r) return;
+    // The caret is about to land in the new paragraph, so a block held selected
+    // as a unit would be showing a ring around something the writer just left.
+    this.clearBlockSelectionState();
+    this.applyStructural(r);
+  }
+
+  /** Move a top-level block so it lands immediately before `beforeId`, or to the
+   *  end of the document when `beforeId` is null — the grip's reorder drag.
+   *
+   *  Expressed as "before which block" rather than as an index on purpose. The
+   *  chrome computes its drop from the blocks it can SEE, and the visible order is
+   *  not the model's: footnote definitions are gathered into a generated
+   *  document-end footer, so a positional index taken from the screen would address
+   *  a different block in the model whenever a definition sits above the drop. A
+   *  block id means the same thing in both orders.
+   *
+   *  No-ops when the drop would not change the order, so a drag that lands where it
+   *  started earns no undo step. One doc assignment, so one undo step. The caret is
+   *  deliberately left where it was rather than chased to the moved block: the
+   *  writer is pointing, not typing, and yanking the caret across the document on a
+   *  drag is the more surprising of the two behaviours. */
+  moveBlockBefore(id: string, beforeId: string | null): void {
+    const to = beforeId === null ? this.doc.blocks.length : this.doc.blocks.findIndex((b) => b.id === beforeId);
+    if (to < 0) return;
+    const blocks = moveBlock(this.doc.blocks, id, to);
+    if (!blocks) return;
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    this.scheduleSerialize();
+  }
+
+  /** Subscribe to block selection changes (set and cleared). The per-block chrome
+   *  keeps the selected grip painted off this signal. Returns an unsubscribe. */
+  onBlockSelectionChange(fn: () => void): () => void {
+    this.blockSelectionListeners.add(fn);
+    return () => {
+      this.blockSelectionListeners.delete(fn);
+    };
+  }
+
+  private notifyBlockSelection(): void {
+    for (const fn of this.blockSelectionListeners) fn();
   }
 
   /** Paint the ring: clear any stale marks, then mark the current selection's
@@ -4611,6 +4724,7 @@ export class BlockSurface {
     for (const el of this.container.querySelectorAll(`[${BLOCK_SELECTED_ATTR}]`)) {
       el.removeAttribute(BLOCK_SELECTED_ATTR);
     }
+    this.notifyBlockSelection();
   }
 
   /** Keys owned while a block is selected. Returns true when consumed. Undo/redo
