@@ -94,9 +94,9 @@ HOST_PID=$!
 # waiting for the run — with a backstop for a host that hangs before reporting.
 # Two different deadlines, because the two hangs mean different things. Waiting
 # for the REPORT gets the full timeout: a renderer that is slow to boot is still
-# booting. Waiting for the EXIT afterwards gets a few seconds, because the known
-# quit defect would otherwise burn the whole budget on every run and turn a
-# sub-minute check into a minute and a half of nothing happening.
+# booting. Waiting for the EXIT afterwards gets a few seconds — a quit that has
+# not happened in that long is not slow, it is stuck, and making every future
+# run pay the full timeout to re-learn that helps nobody.
 waited=0
 hung_after_report=0
 reported=0
@@ -135,7 +135,8 @@ case "$host_exit" in
   133) fail "host SIGTRAPed (133) — a Swift runtime trap, likely an isolation assertion" ;;
   *)
     if (( hung_after_report )); then
-      warn "host had to be killed ($host_exit) — see the clean-quit result below"
+      fail "host reported, then never exited — killed after ${EXIT_GRACE_SECS}s"
+      info "the self-test passed but the quit path hung; see the clean-quit result below"
     else
       fail "host exited $host_exit"
     fi
@@ -161,18 +162,16 @@ fi
 
 # Flush ack: the pre-quit flush logs its duration. Hitting the 2s backstop means
 # the renderer never answered — the app still quits, but it quit by giving up.
+# This gates. It was briefly downgraded to a warning while the host deadlocked on
+# its own quit (terminate() called from a main-queue block spun a nested run loop
+# the flush's replies could never drain through); that is fixed, so a hung or
+# given-up quit is a failure again.
 flush_ms="$(grep -o 'pre-quit flush took [0-9]* ms' "$RUN_LOG" | grep -o '[0-9]*' | head -1)"
-# KNOWN DEFECT, reported but not gating. On a shell-launched run with no
-# document open, applicationShouldTerminate runs and beginFlush emits
-# app:flush-before-quit, but neither the renderer's ack nor beginFlush's own 2s
-# backstop ever fires — both are serviced by the main run loop, which is starved
-# once .terminateLater is returned — so the process never exits. Tracked
-# separately; the trace stays printed here so it cannot be quietly forgotten.
 if [[ -z "$flush_ms" ]]; then
-  warn "no pre-quit flush recorded — the quit did not complete (known defect)"
+  fail "no pre-quit flush recorded — the quit did not complete"
   info "applicationShouldTerminate ran, but the flush never finished"
 elif (( flush_ms >= 2000 )); then
-  warn "pre-quit flush hit the ${flush_ms}ms backstop — the renderer never acked"
+  fail "pre-quit flush hit the ${flush_ms}ms backstop — the renderer never acked"
 else
   pass "clean quit (flush acked in ${flush_ms}ms)"
 fi

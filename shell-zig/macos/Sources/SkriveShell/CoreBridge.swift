@@ -297,19 +297,32 @@ final class CoreBridge {
     // MARK: - Pre-quit flush handshake
 
     private var flushCompletion: (() -> Void)?
+    private var flushBackstop: Timer?
 
     /// Ask the renderer to flush pending saves before quit, then call
     /// `completion` on its `app:flushComplete` ack or after a 2s backstop
     /// (whichever comes first), exactly once.
+    ///
+    /// The backstop runs in the COMMON run-loop modes, not on the main dispatch
+    /// queue. A caller that returns `.terminateLater` leaves AppKit spinning a
+    /// nested run loop until the reply, and if that caller was itself running
+    /// inside a main-queue block, the serial main queue cannot drain until it
+    /// returns — which it never will. A main-queue backstop is therefore exactly
+    /// the mechanism it is supposed to protect against. A common-mode timer is
+    /// serviced by the nested loop and still fires.
     func beginFlush(completion: @escaping () -> Void) {
         flushCompletion = completion
         emitEvent("app:flush-before-quit")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.finishFlush()
+        let backstop = Timer(timeInterval: 2, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.finishFlush() }
         }
+        RunLoop.main.add(backstop, forMode: .common)
+        flushBackstop = backstop
     }
 
     private func finishFlush() {
+        flushBackstop?.invalidate()
+        flushBackstop = nil
         guard let completion = flushCompletion else { return }
         flushCompletion = nil
         completion()

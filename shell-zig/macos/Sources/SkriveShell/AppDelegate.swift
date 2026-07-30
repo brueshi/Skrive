@@ -373,6 +373,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     /// Sparkle's XPC services) only adds a visible beat and protects nothing we
     /// haven't already persisted, so we skip it. The core's writes are
     /// synchronous fs that completed before the ack, so nothing is buffered.
+    ///
+    /// CALLER CONSTRAINT: never invoke NSApp.terminate() from inside a main
+    /// dispatch queue block. Returning .terminateLater leaves AppKit spinning a
+    /// nested run loop until the reply; if that loop is spun inside a main-queue
+    /// block, the serial main queue cannot drain until the block returns, and it
+    /// cannot return until the reply arrives. Everything the flush needs is on
+    /// that queue — the core's response hop in skriveCoreEmit, and the flush
+    /// backstop — so the app deadlocks and never exits. The run loop itself
+    /// stays live throughout (WebKit callbacks and common-mode timers still
+    /// fire), which makes the hang look like an ack that was never sent. Quit
+    /// from an event handler or a run-loop timer instead.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if bridge == nil { return .terminateNow }
         if quitting { return .terminateLater }   // a second Cmd-Q mid-flush
@@ -613,8 +624,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             // exercised, and the process supplies its own exit code. A short
             // delay lets the console relay drain any error logged alongside the
             // report, which would otherwise be lost with the process.
+            // A run-loop timer, NOT DispatchQueue.main.asyncAfter. terminate()
+            // must not be called from inside a main-queue block: see the note on
+            // applicationShouldTerminate. This is where that was learned.
             if smokeEnabled, line.hasPrefix("SELFTEST ") {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
                     NSApp.terminate(nil)
                 }
             }
