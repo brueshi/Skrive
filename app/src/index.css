@@ -2370,7 +2370,9 @@ body {
 
 .outline-popover-row {
   position: relative;
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   width: 100%;
   text-align: left;
   appearance: none;
@@ -2383,10 +2385,57 @@ body {
   padding: 5px 8px;
   border-radius: var(--skrive-radius-sm);
   cursor: pointer;
-  /* One line with an ellipsis, like the design mock. */
+}
+
+/* One line with an ellipsis. On the flex row the label has to be allowed
+   to shrink below its content width before it will truncate. */
+.outline-popover-label {
+  min-width: 0;
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Fold twisty. Always occupies its slot so labels stay aligned whether or
+   not a row has children; only rows that can fold draw the triangle. */
+.outline-popover-twisty {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  position: relative;
+}
+
+.outline-popover-row[data-foldable] .outline-popover-twisty::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 0;
+  height: 0;
+  border-left: 4px solid var(--skrive-muted);
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transform-origin: 2px 50%;
+  transform: translateY(-50%) rotate(90deg);
+}
+
+.outline-popover-row[data-foldable][data-folded] .outline-popover-twisty::before {
+  transform: translateY(-50%) rotate(0deg);
+}
+
+/* The twisty is the fold target inside an otherwise jump-to-heading row,
+   so give it a hit area larger than the 10px glyph. */
+.outline-popover-row[data-foldable] .outline-popover-twisty::after {
+  content: '';
+  position: absolute;
+  inset: -5px -3px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .outline-popover-row[data-foldable] .outline-popover-twisty::before {
+    transition: transform var(--skrive-duration-quick) var(--skrive-easing);
+  }
 }
 
 /* Indent by depth; the top level reads a touch heavier as the title. */

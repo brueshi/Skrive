@@ -19,8 +19,15 @@
 // subtree, which keeps the open/selection state unambiguous.
 
 import { AnimatePresence } from 'framer-motion';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { activeHeadingIndex, type OutlineHeading } from '../../lib/preview/outline';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  activeHeadingIndex,
+  hasChildren,
+  nearestVisible,
+  sectionEnd,
+  visibleIndices,
+  type OutlineHeading
+} from '../../lib/preview/outline';
 import { BLOCK_ID_ATTR } from '../../lib/blocksurface/render';
 import { OutlinePopover } from './OutlinePopover';
 
@@ -140,6 +147,13 @@ export function OutlineRail({
   // simply follows the active section as they scroll.
   const [keyboardNav, setKeyboardNav] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+
+  // Collapsed sections, held by stable heading key rather than index so a
+  // fold stays on its own section as the document is edited around it.
+  // Deliberately not pruned when a heading disappears: the keys are unique
+  // per document, so a stale entry is inert, and keeping it means folds
+  // survive a heading being deleted and undone.
+  const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
 
   // Measured popover height, so the card stays centered-ish and clamped
   // within the pane regardless of how many headings it lists.
@@ -358,10 +372,40 @@ export function OutlineRail({
     };
   }, []);
 
+  // The fold-aware view of the heading list. Fold state is stored by key
+  // but every consumer works in indices, so the mapping happens once here.
+  // A key with no current heading simply maps to nothing.
+  const fold = useMemo(() => {
+    const depths = headings.map((h) => h.depth);
+    const foldedIndices = new Set<number>();
+    const expandable = new Set<number>();
+    headings.forEach((h, i) => {
+      if (!hasChildren(depths, i)) return;
+      // Only a heading with children can be folded; a fold key left on a
+      // heading that has since lost its children stays inert.
+      expandable.add(i);
+      if (folded.has(h.key)) foldedIndices.add(i);
+    });
+    const order = visibleIndices(depths, foldedIndices);
+    return {
+      depths,
+      folded: foldedIndices,
+      expandable,
+      order,
+      visible: new Set(order)
+    };
+  }, [headings, folded]);
+
   if (headings.length < MIN_HEADINGS || railHeight <= 0) return null;
 
   const count = headings.length;
-  const selectedIndex = keyboardNav ? highlightedIndex : activeIndex;
+  // Where the "you are here" mark sits in the popover. Scrolling into a
+  // collapsed section leaves the true active heading hidden, so the mark
+  // falls back to the fold that swallowed it and stays on screen. The tick
+  // strip is unaffected — it always shows every heading, so it keeps
+  // marking the real one.
+  const markedIndex = nearestVisible(activeIndex, fold.visible);
+  const selectedIndex = keyboardNav ? highlightedIndex : markedIndex;
 
   // One evenly-spaced, vertically-centered cluster. The gap shrinks from
   // its ideal only when there are enough headings to otherwise overflow
@@ -382,7 +426,53 @@ export function OutlineRail({
     Math.max(railHeight - popoverHeight - POPOVER_PAD, POPOVER_PAD)
   );
 
-  const clampIndex = (i: number) => clamp(i, 0, count - 1);
+  // Collapse or expand a section. Only headings with children can fold; a
+  // key left behind on a heading that has since lost its children is inert
+  // rather than an error.
+  const toggleFold = (index: number) => {
+    const h = headings[index];
+    if (!h || !fold.expandable.has(index)) return;
+    const collapsing = !fold.folded.has(index);
+    setFolded((prev) => {
+      const next = new Set(prev);
+      if (collapsing) next.add(h.key);
+      else next.delete(h.key);
+      return next;
+    });
+    // Collapsing the section the keyboard cursor is standing in would
+    // strand it on a row that no longer renders, taking
+    // aria-activedescendant with it. Bring it up to the fold head.
+    if (collapsing && keyboardNav) {
+      const end = sectionEnd(fold.depths, index);
+      if (highlightedIndex > index && highlightedIndex < end) {
+        setHighlightedIndex(index);
+      }
+    }
+  };
+
+  // Keyboard movement steps through the visible rows, not the raw heading
+  // list, so a collapsed section is stepped over rather than walked
+  // through invisibly.
+  const selectByPosition = (position: number) => {
+    const next = fold.order[clamp(position, 0, fold.order.length - 1)];
+    if (next === undefined) return;
+    setDismissed(false);
+    setKeyboardNav(true);
+    setHighlightedIndex(next);
+  };
+
+  // The enclosing section: the nearest preceding heading shallower than
+  // this one. Any ancestor of a visible row is itself visible, since a
+  // folded ancestor would have hidden the row.
+  const parentOf = (index: number) => {
+    const own = fold.depths[index];
+    if (own === undefined) return -1;
+    for (let i = index - 1; i >= 0; i--) {
+      const d = fold.depths[i];
+      if (d !== undefined && d < own) return i;
+    }
+    return -1;
+  };
 
   const scrollToHeading = (index: number) => {
     const scroller = scrollerRef.current;
@@ -494,32 +584,48 @@ export function OutlineRail({
     setFocused(false);
   };
 
-  const selectByKeyboard = (index: number) => {
-    const next = clampIndex(index);
-    setDismissed(false);
-    setKeyboardNav(true);
-    setHighlightedIndex(next);
-  };
-
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const base = keyboardNav ? highlightedIndex : activeIndex;
+    const base = keyboardNav ? highlightedIndex : markedIndex;
+    const position = fold.order.indexOf(base);
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
-        selectByKeyboard(base + 1);
+        selectByPosition(position + 1);
         break;
       case 'ArrowUp':
         e.preventDefault();
-        selectByKeyboard(base - 1);
+        selectByPosition(position - 1);
         break;
       case 'Home':
         e.preventDefault();
-        selectByKeyboard(0);
+        selectByPosition(0);
         break;
       case 'End':
         e.preventDefault();
-        selectByKeyboard(count - 1);
+        selectByPosition(fold.order.length - 1);
         break;
+      // The tree idiom: collapse where there is something to collapse,
+      // otherwise climb out to the enclosing section.
+      case 'ArrowLeft': {
+        e.preventDefault();
+        if (fold.expandable.has(base) && !fold.folded.has(base)) {
+          toggleFold(base);
+        } else {
+          const parent = parentOf(base);
+          if (parent !== -1) selectByPosition(fold.order.indexOf(parent));
+        }
+        break;
+      }
+      // Mirror image: expand where there is something to expand, otherwise
+      // step into the section. The first child is the very next heading,
+      // which is on screen precisely because this row is not folded.
+      case 'ArrowRight': {
+        e.preventDefault();
+        if (!fold.expandable.has(base)) break;
+        if (fold.folded.has(base)) toggleFold(base);
+        else selectByPosition(position + 1);
+        break;
+      }
       case 'Enter':
         e.preventDefault();
         scrollToHeading(base);
@@ -539,7 +645,9 @@ export function OutlineRail({
   return (
     <div
       className="outline-rail"
-      role="listbox"
+      // A tree rather than a listbox: the rows nest and collapse, so the
+      // level and expanded state have to be expressible.
+      role="tree"
       aria-label={`Document outline, ${count} sections`}
       aria-activedescendant={open ? optionId(selectedIndex) : undefined}
       tabIndex={0}
@@ -577,10 +685,14 @@ export function OutlineRail({
             ref={popoverRef}
             style={{ top: popoverTop }}
             headings={headings}
+            order={fold.order}
+            folded={fold.folded}
+            expandable={fold.expandable}
             selectedIndex={selectedIndex}
-            activeIndex={activeIndex}
+            activeIndex={markedIndex}
             optionId={optionId}
             onJump={(i) => scrollToHeading(i)}
+            onToggleFold={toggleFold}
           />
         )}
       </AnimatePresence>
