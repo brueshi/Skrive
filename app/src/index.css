@@ -2675,14 +2675,24 @@ body {
   white-space: nowrap;
 }
 
-/* Icon-only segmented controls (.diff-mode-toggle here, the sidebar's All-view
-   switch in AllList) deliberately do NOT use the Segmented primitive. The
-   primitive's options are `{ id, label: string }` — it renders text and has no
-   slot for an icon or the Tooltip an icon-only control needs to say what it
-   does. Converging them would mean widening the primitive's API, which is a
-   design decision about what Segmented IS rather than cleanup, so it belongs in
-   its own change. The text segmented controls (the editor layout switch, the
-   diff scroll-sync switch) did converge. */
+/* Segmented convergence, decided: three of the four non-primitive segmented
+   controls STAY as they are. Do not re-open this without a reason.
+
+   Icon-only ones (.diff-mode-toggle here, the sidebar's All-view switch in
+   AllList): the primitive's options are `{ id, label: string }` — it renders
+   text and has no slot for an icon or the Tooltip an icon-only control needs to
+   say what it does. Converging them means widening the primitive's API, which
+   is a decision about what Segmented IS rather than cleanup.
+
+   The Markdown layout switch (.md-layout-toggle, EditorBar.css): converged onto
+   the primitive and then REVERTED on the owner's judgement — the primitive's
+   framer-motion thumb did not feel as good as the bespoke measured one. Its
+   0.26s curve is deliberate and the duplication is accepted with eyes open.
+   Feel beat de-duplication here; a future sweep that converges it again will be
+   making the same mistake, not finding a missed one.
+
+   The diff scroll-sync switch DID converge — it is plain text with no motion
+   anyone tuned. */
 .diff-mode-toggle {
   display: inline-flex;
   border: 1px solid var(--skrive-rule);

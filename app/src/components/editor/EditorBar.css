@@ -31,6 +31,80 @@
   z-index: 1;
 }
 
+/* Markdown source-mode layout switch (SKR-197): a segmented pill control
+   (Markdown / Split / Preview) centered in the bar's middle band, where the
+   formatting toolbar sits in rich mode. The track is recessed; a single raised
+   thumb slides + resizes to the active segment. The track carries no layout
+   border (an inset shadow paints the edge) so the JS-measured thumb aligns to
+   the buttons' offsetLeft without a border to account for. */
+.md-layout-toggle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: fit-content;
+  padding: 3px;
+  border-radius: var(--skrive-radius-pill);
+  background: var(--skrive-shell-bg);
+  box-shadow: inset 0 0 0 1px var(--skrive-card-border);
+}
+
+.md-layout-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  border-radius: var(--skrive-radius-pill);
+  background: var(--skrive-card-bg);
+  box-shadow: var(--skrive-card-shadow);
+  pointer-events: none;
+  z-index: 0;
+  /* An INTENTIONAL exception to the motion tokens, kept off the scale on
+     purpose. The thumb is a physical object sliding between segments, and it
+     animates `width` alongside `transform` because its size is measured in JS
+     from the segment it lands on — so the two properties must share one curve
+     or the pill visibly stretches before it arrives. The curve is a long, flat
+     settle chosen for that pairing; --skrive-easing is the material standard
+     for fades and colour, and swapping it in makes a sliding object read as
+     snapped rather than carried. The tokens describe state changes; this is
+     locomotion. */
+  transition:
+    transform 0.26s cubic-bezier(0.32, 0.72, 0, 1),
+    width 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.md-layout-btn {
+  position: relative;
+  z-index: 1;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 4px 14px;
+  border-radius: var(--skrive-radius-pill);
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: var(--skrive-muted);
+  /* The label crossfade has no such excuse — it is an ordinary state change, so
+     it takes the tokens. */
+  transition: color var(--skrive-duration-standard) var(--skrive-easing);
+}
+
+.md-layout-btn:hover:not(.active) {
+  color: var(--skrive-fg);
+}
+
+.md-layout-btn.active {
+  color: var(--skrive-fg);
+  font-weight: 500;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .md-layout-thumb {
+    transition: none;
+  }
+}
+
 .editor-bar-left {
   left: 1rem;
 }
