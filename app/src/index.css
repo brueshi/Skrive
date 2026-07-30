@@ -1019,14 +1019,22 @@ body {
   color: var(--skrive-muted);
 }
 
-/* Placement only. The dismiss button itself is the IconButton primitive, which
-   owns its square, ink and hover; this class says WHERE it sits in the sheet.
-   Splitting it this way is what stops a per-dialog close button from drifting
-   away from every other icon button in the app. */
+/* Placement, plus one deliberate retune. The dismiss button is the IconButton
+   primitive, which owns its square, ink and hover; this class says WHERE it
+   sits in the sheet.
+
+   The hover fill is turned off so the × itself brightens and no box appears
+   behind it — an owner call for this button specifically. It is done by
+   retuning the component token rather than out-specificity-ing the primitive's
+   rule, which is exactly what the component tier is for: the look changes in
+   one place and the primitive's CSS is never fought. A dialog's close button
+   sits on an otherwise empty sheet corner with nothing to align its box to,
+   which is why it reads differently here than in a dense row of chrome. */
 .modal-dismiss {
   position: absolute;
   top: 0.75rem;
   right: 0.75rem;
+  --icon-button-bg-hover: transparent;
 }
 
 .app-body {
