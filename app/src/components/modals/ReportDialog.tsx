@@ -10,6 +10,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { DialogShell } from '../ui/Dialog';
 import { Button } from '../ui/Button';
+import { IconButton } from '../ui/IconButton';
 import { Input, Textarea } from '../ui/Input';
 import { useEffect, useRef, useState } from 'react';
 import { notify } from '../../lib/notify';
@@ -158,15 +159,9 @@ export function ReportDialog({ open, kind, onClose }: Props) {
       aria-label={copy.title}
       onKeyDown={handleKeyDown}
     >
-          <button
-            type="button"
-            className="modal-dismiss"
-            aria-label="Close"
-            onClick={onClose}
-            disabled={busy}
-          >
+          <IconButton size="sm" className="modal-dismiss" aria-label="Close" onClick={onClose} disabled={busy}>
             ×
-          </button>
+          </IconButton>
           <div className="modal-eyebrow">{copy.eyebrow}</div>
           <Dialog.Title className="modal-title">{copy.title}</Dialog.Title>
           <Dialog.Description className="modal-desc">{copy.desc}</Dialog.Description>

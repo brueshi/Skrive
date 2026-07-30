@@ -1019,37 +1019,14 @@ body {
   color: var(--skrive-muted);
 }
 
+/* Placement only. The dismiss button itself is the IconButton primitive, which
+   owns its square, ink and hover; this class says WHERE it sits in the sheet.
+   Splitting it this way is what stops a per-dialog close button from drifting
+   away from every other icon button in the app. */
 .modal-dismiss {
   position: absolute;
   top: 0.75rem;
   right: 0.75rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: var(--skrive-radius-sm);
-  background: transparent;
-  color: var(--skrive-muted);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0.55;
-  transition:
-    opacity var(--skrive-duration-quick) var(--skrive-easing),
-    background var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.modal-dismiss:hover:not(:disabled) {
-  opacity: 1;
-  background: color-mix(in srgb, var(--skrive-muted) 16%, transparent);
-}
-
-.modal-dismiss:disabled {
-  opacity: 0.3;
-  cursor: default;
 }
 
 .app-body {
