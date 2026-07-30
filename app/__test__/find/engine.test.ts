@@ -11,7 +11,7 @@ import {
   type FindFlags
 } from '../../src/lib/find/engine';
 import { parseDocument, type BlockNode } from '../../src/lib/blockmodel';
-import { inlinePlainText } from '../../src/lib/blocksurface/inline-ops';
+import { inlineScanText } from '../../src/lib/blocksurface/inline-ops';
 
 const flags = (over: Partial<FindFlags> = {}): FindFlags => ({
   caseSensitive: false,
@@ -60,9 +60,12 @@ describe('findRanges', () => {
 });
 
 describe('findInDocument', () => {
+  // Sliced from the ALIGNED scan text — the offset space a match is expressed in
+  // and the one surface.replaceMatch applies it to. Slicing plain text instead
+  // would silently agree with a match whose offsets had drifted past an atom.
   const sliceOf = (blocks: BlockNode[], blockId: string, start: number, end: number): string => {
     const found = findLeaf(blocks, blockId);
-    return found ? inlinePlainText(found.inline).slice(start, end) : '';
+    return found ? inlineScanText(found.inline).slice(start, end) : '';
   };
 
   function findLeaf(
@@ -118,6 +121,58 @@ describe('findInDocument', () => {
   it('returns nothing for an empty query', () => {
     const { blocks } = parseDocument('the cat');
     expect(findInDocument(blocks, '', flags())).toEqual([]);
+  });
+
+  // A single-cell atom (image / hard break / footnote reference) holds one cell in
+  // the flat offset space. Matching over plain text — which drops atoms — shifted
+  // every later match left by one per atom, so the highlight drifted and replace
+  // edited the wrong characters.
+  describe('with single-cell atoms in the leaf', () => {
+    it('offsets a match past an image by the atom cell', () => {
+      const { blocks } = parseDocument('ab ![x](a.png) the cat');
+      const matches = findInDocument(blocks, 'the', flags());
+      expect(matches).toHaveLength(1);
+      // "ab " (3) + image (1) + " " (1) = 5, not 4.
+      expect([matches[0]!.start, matches[0]!.end]).toEqual([5, 8]);
+      expect(sliceOf(blocks, matches[0]!.blockId, matches[0]!.start, matches[0]!.end)).toBe('the');
+    });
+
+    it('offsets a match past a hard break by the atom cell', () => {
+      const { blocks } = parseDocument('ab\\\nthe cat');
+      const matches = findInDocument(blocks, 'the', flags());
+      expect(matches).toHaveLength(1);
+      expect([matches[0]!.start, matches[0]!.end]).toEqual([3, 6]); // "ab" (2) + break (1)
+      expect(sliceOf(blocks, matches[0]!.blockId, matches[0]!.start, matches[0]!.end)).toBe('the');
+    });
+
+    it('accumulates one cell per atom across several', () => {
+      const { blocks } = parseDocument('![x](a.png)![y](b.png) the');
+      const matches = findInDocument(blocks, 'the', flags());
+      expect([matches[0]!.start, matches[0]!.end]).toEqual([3, 6]); // two atoms + " "
+    });
+
+    it('does not join the text on either side of an atom into a phantom match', () => {
+      // Plain text collapsed this to "abcd" and reported a match that spans an image.
+      const { blocks } = parseDocument('ab![x](a.png)cd');
+      expect(findInDocument(blocks, 'abcd', flags())).toEqual([]);
+    });
+
+    it('drops a regex match that would span an atom', () => {
+      // `.` matches the atom placeholder; replacing such a range would delete the
+      // image outright, so the match is refused rather than offered.
+      const { blocks } = parseDocument('a![x](a.png)b');
+      expect(findInDocument(blocks, 'a.b', flags({ regex: true }))).toEqual([]);
+      // A regex match that stays clear of the atom is still reported.
+      const { blocks: clear } = parseDocument('![x](a.png)azb');
+      const matches = findInDocument(clear, 'a.b', flags({ regex: true }));
+      expect([matches[0]!.start, matches[0]!.end]).toEqual([1, 4]);
+    });
+
+    it('still matches text inside an inline code span', () => {
+      // Find searches code spans; only atoms are masked, never code.
+      const { blocks } = parseDocument('run `the command`');
+      expect(findInDocument(blocks, 'the', flags())).toHaveLength(1);
+    });
   });
 });
 
