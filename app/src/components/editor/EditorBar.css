@@ -58,6 +58,15 @@
   box-shadow: var(--skrive-card-shadow);
   pointer-events: none;
   z-index: 0;
+  /* An INTENTIONAL exception to the motion tokens, kept off the scale on
+     purpose. The thumb is a physical object sliding between segments, and it
+     animates `width` alongside `transform` because its size is measured in JS
+     from the segment it lands on — so the two properties must share one curve
+     or the pill visibly stretches before it arrives. The curve is a long, flat
+     settle chosen for that pairing; --skrive-easing is the material standard
+     for fades and colour, and swapping it in makes a sliding object read as
+     snapped rather than carried. The tokens describe state changes; this is
+     locomotion. */
   transition:
     transform 0.26s cubic-bezier(0.32, 0.72, 0, 1),
     width 0.26s cubic-bezier(0.32, 0.72, 0, 1);
@@ -76,7 +85,9 @@
   line-height: 1.2;
   white-space: nowrap;
   color: var(--skrive-muted);
-  transition: color 0.2s ease;
+  /* The label crossfade has no such excuse — it is an ordinary state change, so
+     it takes the tokens. */
+  transition: color var(--skrive-duration-standard) var(--skrive-easing);
 }
 
 .md-layout-btn:hover:not(.active) {

@@ -9,6 +9,11 @@
   display: flex;
 }
 
+/* The white here is DELIBERATE and not a missing token. The frame renders the
+   author's own HTML document, which is written against a browser's default white
+   page; theming it to the app's surface would silently restyle their content and
+   make dark-mode text vanish against a background their CSS never accounted for.
+   This is content canvas, not app chrome. */
 .html-view-frame {
   flex: 1 1 auto;
   width: 100%;

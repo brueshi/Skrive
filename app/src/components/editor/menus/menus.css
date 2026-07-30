@@ -237,7 +237,7 @@
 }
 
 .rich-link-remove:hover {
-  color: var(--skrive-danger, #c0392b);
+  color: var(--skrive-danger);
 }
 
 /* The slash insert menu, dropped below the `/` trigger. Row anatomy follows the
@@ -392,7 +392,7 @@
 /* The destructive row (Delete row/column) reads in the danger tone, the same
    token the block-danger affordances use. */
 .sk-table-menu-item--danger .rich-slash-title {
-  color: var(--skrive-danger, #c0392b);
+  color: var(--skrive-danger);
 }
 
 /* A hairline between command groups (alignment / insert / delete). */
