@@ -82,6 +82,9 @@ describe('moveBlockBefore', () => {
     s.undo();
     expect(model(s), 'one undo restores the original order').toEqual(['a', 'b', 'c']);
     expect(painted(), 'and the DOM repaints with it').toEqual(['a', 'b', 'c']);
+    s.redo();
+    expect(model(s), 'one redo puts it back').toEqual(['c', 'a', 'b']);
+    expect(painted(), 'and repaints again').toEqual(['c', 'a', 'b']);
   });
 
   it('addresses the model, not the screen, when a footnote definition is gathered', () => {
@@ -109,12 +112,15 @@ describe('insertBlockAbove', () => {
     expect(painted().length).toBe(3);
   });
 
-  it('is one undo step', () => {
+  it('is one undo step, and redoes as one', () => {
     const s = surfaceFor('a\n\nb\n');
     s.insertBlockAbove(idOf(s, 'b'));
     s.undo();
     expect(model(s)).toEqual(['a', 'b']);
     expect(painted()).toEqual(['a', 'b']);
+    s.redo();
+    expect(model(s)).toEqual(['a', '', 'b']);
+    expect(painted().length).toBe(3);
   });
 
   it('no-ops on an unknown block', () => {

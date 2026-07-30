@@ -9,6 +9,8 @@ import { insertBlockBefore, moveBlock } from '../../../src/lib/blocksurface/rang
 import { parseDocument } from '../../../src/lib/blockmodel/parse';
 import { serializeDocument } from '../../../src/lib/blockmodel/serialize';
 import type { BlockNode, Document, InlineNode } from '../../../src/lib/blockmodel/types';
+import { modelToFolio } from '../../../src/lib/folio/convert';
+import { folioToMarkdown } from '../../../src/lib/export/markdown';
 
 function plain(inline: InlineNode[]): string {
   return inline.map((n) => (n.kind === 'text' ? n.text : '')).join('');
@@ -162,5 +164,40 @@ describe('insertBlockBefore', () => {
   it('returns null for an unknown id', () => {
     const d = doc('a\n');
     expect(insertBlockBefore(d.blocks, 'nope')).toBeNull();
+  });
+});
+
+describe('export fidelity after a reorder', () => {
+  // The acceptance criterion the dual-mode rework put on this feature: a reordered
+  // document must EXPORT faithfully. Byte-stability was retired with the
+  // Markdown-canonical model, so this asserts content and order survive the real
+  // pipeline (block model -> .folio -> Markdown), not that bytes match.
+  const folioOf = (blocks: BlockNode[], base: Document) =>
+    modelToFolio({ ...base, blocks }, { docId: 'test', docMeta: { title: null, createdAt: '2026-01-01T00:00:00Z' } });
+
+  it('exports a reordered document in its new order', () => {
+    const d = doc('# One\n\nbody one\n\n## Two\n\nbody two\n');
+    const moved = moveBlock(d.blocks, idOf(d.blocks, 'body two'), 0)!;
+    const md = folioToMarkdown(folioOf(moved, d));
+    expect(md.indexOf('body two'), 'the moved paragraph now leads').toBeLessThan(md.indexOf('# One'));
+  });
+
+  it('keeps a reordered list and code block intact through export', () => {
+    const d = doc('intro\n\n- one\n- two\n\n```js\ncode()\n```\n');
+    const moved = moveBlock(d.blocks, idOf(d.blocks, 'intro'), 3)!;
+    const md = folioToMarkdown(folioOf(moved, d));
+    expect(md).toContain('- one');
+    expect(md).toContain('- two');
+    expect(md).toContain('code()');
+    expect(md.indexOf('intro'), 'intro moved to the end').toBeGreaterThan(md.indexOf('code()'));
+  });
+
+  it('separates blocks properly after a reorder rather than running them together', () => {
+    // The seam clearing matters just as much here: an export that glued two
+    // paragraphs into one would still "contain" both strings.
+    const d = doc('a\n\nb\n\nc\n');
+    const moved = moveBlock(d.blocks, idOf(d.blocks, 'c'), 0)!;
+    const md = folioToMarkdown(folioOf(moved, d));
+    expect(md.trimEnd().split(/\n{2,}/)).toEqual(['c', 'a', 'b']);
   });
 });
