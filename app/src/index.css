@@ -4217,22 +4217,6 @@ body {
   border-color: var(--skrive-muted);
 }
 
-.chip-input {
-  height: 26px;
-  width: 80px;
-  padding: 0 8px;
-  border: 1px solid var(--skrive-focus-ring);
-  border-radius: var(--skrive-radius-sm);
-  background: var(--skrive-bg);
-  color: var(--skrive-fg);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-}
-
-.chip-input:focus {
-  outline: none;
-}
-
 /* ---- Shared field inputs / buttons (carried from the modal era) ---- */
 /* MonoInput rides ui/Input (SKR-212); only the mono typography and the
    compact height live here. */
