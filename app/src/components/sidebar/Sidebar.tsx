@@ -285,8 +285,10 @@ export function Sidebar({ onOpenSwitcher, onOpenHelp }: SidebarProps) {
         style={sidebarStyle}
         aria-label="Files"
         aria-hidden={!sidebarVisible}
-        // @ts-expect-error inert is a string attribute in HTML
-        inert={!sidebarVisible ? '' : undefined}
+        // A real boolean, not the empty string. React reads `inert=""` as FALSE
+        // and warns, which meant the collapsed rail was never actually inert —
+        // its rows stayed in the tab order while hidden off-screen.
+        inert={!sidebarVisible}
       >
         {/* Inner keeps its full width as the rail collapses and slides out
             via translateX, so rows glide off rather than squishing to fit. */}
