@@ -18,7 +18,7 @@
 
 import { contentBox, type ContentBox } from './decoration-overlay';
 import { BLOCK_ID_ATTR } from './render';
-import { zoneContains, type HoverZone } from './table-chrome';
+import { nearestBoundary, zoneContains, type HoverZone } from './table-chrome';
 import type { BlockSurface } from './surface';
 
 /** Chrome sizing. The gutter is an overlay, so these reserve no layout space —
@@ -55,6 +55,23 @@ const ZONE_SLACK = 12;
 const HIDE_DELAY_MS = 140;
 
 const SLOT_CLASS = 'sk-block-chrome';
+
+/** Pointer travel, in px, before a grip press becomes a reorder drag. Below it the
+ *  press stays a click that selects the block. */
+const REORDER_MOVE_THRESHOLD_PX = 4;
+
+/** Body class held while a block is being dragged, for the grabbing cursor and to
+ *  suppress text selection for the length of the drag. */
+const REORDERING_CLASS = 'sk-block-reordering';
+
+/** Marks the block being dragged, so it dims for the length of the gesture — the
+ *  "what am I moving" half of the feedback, paired with the drop line's "where
+ *  will it land". View-only; cleared on drop. */
+const DRAG_BLOCK_ATTR = 'data-block-dragging';
+
+/** The class render.ts gives a footnote definition's element. Definitions are
+ *  display-gathered into a document-end footer, so they sit outside the reorder. */
+const FOOTNOTE_DEF_CLASS = 'sk-footnote-def';
 
 /** One painted affordance, positioned in the scroller's content coordinate space. */
 export type BlockSlot = {
@@ -129,6 +146,43 @@ export function blockHoverZone(
   };
 }
 
+/**
+ * The `n + 1` y positions a reorder can drop at, given the boxes of the draggable
+ * blocks in document order: every block's top edge, then the last one's bottom.
+ * The same shape as a table's rowEdges, so the same nearestBoundary hit test
+ * applies — a drop boundary is an index INTO this list, which is exactly the
+ * insertion boundary moveBlock takes.
+ */
+export function blockDropEdges(boxes: ContentBox[]): number[] {
+  if (boxes.length === 0) return [];
+  const edges = boxes.map((b) => b.y);
+  const last = boxes[boxes.length - 1]!;
+  edges.push(last.y + last.height);
+  return edges;
+}
+
+/**
+ * The drop indicator's rect for a boundary: a full-width rule spanning the widest
+ * draggable block, centred on the boundary so it reads as a line BETWEEN blocks
+ * rather than as a line belonging to either one.
+ */
+export function blockDropIndicatorRect(
+  boxes: ContentBox[],
+  to: number,
+  thickness = 2
+): { x: number; y: number; width: number; height: number } | null {
+  const edges = blockDropEdges(boxes);
+  const y = edges[to];
+  if (y === undefined) return null;
+  let x = Infinity;
+  let right = -Infinity;
+  for (const b of boxes) {
+    if (b.x < x) x = b.x;
+    if (b.x + b.width > right) right = b.x + b.width;
+  }
+  return { x, y: y - thickness / 2, width: right - x, height: thickness };
+}
+
 /** Measure a block element into the scroller's content coordinate space, reading
  *  the first line's height from the element's first client rect — a wrapped
  *  paragraph reports one rect per line, so the first is the line the chrome aligns
@@ -183,9 +237,35 @@ export function attachBlockChrome({
   let rafId = 0;
   let hideTimer = 0;
   let destroyed = false;
+  // A grip press that became a reorder drag must swallow the click the browser
+  // fires on release, so a drop doesn't also select the block it just moved.
+  let suppressClick = false;
+  // The teardown for an in-flight reorder. Held at attach scope so a click (which
+  // WKWebView fires even when it drops the pointerup on a motionless press) and
+  // destroy() can both tidy a gesture's window listeners — no leak on a tap.
+  let activeReorderCleanup: (() => void) | null = null;
 
   const clear = (): void => {
     layer.textContent = '';
+  };
+
+  /** The top-level blocks a reorder can address, in document order, with their
+   *  measured boxes. Footnote definitions are EXCLUDED: they are gathered into a
+   *  generated document-end footer for display, so their on-screen position is not
+   *  a place in the document and dropping into that footer would move a block
+   *  somewhere it would not appear. Everything else keeps its relative model order
+   *  on screen, so a boundary index here IS a model insertion boundary. */
+  const draggableBlocks = (): { id: string; el: HTMLElement; box: ContentBox }[] => {
+    const hostRect = scroller.getBoundingClientRect();
+    const out: { id: string; el: HTMLElement; box: ContentBox }[] = [];
+    for (const child of Array.from(surface.children)) {
+      const el = child as HTMLElement;
+      const id = el.getAttribute(BLOCK_ID_ATTR);
+      if (!id || el.classList.contains(FOOTNOTE_DEF_CLASS)) continue;
+      const geom = measureBlock(el, hostRect, scroller.scrollLeft, scroller.scrollTop);
+      if (geom) out.push({ id, el, box: geom.box });
+    }
+    return out;
   };
 
   /** Build one slot's button and append it. */
@@ -201,14 +281,103 @@ export function attachBlockChrome({
     // Bound to click, NOT pointerup: WKWebView drops pointerup on a motionless
     // press, and the Chromium latency gate is blind to that difference.
     el.addEventListener('click', (e) => {
+      // A click that closes a motionless press tidies any reorder gesture whose
+      // pointerup WKWebView may have dropped; then the press acts as a plain click.
+      activeReorderCleanup?.();
+      if (suppressClick) {
+        // The click that follows a reorder drag: swallow it so the drop doesn't
+        // also select the block it just moved.
+        suppressClick = false;
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       e.preventDefault();
       if (slot.kind === 'grip') blockSurface.selectBlockAt(blockId);
       else blockSurface.insertBlockAbove(blockId);
     });
+    // The grip is also a reorder handle: a press that crosses the move threshold
+    // drags the block to a new position.
+    if (slot.kind === 'grip') {
+      el.addEventListener('pointerdown', (ev) => beginReorder(ev, blockId, el));
+    }
     // Keep a press on the chrome from stealing the caret out of the block before
     // the op runs.
     el.addEventListener('mousedown', (e) => e.preventDefault());
     layer.appendChild(el);
+  };
+
+  /** Drag a grip to a new position. The press stays a click (select the block)
+   *  until it crosses the move threshold, at which point it becomes a reorder: a
+   *  drop-indicator line tracks the nearest boundary and the move commits once on
+   *  release as a single undo step. Listens on the scroller/window rather than
+   *  capturing the tiny grip, so a drag that wanders off it still tracks; cleanup
+   *  runs on pointerup, pointercancel, or — if WKWebView drops the pointerup on a
+   *  motionless press — the ensuing click. */
+  const beginReorder = (e: PointerEvent, blockId: string, el: HTMLElement): void => {
+    if (e.button !== 0) return;
+    activeReorderCleanup?.(); // tidy any prior gesture that leaked
+    const blocks = draggableBlocks();
+    const from = blocks.findIndex((b) => b.id === blockId);
+    if (from < 0) return; // a footnote definition's grip: click-only
+    const boxes = blocks.map((b) => b.box);
+    const edges = blockDropEdges(boxes);
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let moved = false;
+    let dropTo = from;
+    let indicator: HTMLElement | null = null;
+
+    const cleanup = (): void => {
+      scroller.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      activeReorderCleanup = null;
+      if (moved) {
+        document.body.classList.remove(REORDERING_CLASS);
+        el.classList.remove('is-dragging');
+        indicator?.remove();
+        blocks[from]?.el.removeAttribute(DRAG_BLOCK_ATTR);
+      }
+    };
+    const onMove = (ev: PointerEvent): void => {
+      if (!moved) {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < REORDER_MOVE_THRESHOLD_PX) return;
+        moved = true;
+        blockSurface.clearCaret();
+        document.body.classList.add(REORDERING_CLASS);
+        el.classList.add('is-dragging');
+        blocks[from]?.el.setAttribute(DRAG_BLOCK_ATTR, '');
+        indicator = document.createElement('div');
+        indicator.className = `${SLOT_CLASS} ${SLOT_CLASS}--drop`;
+        layer.appendChild(indicator);
+      }
+      const host = scroller.getBoundingClientRect();
+      const pos = ev.clientY - host.top + scroller.scrollTop;
+      dropTo = nearestBoundary(edges, pos);
+      const r = blockDropIndicatorRect(boxes, dropTo);
+      if (!r) return;
+      indicator!.style.transform = `translate(${r.x}px, ${r.y}px)`;
+      indicator!.style.width = `${r.width}px`;
+      indicator!.style.height = `${r.height}px`;
+    };
+    const onUp = (): void => {
+      const didMove = moved;
+      const to = dropTo;
+      cleanup();
+      if (didMove) {
+        suppressClick = true;
+        // The boundary indexes the VISIBLE blocks, so hand the surface the block
+        // the drop landed above (null at the very end) rather than the number —
+        // the model's order is not the screen's wherever a footnote definition
+        // has been gathered into the footer.
+        blockSurface.moveBlockBefore(blockId, blocks[to]?.id ?? null);
+      }
+    };
+    activeReorderCleanup = cleanup;
+    scroller.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
   };
 
   /** The top-level block element for an id, or null. Top-level only: a nested

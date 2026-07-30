@@ -63,6 +63,8 @@ export {
   attachBlockChrome,
   measureBlock,
   blockChromeSlots,
+  blockDropEdges,
+  blockDropIndicatorRect,
   blockHoverZone,
   BLOCK_CHROME_METRICS,
   type BlockSlot,

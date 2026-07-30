@@ -23,7 +23,7 @@ import { HighlightBus } from './highlight/highlight-bus';
 import { SpellBus } from '../spellcheck/spell-bus';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
-import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertBlockBefore, insertTableColumn, insertTableRow, mergeBackward, mergeForward, moveTableColumn, moveTableRow, removeBlocks, removeFootnote, removeTableColumn, removeTableRow, replaceAcross, setColumnAlignment, setTableColumnWidths } from './range-ops';
+import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertBlockBefore, insertTableColumn, insertTableRow, mergeBackward, mergeForward, moveBlock, moveTableColumn, moveTableRow, removeBlocks, removeFootnote, removeTableColumn, removeTableRow, replaceAcross, setColumnAlignment, setTableColumnWidths } from './range-ops';
 import { blockIndexOf, findBlockById, updateBlockById, updateBlockInTop } from './tree';
 import { enterInContainer, exitContainer, splitBlockAt, type StructuralResult } from './structural';
 import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
@@ -4618,6 +4618,31 @@ export class BlockSurface {
     // as a unit would be showing a ring around something the writer just left.
     this.clearBlockSelectionState();
     this.applyStructural(r);
+  }
+
+  /** Move a top-level block so it lands immediately before `beforeId`, or to the
+   *  end of the document when `beforeId` is null — the grip's reorder drag.
+   *
+   *  Expressed as "before which block" rather than as an index on purpose. The
+   *  chrome computes its drop from the blocks it can SEE, and the visible order is
+   *  not the model's: footnote definitions are gathered into a generated
+   *  document-end footer, so a positional index taken from the screen would address
+   *  a different block in the model whenever a definition sits above the drop. A
+   *  block id means the same thing in both orders.
+   *
+   *  No-ops when the drop would not change the order, so a drag that lands where it
+   *  started earns no undo step. One doc assignment, so one undo step. The caret is
+   *  deliberately left where it was rather than chased to the moved block: the
+   *  writer is pointing, not typing, and yanking the caret across the document on a
+   *  drag is the more surprising of the two behaviours. */
+  moveBlockBefore(id: string, beforeId: string | null): void {
+    const to = beforeId === null ? this.doc.blocks.length : this.doc.blocks.findIndex((b) => b.id === beforeId);
+    if (to < 0) return;
+    const blocks = moveBlock(this.doc.blocks, id, to);
+    if (!blocks) return;
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    this.scheduleSerialize();
   }
 
   /** Subscribe to block selection changes (set and cleared). The per-block chrome

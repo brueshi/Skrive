@@ -7,11 +7,14 @@ import { describe, expect, it } from 'vitest';
 import {
   BLOCK_CHROME_METRICS as M,
   blockChromeSlots,
+  blockDropEdges,
+  blockDropIndicatorRect,
   blockHoverZone,
   type BlockGeometry,
   type BlockSlot
 } from '../../src/lib/blocksurface/block-chrome';
-import { zoneContains } from '../../src/lib/blocksurface/table-chrome';
+import { nearestBoundary, zoneContains } from '../../src/lib/blocksurface/table-chrome';
+import type { ContentBox } from '../../src/lib/blocksurface/decoration-overlay';
 
 /** A block at (100, 200), 400 wide, `lines` lines of 20px. */
 function geometry(lines = 1): BlockGeometry {
@@ -119,5 +122,63 @@ describe('blockHoverZone', () => {
     const zone = blockHoverZone(rect);
     expect(zoneContains(zone, 100, 600), 'far below').toBe(false);
     expect(zoneContains(zone, 0, 230), 'far left of the gutter').toBe(false);
+  });
+});
+
+/** Three stacked blocks at x=100, 400 wide, 20/40/20 tall, starting at y=200. */
+function stack(): ContentBox[] {
+  return [
+    { x: 100, y: 200, width: 400, height: 20 },
+    { x: 100, y: 220, width: 400, height: 40 },
+    { x: 100, y: 260, width: 400, height: 20 }
+  ];
+}
+
+describe('blockDropEdges', () => {
+  it('emits one edge per block plus the last block’s bottom', () => {
+    expect(blockDropEdges(stack())).toEqual([200, 220, 260, 280]);
+  });
+
+  it('is empty for no blocks', () => {
+    expect(blockDropEdges([])).toEqual([]);
+  });
+
+  it('feeds nearestBoundary so a pointer maps to an insertion boundary', () => {
+    const edges = blockDropEdges(stack());
+    // The edges ARE the boundaries moveBlock takes, which is the point of the
+    // shared shape: boundary n means "insert before the nth visible block".
+    expect(nearestBoundary(edges, 195), 'above everything').toBe(0);
+    expect(nearestBoundary(edges, 232), 'inside block 1, nearer its top').toBe(1);
+    expect(nearestBoundary(edges, 255), 'inside block 1, nearer its bottom').toBe(2);
+    expect(nearestBoundary(edges, 400), 'below everything').toBe(3);
+  });
+});
+
+describe('blockDropIndicatorRect', () => {
+  it('centres the line on the boundary, not inside either block', () => {
+    const r = blockDropIndicatorRect(stack(), 1, 2)!;
+    expect(r.y + r.height / 2, 'straddles the seam at y=220').toBe(220);
+    expect(r.height).toBe(2);
+  });
+
+  it('spans the full width of the widest block', () => {
+    const boxes: ContentBox[] = [
+      { x: 100, y: 200, width: 200, height: 20 },
+      { x: 100, y: 220, width: 400, height: 20 }
+    ];
+    const r = blockDropIndicatorRect(boxes, 1)!;
+    expect(r.x).toBe(100);
+    expect(r.width).toBe(400);
+  });
+
+  it('draws at the very top and the very bottom boundary', () => {
+    const boxes = stack();
+    expect(blockDropIndicatorRect(boxes, 0)!.y + 1).toBe(200);
+    expect(blockDropIndicatorRect(boxes, 3)!.y + 1).toBe(280);
+  });
+
+  it('returns null for a boundary that does not exist', () => {
+    expect(blockDropIndicatorRect(stack(), 4)).toBeNull();
+    expect(blockDropIndicatorRect([], 0)).toBeNull();
   });
 });
