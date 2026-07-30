@@ -23,7 +23,7 @@ import { HighlightBus } from './highlight/highlight-bus';
 import { SpellBus } from '../spellcheck/spell-bus';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
-import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertTableColumn, insertTableRow, mergeBackward, mergeForward, moveTableColumn, moveTableRow, removeBlocks, removeFootnote, removeTableColumn, removeTableRow, replaceAcross, setColumnAlignment, setTableColumnWidths } from './range-ops';
+import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertBlockBefore, insertTableColumn, insertTableRow, mergeBackward, mergeForward, moveTableColumn, moveTableRow, removeBlocks, removeFootnote, removeTableColumn, removeTableRow, replaceAcross, setColumnAlignment, setTableColumnWidths } from './range-ops';
 import { blockIndexOf, findBlockById, updateBlockById, updateBlockInTop } from './tree';
 import { enterInContainer, exitContainer, splitBlockAt, type StructuralResult } from './structural';
 import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
@@ -298,6 +298,11 @@ export class BlockSurface {
   // Table row/column selection-change listeners (the chrome keeps the selected
   // handle lit off this). Empty until the chrome subscribes.
   private readonly tableSelectionListeners = new Set<() => void>();
+  // Block selection-change listeners (the per-block chrome keeps the selected
+  // block's grip lit off this). A channel of its own rather than a share of
+  // onSelectionChange, which is a single-callback setter already claimed by the
+  // editor component. Empty until the chrome subscribes.
+  private readonly blockSelectionListeners = new Set<() => void>();
   private readonly onDocChange?: (doc: Document) => void;
   private debounceTimer: number | null = null;
   // The deferred idle-callback handle for the cold path, and whether the doc has
@@ -4593,6 +4598,39 @@ export class BlockSurface {
     window.getSelection()?.removeAllRanges();
     this.container.focus();
     this.emitSelection();
+    this.notifyBlockSelection();
+  }
+
+  /** Select a block as a unit from outside the surface — the grip's click. Same
+   *  state and the same ring as the in-surface gestures produce; the chrome owns
+   *  no selection of its own. */
+  selectBlockAt(id: string): void {
+    this.selectBlock(id);
+  }
+
+  /** Insert an empty paragraph above a top-level block (the `+` beside the grip)
+   *  and put the caret in it. One doc assignment, so one undo step. No-ops when
+   *  `id` is not a top-level block. */
+  insertBlockAbove(id: string): void {
+    const r = insertBlockBefore(this.doc.blocks, id);
+    if (!r) return;
+    // The caret is about to land in the new paragraph, so a block held selected
+    // as a unit would be showing a ring around something the writer just left.
+    this.clearBlockSelectionState();
+    this.applyStructural(r);
+  }
+
+  /** Subscribe to block selection changes (set and cleared). The per-block chrome
+   *  keeps the selected grip painted off this signal. Returns an unsubscribe. */
+  onBlockSelectionChange(fn: () => void): () => void {
+    this.blockSelectionListeners.add(fn);
+    return () => {
+      this.blockSelectionListeners.delete(fn);
+    };
+  }
+
+  private notifyBlockSelection(): void {
+    for (const fn of this.blockSelectionListeners) fn();
   }
 
   /** Paint the ring: clear any stale marks, then mark the current selection's
@@ -4611,6 +4649,7 @@ export class BlockSurface {
     for (const el of this.container.querySelectorAll(`[${BLOCK_SELECTED_ATTR}]`)) {
       el.removeAttribute(BLOCK_SELECTED_ATTR);
     }
+    this.notifyBlockSelection();
   }
 
   /** Keys owned while a block is selected. Returns true when consumed. Undo/redo

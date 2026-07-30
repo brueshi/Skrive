@@ -56,3 +56,16 @@ export {
   type HoverZone,
   type TableChromeHandle
 } from './table-chrome';
+// Per-block hover chrome (the grip and + beside a hovered block). Same split as
+// the table chrome: the painter is attached by the editor, and the pure
+// arithmetic half is exported because it is verified without layout.
+export {
+  attachBlockChrome,
+  measureBlock,
+  blockChromeSlots,
+  blockHoverZone,
+  BLOCK_CHROME_METRICS,
+  type BlockSlot,
+  type BlockGeometry,
+  type BlockChromeHandle
+} from './block-chrome';
