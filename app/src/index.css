@@ -2675,7 +2675,14 @@ body {
   white-space: nowrap;
 }
 
-.diff-scroll-toggle,
+/* Icon-only segmented controls (.diff-mode-toggle here, the sidebar's All-view
+   switch in AllList) deliberately do NOT use the Segmented primitive. The
+   primitive's options are `{ id, label: string }` — it renders text and has no
+   slot for an icon or the Tooltip an icon-only control needs to say what it
+   does. Converging them would mean widening the primitive's API, which is a
+   design decision about what Segmented IS rather than cleanup, so it belongs in
+   its own change. The text segmented controls (the editor layout switch, the
+   diff scroll-sync switch) did converge. */
 .diff-mode-toggle {
   display: inline-flex;
   border: 1px solid var(--skrive-rule);
@@ -2683,34 +2690,14 @@ body {
   overflow: hidden;
 }
 
-.diff-scroll-button {
-  background: transparent;
-  border: none;
-  color: var(--skrive-muted);
-  cursor: pointer;
-  height: 24px;
-  padding: 0 0.5rem;
-  font: inherit;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: lowercase;
-  transition:
-    color var(--skrive-duration-quick) var(--skrive-easing),
-    background-color var(--skrive-duration-quick) var(--skrive-easing);
-}
-
-.diff-scroll-button + .diff-scroll-button,
 .diff-mode-button + .diff-mode-button {
   border-left: 1px solid var(--skrive-rule);
 }
 
-.diff-scroll-button:hover,
 .diff-mode-button:hover {
   color: var(--skrive-fg);
 }
 
-.diff-scroll-button.active,
 .diff-mode-button.active {
   color: var(--skrive-fg);
   background: var(--skrive-rule);

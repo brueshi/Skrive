@@ -16,6 +16,7 @@ import {
   useState
 } from 'react';
 import { IconButton } from '../ui/IconButton';
+import { Segmented } from '../ui/Segmented';
 import { Tooltip } from '../ui/Tooltip';
 import { renderMarkdown } from '../../lib/preview/markdown';
 import {
@@ -135,6 +136,11 @@ function renderAfter(segs: DiffSegment[]): AfterSegment[] {
     }
   });
 }
+
+const SCROLL_MODES: Array<{ id: 'matched' | 'linear'; label: string }> = [
+  { id: 'matched', label: 'matched' },
+  { id: 'linear', label: 'linear' }
+];
 
 export function DiffView({
   mode,
@@ -469,28 +475,16 @@ export function DiffView({
                 {currentChangeDisplay} of {changeCount}
               </span>
             )}
-            <div
-              className="diff-scroll-toggle"
-              role="group"
-              aria-label="Scroll sync mode"
-              title="Scroll sync: matched keeps paired blocks aligned; linear maps scroll position by pane height"
-            >
-              <button
-                type="button"
-                className={`diff-scroll-button${scrollMode === 'matched' ? ' active' : ''}`}
-                aria-pressed={scrollMode === 'matched'}
-                onClick={() => setScrollMode('matched')}
-              >
-                matched
-              </button>
-              <button
-                type="button"
-                className={`diff-scroll-button${scrollMode === 'linear' ? ' active' : ''}`}
-                aria-pressed={scrollMode === 'linear'}
-                onClick={() => setScrollMode('linear')}
-              >
-                linear
-              </button>
+            {/* The title rides a wrapper because the primitive has no slot for
+                one, and the explanation of what the two modes actually do is
+                worth more than the one element it costs. */}
+            <div title="Scroll sync: matched keeps paired blocks aligned; linear maps scroll position by pane height">
+              <Segmented
+                value={scrollMode}
+                onChange={setScrollMode}
+                options={SCROLL_MODES}
+                ariaLabel="Scroll sync mode"
+              />
             </div>
             <div
               className="diff-mode-toggle"
