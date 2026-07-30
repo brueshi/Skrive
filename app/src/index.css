@@ -2314,10 +2314,13 @@ body {
 .outline-tick {
   position: absolute;
   right: 10px;
-  height: 2px;
+  /* A hairline, not a lozenge. At 2px with a 2px radius the ends were
+     fully rounded and the bar read soft; a 1px rule with a barely-there
+     radius draws a crisp line, which is what a document map wants. */
+  height: 1px;
   padding: 0;
   border: 0;
-  border-radius: 2px;
+  border-radius: 0.5px;
   appearance: none;
   background: var(--skrive-muted);
   /* Depth reads through weight as well as length. At these sizes a 3px
@@ -2332,8 +2335,8 @@ body {
   cursor: pointer;
 }
 
-/* Invisible, taller hit area so a 2px bar is comfortably clickable
-   without making the bar itself thick. */
+/* Invisible, taller hit area so a hairline is comfortably clickable
+   without making the line itself thick. */
 .outline-tick::before {
   content: '';
   position: absolute;
@@ -2343,13 +2346,17 @@ body {
 /* Width and weight encode depth together: top-level headings read as the
    longest, firmest bars and nested ones taper and recede. Every tick is
    right-anchored, so a deeper heading's left edge steps inward — the same
-   direction the popover indents its rows. */
-.outline-tick[data-depth='1'] { width: 16px; --outline-tick-rest: 0.55; }
-.outline-tick[data-depth='2'] { width: 13px; --outline-tick-rest: 0.45; }
-.outline-tick[data-depth='3'] { width: 10px; --outline-tick-rest: 0.38; }
-.outline-tick[data-depth='4'] { width: 8px; --outline-tick-rest: 0.32; }
-.outline-tick[data-depth='5'] { width: 7px; --outline-tick-rest: 0.28; }
-.outline-tick[data-depth='6'] { width: 6px; --outline-tick-rest: 0.26; }
+   direction the popover indents its rows.
+
+   A hairline needs more contrast than a 2px bar to read as a definite
+   line rather than a smudge, so the resting weights sit higher than they
+   did when the ticks were thicker. */
+.outline-tick[data-depth='1'] { width: 16px; --outline-tick-rest: 0.72; }
+.outline-tick[data-depth='2'] { width: 13px; --outline-tick-rest: 0.6; }
+.outline-tick[data-depth='3'] { width: 10px; --outline-tick-rest: 0.5; }
+.outline-tick[data-depth='4'] { width: 8px; --outline-tick-rest: 0.44; }
+.outline-tick[data-depth='5'] { width: 7px; --outline-tick-rest: 0.38; }
+.outline-tick[data-depth='6'] { width: 6px; --outline-tick-rest: 0.35; }
 
 /* Hovering the strip brings the whole cluster up, so the map is legible
    while you are aiming at it rather than only the bar under the cursor.
@@ -2365,34 +2372,26 @@ body {
   opacity: 0.85;
 }
 
-/* The current section, marked through contrast alone. Geometry is
-   deliberately untouched: the old active state forced an 18px width,
-   which made whichever heading you happened to be reading wider than an
-   h1 and inverted the depth it was supposed to be showing. Holding the
-   size also keeps the cluster still while you scroll — the mark moves
-   between ticks, the ticks themselves never resize. */
+/* The current section: full contrast, and the one place a tick is not a
+   hairline. Against 1px rules, contrast alone was not quite enough to
+   find the mark at a glance, so it doubles to a solid 2px rule.
+
+   Width, though, never changes. That was the part worth fixing: the old
+   active state forced 18px, wider than an h1, so whichever heading you
+   were reading became the widest bar in a strip whose job is showing
+   depth by width. Height is also not transitioned, so the mark snaps
+   between ticks rather than animating, and it grows symmetrically about
+   the tick's center, so nothing around it shifts. */
 .outline-tick[data-active] {
   background: var(--skrive-fg);
   opacity: 1;
-}
-
-/* A small accent pip at the anchored edge, the one piece of colour in the
-   strip. It marks the current section without competing with the bars. */
-.outline-tick[data-active]::after {
-  content: '';
-  position: absolute;
-  right: -5px;
-  top: 50%;
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: var(--skrive-accent);
-  transform: translateY(-50%);
+  height: 2px;
 }
 
 @media (prefers-reduced-motion: no-preference) {
   /* Colour and contrast only. Width and height are pointedly absent: they
-     are what made the strip twitch as the active section changed. */
+     are what made the strip twitch as the active section changed, and the
+     mark is better off snapping between ticks than sliding. */
   .outline-tick {
     transition:
       opacity var(--skrive-duration-quick) var(--skrive-easing),
@@ -2541,13 +2540,16 @@ body {
   margin-top: 5px;
 }
 
+/* Both states sit lighter than they first shipped. The card is a quiet
+   list of section names, and a fill heavy enough to read as a pressed
+   control turned every glance at the outline into a glance at a widget. */
 .outline-popover-row:hover {
-  background: color-mix(in srgb, var(--skrive-fg) 6%, transparent);
+  background: color-mix(in srgb, var(--skrive-fg) 4%, transparent);
 }
 
 /* The selected row: keyboard cursor, or the active section by default. */
 .outline-popover-row[data-selected] {
-  background: color-mix(in srgb, var(--skrive-fg) 10%, transparent);
+  background: color-mix(in srgb, var(--skrive-fg) 6.5%, transparent);
 }
 
 /* Hovering a row surfaces its twisty; at rest the card stays a clean list
@@ -2577,11 +2579,15 @@ body {
   content: '';
   position: absolute;
   left: 0;
-  top: 5px;
-  bottom: 5px;
-  width: 2px;
+  top: 6px;
+  bottom: 6px;
+  /* Narrower, shorter and lighter than it was. At full muted weight and
+     the row's whole height it read as a hard bracket clamping the row,
+     which is far more emphasis than "this is the section you are in"
+     needs next to an already-tinted background. */
+  width: 1.5px;
   border-radius: 1px;
-  background: var(--skrive-muted);
+  background: color-mix(in srgb, var(--skrive-muted) 55%, transparent);
 }
 
 .preview-inner {
