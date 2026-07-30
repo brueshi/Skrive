@@ -16,7 +16,23 @@ import styles from './Input.module.css';
 //
 // Site typography (mono key fields, the report modal's larger scale) rides
 // the className passthrough; the primitive owns border, background, and
-// focus behavior only.
+// focus behavior only. Scale is retuned by setting --input-* on the
+// consumer's class rather than by out-specificity-ing the rules above.
+//
+// What is NOT a candidate, established by sweeping every raw <input>:
+//
+//   - Checkboxes and radios. This primitive is a TEXT FIELD; a checkbox shares
+//     nothing with it but a tag name. The native controls in the modals and the
+//     theme tiles are correct as they are.
+//   - Fields whose focus ring is carried by their PARENT. The chip row's
+//     trailing input, the palette and menu search fields, rename, cmdk, the
+//     link editor: each sits in a surface that already shows focus-within, so
+//     giving the field its own ring would draw two indicators for one focus.
+//     The rule is about where the focus indicator LIVES, not how naked the
+//     field looks.
+//
+// The test for a candidate is therefore: does this field own its own focus?
+// If its surface owns it, it is not this primitive.
 
 const inputVariants = {
   variant: {

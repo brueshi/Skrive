@@ -3538,17 +3538,17 @@ body {
   color: var(--skrive-fg);
 }
 
+/* The inline chip editor is the Input primitive; this retunes its SCALE for a
+   dense chip row and lets it size to content, which the primitive (width:100%)
+   does not. Border, background, radius and the focus glow come from the
+   primitive — it previously had no focus style at all, so it now speaks the
+   app's one focus language instead of the browser's. */
 .chip-edit {
-  background: var(--skrive-bg);
-  border: 1px solid var(--skrive-rule);
-  border-radius: var(--skrive-radius-sm);
-  color: var(--skrive-fg);
-  font: inherit;
-  font-size: 12px;
-  padding: 0.2rem 0.4rem;
-  min-width: 4rem;
   width: auto;
-  box-sizing: border-box;
+  min-width: 4rem;
+  --input-font-size: 12px;
+  --input-pad-y: 0.2rem;
+  --input-pad-x: 0.4rem;
 }
 
 /* The chip-pending input nests inside a .chip-group container that
