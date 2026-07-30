@@ -11,7 +11,7 @@
 // yet; they need their own offset story and are a follow-up.
 
 import type { BlockNode } from '../blockmodel';
-import { inlinePlainText } from '../blocksurface/inline-ops';
+import { SCAN_ATOM, inlineScanText } from '../blocksurface/inline-ops';
 
 export type FindFlags = {
   caseSensitive: boolean;
@@ -91,7 +91,14 @@ export function replaceRangesInString(
 
 /** All matches across a block document, in document order, as block-keyed records.
  *  Descends into lists and blockquotes; matches within each inline-text leaf, never
- *  across a block boundary. The matcher is compiled once and reused per leaf. */
+ *  across a block boundary. The matcher is compiled once and reused per leaf.
+ *
+ *  Matching runs over `inlineScanText`, NOT `inlinePlainText`: a match's [start, end)
+ *  is handed straight to the decoration overlay and to `surface.replaceMatch`, which
+ *  applies it to the inline model, so it has to be in the flat offset space where a
+ *  single-cell atom (image / break / footnote reference) holds one cell. Plain text
+ *  drops those atoms, which shifted every later match left by one per atom — the
+ *  highlight drifted and replace edited the wrong characters. */
 export function findInDocument(blocks: BlockNode[], query: string, flags: FindFlags): Match[] {
   const matcher = buildMatcher(query, flags);
   if (!matcher) return [];
@@ -99,8 +106,15 @@ export function findInDocument(blocks: BlockNode[], query: string, flags: FindFl
   const walk = (nodes: BlockNode[]): void => {
     for (const b of nodes) {
       if (b.type === 'paragraph' || b.type === 'heading') {
-        const text = inlinePlainText(b.inline);
-        for (const r of execAll(matcher, text)) out.push({ blockId: b.id, start: r.start, end: r.end });
+        const text = inlineScanText(b.inline);
+        for (const r of execAll(matcher, text)) {
+          // A regex query (`.`, a character class) can match the atom placeholder;
+          // a literal one never can. Such a "match" isn't text the writer searched
+          // for, and replacing it would silently destroy the atom — an image, or a
+          // footnote reference along with its definition in the footer. Drop it.
+          if (text.slice(r.start, r.end).includes(SCAN_ATOM)) continue;
+          out.push({ blockId: b.id, start: r.start, end: r.end });
+        }
       } else if (b.type === 'blockquote') {
         walk(b.children);
       } else if (b.type === 'bullet_list' || b.type === 'ordered_list') {

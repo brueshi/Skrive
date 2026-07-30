@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { BlockSurface } from '../../src/lib/blocksurface';
 import { parseDocument, type BlockNode, type InlineNode } from '../../src/lib/blockmodel';
 import { findInDocument, type FindFlags } from '../../src/lib/find/engine';
+import { BLOCK_ID_ATTR } from '../../src/lib/blocksurface/render';
 
 let container: HTMLElement;
 beforeEach(() => {
@@ -72,6 +73,42 @@ describe('surface find/replace', () => {
     expect(matches).toHaveLength(1);
     surface.replaceMatch(matches[0]!.blockId, matches[0]!.start, matches[0]!.end, 'that');
     expect(texts(surface)).toEqual(['that item']);
+  });
+
+  // A single-cell atom holds one cell in the flat offset space a match is expressed
+  // in. When find matched over atom-less plain text, every offset past an atom was
+  // short by one and replace ate the character before the match — a defect a
+  // text-only assertion (plainOf drops atoms) would not have caught, so these read
+  // the painted block back.
+  describe('with an image in the leaf', () => {
+    const painted = (blockId: string): HTMLElement =>
+      container.querySelector(`[${BLOCK_ID_ATTR}="${blockId}"]`) as HTMLElement;
+
+    it('replaceMatch after an image edits the right characters and leaves the image', () => {
+      const surface = new BlockSurface({ container, doc: parseDocument('ab ![x](a.png) the cat') });
+      const matches = findInDocument(surface.getDocument().blocks, 'the', flags);
+      expect(matches).toHaveLength(1);
+      surface.replaceMatch(matches[0]!.blockId, matches[0]!.start, matches[0]!.end, 'THE');
+
+      const el = painted(matches[0]!.blockId);
+      expect(el.querySelectorAll('img')).toHaveLength(1); // the atom survives the edit
+      // textContent skips the image, so this reads the text on both sides of it.
+      expect(el.textContent).toBe('ab  THE cat');
+    });
+
+    it('replaceAll keeps every atom and every offset in a block with two of them', () => {
+      const surface = new BlockSurface({
+        container,
+        doc: parseDocument('![x](a.png) the mid ![y](b.png) the end')
+      });
+      const matches = findInDocument(surface.getDocument().blocks, 'the', flags);
+      expect(matches).toHaveLength(2);
+      surface.replaceAll(matches, 'THE');
+
+      const el = painted(matches[0]!.blockId);
+      expect(el.querySelectorAll('img')).toHaveLength(2);
+      expect(el.textContent).toBe(' THE mid  THE end');
+    });
   });
 
   it('readSelectionRange is null when the selection is outside the surface', () => {
