@@ -21,6 +21,7 @@
 import { AnimatePresence } from 'framer-motion';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { activeHeadingIndex, type OutlineHeading } from '../../lib/preview/outline';
+import { BLOCK_ID_ATTR } from '../../lib/blocksurface/render';
 import { OutlinePopover } from './OutlinePopover';
 
 type Props = {
@@ -97,6 +98,24 @@ function queryHeadingEls(content: HTMLElement): HTMLElement[] {
   return Array.from(
     content.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6')
   );
+}
+
+/**
+ * Stable identity for a heading element, for keying fold state and React
+ * rows. The rich surface tags every block with a block id that survives
+ * edits and reordering; the rendered preview has no such attribute but
+ * assigns anchor slugs. The index is a last resort — it keeps folding
+ * working on a surface offering neither, at the cost of a fold sliding
+ * onto its neighbour when headings move.
+ *
+ * The prefixes keep the three namespaces apart, so a slug that happens to
+ * read like a block id can never collide with one.
+ */
+function headingKey(el: HTMLElement, index: number): string {
+  const blockId = el.getAttribute(BLOCK_ID_ATTR);
+  if (blockId) return `b:${blockId}`;
+  if (el.id) return `s:${el.id}`;
+  return `i:${index}`;
 }
 
 export function OutlineRail({
@@ -186,17 +205,18 @@ export function OutlineRail({
             const top = tops[i];
             if (el === undefined || top === undefined) return h;
             const text = el.textContent ?? '';
-            if (top === h.top && text === h.text && el.id === h.id) return h;
+            const key = headingKey(el, i);
+            if (top === h.top && text === h.text && key === h.key) return h;
             changed = true;
-            return { ...h, top, text, id: el.id };
+            return { ...h, top, text, key };
           });
           return changed ? next : prev;
         });
       } else {
         headingElsRef.current = els;
         setHeadings(
-          measured.map(({ el, top }) => ({
-            id: el.id,
+          measured.map(({ el, top }, i) => ({
+            key: headingKey(el, i),
             text: el.textContent ?? '',
             depth: Number(el.tagName[1]) || 1,
             top
@@ -541,7 +561,7 @@ export function OutlineRail({
     >
       {headings.map((h, i) => (
         <span
-          key={`${i}-${h.id}`}
+          key={h.key}
           className="outline-tick"
           aria-hidden="true"
           data-index={i}

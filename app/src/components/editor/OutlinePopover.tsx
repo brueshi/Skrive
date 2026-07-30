@@ -49,7 +49,7 @@ export const OutlinePopover = forwardRef<HTMLDivElement, Props>(
         {headings.map((h, i) => (
           <button
             type="button"
-            key={`${i}-${h.id}`}
+            key={h.key}
             id={optionId(i)}
             role="option"
             aria-selected={i === selectedIndex}
