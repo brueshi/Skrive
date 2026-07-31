@@ -911,3 +911,367 @@ mean sizing is already token-drivable. The debt is the font weights — the
 comparison is weight-for-weight, and the lab currently carries two of the four
 the kit uses (400/500 against 450/500/600). Vendor Inter SemiBold and Light
 before shooting anything for the verdict.
+
+---
+
+## 2026-07-31 — Stage 5: the honest benchmark — tokens, the kit at spec, and the side-by-side
+
+**Branch:** `joe/skr-233-zig-ui-lab-hand-drawn-interface-research`
+(recreated off `main` — the Stage 4 branch had been merged and deleted).
+**Commit:** `a808a84` (code); log + screenshots follow in the next commit.
+
+**Toolchain.** All pins unchanged: Zig 0.16.0, sokol-zig `54776d6`, sokol-shdc
+`87a6914`. No new dependency and no shader change. New assets: Inter SemiBold
+and Inter Light static TTFs vendored from the same Inter 4.1 release as the
+existing Regular/Medium (byte-identical hashes for the carried pair confirmed
+the provenance; SIL OFL, existing license file covers the family). One system
+font is now loaded at *runtime* — see the serif note below — which plan 4.3
+explicitly sanctions as the alternative to vendoring.
+
+**Session-start regression.** Before touching anything: `zig build` clean,
+33/33 tests, and a full `--bench` run — every scene 1 draw call, 0 presents in
+all four idle phases, settle window 10 presents then silence, atlas census
+identical to Stage 4 (225 glyphs, 9.2%, 0 growth). The carried numbers matched
+Stage 4's run at the same 60Hz cadence, so the branch cut was clean.
+
+**What was built.**
+- `ui/tokens.zig` (207 lines) — the mechanical transcription: semantic palette,
+  shell/card values, the radius scale, all four elevation shadows, the focus
+  outline, motion durations/easings, and the component tier (button, input,
+  segmented, toggle, icon button), plus the `.settings-*` class specs the
+  benchmark scene consumes. Every `color-mix()` was computed by hand and then
+  cross-checked against Chromium's computed styles with the real CSS loaded —
+  all matched (`--toggle-track-off` = #bdbec2, `--segmented-track` = #c9cace,
+  `--settings-cap` = #9d9da2, `--settings-hair` = #eaeaec).
+- Widgets restyled off tokens; hover now *animates* (the Stage 4 debt): each
+  widget runs a `hover_t` through the same per-ID store as its state
+  transitions, so the shipped 110ms colour transition reads as a fade rather
+  than a step. Button, toggle, segmented, and the new icon button all carry it.
+- `ui/icons.zig` + IconButton — three shipped icons hand-transcribed to SDF
+  primitives, plus the 26px transparent glyph square with the 7% hover wash and
+  0.4 disabled opacity per the module CSS.
+- The benchmark scene (key `9`) — no longer an invented card: it is the shipped
+  **Editor pane's "Writing" section row for row** (Line measure segmented with
+  all five options; Measure rule / Smart typography / Check spelling toggles;
+  the real label and description copy from SettingsView.tsx), under the real
+  pane head, on the real `.settings-col` geometry, with a labelled CONTROLS
+  strip below it so Button and IconButton appear in the comparison (the strip
+  is kit coverage, not a shipped section — the screenshots say so).
+- `gfx/text.zig` gained TTC support: `faceCount`, `initFace(id, data, index)`,
+  and `subfamily()` (Mac name record first, Microsoft UTF-16BE fallback) so a
+  face can be picked out of a TrueType collection by name at runtime.
+
+**The transcription findings — measuring the kit beat eyeballing it, twice.**
+- **The rem trap.** `index.css` sets `:root { font-size: 14px }`, so 1rem is
+  14px in the shipped app — not the browser-default 16. `--button-font-size:
+  0.8125rem` therefore computes to **11.375px**, not the 13px the value was
+  presumably chosen to be, and the shipped button genuinely renders an 11.4px
+  label (verified via getComputedStyle: font-size 11.375px, padding 7px/15.4px,
+  height 33.06px). The lab's Stage 3 by-eye numbers (13px label, 9px radius,
+  34px tall, 16px pads) were all wrong against the real kit; the token pass
+  moved every one (radius 9 → 8, label 13 → 11.375, pads 16 → 15.4, height
+  34 → 33.06).
+- **The primary button is weight 400.** `.button` says `font: inherit` and no
+  rule anywhere in the kit adds a font-weight — primary included. The lab had
+  been drawing primary labels in Medium since Stage 3. Now Regular everywhere,
+  per the measurement, not the guess.
+- Focus ring corrected to the shipped `:focus-visible` spec: 2px at 50% alpha,
+  **2px** offset (the lab carried 3px by eye).
+- The card shadow is the token's quiet `0 1px 2px 5%` (sigma 1), not the
+  by-eye `0 2px / sigma 4` the Stage 4 card wore; the row hairline is
+  `--settings-hair` (#eaeaec), not rule-at-60%.
+- The segmented active option steps to **SemiBold 600** — the weight the lab
+  finally carries. Options are measured at the weight they currently render,
+  so the strip resizes by a fraction of a pixel on selection exactly as the
+  shipped control does (no reserved bold width there either; the thumb rides
+  framer-motion's layout animation over it).
+
+**The serif title.** The pane title renders in `--skrive-editor-font` — Iowan
+Old Style at font-weight 600, which CSS font matching resolves to the
+collection's **Bold** face. The lab cannot vendor an Apple system font, so it
+reads `/System/Library/Fonts/Supplemental/Iowan Old Style.ttc` at runtime and
+picks the Bold face by name (face 1 of 7), falling back to Inter SemiBold with
+a log line if the file is missing. That makes the most prominent line of the
+benchmark a typeface-for-typeface comparison in *both* flavours. Zig 0.16
+fought back here: `std.fs.openFileAbsolute` is gone (fs reads now route
+through the new `std.Io` interface, and threading an Io through sokol
+callbacks is the same disproportion Stage 0 hit with timers), and
+`std.posix` has lost `fstat` and even `close` — the loader ended up on
+`posix.openat` + `posix.read` to EOF under a 16MB cap with a libc `close`.
+Three API archaeology rounds for one file read; recorded so the next session
+doesn't rediscover it.
+
+**The icons, and where the primitive vocabulary ends.** Three icons, three
+verdicts on expressibility:
+- **Plus is exact**: a round-capped stroke *is* a pill-radius rect.
+- **Search is exact except its handle**: the lens ring is a border-mode rect
+  at half-size radius (the SDF degenerates to a circle), but the 45° handle
+  has **no primitive** — the vertex format carries no rotation, so it is
+  stamped as 13 overlapping filled circles along the segment. Reads cleanly
+  at 2x; overlapping AA fringes would show at 1x. A real renderer grows a
+  rotated-quad transform here (GPUI and Dear ImGui both have one).
+- **The pin names the edge**: its head is an ellipse and its base plate is a
+  cubic bezier — neither expressible. The head became a stadium of the same
+  bounds (sub-pixel bulge difference at 16px), the plate a stroked rounded
+  rect, the near-vertical flanks vertical strokes. It *reads* as the pin in
+  the side-by-side, but it is an approximation and the least faithful of the
+  three. Finding, not a reason to build a path rasterizer — exactly as the
+  plan predicted.
+
+**The line-box lesson — the miss that taught the most.** The first side-by-side
+had the lab's whole card sitting **11px higher** than the reference. Cause:
+the lab was using natural font line heights for the title/sub/cap while CSS
+applies the root `line-height: 1.5` to all three (none declares its own) and
+centres each font box in its line box via half-leading. Modelled that (37.5 /
+20.25 / 16.5px boxes, text centred), and the card's top border then landed
+within **0.5px** of the reference (measured programmatically off both images:
+lab 161.5px from content top, Chromium 162). The general shape of this
+finding: WebKit's text stack is not just a rasterizer, it is a *layout
+semantics* engine — rem resolution, line boxes, half-leading, font matching —
+and every one of those semantics had to be reimplemented by hand to make the
+pixels line up. The rasterizer was never the hard part of text; the rules
+around it are.
+
+**Screenshots** in `docs/zig-ui-lab/` (the typeface-trap discipline, stated on
+every image):
+- `stage5-benchmark-lab.png` — the lab scene (Inter vendored + system Iowan).
+- `stage5-benchmark-web-product.png` — Chromium, the app's real CSS + markup,
+  system font stack: the **product-honest** flavour (typefaces differ by
+  design: SF Pro vs Inter; Iowan title on both).
+- `stage5-benchmark-web-inter.png` — same page over the **same Inter TTFs**
+  via @font-face with synthesis off: the **rasterizer-isolating** flavour.
+- `stage5-side-by-side-product.png`, `stage5-side-by-side-inter.png` —
+  labelled A/B panels at identical logical size, 2x.
+- `stage5-text-crops.png` — 3x magnified crops (title / Medium label /
+  Regular desc / SemiBold active segment), lab vs Chromium-on-identical-files,
+  regions anchored per-image to the detected card edge.
+- `stage5-showcase-lab.png` — every widget in every state, incl. IconButton
+  and the icon set, through the real paint paths (556 quads, 1 draw call).
+- The reference is a Chromium transcription, not the live app: driving the
+  live Skrive is Joe's to launch, not the session's to intrude on (the Stage 1
+  call, restated), and the transcription uses the shipped CSS verbatim so the
+  spec side is exact. WebKit-vs-Chromium rendering differs marginally;
+  disclosed as always.
+
+**The text delta, quantified** (mean ink over matching regions, lab vs
+Chromium on identical font files, anchored to the card edge):
+- Inter Medium 13.5px row label: **−0.5%** ink; Regular 12.5px desc:
+  **−0.1%** — statistically nothing. The dark-pixel fraction runs slightly
+  *higher* on the lab side at equal ink (0.030 vs 0.026): same total
+  coverage, more of it at full contrast — the "hair lighter and slightly
+  crisper" Stage 2 saw, now as a number.
+- Iowan Old Style Bold 25px title: **−6.2%** ink — the lab renders the serif
+  visibly lighter in a direct A/B (Chromium's gamma-aware blending thickens
+  dark-on-light text, and it shows most at display sizes). Not noticeable in
+  isolation; findable in the magnified crop.
+- The segment-strip region read −11.8%, but that number mixes control-fill
+  geometry (track/thumb pixels) with text and is not a text metric; the
+  label-only crops above are the honest ones.
+
+**Measurements (macOS daily driver, ReleaseFast, 1200x800 @ 2x, via
+`--bench`).** Load-independent invariants first, as always:
+- **Every scene: 1 draw call**, including the new benchmark scene (350 quads
+  — five-option segmented, three toggles, four buttons, three icon buttons,
+  serif title) and the expanded showcase (556 quads). The `flush()` seam is
+  *still* unused: shapes, glyphs from five faces, and icon geometry all share
+  the single batch.
+- **Frame-on-demand holds everywhere**: 0 presents over 15s in all four idle
+  phases; the kick-animation phase repaints 10 frames during the settle
+  window and then 0 for 15s. The hover animation obeys the same discipline
+  (it retargets during the build, so the dirty flag decision stays after the
+  build — nothing new to trap).
+- benchmark scene build 380us avg (between `settings` 585us/394 quads and
+  `buttons` 163us/114 quads — still tracking quad count, not layout depth,
+  with ~8 boxes resolved per frame plus a TTC face in play).
+- Carried baselines re-confirmed at the 60Hz cadence this run held: stress
+  16.61ms / shadows 23.35 / small 16.66 / toast 16.67 / settings 16.34 /
+  text-wall 17.19 / buttons 16.82 — quad counts identical to Stage 4. One
+  artifact: the shadows phase logged a 12ms encode *average* (its frame times
+  are normal and match Stages 1–4); ambient-load contamination of the CPU
+  span, of the family Stage 3 documented. Environmental caveats otherwise
+  unchanged.
+- Atlas after everything: **1024², 236 glyphs, 9.6%, 0 growth** — two new
+  Inter weights plus a serif Bold cost 11 glyphs, because only the strings
+  actually drawn rasterize. The icons cost zero (pure geometry).
+- Idle CPU unchanged (~1.2%, the Stage 0 display-link constant).
+
+**How it feels — the three legs, and what remains Joe's.**
+1. *Mechanics*: 33/33 headless tests still pass untouched — the restyle moved
+   no behaviour. IconButton rides the same `interact()` machinery the tests
+   pin.
+2. *Visuals*: the showcase + benchmark screenshots above, through the real
+   paint paths; hover states now photographed at their settled `hover_t = 1`.
+3. *Tactile*: unverifiable from the agent shell, as every stage has said
+   plainly. **Owed to Joe at the keyboard, and this stage is the natural
+   collection point**: the Stage 3 button tactile pass was never done (Stage
+   4's toggle/segmented pass was), and the new hover fades, the 11.4px button
+   labels, and the five-option segmented all deserve a hand on them. Keys `7`
+   (buttons) and `9` (the benchmark section, live controls throughout,
+   `Check for updates…` and the pin pop the toast). One known motion-quality
+   divergence to feel for: the shipped segmented thumb is an *underdamped
+   spring* (stiffness 520, damping 38 — it overshoots by design); the lab's
+   exponential decay cannot overshoot. Same duration family, different
+   character at the end of travel.
+
+**Deliberate divergences kept (logged, not silent).**
+- The lab keeps its distinct pressed states (shipped Button has no `:active`
+  rule) and the bare default's hover wash — the Stage 3 calls, both arguably
+  in the lab's favour, both visible in the showcase.
+- The toggle's second inset rim layer (1.5px blurred top shadow, white top
+  highlight when on) stays dropped: **the SDF shader still draws no inset
+  blur.** The carried Stage 4 debt is hereby recorded as a renderer gap
+  rather than implemented — at 23px it is invisible in the side-by-side, and
+  Stage 5's budget went to fidelity that shows. The on/off rim *colours* now
+  interpolate per the CSS, which the old single-colour border didn't.
+- Inter Light was vendored per the stage brief but is unused: the kit's
+  fourth weight is 450 (the toast eyebrow), which has no static file, and
+  Regular remains the closest honest stand-in. Four faces ship in assets/;
+  three draw.
+
+**What fought back.**
+- Zig 0.16's Io migration reaching the filesystem (above) — the only real
+  code fight of the session.
+- `screencapture` returned a **222x154 window-proxy thumbnail** instead of
+  the window once, silently — a new failure mode for the capture bag: the
+  window was mid-settle after a relaunch. The fix was the existing lesson
+  (frontmost + wait longer), plus a new rule: *check the capture's pixel
+  dimensions before using it*.
+- Playwright composites screenshotted before multi-megabyte data-URI images
+  finished decoding, producing a soft lab panel; `img.decode()` await fixed
+  it. Same genus as the thumbnail: verify the artifact, not the exit code.
+- The 11px line-box miss (above) — caught by measuring both images rather
+  than trusting the eyeball, which is the whole method of this stage.
+
+**Exit criteria.**
+- *Side-by-side exists, labelled, both typeface flavours distinguished:*
+  **pass** — product-honest and rasterizer-isolating sheets, flavour stated
+  on every panel.
+- *A stranger sorting the two would hesitate on everything except text
+  rendering quality:* **pass, and stronger than the criterion asked** — at
+  kit scale the text needs the 3x crops to sort (the serif's −6.2% ink is
+  the tell; the UI sizes are −0.5% and below), and the geometry lands within
+  a pixel once line boxes were modelled. The honest tells that remain:
+  overall type colour a hair lighter, the segmented thumb's missing
+  overshoot in motion, and the pin icon under magnification.
+- *Verdict entry written, all five §8 questions answered, accessibility
+  named plainly:* **pass** — below.
+- *Cost accounting with real numbers:* **pass** — below.
+- *`--bench` clean end to end; frame-on-demand holds (0 idle presents
+  including post-settle); 1 draw call:* **pass**, all measured this session.
+- *Isolation:* **pass** — repo-wide grep finds `zig-ui` only under `labs/`
+  plus this log and the graduation checklist; `bun run typecheck` untouched;
+  `rm -rf labs/` still breaks nothing.
+
+**Cost accounting (the answer to "what would it actually take").**
+- **Sessions:** 6, one per stage: 2026-07-07, 07-09, 07-13, 07-16, 07-24,
+  07-31. The log records dates, not durations; against the plan's 2–4 hour
+  session envelope that is **12–24 wall-clock hours, best estimate ~18**,
+  spread over 24 days of off-occasions.
+- **Code:** 4,328 lines of hand-written Zig in `src/` (excluding the
+  1,218-line generated shader artifact), + 147 lines of GLSL shader source,
+  + 99 lines of build script ≈ **4,574 authored lines**. Of that, roughly a
+  third is `main.zig` (scenes, bench harness, plumbing) — the reusable
+  substrate + kit is ~3,000 lines. 33 headless tests.
+- **Dependencies: one.** sokol-zig (pinned by hash), with sokol-shdc as a
+  build-time tool behind an explicit step, stb_truetype as a vendored
+  single header carrying one 15-line local patch, and four OFL font files.
+  Nothing else.
+- **What that bought:** window → single-draw-call SDF renderer → atlas text
+  with five faces → immediate-mode identity/input → flexbox-lite layout →
+  animation store → four widgets + icons at shipped-spec fidelity, measured
+  rather than asserted.
+- **The scaling honesty:** a component kit is the *demo-able* 10%. The
+  number above prices the substrate and the kit; it does not price text
+  editing, scrolling, IME, accessibility, or the long tail below.
+
+---
+
+## Stage 5 verdict
+
+The plan's §8 questions, answered in order, then the outcome.
+
+**1. Feel ceiling — can hand-drawn widgets match the shipped kit's feel?**
+At kit scale, **yes, and in places it exceeds it.** Input latency is
+structurally minimal: hover, press, and release read the same frame's hit
+test, every event repaints that frame, and there is no framework queue
+between the OS event and the pixel — a property the web stack cannot have by
+construction. The lab has real pressed states where the shipped CSS has
+none. Hover now fades on the shipped 110ms curve; focus rings are
+spec-exact; the toggle's press-stretch and retargetable mid-flight reversals
+are there. Two honest gaps: the segmented thumb's spring overshoot (the
+store is exponential decay; a spring integrator is a bounded addition nobody
+needed until now), and the tactile leg of this stage — the button pass Stage
+3 owed — still needs Joe's hand at the keyboard, because that is the one
+thing this harness cannot feel. Stage 4's toggle pass ("runs well, nothing
+changed") is the precedent that the design's latency claims survive contact.
+
+**2. The text tax — how far below WebKit is lab-tier text?** Far smaller
+than feared at 2x, and mostly *not where expected*. On identical font files
+the UI sizes measure within half a percent of Chromium's ink; the serif
+display size runs 6% light; 1x remains visibly rough (unhinted stems — the
+known, accepted lab-tier boundary). The genuinely expensive discovery is
+that the tax is **semantics, not rasterization**: rem resolution, CSS line
+boxes, half-leading, font matching against a system collection — each had to
+be reimplemented by hand to get within a pixel of the reference, and each is
+a place a hand-drawn app can silently diverge from every design spec written
+in CSS terms. stb draws the glyphs fine; *being a browser about text* is the
+part that costs. Product-tier (CoreText + shaping) remains unpriced by this
+lab and would be its own multi-stage arc, exactly as plan 4.3 said.
+
+**3. Velocity — hours per widget once the substrate existed?** High and
+still improving. Stage 5 alone, one session: the full token transcription,
+a four-widget restyle, IconButton plus three icons (~200 lines total), a
+runtime TTC loader, and a spec-exact benchmark scene. IconButton cost
+perhaps an hour end to end. The substrate (Stages 0–2, ~10 hours) is paid
+once; widgets are now cheap; *fidelity* is the recurring cost — every
+component wants its measured spec, its states showcased, and its mechanics
+pinned headless, because there is no inspector and no browser to catch
+drift. Call it: substrate ~10h, then roughly a widget per hour at
+shipped-spec quality.
+
+**4. Joy.** From inside the sessions: the substrate stages (the SDF shader,
+the kerning excavation, the layout idiom fight) were discovery; Stage 5 was
+transcription with three genuinely delightful finds in it (the rem trap, the
+weight-400 primary button, the line-box lesson — all things now known about
+the *product*, not just the lab). The energy curve suggests the lab's joy
+lives below the widget layer, in the renderer and text strata — worth
+knowing if a continuation is ever weighed. But this question belongs to the
+owner: five of six sessions were model-run with Joe closing the tactile
+loops, and his read of whether this was fun is the one that counts. Flagged,
+not answered.
+
+**5. The missing 90%.** What a real Skrive frontend would still need, and
+the kit does not touch: **text editing** — the entire block surface: caret,
+selection, IME composition, undo, the things the bespoke editor spent
+months on *inside* an engine that already did text; **scrolling and
+clipping** — never built; the batcher's flush()/scissor seam has never once
+been exercised; **popovers and overlay arbitration** — the Stage 3 hot-ID
+seam, still theoretical; **dark theme**; **Windows beyond a cross-compile
+that has never been run**; rotated geometry, inset blur, gamma-aware
+blending, springs — each small, each real, each currently absent. And above
+all of it: **accessibility. A hand-drawn UI starts at zero — no VoiceOver,
+no accessibility tree, no system text scaling, no reduced-motion
+inheritance (the shipped kit honours `prefers-reduced-motion`; the lab does
+not even have the setting). WebKit gives Skrive all of this nearly free.
+For a shipped writing app this is close to disqualifying on its own, and no
+amount of rendering fidelity earned above changes that.** The five §8
+words stand as written.
+
+**Outcome: park it.** The terminal question — how far up the ladder can
+occasional sessions climb, and does the top feel like Skrive — is answered:
+six sessions, ~4,600 lines, one dependency, and the hand-drawn kit sits
+next to the shipped one closely enough that the differences need
+magnification or motion to name. That is the education banked, and it is
+real: the SDF vocabulary, the immediate-mode identity scheme, the
+frame-on-demand discipline, the true shape of the text problem, and a
+sharpened respect for what the web stack does silently. The same accounting
+says the remaining 90% is not six more sessions, it is a different project
+— and the accessibility line item disqualifies the destination, not just
+the schedule. The hard no on replacing Skrive's frontend stands, unmoved by
+how good the screenshots look; nothing here argues for reopening it through
+the plan's separate-conversation gate. If the lab ever gets a casual
+seventh session, the two threads with standalone pull are the CoreText arc
+(pricing product-tier text for its own sake) and running the Windows .exe
+out of curiosity — neither is scheduled, neither is owed. The log closes
+green: every scene one draw call, idle at zero presents, and a component
+kit that would make a stranger hesitate. Question asked, question answered.
