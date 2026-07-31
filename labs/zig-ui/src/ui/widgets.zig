@@ -6,11 +6,18 @@
 //  honestly (default / hover / pressed / focused / disabled), and returns what
 //  happened. There is no widget object and no retained tree.
 //
-//  Styling is by-eye from the shipped kit (app/src/components/ui), NOT a
-//  transcription of tokens.css — exact tokens arrive in Stage 5. Values here
-//  are plausible round numbers picked to sit next to the real components:
-//  13px label, 9px radius, ~34px tall buttons, the slate-indigo focus ring;
-//  the 40x23 toggle track and 30px segmented strip the real CSS specifies.
+//  Styling reads ui/tokens.zig (Stage 5) — the mechanical transcription of the
+//  shipped kit's tokens.css + index.css token blocks. Where the Stage 3/4
+//  by-eye values disagreed with the tokens, the tokens won; the log records
+//  what moved. One deliberate divergence is kept: a distinct pressed state
+//  (the shipped Button has no :active rule, so a shipped press shows only the
+//  hover look — the lab's deeper press wash is more tactile and was reviewed
+//  favourably in Stage 3).
+//
+//  Hover is animated (Stage 4's carried debt): the shipped CSS transitions
+//  hover colour over --skrive-duration-quick; each widget runs a hover_t
+//  value through the same per-ID animation store as its state transitions,
+//  and the visual resolution interpolates rather than steps.
 //
 //  Stage 4 splits each widget in two: a `*Interact` half that is pure state
 //  (context in, decision out, no drawing) and a drawing half that calls it.
@@ -24,6 +31,7 @@ const draw = @import("draw.zig");
 const context = @import("context.zig");
 const layout = @import("layout.zig");
 const anim = @import("anim.zig");
+const tokens = @import("tokens.zig");
 const batch = @import("../gfx/batch.zig");
 const atlas_mod = @import("../gfx/atlas.zig");
 const text_mod = @import("../gfx/text.zig");
@@ -31,33 +39,28 @@ const text_mod = @import("../gfx/text.zig");
 const Context = context.Context;
 const Color = draw.Color;
 
-/// Bundles the drawing dependencies so widget signatures stay short. The two
-/// weights match the shipped UI face (Inter Regular for body labels, Medium
-/// for the primary action's bit of extra presence).
+/// Bundles the drawing dependencies so widget signatures stay short. Three
+/// weights of the UI face: Regular (400) for labels — including the button,
+/// whose shipped CSS sets no font-weight anywhere, even on primary — Medium
+/// (500) for the settings-row label and inactive segmented options, SemiBold
+/// (600) for the active segmented option and section caps.
 pub const Painter = struct {
     b: *batch.Batch,
     atlas: *atlas_mod.Atlas,
     dpi: f32,
     font: *const text_mod.Font, // Inter Regular
     font_medium: *const text_mod.Font, // Inter Medium
+    font_semibold: *const text_mod.Font, // Inter SemiBold
 };
 
-// By-eye palette (light theme), the same hexes the toast scene already reads
-// from index.css. Not tokens.css — Stage 5 replaces these with the real set.
-pub const pal = struct {
-    const fg = Color.hex(0x1a1a1d); // --skrive-fg
-    const muted = Color.hex(0x73737a); // --skrive-muted
-    const rule = Color.hex(0xd8d9dd); // --skrive-rule
-    const accent = Color.hex(0x4c5ba6); // --skrive-accent / focus ring
-    const on_primary = Color.hex(0xffffff);
-    pub const bg = Color.hex(0xffffff); // --skrive-bg
-};
-
-// Geometry, by eye from the shipped Button (radius 9, ~13px label, snug pads).
-const font_size: f32 = 13;
-const height: f32 = 34;
-const radius: f32 = 9;
-const pad_x: f32 = 16;
+// Button geometry, from tokens. The Stage 3 by-eye values were 13px label /
+// 9px radius / 34px tall / 16px pads; the tokens say 11.375px (0.8125rem
+// against the app's 14px root — see tokens.zig on the rem trap) / 8px /
+// 33.06px / 15.4px. Tokens win.
+const font_size: f32 = tokens.button_font_size;
+const height: f32 = tokens.button_height;
+const radius: f32 = tokens.button_radius;
+const pad_x: f32 = tokens.button_pad_x;
 
 pub const Variant = enum { default, secondary, primary };
 
@@ -84,47 +87,50 @@ const Visual = struct {
     text: Color,
 };
 
-/// Map the five honest states onto fill / border / text. Hover and pressed
-/// deepen a translucent wash for the outline variants; primary dims toward the
-/// background on hover (CSS `opacity: 0.85`) and darkens when pressed.
-fn resolve(variant: Variant, it: context.Interaction, disabled: bool) Visual {
+/// Map the states onto fill / border / text. `hover_t` is the animated hover
+/// blend (0..1) so the 110ms colour transition the shipped CSS declares reads
+/// as a fade, not a step. States per the shipped module CSS: secondary hover
+/// lifts border rule->muted and text muted->fg (no fill); primary hover is
+/// `opacity: 0.85` (the whole element fades toward the surface). The bare
+/// default's subtle hover wash and every pressed state are the kept lab
+/// divergences (the shipped CSS has no rule for either).
+fn resolve(variant: Variant, hover_t: f32, pressed: bool, disabled: bool) Visual {
     var v: Visual = switch (variant) {
-        .default => .{ .fill = pal.fg.withAlpha(0), .border = .{ .width = 1, .color = pal.rule }, .text = pal.fg },
-        .secondary => .{ .fill = pal.fg.withAlpha(0), .border = .{ .width = 1, .color = pal.rule }, .text = pal.muted },
-        .primary => .{ .fill = pal.fg, .border = null, .text = pal.on_primary },
+        .default => .{
+            .fill = tokens.fg.withAlpha(0.05 * hover_t),
+            .border = .{ .width = 1, .color = tokens.button_border },
+            .text = tokens.button_fg,
+        },
+        .secondary => .{
+            .fill = tokens.fg.withAlpha(0),
+            .border = .{ .width = 1, .color = mix(tokens.button_border, tokens.muted, hover_t) },
+            .text = mix(tokens.muted, tokens.fg, hover_t),
+        },
+        .primary => .{
+            .fill = tokens.button_primary_bg.withAlpha(1 - (1 - tokens.button_primary_hover_opacity) * hover_t),
+            .border = null,
+            .text = tokens.button_primary_fg.withAlpha(1 - (1 - tokens.button_primary_hover_opacity) * hover_t),
+        },
     };
 
-    if (it.pressed) {
+    if (pressed) {
         switch (variant) {
-            .default => v.fill = pal.fg.withAlpha(0.10),
+            .default => v.fill = tokens.fg.withAlpha(0.10),
             .secondary => {
-                v.fill = pal.fg.withAlpha(0.09);
-                v.border = .{ .width = 1, .color = pal.muted };
-                v.text = pal.fg;
+                v.fill = tokens.fg.withAlpha(0.09);
+                v.border = .{ .width = 1, .color = tokens.muted };
+                v.text = tokens.fg;
             },
-            .primary => v.fill = mix(pal.fg, Color.hex(0x000000), 0.18),
-        }
-    } else if (it.hovered) {
-        switch (variant) {
-            .default => v.fill = pal.fg.withAlpha(0.05),
-            .secondary => {
-                v.fill = pal.fg.withAlpha(0.04);
-                v.border = .{ .width = 1, .color = pal.muted };
-                v.text = pal.fg;
-            },
-            .primary => {
-                // CSS opacity 0.85: fade the whole element toward the surface.
-                v.fill = pal.fg.withAlpha(0.85);
-                v.text = pal.on_primary.withAlpha(0.85);
-            },
+            .primary => v.fill = mix(tokens.button_primary_bg, Color.hex(0x000000), 0.18),
         }
     }
 
     if (disabled) {
         // CSS `:disabled { opacity: 0.5 }` — scale every layer's alpha.
-        v.fill = v.fill.withAlpha(v.fill.a * 0.5);
-        v.text = v.text.withAlpha(v.text.a * 0.5);
-        if (v.border) |*bd| bd.color = bd.color.withAlpha(bd.color.a * 0.5);
+        const o = tokens.button_disabled_opacity;
+        v.fill = v.fill.withAlpha(v.fill.a * o);
+        v.text = v.text.withAlpha(v.text.a * o);
+        if (v.border) |*bd| bd.color = bd.color.withAlpha(bd.color.a * o);
     }
     return v;
 }
@@ -139,20 +145,23 @@ fn mix(a: Color, b: Color, t: f32) Color {
 }
 
 pub fn button(ctx: *Context, p: *const Painter, x: f32, y: f32, label: []const u8, opts: ButtonOpts) ButtonResult {
-    const label_font = if (opts.variant == .primary) p.font_medium else p.font;
-    const m = draw.measureText(label_font, font_size, p.dpi, label, 0);
+    // Weight 400 for every variant: the shipped .button sets `font: inherit`
+    // and no rule anywhere adds a font-weight — primary included (verified
+    // against computed styles; Stage 3's Medium primary was a by-eye guess).
+    const m = draw.measureText(p.font, font_size, p.dpi, label, 0);
     const w = @max(opts.min_width, @ceil(m.width) + 2 * pad_x);
     const rect: draw.Rect = .{ .x = x, .y = y, .w = w, .h = height };
 
     const wid = Context.id(opts.id_label orelse label, opts.disc);
     const it = ctx.interact(wid, rect, .{ .disabled = opts.disabled });
-    const v = resolve(opts.variant, it, opts.disabled);
+    const hover_t = ctx.anim.value(anim.Store.key(wid, 2), if (it.hovered and !it.pressed) 1 else 0);
+    const v = resolve(opts.variant, hover_t, it.pressed, opts.disabled);
 
     draw.rect(p.b, rect, .{ .fill = v.fill, .radius = radius, .border = v.border });
     _ = draw.text(p.b, p.atlas, p.dpi, .{
         x + (w - m.width) / 2,
         y + (height - m.lineHeight()) / 2,
-    }, label, .{ .font = label_font, .size = font_size, .color = v.text });
+    }, label, .{ .font = p.font, .size = font_size, .color = v.text });
 
     if (it.focused) drawFocusRing(p, rect, radius);
     return .{ .fired = it.fired, .rect = rect };
@@ -164,37 +173,30 @@ pub fn button(ctx: *Context, p: *const Painter, x: f32, y: f32, label: []const u
 pub const ShowcaseState = enum { normal, hovered, pressed, focused, disabled };
 
 pub fn buttonShowcase(p: *const Painter, x: f32, y: f32, label: []const u8, variant: Variant, s: ShowcaseState) draw.Rect {
-    const it: context.Interaction = switch (s) {
-        .normal, .disabled => .{},
-        .hovered => .{ .hovered = true },
-        .pressed => .{ .pressed = true },
-        .focused => .{ .focused = true },
-    };
-    const disabled = s == .disabled;
-    const label_font = if (variant == .primary) p.font_medium else p.font;
-    const m = draw.measureText(label_font, font_size, p.dpi, label, 0);
+    const m = draw.measureText(p.font, font_size, p.dpi, label, 0);
     const w = @ceil(m.width) + 2 * pad_x;
     const rect: draw.Rect = .{ .x = x, .y = y, .w = w, .h = height };
 
-    const v = resolve(variant, it, disabled);
+    const v = resolve(variant, if (s == .hovered) 1 else 0, s == .pressed, s == .disabled);
     draw.rect(p.b, rect, .{ .fill = v.fill, .radius = radius, .border = v.border });
     _ = draw.text(p.b, p.atlas, p.dpi, .{
         x + (w - m.width) / 2,
         y + (height - m.lineHeight()) / 2,
-    }, label, .{ .font = label_font, .size = font_size, .color = v.text });
-    if (it.focused) drawFocusRing(p, rect, radius);
+    }, label, .{ .font = p.font, .size = font_size, .color = v.text });
+    if (s == .focused) drawFocusRing(p, rect, radius);
     return rect;
 }
 
-/// A 2px slate-indigo ring, offset a few px outside the control — the shipped
-/// :focus-visible outline. Fill alpha 0 so only the ring paints; drawn last so
-/// it sits above the fill.
+/// The shipped global :focus-visible outline: 2px solid, --skrive-focus-ring
+/// at 50%, offset 2px outside the control (was 3px by eye; tokens win). The
+/// drawn rect is expanded by offset + width so the ring's inner edge sits
+/// exactly `offset` off the control; fill alpha 0 so only the ring paints.
 fn drawFocusRing(p: *const Painter, r: draw.Rect, ring_radius: f32) void {
-    const gap: f32 = 3;
+    const gap = tokens.focus_outline_offset + tokens.focus_outline_width;
     draw.rect(p.b, .{ .x = r.x - gap, .y = r.y - gap, .w = r.w + 2 * gap, .h = r.h + 2 * gap }, .{
-        .fill = pal.accent.withAlpha(0),
+        .fill = tokens.focus_outline_color.withAlpha(0),
         .radius = ring_radius + gap,
-        .border = .{ .width = 2, .color = pal.accent.withAlpha(0.5) },
+        .border = .{ .width = tokens.focus_outline_width, .color = tokens.focus_outline_color },
     });
 }
 
@@ -218,11 +220,11 @@ fn drawFocusRing(p: *const Painter, r: draw.Rect, ring_radius: f32) void {
 //  bare switch with an aria-label, and the settings row supplies the text).
 //  The label string here is identity only.
 //------------------------------------------------------------------------------
-pub const toggle_w: f32 = 40;
-pub const toggle_h: f32 = 23;
-const toggle_pad: f32 = 2;
-const knob_size: f32 = 19;
-const knob_stretch: f32 = 22;
+pub const toggle_w: f32 = tokens.toggle_w;
+pub const toggle_h: f32 = tokens.toggle_h;
+const toggle_pad: f32 = tokens.toggle_pad;
+const knob_size: f32 = tokens.toggle_knob;
+const knob_stretch: f32 = tokens.toggle_knob_stretch;
 const knob_travel: f32 = toggle_w - 2 * toggle_pad - knob_size; // 17
 
 pub const ToggleOpts = struct {
@@ -267,14 +269,16 @@ pub fn toggle(
     const rect: draw.Rect = .{ .x = x, .y = y, .w = toggle_w, .h = toggle_h };
     const r = toggleInteract(ctx, id_label, rect, value, opts);
 
-    // Two animated values per toggle: `on_t` drives both the knob's travel and
-    // the track's colour (they are the same transition), `knob_w` the press
-    // stretch. Both are retargetable, so a double-flick reverses mid-slide.
+    // Three animated values per toggle: `on_t` drives both the knob's travel
+    // and the track's colour (they are the same transition), `knob_w` the
+    // press stretch, `hover_t` the 110ms hover wash the shipped CSS
+    // transitions. All retargetable, so a double-flick reverses mid-slide.
     const on_t = ctx.anim.value(anim.Store.key(r.wid, 0), if (value.*) 1 else 0);
     const knob_w = ctx.anim.value(anim.Store.key(r.wid, 1), if (r.it.pressed) knob_stretch else knob_size);
+    const hover_t = ctx.anim.value(anim.Store.key(r.wid, 2), if (r.it.hovered) 1 else 0);
 
     drawToggle(p, rect, on_t, knob_w, .{
-        .hovered = r.it.hovered,
+        .hover_t = hover_t,
         .disabled = opts.disabled,
     });
     if (r.it.focused) drawFocusRing(p, rect, toggle_h / 2);
@@ -282,27 +286,29 @@ pub fn toggle(
 }
 
 const ToggleVisual = struct {
-    hovered: bool = false,
+    hover_t: f32 = 0,
     disabled: bool = false,
 };
 
 /// Painting only, so the showcase can force states through the identical path.
 fn drawToggle(p: *const Painter, rect: draw.Rect, on_t: f32, knob_w: f32, v: ToggleVisual) void {
     const alpha: f32 = if (v.disabled) 0.5 else 1;
-    // color-mix(in srgb, --skrive-fg 14%, --skrive-rule); the hover variants
-    // are the CSS's 8% fg wash and, on the filled track, a 10% darken.
-    const track_off = mix(pal.rule, pal.fg, 0.14);
-    const track_on = pal.accent;
-    const off_c = if (v.hovered) mix(track_off, pal.fg, 0.08) else track_off;
-    const on_c = if (v.hovered) mix(track_on, Color.hex(0x000000), 0.10) else track_on;
+    // Track colours from tokens: --toggle-track-off (the computed fg-14%/rule
+    // mix) and --toggle-track-on (accent). Hover per the module CSS — off
+    // mixes 8% toward fg, on darkens 10% — blended by the animated hover_t.
+    const off_c = mix(tokens.toggle_track_off, tokens.fg, tokens.toggle_hover_mix * v.hover_t);
+    const on_c = mix(tokens.toggle_track_on, Color.hex(0x000000), tokens.toggle_on_hover_darken * v.hover_t);
 
+    // The CSS's `inset 0 0 0 1px` rim (fg 6% off, #000 7% on — near-equal
+    // colours, mixed for fidelity); the second inset layer (a 1.5px-blur top
+    // shadow, and a white top highlight when on) has no equivalent in an SDF
+    // that draws no inset blur, and is dropped rather than approximated
+    // badly — the recorded renderer gap.
+    const rim = mix(tokens.toggle_rim, tokens.toggle_on_rim, on_t);
     draw.rect(p.b, rect, .{
         .fill = mix(off_c, on_c, on_t).withAlpha(alpha),
         .radius = rect.h / 2,
-        // The CSS's `inset 0 0 0 1px fg 6%` rim; the second inset layer (a
-        // 1.5px top shadow) has no equivalent in an SDF that draws no inset
-        // blur, and is dropped rather than approximated badly.
-        .border = .{ .width = 1, .color = pal.fg.withAlpha(0.06 * alpha) },
+        .border = .{ .width = 1, .color = rim.withAlpha(rim.a * alpha) },
     });
 
     // Leading-edge pin: off grows rightward from the pad, on grows leftward
@@ -312,10 +318,10 @@ fn drawToggle(p: *const Painter, rect: draw.Rect, on_t: f32, knob_w: f32, v: Tog
     draw.rect(p.b, .{ .x = knob_x, .y = rect.y + toggle_pad, .w = knob_w, .h = knob_size }, .{
         .fill = Color.hex(0xffffff).withAlpha(alpha),
         .radius = knob_size / 2,
-        .border = .{ .width = 0.5, .color = Color.hex(0x000000).withAlpha(0.04 * alpha) },
+        .border = .{ .width = 0.5, .color = tokens.knob_ring.withAlpha(tokens.knob_ring.a * alpha) },
         .shadows = &.{
-            .{ .offset = .{ 0, 1 }, .sigma = 0.5, .color = Color.hex(0x000000).withAlpha(0.10 * alpha) },
-            .{ .offset = .{ 0, 2 }, .sigma = 2.5, .color = Color.hex(0x000000).withAlpha(0.12 * alpha) },
+            .{ .offset = tokens.knob_shadow[0].offset, .sigma = tokens.knob_shadow[0].sigma, .color = tokens.knob_shadow[0].color.withAlpha(tokens.knob_shadow[0].color.a * alpha) },
+            .{ .offset = tokens.knob_shadow[1].offset, .sigma = tokens.knob_shadow[1].sigma, .color = tokens.knob_shadow[1].color.withAlpha(tokens.knob_shadow[1].color.a * alpha) },
         },
     });
 }
@@ -340,14 +346,14 @@ fn drawToggle(p: *const Painter, rect: draw.Rect, on_t: f32, knob_w: f32, v: Tog
 //  keeps it correct when the options have different label widths.
 //------------------------------------------------------------------------------
 pub const max_options = 8;
-pub const segmented_h: f32 = 30;
-const segmented_pad: f32 = 2;
-const segmented_gap: f32 = 2;
+pub const segmented_h: f32 = tokens.segmented_h;
+const segmented_pad: f32 = tokens.segmented_pad;
+const segmented_gap: f32 = tokens.segmented_gap;
 const segmented_option_h: f32 = segmented_h - 2 * segmented_pad; // 26
-const segmented_option_pad_x: f32 = 13;
-const segmented_font_size: f32 = 12;
-const segmented_track_radius: f32 = 8; // --skrive-radius-md
-const segmented_option_radius: f32 = 6; // --skrive-radius-sm
+const segmented_option_pad_x: f32 = tokens.segmented_option_pad_x;
+const segmented_font_size: f32 = tokens.segmented_font_size;
+const segmented_track_radius: f32 = tokens.segmented_track_radius;
+const segmented_option_radius: f32 = tokens.segmented_option_radius;
 
 pub const SegmentedOpts = struct {
     disabled: bool = false,
@@ -440,9 +446,12 @@ pub fn segmented(
     std.debug.assert(options.len <= max_options);
     var widths: [max_options]f32 = undefined;
     for (options, 0..) |label, i| {
-        // Measured on the weight the option will actually be drawn in, so the
-        // strip does not jiggle when the selection moves.
-        widths[i] = draw.measureText(p.font_medium, segmented_font_size, p.dpi, label, 0).width;
+        // Measured on the weight the option currently renders in: the shipped
+        // kit steps 500 -> 600 on the active option with no reserved bold
+        // width, so the real strip resizes by a fraction of a px on selection
+        // — transcribed faithfully rather than smoothed away.
+        const f = if (i == selected.*) p.font_semibold else p.font_medium;
+        widths[i] = draw.measureText(f, segmented_font_size, p.dpi, label, 0).width;
     }
     const l = segmentedLayout(x, y, widths[0..options.len]);
 
@@ -468,7 +477,7 @@ fn drawSegmented(
 ) void {
     const alpha: f32 = if (disabled) 0.5 else 1;
     draw.rect(p.b, l.track, .{
-        .fill = mix(pal.rule, pal.fg, 0.08).withAlpha(alpha),
+        .fill = tokens.segmented_track.withAlpha(alpha),
         .radius = segmented_track_radius,
     });
 
@@ -484,9 +493,13 @@ fn drawSegmented(
             .w = a.w + (b.w - a.w) * t,
             .h = a.h,
         }, .{
-            .fill = pal.bg.withAlpha(alpha),
+            .fill = tokens.bg.withAlpha(alpha),
             .radius = segmented_option_radius,
-            .shadows = &.{.{ .offset = .{ 0, 1 }, .sigma = 1, .color = pal.fg.withAlpha(0.09 * alpha) }},
+            .shadows = &.{.{
+                .offset = tokens.segmented_thumb_shadow[0].offset,
+                .sigma = tokens.segmented_thumb_shadow[0].sigma,
+                .color = tokens.segmented_thumb_shadow[0].color.withAlpha(tokens.segmented_thumb_shadow[0].color.a * alpha),
+            }},
         });
     }
 
@@ -495,20 +508,94 @@ fn drawSegmented(
     const active: usize = @intFromFloat(@round(std.math.clamp(pos, 0, @as(f32, @floatFromInt(@max(l.len, 1) - 1)))));
     for (options, 0..) |label, i| {
         const r = l.options[i];
-        const m = draw.measureText(p.font_medium, segmented_font_size, p.dpi, label, 0);
+        // The shipped active option steps to weight 600 — SemiBold, vendored
+        // for exactly this (the Stage 2/4 weight-inventory gap, closed).
+        const f = if (i == active) p.font_semibold else p.font_medium;
+        const m = draw.measureText(f, segmented_font_size, p.dpi, label, 0);
         _ = draw.text(p.b, p.atlas, p.dpi, .{
             r.x + (r.w - m.width) / 2,
             r.y + (r.h - m.lineHeight()) / 2,
         }, label, .{
-            .font = p.font_medium,
+            .font = f,
             .size = segmented_font_size,
-            // The shipped kit steps 500 -> 600 on the active option; the lab
-            // carries Regular and Medium only (the Stage 2 weight-inventory
-            // gap), so the state reads through colour alone.
-            .color = (if (i == active) pal.fg else pal.muted).withAlpha(alpha),
+            .color = (if (i == active) tokens.fg else tokens.muted).withAlpha(alpha),
         });
     }
 }
+
+//------------------------------------------------------------------------------
+//  IconButton (Stage 5). The shipped IconButton.module.css: a transparent
+//  glyph square (26px default; 22 sm, 28 lg), sm radius, muted glyph that
+//  lifts to fg on hover over a 7% fg wash, both transitioned over the quick
+//  duration — so hover_t animates here exactly as on the button. Disabled is
+//  opacity 0.4 (not the button's 0.5). Icons come from ui/icons.zig at the
+//  shipped 16px glyph size, centred in the square.
+//------------------------------------------------------------------------------
+pub const IconButtonSize = enum {
+    sm,
+    md,
+    lg,
+
+    fn px(self: IconButtonSize) f32 {
+        return switch (self) {
+            .sm => tokens.icon_button_size_sm,
+            .md => tokens.icon_button_size,
+            .lg => tokens.icon_button_size_lg,
+        };
+    }
+};
+
+pub const IconButtonOpts = struct {
+    size: IconButtonSize = .md,
+    disabled: bool = false,
+    disc: u64 = 0,
+};
+
+pub fn iconButton(
+    ctx: *Context,
+    p: *const Painter,
+    x: f32,
+    y: f32,
+    icon: icons.Icon,
+    id_label: []const u8,
+    opts: IconButtonOpts,
+) ButtonResult {
+    const side = opts.size.px();
+    const rect: draw.Rect = .{ .x = x, .y = y, .w = side, .h = side };
+    const wid = Context.id(id_label, opts.disc);
+    const it = ctx.interact(wid, rect, .{ .disabled = opts.disabled });
+    const hover_t = ctx.anim.value(anim.Store.key(wid, 2), if (it.hovered) 1 else 0);
+    drawIconButton(p, rect, icon, hover_t, opts.disabled);
+    if (it.focused) drawFocusRing(p, rect, tokens.icon_button_radius);
+    return .{ .fired = it.fired, .rect = rect };
+}
+
+fn drawIconButton(p: *const Painter, rect: draw.Rect, icon: icons.Icon, hover_t: f32, disabled: bool) void {
+    const alpha: f32 = if (disabled) tokens.icon_button_disabled_opacity else 1;
+    if (hover_t > 0 and !disabled) {
+        draw.rect(p.b, rect, .{
+            .fill = tokens.icon_button_bg_hover.withAlpha(tokens.icon_button_bg_hover.a * hover_t),
+            .radius = tokens.icon_button_radius,
+        });
+    }
+    const glyph = if (disabled)
+        tokens.icon_button_fg.withAlpha(alpha)
+    else
+        mix(tokens.icon_button_fg, tokens.icon_button_fg_hover, hover_t);
+    const icon_px: f32 = 16; // the shipped 16-grid icons at their native size
+    icons.drawIcon(p.b, icon, rect.x + (rect.w - icon_px) / 2, rect.y + (rect.h - icon_px) / 2, icon_px, glyph);
+}
+
+/// Screenshot-only forced states, identical paint path.
+pub fn iconButtonShowcase(p: *const Painter, x: f32, y: f32, icon: icons.Icon, s: ShowcaseState) draw.Rect {
+    const side = tokens.icon_button_size;
+    const rect: draw.Rect = .{ .x = x, .y = y, .w = side, .h = side };
+    drawIconButton(p, rect, icon, if (s == .hovered or s == .pressed) 1 else 0, s == .disabled);
+    if (s == .focused) drawFocusRing(p, rect, tokens.icon_button_radius);
+    return rect;
+}
+
+pub const icons = @import("icons.zig");
 
 //------------------------------------------------------------------------------
 //  Intrinsic sizes. A layout box needs a child's natural width before the
@@ -516,18 +603,18 @@ fn drawSegmented(
 //  measurement its drawing half would have made.
 //------------------------------------------------------------------------------
 pub fn buttonWidth(p: *const Painter, label: []const u8, opts: ButtonOpts) f32 {
-    const label_font = if (opts.variant == .primary) p.font_medium else p.font;
-    const m = draw.measureText(label_font, font_size, p.dpi, label, 0);
+    const m = draw.measureText(p.font, font_size, p.dpi, label, 0);
     return @max(opts.min_width, @ceil(m.width) + 2 * pad_x);
 }
 
 pub const button_h: f32 = height;
 
-pub fn segmentedWidth(p: *const Painter, options: []const []const u8) f32 {
+pub fn segmentedWidth(p: *const Painter, options: []const []const u8, selected: usize) f32 {
     var w: f32 = 2 * segmented_pad;
     for (options, 0..) |label, i| {
         if (i > 0) w += segmented_gap;
-        w += @ceil(draw.measureText(p.font_medium, segmented_font_size, p.dpi, label, 0).width) + 2 * segmented_option_pad_x;
+        const f = if (i == selected) p.font_semibold else p.font_medium;
+        w += @ceil(draw.measureText(f, segmented_font_size, p.dpi, label, 0).width) + 2 * segmented_option_pad_x;
     }
     return w;
 }
@@ -540,7 +627,7 @@ pub fn segmentedWidth(p: *const Painter, options: []const []const u8) f32 {
 pub fn toggleShowcase(p: *const Painter, x: f32, y: f32, on: bool, s: ShowcaseState) draw.Rect {
     const rect: draw.Rect = .{ .x = x, .y = y, .w = toggle_w, .h = toggle_h };
     drawToggle(p, rect, if (on) 1 else 0, if (s == .pressed) knob_stretch else knob_size, .{
-        .hovered = s == .hovered,
+        .hover_t = if (s == .hovered) 1 else 0,
         .disabled = s == .disabled,
     });
     if (s == .focused) drawFocusRing(p, rect, toggle_h / 2);
@@ -569,7 +656,8 @@ pub fn segmentedShowcase(
 ) draw.Rect {
     var widths: [max_options]f32 = undefined;
     for (options, 0..) |label, i| {
-        widths[i] = draw.measureText(p.font_medium, segmented_font_size, p.dpi, label, 0).width;
+        const f = if (i == selected) p.font_semibold else p.font_medium;
+        widths[i] = draw.measureText(f, segmented_font_size, p.dpi, label, 0).width;
     }
     const l = segmentedLayout(x, y, widths[0..options.len]);
     drawSegmented(p, &l, options, @floatFromInt(selected), s == .disabled);

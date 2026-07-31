@@ -43,6 +43,8 @@ pub fn build(b: *std.Build) !void {
     // the src/ module root, so they arrive as anonymous imports.
     root_module.addAnonymousImport("Inter-Regular.ttf", .{ .root_source_file = b.path("assets/Inter-Regular.ttf") });
     root_module.addAnonymousImport("Inter-Medium.ttf", .{ .root_source_file = b.path("assets/Inter-Medium.ttf") });
+    root_module.addAnonymousImport("Inter-SemiBold.ttf", .{ .root_source_file = b.path("assets/Inter-SemiBold.ttf") });
+    root_module.addAnonymousImport("Inter-Light.ttf", .{ .root_source_file = b.path("assets/Inter-Light.ttf") });
 
     const exe = b.addExecutable(.{
         .name = "zig-ui",

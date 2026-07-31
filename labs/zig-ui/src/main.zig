@@ -41,6 +41,8 @@ const layout = @import("ui/layout.zig");
 
 const inter_regular_ttf = @embedFile("Inter-Regular.ttf");
 const inter_medium_ttf = @embedFile("Inter-Medium.ttf");
+const inter_semibold_ttf = @embedFile("Inter-SemiBold.ttf");
+const inter_light_ttf = @embedFile("Inter-Light.ttf");
 
 const hud_print_interval_sec: f64 = 1.0;
 // Base clear color: neutral warm grey, placeholder until Stage 5 tokens.
@@ -57,20 +59,10 @@ const clear_palette = [_][3]f32{
     .{ 0.930, 0.940, 0.935 },
 };
 
-// Skrive light-theme tokens the toast scene transcribes (app/src/index.css).
-const skrive = struct {
-    const bg = draw.Color.hex(0xffffff); // --skrive-bg
-    const fg = draw.Color.hex(0x1a1a1d); // --skrive-fg
-    const muted = draw.Color.hex(0x73737a); // --skrive-muted
-    const rule = draw.Color.hex(0xd8d9dd); // --skrive-rule
-    const radius_xl: f32 = 16; // --skrive-radius-xl
-    // --skrive-shadow-sheet: 0 14px 34px 14%, 0 3px 10px 7%.
-    // CSS blur-radius = 2 sigma, so sigmas are 17 and 5.
-    const shadow_sheet = [2]draw.Shadow{
-        .{ .offset = .{ 0, 14 }, .sigma = 17, .color = draw.Color.hex(0x000000).withAlpha(0.14) },
-        .{ .offset = .{ 0, 3 }, .sigma = 5, .color = draw.Color.hex(0x000000).withAlpha(0.07) },
-    };
-};
+// Skrive light-theme tokens — since Stage 5 the one transcription in
+// ui/tokens.zig, which every scene and widget reads. The `skrive` name stays
+// because the scenes read naturally through it.
+const skrive = @import("ui/tokens.zig");
 
 const Scene = enum { demo, toast, stress, settings, text_wall, buttons, showcase, card };
 
@@ -159,7 +151,7 @@ const bench = struct {
             state.stress_size = p.stress_size;
             initStressRects();
         }
-        if (p.kick_animation) state.card_word_count = !state.card_word_count;
+        if (p.kick_animation) state.bm_measure_rule = !state.bm_measure_rule;
         state.dirty = true;
         measuring = false;
         phase_presents = 0;
@@ -232,6 +224,14 @@ const state = struct {
     var atlas: atlas_mod.Atlas = undefined;
     var font_regular: text_mod.Font = undefined;
     var font_medium: text_mod.Font = undefined;
+    var font_semibold: text_mod.Font = undefined;
+    var font_light: text_mod.Font = undefined;
+    // The settings pane title renders in --skrive-editor-font — Iowan Old
+    // Style, an Apple system font. Loaded from the system at runtime (plan
+    // 4.3's rule for fonts the lab may not vendor); null when the file is
+    // missing, and the title falls back to Inter SemiBold with a log line.
+    var font_serif: ?text_mod.Font = null;
+    var serif_data: []u8 = &.{};
     var scene: Scene = .demo;
     var stress_shadows: bool = false;
     var stress_size: StressSize = .large;
@@ -259,9 +259,12 @@ const state = struct {
     // Wall clock of the last *rendered* frame, which under frame-on-demand is
     // not the display interval. The animation store takes dt from this.
     var last_frame_ticks: u64 = 0;
-    // The settings-card demo's bound values (Stage 4).
-    var card_theme: usize = 2;
-    var card_word_count: bool = true;
+    // The benchmark scene's bound values (Stage 5): the real Editor pane's
+    // Writing section, transcribed row for row from SettingsView.tsx.
+    var bm_line_measure: usize = 1; // "Normal"
+    var bm_measure_rule: bool = true;
+    var bm_smart_typo: bool = true;
+    var bm_spellcheck: bool = false;
     // HUD accumulators, reset on each refresh of the on-screen line
     var hud_last_print_ticks: u64 = 0;
     var hud_presents: u64 = 0;
@@ -311,6 +314,57 @@ fn initStressRects() void {
     });
 }
 
+/// The shipped settings title renders in Iowan Old Style at font-weight 600,
+/// which CSS font matching resolves to the family's Bold face (the nearest
+/// weight >= 600 the collection carries). Load exactly that face out of the
+/// system .ttc so the benchmark's most prominent line compares typeface for
+/// typeface. Failure is soft: the title falls back to Inter SemiBold and the
+/// side-by-side notes it.
+fn loadSystemSerif() void {
+    // std.posix, not std.fs: Zig 0.16 routed fs reads through the new
+    // std.Io interface, and threading an Io instance through sokol callbacks
+    // is the same disproportion Stage 0 hit with timers. The posix layer is
+    // still direct.
+    const path = "/System/Library/Fonts/Supplemental/Iowan Old Style.ttc";
+    const fd = std.posix.openat(std.posix.AT.FDCWD, path, .{ .ACCMODE = .RDONLY }, 0) catch {
+        std.debug.print("serif: {s} not found; title falls back to Inter SemiBold\n", .{path});
+        return;
+    };
+    defer _ = std.c.close(fd); // posix.close is gone in 0.16; libc is linked anyway
+    // No fstat on this std surface either — read to EOF under a fixed cap.
+    // The collection is ~3.4MB; 16MB is generous headroom, and the buffer
+    // stays alive for the process lifetime because stbtt_fontinfo keeps
+    // pointers into it.
+    const cap: usize = 16 << 20;
+    const data = std.heap.page_allocator.alloc(u8, cap) catch return;
+    var off: usize = 0;
+    while (off < cap) {
+        const n = std.posix.read(fd, data[off..]) catch break;
+        if (n == 0) break;
+        off += n;
+    }
+    if (off == 0 or off == cap) {
+        std.heap.page_allocator.free(data);
+        std.debug.print("serif: unreadable or oversized; title falls back to Inter SemiBold\n", .{});
+        return;
+    }
+    state.serif_data = data[0..off];
+
+    var namebuf: [64]u8 = undefined;
+    const n = text_mod.faceCount(state.serif_data);
+    var i: u32 = 0;
+    while (i < n) : (i += 1) {
+        const f = text_mod.Font.initFace(4, state.serif_data, i) catch continue;
+        const sub = f.subfamily(&namebuf) orelse continue;
+        if (std.mem.eql(u8, sub, "Bold")) {
+            state.font_serif = f;
+            std.debug.print("serif: Iowan Old Style Bold (face {d} of {d})\n", .{ i, n });
+            return;
+        }
+    }
+    std.debug.print("serif: no Bold face in {d}-face collection; title falls back to Inter SemiBold\n", .{n});
+}
+
 export fn init() void {
     stime.setup();
     sg.setup(.{
@@ -325,6 +379,11 @@ export fn init() void {
     state.atlas = atlas_mod.Atlas.init(std.heap.page_allocator);
     state.font_regular = text_mod.Font.init(0, inter_regular_ttf) catch @panic("zig-ui: Inter Regular failed to parse");
     state.font_medium = text_mod.Font.init(1, inter_medium_ttf) catch @panic("zig-ui: Inter Medium failed to parse");
+    // Distinct font ids: the atlas cache is keyed (font id, glyph, px), so a
+    // new face with a reused id would serve another weight's bitmaps.
+    state.font_semibold = text_mod.Font.init(2, inter_semibold_ttf) catch @panic("zig-ui: Inter SemiBold failed to parse");
+    state.font_light = text_mod.Font.init(3, inter_light_ttf) catch @panic("zig-ui: Inter Light failed to parse");
+    loadSystemSerif();
     initStressRects();
     std.debug.print("backend: {t}\n", .{sg.queryBackend()});
     std.debug.print("device pixel ratio: {d}\n", .{sapp.dpiScale()});
@@ -551,6 +610,7 @@ fn painter(b: *batch_mod.Batch) widgets.Painter {
         .dpi = sapp.dpiScale(),
         .font = &state.font_regular,
         .font_medium = &state.font_medium,
+        .font_semibold = &state.font_semibold,
     };
 }
 
@@ -633,23 +693,23 @@ fn buildButtonsScene(b: *batch_mod.Batch) void {
 }
 
 //------------------------------------------------------------------------------
-//  The Stage 4 deliverable: a settings card laid out entirely by ui/layout.zig.
+//  The Stage 5 benchmark scene: the shipped Editor pane's "Writing" section,
+//  transcribed row for row from SettingsView.tsx — same copy, same controls,
+//  same specs (.settings-col / -pane-head / -section-cap / -card / -row, all
+//  via ui/tokens.zig) — plus a CONTROLS strip underneath so Button and
+//  IconButton appear in the side-by-side (labelled as such: the strip is kit
+//  coverage, not part of the shipped section). The pane title renders in the
+//  system's Iowan Old Style Bold, exactly the face the shipped CSS resolves
+//  font-weight 600 to; everything else is Inter against the shipped system
+//  stack (the typeface-flavour question the screenshots disclose).
 //
-//  There is not one absolute coordinate below — every rect comes out of a Box.
-//  The page column centres a 720px-max content column in whatever the window
-//  is; the card takes the space left under the heading and then shrinks to its
-//  rows (Fit.content); each row is the real .settings-row (grow text block,
-//  never-shrinking control, 24px gap, 16/18 padding); each text block is a
-//  nested column with the real 3px gap. Resize the window and it all follows.
-//
-//  Adding a fourth row is one line in `card_rows`. That is the exit criterion,
-//  and it is why the controls are a tagged union rather than three hand-placed
-//  widget calls.
+//  Layout discipline unchanged from Stage 4: zero absolute coordinates;
+//  every rect comes out of a Box, spacing is explicit spacer children where
+//  the CSS uses margins.
 //------------------------------------------------------------------------------
 const CardControl = union(enum) {
     toggle: *bool,
     segmented: struct { options: []const []const u8, selected: *usize },
-    button: []const u8,
 };
 
 const CardRow = struct {
@@ -659,41 +719,41 @@ const CardRow = struct {
     control: CardControl,
 };
 
-const theme_options = [_][]const u8{ "Light", "Dark", "System" };
+const line_measure_options = [_][]const u8{ "Narrow", "Normal", "Wide", "Full", "Custom" };
 
-fn cardRows() [3]CardRow {
+fn benchmarkRows() [4]CardRow {
     return .{
         .{
-            .label = "Colour theme",
-            .desc = "Light, dark, or whatever the system is doing.",
-            .id = "card-theme",
-            .control = .{ .segmented = .{ .options = &theme_options, .selected = &state.card_theme } },
+            .label = "Line measure",
+            .desc = "Width of the writing column.",
+            .id = "bm-line-measure",
+            .control = .{ .segmented = .{ .options = &line_measure_options, .selected = &state.bm_line_measure } },
         },
         .{
-            .label = "Word count",
-            .desc = "Keep a live count in the corner of the window.",
-            .id = "card-word-count",
-            .control = .{ .toggle = &state.card_word_count },
+            .label = "Measure rule",
+            .desc = "A hairline at the writing column's edge.",
+            .id = "bm-measure-rule",
+            .control = .{ .toggle = &state.bm_measure_rule },
         },
         .{
-            .label = "Restore defaults",
-            .desc = "Put every appearance setting back where it started.",
-            .id = "card-reset",
-            .control = .{ .button = "Restore" },
+            .label = "Smart typography",
+            .desc = "Curly quotes, em dashes, and ellipses as you type.",
+            .id = "bm-smart-typo",
+            .control = .{ .toggle = &state.bm_smart_typo },
+        },
+        .{
+            .label = "Check spelling",
+            .desc = "Underline misspelled words as you write.",
+            .id = "bm-spellcheck",
+            .control = .{ .toggle = &state.bm_spellcheck },
         },
     };
 }
 
-const card_label_size: f32 = 13.5; // .settings-row-label
-const card_desc_size: f32 = 12.5; // .settings-row-desc
-const card_row_gap: f32 = 3;
-const card_row_pad_y: f32 = 16;
-const card_row_pad_x: f32 = 18;
-
 fn buildCardScene(b: *batch_mod.Batch) void {
     const dpi = sapp.dpiScale();
     var p = painter(b);
-    const rows = cardRows();
+    const rows = benchmarkRows();
 
     const win: draw.Rect = .{
         .x = 0,
@@ -702,43 +762,66 @@ fn buildCardScene(b: *batch_mod.Batch) void {
         .h = @as(f32, @floatFromInt(sapp.height())) / dpi,
     };
 
-    const label_m = draw.measureText(&state.font_medium, card_label_size, dpi, "Hg", 0);
-    const desc_m = draw.measureText(&state.font_regular, card_desc_size, dpi, "Hg", 0);
-    const title_m = draw.measureText(&state.font_medium, 25, dpi, "Hg", 0);
-    const sub_m = draw.measureText(&state.font_regular, 13.5, dpi, "Hg", 0);
-    const cap_m = draw.measureText(&state.font_medium, 11, dpi, "HG", 0);
-    const text_h = label_m.lineHeight() + card_row_gap + desc_m.lineHeight();
+    const title_font: *const text_mod.Font = if (state.font_serif) |*f| f else &state.font_semibold;
+    const label_m = draw.measureText(&state.font_medium, skrive.settings_label_size, dpi, "Hg", 0);
+    const desc_m = draw.measureText(&state.font_regular, skrive.settings_desc_size, dpi, "Hg", 0);
+    const title_m = draw.measureText(title_font, skrive.settings_title_size, dpi, "Hg", 0);
+    const sub_m = draw.measureText(&state.font_regular, skrive.settings_sub_size, dpi, "Hg", 0);
+    const cap_m = draw.measureText(&state.font_semibold, skrive.settings_cap_size, dpi, "HG", 0);
+    // .settings-row-text: label (lh 18) + 3px gap + desc (lh 16).
+    const row_text_gap: f32 = 3;
+    const text_h = skrive.settings_label_line_height + row_text_gap + skrive.settings_desc_line_height;
 
-    // .settings-col: a 720px column, centred, 44/40 padding.
+    // .settings-col: max-width 720 (content-box), centred, 44px top padding.
+    // Margins from the CSS become explicit spacer children.
+    // CSS line boxes, not natural font line heights: the root line-height of
+    // 1.5 applies to the title, sub, and cap (none declares its own), and the
+    // browser centres each font box in its line box via half-leading. Using
+    // natural heights here left the whole card sitting 11px higher than the
+    // reference — measured off the first side-by-side, then fixed.
+    const title_box = skrive.settings_title_size * skrive.ui_line_height; // 37.5
+    const sub_box = skrive.settings_sub_size * skrive.ui_line_height; // 20.25
+    const cap_box = skrive.settings_cap_size * skrive.ui_line_height; // 16.5
+
     var page = layout.Box.column(win, .{
         .padding = .xy(44, 40),
-        .gap = 10,
         .cross = .center,
     });
     const col_w = @min(720, win.w - 80);
-    const i_title = page.add(.{ .main = .{ .content = title_m.lineHeight() }, .cross = col_w });
-    const i_sub = page.add(.{ .main = .{ .content = sub_m.lineHeight() }, .cross = col_w });
-    const i_cap = page.add(.{ .main = .{ .content = cap_m.lineHeight() + 18 }, .cross = col_w });
-    // The card takes whatever is left, then shrinks to its rows below.
+    const i_title = page.add(.{ .main = .{ .content = title_box }, .cross = col_w });
+    _ = page.add(.{ .main = .{ .fixed = 5.25 } }); // .settings-pane-sub margin-top 0.375rem
+    const i_sub = page.add(.{ .main = .{ .content = sub_box }, .cross = col_w });
+    _ = page.add(.{ .main = .{ .fixed = 28 } }); // .settings-pane-head margin-bottom
+    const i_cap = page.add(.{ .main = .{ .content = cap_box }, .cross = col_w });
+    _ = page.add(.{ .main = .{ .fixed = 10 } }); // .settings-section-cap margin-bottom
     const i_card = page.add(.{ .main = .{ .grow = 1 }, .cross = col_w });
     const page_rects = page.resolve();
 
-    _ = draw.text(b, &state.atlas, dpi, .{ page_rects[i_title].x, page_rects[i_title].y }, "Appearance", .{
-        .font = &state.font_medium,
-        .size = 25,
+    _ = draw.text(b, &state.atlas, dpi, .{
+        page_rects[i_title].x,
+        page_rects[i_title].y + (title_box - title_m.lineHeight()) / 2,
+    }, "Editor", .{
+        .font = title_font,
+        .size = skrive.settings_title_size,
         .color = skrive.fg,
         .letter_spacing = -0.25, // -0.01em at 25px, per .settings-pane-title
     });
-    _ = draw.text(b, &state.atlas, dpi, .{ page_rects[i_sub].x, page_rects[i_sub].y }, "How Skrive looks while you write. Changes apply immediately.", .{
+    _ = draw.text(b, &state.atlas, dpi, .{
+        page_rects[i_sub].x,
+        page_rects[i_sub].y + (sub_box - sub_m.lineHeight()) / 2,
+    }, "Defaults for new documents and how writing behaves.", .{
         .font = &state.font_regular,
-        .size = 13.5,
+        .size = skrive.settings_sub_size,
         .color = skrive.muted,
     });
-    _ = draw.text(b, &state.atlas, dpi, .{ page_rects[i_cap].x, page_rects[i_cap].y + 18 }, "THEME", .{
-        .font = &state.font_medium,
-        .size = 11,
-        .color = skrive.muted,
-        .letter_spacing = 0.77, // 0.07em at 11px, per .settings-section-cap
+    _ = draw.text(b, &state.atlas, dpi, .{
+        page_rects[i_cap].x + 2,
+        page_rects[i_cap].y + (cap_box - cap_m.lineHeight()) / 2,
+    }, "WRITING", .{
+        .font = &state.font_semibold, // .settings-section-cap font-weight 600
+        .size = skrive.settings_cap_size,
+        .color = skrive.settings_cap,
+        .letter_spacing = 0.77, // 0.07em at 11px
     });
 
     // The card column: one child per row, plus a hairline between them. Its
@@ -750,60 +833,68 @@ fn buildCardScene(b: *batch_mod.Batch) void {
         const control_h: f32 = switch (row.control) {
             .toggle => widgets.toggle_h,
             .segmented => widgets.segmented_h,
-            .button => widgets.button_h,
         };
-        row_slots[i] = card.add(.{ .main = .{ .fixed = 2 * card_row_pad_y + @max(text_h, control_h) } });
+        row_slots[i] = card.add(.{ .main = .{ .fixed = 2 * skrive.settings_row_pad_y + @max(text_h, control_h) } });
     }
     const card_rects = card.resolve();
     const card_rect = card.resolvedBounds();
 
+    // .settings-card: bg, rule border, lg radius, --skrive-card-shadow (the
+    // Stage 4 by-eye shadow was 0 2px / sigma 4 — the token is quieter).
     draw.rect(b, card_rect, .{
         .fill = skrive.bg,
-        .radius = 12,
+        .radius = skrive.radius_lg,
         .border = .{ .width = 1, .color = skrive.rule },
-        .shadows = &.{.{ .offset = .{ 0, 2 }, .sigma = 4, .color = draw.Color.hex(0x000000).withAlpha(0.05) }},
+        .shadows = &skrive.card_shadow,
     });
 
     var fired = false;
     for (rows, 0..) |row, i| {
         if (i > 0) {
             const hair = card_rects[row_slots[i] - 1];
-            draw.rect(b, hair, .{ .fill = skrive.rule.withAlpha(0.6) });
+            // --settings-hair, the lightened hairline (was rule at 60%).
+            draw.rect(b, hair, .{ .fill = skrive.settings_hair });
         }
 
         const control_w: f32 = switch (row.control) {
             .toggle => widgets.toggle_w,
-            .segmented => |sg_ctl| widgets.segmentedWidth(&p, sg_ctl.options),
-            .button => |label| widgets.buttonWidth(&p, label, .{ .variant = .secondary }),
+            .segmented => |sg_ctl| widgets.segmentedWidth(&p, sg_ctl.options, sg_ctl.selected.*),
         };
         const control_h: f32 = switch (row.control) {
             .toggle => widgets.toggle_h,
             .segmented => widgets.segmented_h,
-            .button => widgets.button_h,
         };
 
         var r = layout.Box.row(card_rects[row_slots[i]], .{
-            .padding = .xy(card_row_pad_y, card_row_pad_x),
-            .gap = 24,
+            .padding = .xy(skrive.settings_row_pad_y, skrive.settings_row_pad_x),
+            .gap = skrive.settings_row_gap,
             .cross = .center,
         });
         const i_text = r.add(.{ .main = .{ .grow = 1 } }); // flex: 1; min-width: 0
         const i_ctl = r.add(.{ .main = .{ .fixed = control_w }, .cross = control_h }); // flex-shrink: 0
         const row_rects = r.resolve();
 
-        var tc = layout.Box.column(row_rects[i_text], .{ .gap = card_row_gap });
-        const i_label = tc.add(.{ .main = .{ .content = label_m.lineHeight() } });
-        const i_desc = tc.add(.{ .main = .{ .content = desc_m.lineHeight() } });
+        var tc = layout.Box.column(row_rects[i_text], .{ .gap = row_text_gap });
+        const i_label = tc.add(.{ .main = .{ .content = skrive.settings_label_line_height } });
+        const i_desc = tc.add(.{ .main = .{ .content = skrive.settings_desc_line_height } });
         const text_rects = tc.resolve();
 
-        _ = draw.text(b, &state.atlas, dpi, .{ text_rects[i_label].x, text_rects[i_label].y }, row.label, .{
+        // Labels draw centred in their CSS line boxes (18px/16px), the same
+        // half-leading placement the browser gives them.
+        _ = draw.text(b, &state.atlas, dpi, .{
+            text_rects[i_label].x,
+            text_rects[i_label].y + (skrive.settings_label_line_height - label_m.lineHeight()) / 2,
+        }, row.label, .{
             .font = &state.font_medium,
-            .size = card_label_size,
+            .size = skrive.settings_label_size,
             .color = skrive.fg,
         });
-        _ = draw.text(b, &state.atlas, dpi, .{ text_rects[i_desc].x, text_rects[i_desc].y }, row.desc, .{
+        _ = draw.text(b, &state.atlas, dpi, .{
+            text_rects[i_desc].x,
+            text_rects[i_desc].y + (skrive.settings_desc_line_height - desc_m.lineHeight()) / 2,
+        }, row.desc, .{
             .font = &state.font_regular,
-            .size = card_desc_size,
+            .size = skrive.settings_desc_size,
             .color = skrive.muted,
         });
 
@@ -815,21 +906,57 @@ fn buildCardScene(b: *batch_mod.Batch) void {
             .segmented => |sg_ctl| {
                 if (widgets.segmented(&state.ctx, &p, ctl.x, ctl.y, row.id, sg_ctl.options, sg_ctl.selected, .{}).changed) fired = true;
             },
-            .button => |label| {
-                if (widgets.button(&state.ctx, &p, ctl.x, ctl.y, label, .{ .variant = .secondary, .id_label = row.id }).fired) {
-                    state.card_theme = 2;
-                    state.card_word_count = true;
-                    fired = true;
-                }
-            },
         }
     }
 
-    _ = draw.text(b, &state.atlas, dpi, .{ page_rects[i_title].x, card_rect.y + card_rect.h + 20 }, "Tab moves between controls; arrows pick a segment; space toggles.", .{
-        .font = &state.font_regular,
-        .size = 12,
-        .color = skrive.muted,
+    // The kit-coverage strip: Button variants + the three transcribed icons.
+    // Not part of the shipped Writing section — the screenshots say so — but
+    // present on both sides of the comparison, laid out like a settings row.
+    var strip = layout.Box.column(.{
+        .x = page_rects[i_card].x,
+        .y = card_rect.y + card_rect.h,
+        .w = col_w,
+        .h = 200,
+    }, .{});
+    _ = strip.add(.{ .main = .{ .fixed = 28 } }); // .settings-section margin
+    const i_strip_cap = strip.add(.{ .main = .{ .content = cap_m.lineHeight() } });
+    _ = strip.add(.{ .main = .{ .fixed = 10 } });
+    const i_strip_row = strip.add(.{ .main = .{ .content = widgets.button_h } });
+    const strip_rects = strip.resolve();
+
+    _ = draw.text(b, &state.atlas, dpi, .{ strip_rects[i_strip_cap].x + 2, strip_rects[i_strip_cap].y }, "CONTROLS", .{
+        .font = &state.font_semibold,
+        .size = skrive.settings_cap_size,
+        .color = skrive.settings_cap,
+        .letter_spacing = 0.77,
     });
+
+    var controls = layout.Box.row(strip_rects[i_strip_row], .{ .gap = 12, .cross = .center });
+    const i_b1 = controls.add(.{ .main = .{ .content = widgets.buttonWidth(&p, "Save", .{}) }, .cross = widgets.button_h });
+    const i_b2 = controls.add(.{ .main = .{ .content = widgets.buttonWidth(&p, "Check for updates\u{2026}", .{}) }, .cross = widgets.button_h });
+    const i_b3 = controls.add(.{ .main = .{ .content = widgets.buttonWidth(&p, "Cancel", .{}) }, .cross = widgets.button_h });
+    const i_b4 = controls.add(.{ .main = .{ .content = widgets.buttonWidth(&p, "Add", .{}) }, .cross = widgets.button_h });
+    _ = controls.add(.{ .main = .{ .fixed = 8 } });
+    const i_ic1 = controls.add(.{ .main = .{ .fixed = 26 }, .cross = 26 });
+    const i_ic2 = controls.add(.{ .main = .{ .fixed = 26 }, .cross = 26 });
+    const i_ic3 = controls.add(.{ .main = .{ .fixed = 26 }, .cross = 26 });
+    const c_rects = controls.resolve();
+
+    _ = widgets.button(&state.ctx, &p, c_rects[i_b1].x, c_rects[i_b1].y, "Save", .{ .variant = .primary });
+    if (widgets.button(&state.ctx, &p, c_rects[i_b2].x, c_rects[i_b2].y, "Check for updates\u{2026}", .{}).fired) {
+        state.toast_visible = !state.toast_visible;
+        fired = true;
+    }
+    _ = widgets.button(&state.ctx, &p, c_rects[i_b3].x, c_rects[i_b3].y, "Cancel", .{ .variant = .secondary });
+    _ = widgets.button(&state.ctx, &p, c_rects[i_b4].x, c_rects[i_b4].y, "Add", .{ .disabled = true });
+    if (widgets.iconButton(&state.ctx, &p, c_rects[i_ic1].x, c_rects[i_ic1].y, .pin, "bm-pin", .{}).fired) {
+        state.toast_visible = !state.toast_visible;
+        fired = true;
+    }
+    _ = widgets.iconButton(&state.ctx, &p, c_rects[i_ic2].x, c_rects[i_ic2].y, .search, "bm-search", .{});
+    _ = widgets.iconButton(&state.ctx, &p, c_rects[i_ic3].x, c_rects[i_ic3].y, .plus, "bm-plus", .{});
+
+    if (state.toast_visible) buildDemoToast(b, win.w / 2 - 178, win.h - 110);
     if (fired) state.dirty = true;
 }
 
@@ -898,6 +1025,7 @@ fn buildShowcaseScene(b: *batch_mod.Batch) void {
         y += 44;
     }
 
+    const seg_options = [_][]const u8{ "Light", "Dark", "System" };
     y += 12;
     _ = draw.text(b, &state.atlas, dpi, .{ 80, y + 8 }, "Segmented", .{
         .font = &state.font_regular,
@@ -905,7 +1033,29 @@ fn buildShowcaseScene(b: *batch_mod.Batch) void {
         .color = skrive.muted,
     });
     for (states, 0..) |s, i| {
-        _ = widgets.segmentedShowcase(&p, col_x0 + @as(f32, @floatFromInt(i)) * col_w, y, &theme_options, 1, s);
+        _ = widgets.segmentedShowcase(&p, col_x0 + @as(f32, @floatFromInt(i)) * col_w, y, &seg_options, 1, s);
+    }
+
+    // IconButton (Stage 5): the five states on the search glyph, then the
+    // three transcribed icons at rest — the pin is the vocabulary-edge case.
+    y += 44;
+    _ = draw.text(b, &state.atlas, dpi, .{ 80, y + 5 }, "IconButton", .{
+        .font = &state.font_regular,
+        .size = 12,
+        .color = skrive.muted,
+    });
+    for (states, 0..) |s, i| {
+        _ = widgets.iconButtonShowcase(&p, col_x0 + @as(f32, @floatFromInt(i)) * col_w, y, .search, s);
+    }
+    y += 36;
+    _ = draw.text(b, &state.atlas, dpi, .{ 80, y + 5 }, "Icons", .{
+        .font = &state.font_regular,
+        .size = 12,
+        .color = skrive.muted,
+    });
+    const icon_set = [_]widgets.icons.Icon{ .pin, .search, .plus };
+    for (icon_set, 0..) |ic, i| {
+        _ = widgets.iconButtonShowcase(&p, col_x0 + @as(f32, @floatFromInt(i)) * col_w, y, ic, .normal);
     }
 
     // The animated in-between states, sampled along the transition the
@@ -940,7 +1090,10 @@ export fn frame() void {
         @floatCast(stime.sec(stime.diff(frame_ticks, state.last_frame_ticks)));
     state.last_frame_ticks = frame_ticks;
 
-    const clear_base = clear_palette[state.clear_index];
+    // The benchmark scene sits on --skrive-bg like the shipped settings
+    // content area (an editor-frame white card); every other scene keeps the
+    // neutral grey so AA and shadows stay judgeable against a non-white field.
+    const clear_base = if (state.scene == .card) [3]f32{ 1, 1, 1 } else clear_palette[state.clear_index];
     state.pass_action.colors[0].clear_value.r = clear_base[0];
     state.pass_action.colors[0].clear_value.b = clear_base[2];
     if (state.continuous) {

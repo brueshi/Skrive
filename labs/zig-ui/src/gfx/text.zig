@@ -36,16 +36,48 @@ pub const GlyphBitmap = struct {
     off_y: i32, // negative: bitmaps start above the baseline
 };
 
+/// Number of faces in a font file (1 for .ttf, N for .ttc collections).
+pub fn faceCount(data: []const u8) u32 {
+    const n = c.stbtt_GetNumberOfFonts(data.ptr);
+    return if (n < 0) 0 else @intCast(n);
+}
+
 pub const Font = struct {
     info: c.stbtt_fontinfo,
     id: u8, // atlas cache key component; assign uniquely per loaded font
 
     pub fn init(id: u8, ttf: []const u8) !Font {
+        return initFace(id, ttf, 0);
+    }
+
+    /// Init one face of a TrueType collection (.ttc). Plain .ttf files are a
+    /// one-face collection, so init() routes through here with index 0.
+    pub fn initFace(id: u8, data: []const u8, face_index: u32) !Font {
         var font: Font = .{ .info = undefined, .id = id };
-        const offset = c.stbtt_GetFontOffsetForIndex(ttf.ptr, 0);
+        const offset = c.stbtt_GetFontOffsetForIndex(data.ptr, @intCast(face_index));
         if (offset < 0) return error.InvalidFont;
-        if (c.stbtt_InitFont(&font.info, ttf.ptr, offset) == 0) return error.InvalidFont;
+        if (c.stbtt_InitFont(&font.info, data.ptr, offset) == 0) return error.InvalidFont;
         return font;
+    }
+
+    /// The face's subfamily name ("Regular", "Bold", ...), used to pick a
+    /// face out of a system .ttc at runtime. Tries the Macintosh name record
+    /// (plain ASCII — Apple system fonts carry it) and falls back to the
+    /// Microsoft record (UTF-16BE; ASCII subset decoded by dropping the high
+    /// bytes, which is all a subfamily name needs).
+    pub fn subfamily(self: *const Font, buf: []u8) ?[]const u8 {
+        var len: c_int = 0;
+        if (c.stbtt_GetFontNameString(&self.info, &len, 1, 0, 0, 2)) |ptr| {
+            const n = @min(@as(usize, @intCast(len)), buf.len);
+            @memcpy(buf[0..n], ptr[0..n]);
+            return buf[0..n];
+        }
+        if (c.stbtt_GetFontNameString(&self.info, &len, 3, 1, 0x409, 2)) |ptr| {
+            const pairs = @min(@as(usize, @intCast(len)) / 2, buf.len);
+            for (0..pairs) |i| buf[i] = ptr[i * 2 + 1];
+            return buf[0..pairs];
+        }
+        return null;
     }
 
     /// Unitless font-space -> device-px scale for a CSS-equivalent em size.
