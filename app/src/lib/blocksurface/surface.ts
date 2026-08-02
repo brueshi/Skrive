@@ -54,6 +54,7 @@ import {
   toggleMarkInInline
 } from './inline-ops';
 import { clampRunToAtoms, lineBoundaryRange, wordBoundaryRange } from './word-boundary';
+import { graphemeAfter, graphemeBefore } from './grapheme';
 import { DocHistory, type EditHint } from './history';
 
 /** A block type the insert menu / commands can apply to the current block. */
@@ -4109,14 +4110,17 @@ export class BlockSurface {
         if (label != null && this.armFootnoteRef(cell.cellEl, cellKey(cell), cell.start - 1, cell.start, label)) return;
       }
       this.nextEditHint = { kind: 'delete', target: cellKey(cell) };
+      // One press removes one GRAPHEME, not one code unit: an emoji is two or
+      // more units and a code-unit step would leave a broken half behind.
+      const back = cell.collapsed ? graphemeBefore(inlineScanText(cell.inline), cell.start) : 0;
       const point = cell.collapsed ? this.surgicalPoint() : null;
-      if (point && this.canSurgicalDeleteBack(point)) {
+      if (point && this.canSurgicalDeleteBack(point, back)) {
         // Model first, then the DOM — the snapshot's lazy selection read must
         // see the pre-mutation caret (F42), same as the insert path.
-        this.updateCellModel(cell, deleteRangeInInline(cell.inline, cell.start - 1, cell.start));
-        this.surgicalDeleteBackAt(point);
+        this.updateCellModel(cell, deleteRangeInInline(cell.inline, cell.start - back, cell.start));
+        this.surgicalDeleteBackAt(point, back);
       } else {
-        const from = cell.collapsed ? cell.start - 1 : cell.start;
+        const from = cell.collapsed ? cell.start - back : cell.start;
         const to = cell.collapsed ? cell.start : cell.end;
         this.commitCell(cell, deleteRangeInInline(cell.inline, from, to), from);
       }
@@ -4173,7 +4177,17 @@ export class BlockSurface {
       return;
     }
 
-    const from = t.collapsed ? t.start - 1 : t.start;
+    // One press removes one GRAPHEME (see grapheme.ts). A code block measures
+    // against its own raw text; an inline leaf against inlineScanText, the same
+    // offset-aligned string the word/line scans use — inlinePlainText would
+    // misalign here, since it drops atoms.
+    const backText = t.leaf.type === 'code_block'
+      ? t.leaf.text
+      : isInlineText(t.leaf)
+        ? inlineScanText(t.leaf.inline)
+        : null;
+    const back = t.collapsed && backText != null ? graphemeBefore(backText, t.start) : 1;
+    const from = t.collapsed ? t.start - back : t.start;
     const to = t.collapsed ? t.start : t.end;
     if (t.leaf.type === 'code_block') {
       this.nextEditHint = { kind: 'delete', target: t.leaf.id };
@@ -4192,10 +4206,10 @@ export class BlockSurface {
     // a selection delete or a caret at a text-node boundary. Model before DOM —
     // the snapshot must capture the pre-mutation caret (F42).
     const point = t.collapsed ? this.surgicalPoint() : null;
-    if (point && this.canSurgicalDeleteBack(point)) {
+    if (point && this.canSurgicalDeleteBack(point, back)) {
       const inline = deleteRangeInInline(t.leaf.inline, from, to);
       this.doc = { ...this.doc, blocks: updateBlockById(this.doc.blocks, t.leaf.id, (b) => ({ ...b, inline, dirty: true }) as BlockNode) };
-      this.surgicalDeleteBackAt(point);
+      this.surgicalDeleteBackAt(point, back);
       this.markRenderedInPlace(t.leaf.id);
     } else {
       this.commitInline(t.leaf.id, deleteRangeInInline(t.leaf.inline, from, to), t.blockEl, from);
@@ -4222,8 +4236,11 @@ export class BlockSurface {
         if (label != null && this.armFootnoteRef(cell.cellEl, cellKey(cell), cell.start, cell.start, label)) return;
       }
       this.nextEditHint = { kind: 'delete', target: cellKey(cell) };
+      // One press removes one grapheme forward, mirroring Backspace.
       const from = cell.start;
-      const to = cell.collapsed ? cell.start + 1 : cell.end;
+      const to = cell.collapsed
+        ? cell.start + graphemeAfter(inlineScanText(cell.inline), cell.start)
+        : cell.end;
       this.commitCell(cell, deleteRangeInInline(cell.inline, from, to), from);
       this.scheduleSerialize();
       return;
@@ -4253,8 +4270,16 @@ export class BlockSurface {
       return;
     }
 
+    // One press removes one grapheme forward (see grapheme.ts), measured against
+    // the same text the offsets address — raw text in a code block,
+    // inlineScanText in an inline leaf.
+    const fwdText = t.leaf.type === 'code_block'
+      ? t.leaf.text
+      : isInlineText(t.leaf)
+        ? inlineScanText(t.leaf.inline)
+        : null;
     const from = t.start;
-    const to = t.collapsed ? t.start + 1 : t.end;
+    const to = t.collapsed && fwdText != null ? t.start + graphemeAfter(fwdText, t.start) : t.collapsed ? t.start + 1 : t.end;
     if (t.leaf.type === 'code_block') {
       this.nextEditHint = { kind: 'delete', target: t.leaf.id };
       this.editCodeText(t.leaf, t.blockEl, t.leaf.text.slice(0, from) + t.leaf.text.slice(to), from);
@@ -5420,13 +5445,18 @@ export class BlockSurface {
   // place with no re-render — a block emptied this way loses its placeholder
   // <br> (height + addressable caret, see renderInline), a zero-height caret in
   // WKWebView (SKR-192). The fallback commit path re-renders and restores it.
-  private canSurgicalDeleteBack(point: { tn: Text; off: number }): boolean {
-    return point.off > 0 && point.tn.data.length > 1;
+  // `units` is the grapheme's width (grapheme.ts), so the DOM removes exactly
+  // what the model does. Requiring the whole cluster to sit inside this text
+  // node is what keeps the two in step: marks split a run across nodes, and a
+  // cluster straddling that seam would otherwise be half-deleted here and
+  // wholly deleted in the model. Straddling declines and re-renders instead.
+  private canSurgicalDeleteBack(point: { tn: Text; off: number }, units: number): boolean {
+    return units > 0 && point.off >= units && point.tn.data.length > units;
   }
 
-  private surgicalDeleteBackAt(point: { tn: Text; off: number }): void {
-    point.tn.deleteData(point.off - 1, 1);
-    window.getSelection()?.collapse(point.tn, point.off - 1);
+  private surgicalDeleteBackAt(point: { tn: Text; off: number }, units: number): void {
+    point.tn.deleteData(point.off - units, units);
+    window.getSelection()?.collapse(point.tn, point.off - units);
   }
 
   // Move the caret to the next/previous cell in row-major order. Returns false
