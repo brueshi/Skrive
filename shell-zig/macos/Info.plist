@@ -27,6 +27,61 @@
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <!-- Document types LaunchServices registers Skrive as a handler for, so
+         Finder offers "Open with Skrive" and a double-click reaches the app
+         (AppDelegate's application(_:open:) routes it to the renderer).
+
+         LSHandlerRank is Alternate, not Owner, for all three: these are
+         borrowed system types that other editors already own, and installing
+         Skrive must not quietly seize the system default for .txt or .html.
+         Alternate puts Skrive in the Open With menu and lets the user promote
+         it via Get Info; Owner is reserved for a type Skrive itself defines.
+
+         .folio — Skrive's own format — is deliberately absent. Owning a type
+         means exporting a UTI and shipping a document icon, which is its own
+         piece of work rather than a fourth entry here. -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Markdown Document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>net.daringfireball.markdown</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Plain Text Document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.plain-text</string>
+            </array>
+        </dict>
+        <dict>
+            <!-- Viewer, not Editor: an .html opens in the read-only rendered
+                 view. Claiming Editor would advertise a capability the app
+                 does not have. -->
+            <key>CFBundleTypeName</key>
+            <string>HTML Document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.html</string>
+            </array>
+        </dict>
+    </array>
     <!-- Sparkle auto-update (Stage 6.1). The EdDSA public key verifies every
          downloaded update; its private half is a CI-only secret (Keychain on
          the dev box). SUFeedURL mirrors release.yml's forever-URL alias

@@ -37,6 +37,11 @@ export const NATIVE_COMMANDS = new Set<string>([
   // transport, the host never sees the ack, and every Cmd-Q waits the full
   // 2s flush backstop. Fire-and-forget by contract; the host sends no reply.
   'app:flushComplete',
+  // OS-initiated document opens. Host-owned (the queue lives in the host, which
+  // is the only thing awake when the OS delivers a cold-launch open), so this
+  // must reach the host: served from the mock it would answer `{}` on every
+  // boot, and a file double-clicked in Finder would vanish silently.
+  'app:takeOpenPaths',
   'diag:poison',
   'fs:readFile',
   'fs:writeFile',

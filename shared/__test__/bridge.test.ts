@@ -51,6 +51,56 @@ describe('app', () => {
     bridge.app.flushComplete();
     expect(lastCall()).toEqual({ cmd: 'app:flushComplete', payload: {} });
   });
+
+  it('takeOpenPaths unwraps { paths }', async () => {
+    transport.stub('app:takeOpenPaths', { paths: ['/a/note.md', '/b/log.txt'] });
+    await expect(bridge.app.takeOpenPaths()).resolves.toEqual([
+      '/a/note.md',
+      '/b/log.txt'
+    ]);
+    expect(lastCall()).toEqual({ cmd: 'app:takeOpenPaths', payload: {} });
+  });
+
+  // The honest-probe contract: a host with no file associations doesn't
+  // implement the command, and that must not throw during boot.
+  it('takeOpenPaths resolves [] when the host rejects', async () => {
+    transport.stubError('app:takeOpenPaths', 'UNKNOWN_COMMAND');
+    await expect(bridge.app.takeOpenPaths()).resolves.toEqual([]);
+  });
+
+  it('takeOpenPaths resolves [] on a missing or mis-shaped result', async () => {
+    transport.stub('app:takeOpenPaths', {});
+    await expect(bridge.app.takeOpenPaths()).resolves.toEqual([]);
+    transport.stub('app:takeOpenPaths', { paths: '/a/note.md' });
+    await expect(bridge.app.takeOpenPaths()).resolves.toEqual([]);
+  });
+
+  it('takeOpenPaths drops non-string entries', async () => {
+    transport.stub('app:takeOpenPaths', { paths: ['/a/note.md', 7, null] });
+    await expect(bridge.app.takeOpenPaths()).resolves.toEqual(['/a/note.md']);
+  });
+
+  it('onOpenPaths subscribes and unsubscribes', () => {
+    const seen: string[][] = [];
+    const off = bridge.app.onOpenPaths((paths) => seen.push(paths));
+    transport.emit('app:open-paths', { paths: ['/a/note.md'] });
+    expect(seen).toEqual([['/a/note.md']]);
+    off();
+    transport.emit('app:open-paths', { paths: ['/b/other.md'] });
+    expect(seen).toEqual([['/a/note.md']]);
+    expect(transport.subscriberCount('app:open-paths')).toBe(0);
+  });
+
+  it('onOpenPaths ignores an empty or mis-shaped payload', () => {
+    let fired = 0;
+    bridge.app.onOpenPaths(() => {
+      fired++;
+    });
+    transport.emit('app:open-paths', {});
+    transport.emit('app:open-paths', { paths: [] });
+    transport.emit('app:open-paths', { paths: [7] });
+    expect(fired).toBe(0);
+  });
 });
 
 describe('links', () => {

@@ -28,6 +28,8 @@ import { NewProjectDialog } from './components/modals/NewProjectDialog';
 import { ReportDialog } from './components/modals/ReportDialog';
 import type { ReportType } from './lib/report';
 import { CheatSheetModal } from './components/modals/CheatSheetModal';
+import { OpenExternalFileModal } from './components/modals/OpenExternalFileModal';
+import { useOsDocumentOpens } from './lib/use-os-document-opens';
 import { CommandPalette } from './components/cmdk/CommandPalette';
 import { FileSwitcher } from './components/cmdk/FileSwitcher';
 import {
@@ -294,6 +296,10 @@ export function App() {
     return () => clearTimeout(timer);
   }, [preferencesHydrated]);
 
+  // Documents the OS handed us (Finder double-click, `open -a Skrive x.md`,
+  // a launch argument). Owns its own confirm sheet, rendered below.
+  const osOpens = useOsDocumentOpens(preferencesHydrated);
+
   // Auto-open the last project once preferences hydrate. Skipped if
   // a project is already loaded (defensive — first render might race
   // a manual openProject from the URL handler we don't have yet).
@@ -301,6 +307,15 @@ export function App() {
   useEffect(() => {
     if (didAutoOpenRef.current) return;
     if (!preferencesHydrated) return;
+    // Wait for the launch-file drain to settle, then stand down if it found
+    // one: a file opened from Finder names the project the writer wants, and
+    // restoring the last-opened project over it would snapshot two projects
+    // and leave the wrong one showing.
+    if (!osOpens.launchResolved) return;
+    if (osOpens.launchHandled) {
+      didAutoOpenRef.current = true;
+      return;
+    }
     if (manifest) {
       didAutoOpenRef.current = true;
       return;
@@ -315,7 +330,14 @@ export function App() {
       // The path may have moved; clear it so we don't retry every boot.
       usePreferencesStore.getState().setLastOpenedProject(null);
     });
-  }, [preferencesHydrated, manifest, lastOpenedProject, openProject]);
+  }, [
+    preferencesHydrated,
+    manifest,
+    lastOpenedProject,
+    openProject,
+    osOpens.launchResolved,
+    osOpens.launchHandled
+  ]);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -654,6 +676,13 @@ export function App() {
         open={cheatSheetOpen}
         onClose={() => setCheatSheetOpen(false)}
         bindings={bindings}
+      />
+      <OpenExternalFileModal
+        open={osOpens.confirmation !== null}
+        root={osOpens.confirmation?.root ?? ''}
+        fileCount={osOpens.confirmation?.fileCount ?? 0}
+        onConfirm={osOpens.confirm}
+        onCancel={osOpens.cancel}
       />
       <Toaster
         position="bottom-right"

@@ -335,3 +335,44 @@ pub const SYSTEMTIME = extern struct {
     wMilliseconds: u16,
 };
 pub extern "kernel32" fn GetLocalTime(lpSystemTime: *SYSTEMTIME) callconv(WINAPI) void;
+
+// ---- single-instance file-open hand-off ------------------------------------
+// A second launch (Explorer double-click while Skrive runs) forwards its file
+// arguments to the live instance and exits. WM_COPYDATA is the mechanism:
+// it marshals a block of bytes across the process boundary for us, which a
+// plain PostMessage cannot do — a pointer from the sending process is
+// meaningless in the receiving one.
+
+pub const WM_COPYDATA: u32 = 0x004A;
+
+/// The payload WM_COPYDATA carries. `dwData` tags the message so an unrelated
+/// sender's COPYDATASTRUCT is not parsed as ours.
+pub const COPYDATASTRUCT = extern struct {
+    dwData: usize,
+    cbData: u32,
+    lpData: ?*anyopaque,
+};
+
+pub extern "user32" fn FindWindowW(lpClassName: ?LPCWSTR, lpWindowName: ?LPCWSTR) callconv(WINAPI) ?HWND;
+/// SYNCHRONOUS by necessity: WM_COPYDATA's buffer is only valid for the
+/// duration of the call, so it must not be posted.
+pub extern "user32" fn SendMessageW(hWnd: HWND, Msg: u32, wParam: WPARAM, lParam: LPARAM) callconv(WINAPI) LRESULT;
+pub extern "user32" fn SetForegroundWindow(hWnd: HWND) callconv(WINAPI) BOOL;
+pub extern "user32" fn IsIconic(hWnd: HWND) callconv(WINAPI) BOOL;
+/// The forwarding process grants the running instance the right to take the
+/// foreground. Without it the OS foreground lock leaves the raised window
+/// behind the one that is exiting.
+pub const ASFW_ANY: u32 = 0xFFFFFFFF;
+pub extern "user32" fn AllowSetForegroundWindow(dwProcessId: u32) callconv(WINAPI) BOOL;
+
+/// Command-line access straight from the OS. Preferred over std.process here
+/// because CommandLineToArgvW applies the exact quoting rules Explorer used to
+/// build the line, so a path with spaces survives as one argument.
+pub extern "kernel32" fn GetCommandLineW() callconv(WINAPI) LPCWSTR;
+pub extern "shell32" fn CommandLineToArgvW(lpCmdLine: LPCWSTR, pNumArgs: *i32) callconv(WINAPI) ?[*][*:0]u16;
+pub extern "kernel32" fn LocalFree(hMem: ?*anyopaque) callconv(WINAPI) ?*anyopaque;
+pub extern "kernel32" fn Sleep(dwMilliseconds: u32) callconv(WINAPI) void;
+
+pub const INVALID_FILE_ATTRIBUTES: u32 = 0xFFFFFFFF;
+pub const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+pub extern "kernel32" fn GetFileAttributesW(lpFileName: LPCWSTR) callconv(WINAPI) u32;

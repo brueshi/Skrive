@@ -2,13 +2,7 @@ import { IconDoc } from './IconDoc';
 import { IconDocMarkdown } from './IconDocMarkdown';
 import { IconDocText } from './IconDocText';
 import { IconDocHtml } from './IconDocHtml';
-
-// Extension families, mirrored from the shell/model regexes. Kept local so the
-// UI layer doesn't import the worker-side project model just to read them
-// (matching the existing "duplicated for isolation" convention).
-const MARKDOWN_EXT = /\.(md|markdown)$/i;
-const TEXT_EXT = /\.(txt|text)$/i;
-const HTML_EXT = /\.(html|htm)$/i;
+import { HTML_EXT, MARKDOWN_EXT, TEXT_EXT } from '../../lib/doc-types';
 
 type Props = {
   path: string;

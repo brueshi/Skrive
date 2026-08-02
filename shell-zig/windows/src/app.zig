@@ -41,7 +41,14 @@ const WM_SKRIVE_EMIT: u32 = win32.WM_APP + 1;
 /// host to perform on the UI thread. wParam is the heap pointer to the copy.
 const WM_SKRIVE_HOSTCMD: u32 = win32.WM_APP + 2;
 
-const CLASS_NAME = std.unicode.utf8ToUtf16LeStringLiteral("SkriveWindowClass");
+/// Tag on the WM_COPYDATA a second instance sends when Explorer hands it files
+/// to open. Identifies the message as ours; any other sender's COPYDATA is
+/// ignored rather than parsed as paths.
+pub const COPYDATA_OPEN_PATHS: usize = 0x534B_5250; // "SKRP"
+
+/// Public so a second instance can FindWindowW the running one's window and
+/// hand it the files Explorer gave it (see main.zig).
+pub const CLASS_NAME = std.unicode.utf8ToUtf16LeStringLiteral("SkriveWindowClass");
 const WINDOW_TITLE = std.unicode.utf8ToUtf16LeStringLiteral("Skrive");
 // `.localhost` is a reserved TLD (RFC 6761): it never resolves externally (no
 // domain to own) and is exempt from HSTS — unlike `.app`, a real HSTS-preloaded
@@ -84,6 +91,16 @@ pub const App = struct {
     /// stream (SIZE_RESTORED fires on every resize step) so window:maximize
     /// Changed is emitted only on a real transition.
     is_maximized: bool = false,
+
+    /// Documents the OS asked us to open before the renderer could hear about
+    /// it: file arguments on this process's command line, plus anything a
+    /// second instance forwarded over WM_COPYDATA while we were still booting.
+    /// Owned WTF-8 strings, freed on drain.
+    pending_open_paths: std.ArrayList([]const u8) = .empty,
+    /// Flipped by the renderer's `app:takeOpenPaths` drain. Before it, opens
+    /// queue above; after it, they go out as `app:open-paths` events. Both run
+    /// on the UI thread, so the handoff drops nothing.
+    renderer_drained_open_paths: bool = false,
 
     /// Build the window + core and kick off async WebView2 creation. The App is
     /// heap-allocated so its address is stable: the handlers hold `*App`, the
@@ -465,6 +482,13 @@ pub const App = struct {
             else => null,
         };
 
+        // Host-owned: the queue lives here, since the host is the only thing
+        // awake when Explorer hands over a file at launch. Parity with the
+        // macOS CoreBridge.
+        if (std.mem.eql(u8, cmd, "app:takeOpenPaths")) {
+            self.drainOpenPaths(id);
+            return true;
+        }
         if (std.mem.eql(u8, cmd, "project:openDialog")) {
             const path = host_cmds.pickFolder(self.gpa, self.hwnd);
             defer if (path) |p| self.gpa.free(p);
@@ -628,6 +652,83 @@ pub const App = struct {
         core.handle(reply);
     }
 
+    // ---- opening documents from the OS ------------------------------------
+
+    /// Take ownership of paths the OS wants opened — command-line arguments at
+    /// startup, or a forwarded batch from a second instance. Queued until the
+    /// renderer drains them, emitted as an event after that.
+    ///
+    /// Takes ownership: each slice is freed here on the queue path and on the
+    /// emit path, so callers hand over allocated copies and forget them.
+    pub fn deliverOpenPaths(self: *App, open_paths: []const []const u8) void {
+        if (open_paths.len == 0) return;
+
+        if (!self.renderer_drained_open_paths) {
+            for (open_paths) |p| {
+                self.pending_open_paths.append(self.gpa, p) catch self.gpa.free(p);
+            }
+            return;
+        }
+        defer for (open_paths) |p| self.gpa.free(p);
+
+        // Opening a document is a request for attention: unminimize and raise.
+        if (self.hwnd) |h| {
+            if (win32.IsIconic(h) != 0) _ = win32.ShowWindow(h, win32.SW_RESTORE);
+            _ = win32.SetForegroundWindow(h);
+        }
+
+        const json = pathsJsonArray(self.gpa, open_paths) catch return;
+        defer self.gpa.free(json);
+        const env = std.fmt.allocPrint(
+            self.gpa,
+            "{{\"v\":1,\"event\":\"app:open-paths\",\"payload\":{{\"paths\":{s}}}}}",
+            .{json},
+        ) catch return;
+        defer self.gpa.free(env);
+        self.sendToRenderer(env);
+    }
+
+    /// UI-thread side of a second instance's WM_COPYDATA: split the forwarded
+    /// buffer back into paths and deliver them.
+    fn receiveForwardedOpenPaths(self: *App, lparam: win32.LPARAM) void {
+        const cds: *const win32.COPYDATASTRUCT = @ptrFromInt(@as(usize, @bitCast(lparam)));
+        if (cds.dwData != COPYDATA_OPEN_PATHS) return;
+        const data = cds.lpData orelse return;
+        if (cds.cbData == 0) return;
+        const bytes: []const u8 = @as([*]const u8, @ptrCast(data))[0..cds.cbData];
+
+        var forwarded: std.ArrayList([]const u8) = .empty;
+        defer forwarded.deinit(self.gpa);
+        var it = std.mem.splitScalar(u8, bytes, '\n');
+        while (it.next()) |line| {
+            if (line.len == 0) continue;
+            const copy = self.gpa.dupe(u8, line) catch continue;
+            forwarded.append(self.gpa, copy) catch self.gpa.free(copy);
+        }
+        self.deliverOpenPaths(forwarded.items);
+    }
+
+    /// `app:takeOpenPaths`: hand the queue to the renderer and mark it awake.
+    fn drainOpenPaths(self: *App, id: i64) void {
+        self.renderer_drained_open_paths = true;
+        const queued = self.pending_open_paths.items;
+        defer {
+            for (queued) |p| self.gpa.free(p);
+            self.pending_open_paths.clearAndFree(self.gpa);
+        }
+        const json = pathsJsonArray(self.gpa, queued) catch {
+            self.sendOk(id, "{\"paths\":[]}");
+            return;
+        };
+        defer self.gpa.free(json);
+        const result = std.fmt.allocPrint(self.gpa, "{{\"paths\":{s}}}", .{json}) catch {
+            self.sendOk(id, "{\"paths\":[]}");
+            return;
+        };
+        defer self.gpa.free(result);
+        self.sendOk(id, result);
+    }
+
     fn sendOk(self: *App, id: i64, result_json: []const u8) void {
         const env = std.fmt.allocPrint(self.gpa, "{{\"v\":1,\"id\":{d},\"ok\":true,\"result\":{s}}}", .{ id, result_json }) catch return;
         defer self.gpa.free(env);
@@ -788,6 +889,12 @@ fn wndProc(hwnd: win32.HWND, msg: u32, wparam: win32.WPARAM, lparam: win32.LPARA
             if (app) |a| a.handleHostCommand(wparam);
             return 0;
         },
+        win32.WM_COPYDATA => {
+            // A second instance forwarding the files Explorer gave it. Sent,
+            // not posted: the buffer is only valid for this call.
+            if (app) |a| a.receiveForwardedOpenPaths(lparam);
+            return 1;
+        },
         win32.WM_NCCALCSIZE => {
             // Frameless chrome (B3). DefWindowProc computes the standard client
             // rect (insets all four edges for the resize frame + caption); we
@@ -882,6 +989,21 @@ fn isLightTheme() bool {
 
 /// Quote + JSON-escape a string for embedding as a JSON value (paths contain
 /// backslashes; text contains quotes/newlines). Caller owns the result.
+/// `["a","b"]` from a slice of paths. Caller owns the result.
+fn pathsJsonArray(gpa: std.mem.Allocator, items: []const []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(gpa);
+    try out.append(gpa, '[');
+    for (items, 0..) |item, i| {
+        if (i > 0) try out.append(gpa, ',');
+        const quoted = try jsonQuote(gpa, item);
+        defer gpa.free(quoted);
+        try out.appendSlice(gpa, quoted);
+    }
+    try out.append(gpa, ']');
+    return out.toOwnedSlice(gpa);
+}
+
 fn jsonQuote(gpa: std.mem.Allocator, s: []const u8) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(gpa);
