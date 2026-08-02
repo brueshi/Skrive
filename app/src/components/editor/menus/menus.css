@@ -416,9 +416,50 @@
    number of cells: the arrow keys move by a constant, and a wrapping row would
    silently break that. */
 .sk-emoji-menu {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   width: 20.5rem;
   max-height: 17rem;
+  /* The grid scrolls inside, not the popover, so the query line stays put as the
+     results change underneath it (the code-language picker's arrangement). */
+  overflow: hidden;
+}
+
+.sk-emoji-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The query line. Not an input and not focusable — the document is the search
+   field. It reflects what has been typed and, when empty, names the gesture,
+   since the browse grid otherwise gives no hint that typing filters it. */
+.sk-emoji-search {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+  padding: 0.3rem 0.45rem 0.4rem;
+  margin-bottom: 0.15rem;
+  border-bottom: 1px solid var(--skrive-rule);
+  font-size: 0.85em;
+}
+
+.sk-emoji-search-icon {
+  flex: 0 0 auto;
+  color: var(--skrive-muted);
+}
+
+.sk-emoji-search-query {
+  color: var(--skrive-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sk-emoji-search-hint {
+  color: var(--skrive-muted);
 }
 
 .sk-emoji-row {
@@ -430,7 +471,7 @@
    scrolling through stays named without stealing attention from the glyphs. */
 .sk-emoji-group {
   position: sticky;
-  top: -0.3rem;
+  top: 0;
   z-index: 1;
   padding: 0.4rem 0.35rem 0.25rem;
   margin: 0 -0.3rem;

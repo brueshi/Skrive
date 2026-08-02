@@ -19,6 +19,7 @@ import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import type { BlockSurface, EmojiMenuState } from '../../../lib/blocksurface';
 import { EMOJI_GROUPS, loadEmoji, loadedEmoji, searchEmoji, type EmojiEntry } from '../../../lib/emoji';
+import { IconSearch } from '../../icons/IconSearch';
 import { useAnchoredRect } from './useAnchoredRect';
 import './menus.css';
 
@@ -159,43 +160,58 @@ export function BlockEmojiMenu({ surface }: { surface: BlockSurface }) {
           transition={{ duration: 0.12 }}
           onMouseDown={(e) => e.preventDefault()}
         >
-          {!entries && <div className="rich-slash-empty">Loading emoji…</div>}
-          {entries && items.length === 0 && (
-            <div className="rich-slash-empty">No emoji for “{query}”</div>
-          )}
-          {rows.map((row, r) =>
-            row.kind === 'header' ? (
-              <div key={`h${r}`} className="sk-emoji-group">
-                {row.name}
-              </div>
+          {/* The query line. NOT an input, deliberately: the document is the
+              search field, and moving focus into a real box would collapse the
+              caret the session is anchored to. This mirrors what has been typed
+              so the search is visible, and names the gesture when it is empty —
+              the browse grid otherwise gives no hint that typing does anything. */}
+          <div className="sk-emoji-search" aria-hidden="true">
+            <IconSearch size={16} className="sk-emoji-search-icon" />
+            {query ? (
+              <span className="sk-emoji-search-query">{query}</span>
             ) : (
-              <div key={`r${r}`} className="sk-emoji-row">
-                {row.items.map((item) => {
-                  cursor += 1;
-                  const isActive = cursor === active;
-                  const index = cursor;
-                  return (
-                    <button
-                      key={item.char}
-                      type="button"
-                      role="option"
-                      aria-selected={isActive}
-                      aria-label={item.label}
-                      title={item.label}
-                      className={`sk-emoji-cell${isActive ? ' active' : ''}`}
-                      onMouseEnter={() => setActive(index)}
-                      onMouseDown={(e: MouseEvent) => {
-                        e.preventDefault();
-                        surface.applyEmojiCommand(item.char);
-                      }}
-                    >
-                      {item.char}
-                    </button>
-                  );
-                })}
-              </div>
-            )
-          )}
+              <span className="sk-emoji-search-hint">Type to search</span>
+            )}
+          </div>
+          <div className="sk-emoji-scroll">
+            {!entries && <div className="rich-slash-empty">Loading emoji…</div>}
+            {entries && items.length === 0 && (
+              <div className="rich-slash-empty">No emoji for “{query}”</div>
+            )}
+            {rows.map((row, r) =>
+              row.kind === 'header' ? (
+                <div key={`h${r}`} className="sk-emoji-group">
+                  {row.name}
+                </div>
+              ) : (
+                <div key={`r${r}`} className="sk-emoji-row">
+                  {row.items.map((item) => {
+                    cursor += 1;
+                    const isActive = cursor === active;
+                    const index = cursor;
+                    return (
+                      <button
+                        key={item.char}
+                        type="button"
+                        role="option"
+                        aria-selected={isActive}
+                        aria-label={item.label}
+                        title={item.label}
+                        className={`sk-emoji-cell${isActive ? ' active' : ''}`}
+                        onMouseEnter={() => setActive(index)}
+                        onMouseDown={(e: MouseEvent) => {
+                          e.preventDefault();
+                          surface.applyEmojiCommand(item.char);
+                        }}
+                      >
+                        {item.char}
+                      </button>
+                    );
+                  })}
+                </div>
+              )
+            )}
+          </div>
         </motion.div>
       )}
     </AnimatePresence>,
