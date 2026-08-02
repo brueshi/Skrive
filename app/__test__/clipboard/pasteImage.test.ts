@@ -8,6 +8,7 @@ import {
   bytesToBase64,
   imageExtension,
   imageMarkdownLink,
+  imageMimeFromFilename,
   imagePasteTarget,
   pastedImageFilename
 } from '../../src/lib/clipboard/pasteImage';
@@ -30,6 +31,39 @@ describe('imageExtension', () => {
     expect(imageExtension('text/plain')).toBeNull();
     expect(imageExtension('application/pdf')).toBeNull();
     expect(imageExtension('')).toBeNull();
+  });
+});
+
+describe('imageMimeFromFilename', () => {
+  it('recovers the type from the extension', () => {
+    expect(imageMimeFromFilename('photo.png')).toBe('image/png');
+    expect(imageMimeFromFilename('diagram.svg')).toBe('image/svg+xml');
+    expect(imageMimeFromFilename('shot.WEBP')).toBe('image/webp');
+  });
+
+  it('treats .jpeg and .jpg as the same type', () => {
+    expect(imageMimeFromFilename('a.jpg')).toBe('image/jpeg');
+    expect(imageMimeFromFilename('a.jpeg')).toBe('image/jpeg');
+  });
+
+  it('reads only the last extension of a multi-dot name', () => {
+    expect(imageMimeFromFilename('archive.png.zip')).toBeNull();
+    expect(imageMimeFromFilename('my.photo.v2.png')).toBe('image/png');
+  });
+
+  it('returns null with no usable extension', () => {
+    expect(imageMimeFromFilename('README')).toBeNull();
+    expect(imageMimeFromFilename('notes.md')).toBeNull();
+    expect(imageMimeFromFilename('')).toBeNull();
+  });
+
+  // Every type it can name must be one the write path can actually place, or a
+  // picked file would be accepted and then written under an extension the
+  // renderer can't load.
+  it('only names types imageExtension already accepts', () => {
+    for (const name of ['a.png', 'a.jpg', 'a.jpeg', 'a.gif', 'a.webp', 'a.svg', 'a.avif', 'a.bmp']) {
+      expect(imageExtension(imageMimeFromFilename(name)!), name).not.toBeNull();
+    }
   });
 });
 

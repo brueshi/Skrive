@@ -24,6 +24,7 @@ import { attachSpellcheck, type SpellcheckHandle } from '../../../lib/spellcheck
 import { SpellDictionary } from '../../../lib/spellcheck/dictionary';
 import { hostSpellProvider } from '../../../lib/spellcheck/provider';
 import { installDecorationDevHarness } from '../../../lib/blocksurface/decoration-dev';
+import { pickImageFile } from '../../../lib/pick-image-file';
 import type { Document } from '../../../lib/blockmodel';
 import { setActiveEditorFlush } from '../active-editor';
 import { setActiveBlockMenu } from '../active-surface';
@@ -243,6 +244,11 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
     surface.onImagePaste((bytes, _mimeType, filename) =>
       useProjectStore.getState().pasteImageAsset(docPath, filename, bytes)
     );
+    // The pick seam, the deliberate half of the same feature: the Insert entry
+    // needs a file, and choosing one is a host affordance. Registered here rather
+    // than reached for inside the surface so the surface keeps knowing nothing
+    // about the DOM outside its own container.
+    surface.onImagePick(pickImageFile);
     // Clicking an inline tag chip scopes the sidebar's All list to that tag.
     surface.onTagClick((name) =>
       useProjectStore.getState().setFilter({ kind: 'tag', value: name })

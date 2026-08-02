@@ -12,7 +12,8 @@ export {
   type TableMenuState,
   type TagMenuState,
   type CodeLangMenuState,
-  type ImagePasteDelegate
+  type ImagePasteDelegate,
+  type ImagePickDelegate
 } from './surface';
 export { renderDocument, renderBlock, renderInlineInto, BlockViewRegistry, BLOCK_ID_ATTR } from './render';
 export type { AssetResolver } from './render';

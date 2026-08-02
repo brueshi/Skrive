@@ -108,6 +108,10 @@ export interface MenuController {
   insertDivider(): void;
   insertTable(): void;
   insertFootnote(): void;
+  /** Opens the host's image picker and inserts the chosen file. Fire-and-forget
+   *  like every other command here: the picker and the write are asynchronous,
+   *  but a menu never awaits a command. */
+  insertImage(): void;
 
   // Link affordance: open the floating editor against the current selection, then
   // commit / remove / cancel. The adapter preserves the target across the input

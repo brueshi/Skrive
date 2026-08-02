@@ -2,6 +2,7 @@ import AppKit
 import WebKit
 import Sparkle
 import SkriveShellKit
+import UniformTypeIdentifiers
 
 // Stage 1 host: one transparent-titlebar NSWindow holding a WKWebView that
 // loads the existing renderer bundle, with the Zig core wired in behind the
@@ -569,6 +570,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     ) -> WKWebView? {
         if let url = navigationAction.request.url { ExternalLink.open(url) }
         return nil
+    }
+
+    /// The file panel behind an `<input type="file">` — the editor's Insert >
+    /// Image entry. WKWebView does not open one on its own: without this method
+    /// the input's click is swallowed and the writer gets no panel and no error,
+    /// which is why the image picker cannot be tested anywhere but here (Chromium
+    /// and WebView2 both open it natively).
+    ///
+    /// A sheet rather than `runModal`: the web content process is blocked waiting
+    /// on `completionHandler`, so the host must not also block its own main run
+    /// loop while the writer browses.
+    func webView(
+        _ webView: WKWebView,
+        runOpenPanelWith parameters: WKOpenPanelParameters,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping @MainActor @Sendable ([URL]?) -> Void
+    ) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        // WKOpenPanelParameters carries no accept list, so the panel filters by
+        // the broad category and the renderer re-checks the specific type it can
+        // actually write — an unsupported image says so rather than vanishing.
+        panel.allowedContentTypes = [.image]
+        panel.title = "Insert image"
+        panel.prompt = "Insert"
+        guard let window else {
+            // No window to hang the sheet on: answer the callback anyway. It must
+            // be called exactly once or the web content process stays blocked.
+            completionHandler(nil)
+            return
+        }
+        panel.beginSheetModal(for: window) { response in
+            completionHandler(response == .OK ? panel.urls : nil)
+        }
     }
 
     // MARK: - Diagnostics
