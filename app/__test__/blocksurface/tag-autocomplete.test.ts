@@ -128,3 +128,51 @@ describe('the heading rule keeps priority', () => {
     expect(last).toBeNull(); // the session was closed, not left stale
   });
 });
+
+// The query is read from the text between the `#` and the caret, so a delete
+// changes it just as an insert does. Before this, refreshTag ran only on the
+// insert path: backspacing a typo narrowed the text but left the menu showing
+// the query from before the delete, so the suggestions no longer matched what
+// was on screen.
+describe('the query tracks deletes, not just inserts', () => {
+  function beforeInput(surface: BlockSurface, inputType: string): void {
+    (surface as unknown as { onBeforeInput: (e: Event) => void }).onBeforeInput({
+      inputType,
+      preventDefault() {}
+    } as unknown as Event);
+  }
+
+  it('narrows the query on Backspace', () => {
+    let last: TagMenuState | null = null;
+    const surface = new BlockSurface({ container, doc: parseDocument('note\n') });
+    surface.onTagMenu((s) => (last = s));
+    caretAtEnd(surface);
+    type(surface, ' #todo');
+    expect(last!.query).toBe('todo');
+
+    beforeInput(surface, 'deleteContentBackward');
+    expect(last!.query).toBe('tod');
+  });
+
+  it('reopens the full list when the query empties back to a bare #', () => {
+    let last: TagMenuState | null = null;
+    const surface = new BlockSurface({ container, doc: parseDocument('note\n') });
+    surface.onTagMenu((s) => (last = s));
+    caretAtEnd(surface);
+    type(surface, ' #a');
+    beforeInput(surface, 'deleteContentBackward');
+    expect(last).not.toBeNull();
+    expect(last!.query).toBe('');
+  });
+
+  it('closes when the `#` itself is deleted', () => {
+    let last: TagMenuState | null = null;
+    const surface = new BlockSurface({ container, doc: parseDocument('note\n') });
+    surface.onTagMenu((s) => (last = s));
+    caretAtEnd(surface);
+    type(surface, ' #a');
+    beforeInput(surface, 'deleteContentBackward'); // the 'a'
+    beforeInput(surface, 'deleteContentBackward'); // the '#'
+    expect(last).toBeNull();
+  });
+});

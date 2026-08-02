@@ -4366,9 +4366,13 @@ export class BlockSurface {
       this.commitInline(t.leaf.id, deleteRangeInInline(t.leaf.inline, from, to), t.blockEl, from);
     }
     this.scheduleSerialize();
+    // Backspacing a typo mid-query is routine while a menu is open, so every
+    // query-bearing session tracks deletes as well as inserts. Forward delete
+    // deliberately refreshes nothing: it removes text AFTER the caret, which is
+    // outside the marker-to-caret range a query is read from, so no query can
+    // change under it.
     this.refreshSlash();
-    // Backspacing a typo mid-query is routine while the picker is open, so the
-    // emoji session tracks deletes as well as inserts.
+    this.refreshTag();
     this.refreshEmoji();
   }
 
@@ -4495,7 +4499,9 @@ export class BlockSurface {
       this.nextEditHint = { kind: 'other' };
       this.commitInline(leaf.id, deleteRangeInInline(leaf.inline, from, to), t.blockEl, from);
       this.scheduleSerialize();
-      this.refreshSlash(); // an open slash menu tracks the edit, as plain delete does
+      // Every open query-bearing menu tracks the edit, as plain delete does.
+      this.refreshSlash();
+      this.refreshTag();
       this.refreshEmoji();
       return;
     }
