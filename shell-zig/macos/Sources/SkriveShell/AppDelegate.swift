@@ -44,6 +44,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     // tile ourselves, parity with the Electron shell's applyDockIcon).
     private var appearanceObservation: NSKeyValueObservation?
 
+    // Documents the OS asked us to open before the renderer could hear about
+    // it. Initialized inline, NOT in applicationDidFinishLaunching: on a cold
+    // launch AppKit delivers application(_:open:) around launch time and it can
+    // land BEFORE that method runs, so anything set up there is too late.
+    private var pendingOpenPaths: [String] = []
+
+    // Flipped by the renderer's `app:takeOpenPaths` drain. Before it, opens go
+    // in the queue above; after it, they go out as `app:open-paths` events.
+    // Both sides run on the main thread, so the handoff has no window in which
+    // an open could be queued for a renderer that will never ask again.
+    private var rendererDrainedOpenPaths = false
+
     // Headless smoke test, enabled with SKRIVE_DIAG=1: relays the webview
     // console to stdout and, once the renderer settles, round-trips
     // app:version / app:platform and probes the rendered DOM. Repeatable
@@ -154,6 +166,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         bridge.onUpdaterCurrent = { [weak self] in
             self?.updaterDriver.current ?? ["kind": "idle"]
         }
+        // The renderer's launch drain (see pendingOpenPaths).
+        bridge.onTakeOpenPaths = { [weak self] in
+            guard let self else { return [] }
+            self.rendererDrainedOpenPaths = true
+            let paths = self.pendingOpenPaths
+            self.pendingOpenPaths = []
+            return paths
+        }
 
         // Now that status has somewhere to go, start the engine (schedules the
         // background check loop per Info.plist). A failure here is non-fatal —
@@ -197,6 +217,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     // handshake — and reopening is a cheap re-show rather than a cold start.
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool {
         false
+    }
+
+    // MARK: - Opening documents from the OS
+
+    /// The open-document Apple event: a Finder double-click, `open -a Skrive
+    /// note.md`, a drop on the dock tile. Fires on a cold launch too, where it
+    /// can precede applicationDidFinishLaunching — hence the queue rather than
+    /// a direct emit.
+    ///
+    /// Non-file URLs are dropped: this app declares document types, not URL
+    /// schemes, and a `skrive://` deep link would be a different feature with
+    /// different trust rules.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        let paths = urls.filter(\.isFileURL).map(\.path)
+        guard !paths.isEmpty else { return }
+
+        // Opening a document is a request for the app's attention, and the
+        // window may be closed (the app stays resident) or behind another app.
+        if let window, !window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+
+        guard rendererDrainedOpenPaths, let bridge else {
+            pendingOpenPaths.append(contentsOf: paths)
+            return
+        }
+        bridge.emitEvent("app:open-paths", payload: ["paths": paths])
     }
 
     /// Dock-icon click (or any reopen) with no visible window re-shows the

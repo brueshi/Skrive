@@ -55,6 +55,10 @@ final class CoreBridge {
     var onUpdaterDownloadAndInstall: (() -> Void)?
     /// `updater:current` — the driver's latest status snapshot.
     var onUpdaterCurrent: (() -> [String: Any])?
+    /// `app:takeOpenPaths` — drain the documents the OS asked us to open before
+    /// the renderer existed, and mark it awake so later opens arrive as events.
+    /// Owned by AppDelegate, which receives the open-document Apple event.
+    var onTakeOpenPaths: (() -> [String])?
 
     init(webView: WKWebView, configJSON: String, activeProject: ActiveProject) {
         self.webView = webView
@@ -112,6 +116,12 @@ final class CoreBridge {
             return true
         case "clipboard:readText":
             handleClipboardReadText(id: id)
+            return true
+        case "app:takeOpenPaths":
+            // Host-owned: the queue lives in AppDelegate, which is the only
+            // thing awake when the OS delivers a cold-launch open. The core
+            // never sees this.
+            replyToRenderer(id: id, result: ["paths": onTakeOpenPaths?() ?? []])
             return true
         case "app:flushComplete":
             // The renderer's pre-quit flush ack — fire-and-forget, no reply.
