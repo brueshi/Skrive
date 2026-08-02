@@ -156,6 +156,9 @@ export class BlockMenuController implements MenuController {
   insertImage(): void {
     this.surface.setBlockType({ kind: 'image' });
   }
+  insertEmoji(): void {
+    this.surface.setBlockType({ kind: 'emoji' });
+  }
 
   openLinkEditor(): void {
     if (!this.surface.beginLink()) return;

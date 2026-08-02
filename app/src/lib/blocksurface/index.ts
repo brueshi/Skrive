@@ -11,6 +11,7 @@ export {
   type SlashMenuState,
   type TableMenuState,
   type TagMenuState,
+  type EmojiMenuState,
   type CodeLangMenuState,
   type ImagePasteDelegate,
   type ImagePickDelegate

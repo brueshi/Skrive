@@ -112,6 +112,9 @@ export interface MenuController {
    *  like every other command here: the picker and the write are asynchronous,
    *  but a menu never awaits a command. */
   insertImage(): void;
+  /** Opens the emoji picker at the caret. Inserts nothing on its own — the
+   *  writer still chooses one — so a dismissed picker leaves only the `:`. */
+  insertEmoji(): void;
 
   // Link affordance: open the floating editor against the current selection, then
   // commit / remove / cancel. The adapter preserves the target across the input

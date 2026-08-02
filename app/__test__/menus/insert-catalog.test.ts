@@ -40,7 +40,8 @@ function recordingController(): { controller: MenuController; calls: string[] } 
     insertDivider: () => calls.push('divider'),
     insertTable: () => calls.push('table'),
     insertFootnote: () => calls.push('footnote'),
-    insertImage: () => calls.push('image')
+    insertImage: () => calls.push('image'),
+    insertEmoji: () => calls.push('emoji')
   } as unknown as MenuController;
   return { controller, calls };
 }
