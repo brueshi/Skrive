@@ -402,3 +402,33 @@ export function IconFootnote(p: IconProps) {
     </Glyph>
   );
 }
+
+export function IconImage(p: IconProps) {
+  // A framed picture: horizon ridge and a sun. The ridge meets the frame on both
+  // sides so the glyph reads as a picture rather than a shape in a box, and the
+  // sun is the same solid disc the footnote mark uses — the one filled accent
+  // this icon language allows itself.
+  return (
+    <Glyph {...p} viewBox="0 0 24 24">
+      <rect
+        x="3.5"
+        y="4.75"
+        width="17"
+        height="14.5"
+        rx="2.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <circle cx="8.75" cy="9.75" r="1.5" />
+      <path
+        d="M4 16.25l4.5-4.25 3.25 3.1 2.75-2.6 5.5 5.25"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Glyph>
+  );
+}

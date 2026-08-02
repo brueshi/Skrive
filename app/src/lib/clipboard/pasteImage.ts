@@ -28,6 +28,26 @@ export function imageExtension(mimeType: string): string | null {
   return IMAGE_EXTENSIONS[mimeType.trim().toLowerCase()] ?? null;
 }
 
+/**
+ * Recover an image MIME type from a filename, for the picker route: a file
+ * chosen from disk carries a `type` the browser guessed, and some WebKit builds
+ * guess nothing at all. The extension is then the only evidence there is. Null
+ * when the extension isn't one of the supported set — the caller must not write
+ * bytes under an extension the renderer can't load.
+ */
+export function imageMimeFromFilename(name: string): string | null {
+  const dot = name.lastIndexOf('.');
+  if (dot < 0) return null;
+  const ext = name.slice(dot + 1).trim().toLowerCase();
+  // `.jpeg` and `.jpg` are the same type; the table above stores only the
+  // canonical extension, so the alias is matched explicitly.
+  if (ext === 'jpeg') return 'image/jpeg';
+  for (const [mime, mapped] of Object.entries(IMAGE_EXTENSIONS)) {
+    if (mapped === ext) return mime;
+  }
+  return null;
+}
+
 /** Directory portion of a project-relative path; '' for a root-level file. */
 function dirOf(relPath: string): string {
   const i = relPath.lastIndexOf('/');

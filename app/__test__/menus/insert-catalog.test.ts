@@ -39,7 +39,8 @@ function recordingController(): { controller: MenuController; calls: string[] } 
     toggleBlockquote: () => calls.push('quote'),
     insertDivider: () => calls.push('divider'),
     insertTable: () => calls.push('table'),
-    insertFootnote: () => calls.push('footnote')
+    insertFootnote: () => calls.push('footnote'),
+    insertImage: () => calls.push('image')
   } as unknown as MenuController;
   return { controller, calls };
 }

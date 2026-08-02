@@ -153,6 +153,9 @@ export class BlockMenuController implements MenuController {
   insertFootnote(): void {
     this.surface.setBlockType({ kind: 'footnote' });
   }
+  insertImage(): void {
+    this.surface.setBlockType({ kind: 'image' });
+  }
 
   openLinkEditor(): void {
     if (!this.surface.beginLink()) return;

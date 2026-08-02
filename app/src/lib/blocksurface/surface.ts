@@ -66,7 +66,8 @@ export type BlockTypeSpec =
   | { kind: 'code' }
   | { kind: 'table' }
   | { kind: 'divider' }
-  | { kind: 'footnote' };
+  | { kind: 'footnote' }
+  | { kind: 'image' };
 
 /** What the insert (slash) menu needs: where to anchor, the query typed after
  *  the `/`, and which kind of session is open — `block` (the `/` is the whole
@@ -107,6 +108,15 @@ export type CodeLangMenuState = { rect: DOMRect; blockId: string; current: strin
  *  rejects when the write can't happen (no bridge capability, I/O failure) —
  *  the surface toasts and leaves the document untouched. */
 export type ImagePasteDelegate = (bytes: Uint8Array, mimeType: string, filename: string) => Promise<string>;
+
+/** The image-pick seam: the other half of the write delegate above, for the
+ *  deliberate Insert path rather than a paste or a drop. The surface owns
+ *  *where* the image lands, but choosing a file is a host affordance (a native
+ *  open panel behind an `<input type="file">`) that belongs to the editor
+ *  component, same as the write. Resolves with the chosen file, or null when the
+ *  writer cancels — a cancel is a normal outcome, not an error, and leaves the
+ *  document untouched. */
+export type ImagePickDelegate = () => Promise<{ file: File; mimeType: string } | null>;
 
 /** The current selection's formatting context, emitted on every selection change
  *  (rAF-coalesced, never per keystroke). Drives both the fixed toolbar (always
@@ -389,6 +399,10 @@ export class BlockSurface {
   // never do — an image paste with no delegate toasts and declines rather than
   // silently losing the gesture.
   private imagePasteCb: ImagePasteDelegate | null = null;
+  // The registered image-pick delegate; see ImagePickDelegate. Null on the
+  // harness/tests and until the editor component registers one, in which case the
+  // Insert entry declines out loud rather than opening nothing.
+  private imagePickCb: ImagePickDelegate | null = null;
   // Maps a model image URL onto a loadable one at render time (SKR-223). Every
   // render.ts call funnels through this so a pasted image resolves the instant its
   // block re-renders and a doc opened with images resolves on first paint. Pure
@@ -708,6 +722,11 @@ export class BlockSurface {
    *  ImagePasteDelegate for the contract. */
   onImagePaste(cb: ImagePasteDelegate | null): void {
     this.imagePasteCb = cb;
+  }
+
+  /** Register (or clear) the image-pick delegate. See ImagePickDelegate. */
+  onImagePick(cb: ImagePickDelegate | null): void {
+    this.imagePickCb = cb;
   }
 
   /** The current authoritative document. The consumer serializes this. */
@@ -1524,6 +1543,14 @@ export class BlockSurface {
     // palette funnel through here, so this one branch covers every caller.
     if (spec.kind === 'footnote') {
       this.insertFootnote();
+      return;
+    }
+    // An image insert is a file choice, so it is the one catalog entry that
+    // cannot complete synchronously: it opens the host's picker and lands only
+    // once bytes come back. Everything after the pick is the paste path
+    // verbatim, so the two insertion routes can never drift.
+    if (spec.kind === 'image') {
+      void this.insertPickedImage();
       return;
     }
     // Multi-block textblock conversions (Text / Heading / Code) map over every
@@ -2998,7 +3025,7 @@ export class BlockSurface {
     const image = this.findImageItem(data);
     if (image) {
       claim();
-      void this.handleImagePaste(image);
+      void this.landImage(image);
       return true;
     }
     const plain = data.getData('text/plain');
@@ -3037,18 +3064,45 @@ export class BlockSurface {
     return null;
   }
 
-  // Land a pasted/dropped image (SKR-175): read its bytes and hand them to the
-  // registered write delegate — the surface knows neither the active
-  // document's path nor the shell bridge, so it can't perform the write
-  // itself (see ImagePasteDelegate). On resolve, splice the Markdown image
-  // link the delegate hands back at the caret through the normal insert
-  // pipeline (one history step, same as any other block paste). No delegate
-  // registered, or the delegate rejects (unsupported bridge, I/O failure):
-  // toast and leave the document untouched. Either way the gesture was
-  // already claimed by the caller, so the browser never gets a shot at it.
-  private async handleImagePaste(image: { file: File; mimeType: string }): Promise<void> {
+  // Ask the host to pick an image file, then land it exactly as a paste would.
+  // The caret is the one thing at risk here that a paste never faces: a native
+  // open panel takes focus, and WKWebView collapses the surface's live selection
+  // when it does. Nothing needs to save it — landImage splices through
+  // leafTarget(), which already falls back to the last observed range for
+  // precisely this case, so the image lands where the writer left the caret
+  // instead of at the end of the document.
+  private async insertPickedImage(): Promise<void> {
+    if (!this.imagePickCb) {
+      notify.error("Can't insert images in this version of Skrive");
+      return;
+    }
+    let picked: { file: File; mimeType: string } | null;
+    try {
+      picked = await this.imagePickCb();
+    } catch (err) {
+      // The picker rejects with copy meant for the writer (an unsupported file
+      // type), so it becomes the toast title rather than a generic wrapper —
+      // notify.error only puts `cause` on the console.
+      notify.error(err instanceof Error ? err.message : "Couldn't insert that image", err);
+      return;
+    }
+    if (!picked) return; // cancelled: a normal outcome, document untouched
+    await this.landImage(picked);
+  }
+
+  // Land an image that arrived by paste, drop, or the Insert picker (SKR-175):
+  // read its bytes and hand them to the registered write delegate — the surface
+  // knows neither the active document's path nor the shell bridge, so it can't
+  // perform the write itself (see ImagePasteDelegate). On resolve, splice the
+  // Markdown image link the delegate hands back at the caret through the normal
+  // insert pipeline (one history step, same as any other block paste). No
+  // delegate registered, or the delegate rejects (unsupported bridge, I/O
+  // failure): toast and leave the document untouched. On the paste/drop routes
+  // the gesture was already claimed by the caller, so the browser never gets a
+  // shot at it.
+  private async landImage(image: { file: File; mimeType: string }): Promise<void> {
     if (!this.imagePasteCb) {
-      notify.error("Can't paste images in this version of Skrive");
+      notify.error("Can't add images in this version of Skrive");
       return;
     }
     const ext = imageExtension(image.mimeType);
@@ -3063,7 +3117,7 @@ export class BlockSurface {
       // literal text there instead of the gesture silently vanishing.
       if (!this.insertMarkdownBlocks(markdown)) this.pasteText(markdown, 'flow');
     } catch (err) {
-      notify.error("Couldn't paste image", err);
+      notify.error("Couldn't add image", err);
     }
   }
 
