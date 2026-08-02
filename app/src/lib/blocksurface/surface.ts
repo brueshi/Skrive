@@ -68,7 +68,8 @@ export type BlockTypeSpec =
   | { kind: 'table' }
   | { kind: 'divider' }
   | { kind: 'footnote' }
-  | { kind: 'image' };
+  | { kind: 'image' }
+  | { kind: 'emoji' };
 
 /** What the insert (slash) menu needs: where to anchor, the query typed after
  *  the `/`, and which kind of session is open — `block` (the `/` is the whole
@@ -93,6 +94,17 @@ export type TableMenuState = {
  *  menu — the two share the anchoring machinery, differing only in trigger and
  *  what a commit does. */
 export type TagMenuState = { rect: DOMRect; query: string };
+
+/** What the emoji (`:`) picker needs: where to anchor, the query typed after the
+ *  `:`, and whether the session was opened DELIBERATELY (the Insert catalog)
+ *  rather than by typing a colon.
+ *
+ *  `seeded` exists because the two openings want opposite defaults. A writer who
+ *  chose "Emoji" from a menu is browsing and should see the catalog immediately;
+ *  a writer who merely typed a colon has not asked for anything yet, so the grid
+ *  stays hidden until a character follows and gives it something to match. Null
+ *  when the picker is closed. */
+export type EmojiMenuState = { rect: DOMRect; query: string; seeded: boolean };
 
 /** What the code-block language picker needs: where to anchor (the corner button's
  *  rect), which block it edits, and that block's current language (so the list can
@@ -383,6 +395,11 @@ export class BlockSurface {
   // `#` that opened it. Null when closed. Mirrors `slash`, but a tag session opens
   // mid-text at a word boundary rather than only on a whole-block `/`.
   private tagSession: { blockId: string; hashOffset: number } | null = null;
+  // The emoji (`:`) session: the block, the flat offset of the `:` that opened it,
+  // and whether it was opened deliberately (see EmojiMenuState.seeded). Null when
+  // closed. A near-exact sibling of tagSession — same word-boundary opening, same
+  // caret-intact rule — differing in what a commit splices.
+  private emojiSession: { blockId: string; colonOffset: number; seeded: boolean } | null = null;
   // A footnote reference armed for deletion (the select-before-delete beat): the
   // first Backspace/Delete adjacent to a reference highlights it (and, when it is
   // the label's last reference, the definition that would die with it) instead of
@@ -391,6 +408,7 @@ export class BlockSurface {
   // move away from it disarms.
   private armedFootnote: { key: string; refOffset: number; caret: number; label: string } | null = null;
   private tagCb: ((state: TagMenuState | null) => void) | null = null;
+  private emojiCb: ((state: EmojiMenuState | null) => void) | null = null;
   // The code-block language picker observer (SKR-262). Click-triggered from a code
   // block's corner button, so there is no persistent "session" — the surface just
   // emits an open state and the picker drives itself until it commits or closes.
@@ -632,6 +650,12 @@ export class BlockSurface {
    *  closes (null). */
   onTagMenu(cb: ((state: TagMenuState | null) => void) | null): void {
     this.tagCb = cb;
+  }
+
+  /** Register (or clear) the emoji (`:`) picker observer. Fired when a session
+   *  opens, as its query changes, and when it closes (null). */
+  onEmojiMenu(cb: ((state: EmojiMenuState | null) => void) | null): void {
+    this.emojiCb = cb;
   }
 
   /** Register (or clear) the code-block language picker observer. Fired with an open
@@ -1032,7 +1056,7 @@ export class BlockSurface {
     // focus off the surface; the guard is belt-and-suspenders for its saved
     // selection. Escape in prose keeps its (currently inert) native behaviour.
     if (e.key === 'Escape') {
-      if (this.slash || this.tagSession || this.savedLink) return;
+      if (this.slash || this.tagSession || this.emojiSession || this.savedLink) return;
       const id = this.currentBarrierBlockId();
       if (id) {
         e.preventDefault();
@@ -1552,6 +1576,13 @@ export class BlockSurface {
     // verbatim, so the two insertion routes can never drift.
     if (spec.kind === 'image') {
       void this.insertPickedImage();
+      return;
+    }
+    // Emoji opens a session rather than inserting anything: the writer still has
+    // to choose one. Like footnote, it lands at the caret and never converts the
+    // block, so it short-circuits ahead of the conversion machinery below.
+    if (spec.kind === 'emoji') {
+      this.openEmojiPicker();
       return;
     }
     // Multi-block textblock conversions (Text / Heading / Code) map over every
@@ -2350,7 +2381,7 @@ export class BlockSurface {
     // inline-atom specs are accepted (the menu filters to the Inline group, but a
     // stale click must not convert the block the writer is mid-sentence in).
     if (slash.kind === 'inline') {
-      if (spec.kind !== 'footnote') {
+      if (spec.kind !== 'footnote' && spec.kind !== 'emoji') {
         this.closeSlash();
         return;
       }
@@ -2361,7 +2392,8 @@ export class BlockSurface {
         this.markRenderedInPlace(cur.block.id);
         setCaret(cur.blockEl, slash.slashOffset);
         this.closeSlash();
-        this.insertFootnote();
+        if (spec.kind === 'emoji') this.openEmojiPicker();
+        else this.insertFootnote();
       });
       return;
     }
@@ -2620,6 +2652,122 @@ export class BlockSurface {
     return !!cur && !!this.tagSession && cur.block.id === this.tagSession.blockId && cur.collapsed;
   }
 
+  // --- the emoji (`:`) session ----------------------------------------------
+  //
+  // A sibling of the tag session above: same word-boundary opening, same
+  // caret-intact rule, same close-on-selection-move. Two things differ.
+  //
+  // A commit splices PLAIN TEXT — the emoji character itself — rather than an
+  // atom, because that is the entire serialization story for this feature: a
+  // literal Unicode character that `.md` and `.folio` already carry as text.
+  // And there is no auto-trailing-space, unlike a tag commit: a tag is a chip
+  // that needs separating from the prose after it, while an emoji is a character
+  // in the middle of a sentence and inserting a space would be a wrong guess.
+  //
+  // The word-boundary rule is what makes a `:` trigger safe in prose, and it is
+  // inherited rather than invented. `3:30`, `note: this`, and `https://` all have
+  // a non-space character before the colon, so no session ever opens. `foo :)`
+  // does open one, and the query class closes it again on the `)`, leaving the
+  // colon literal.
+
+  // Characters that may follow the `:` while the session stays open. Shortcodes
+  // are word-ish (`+1`, `-1`, `thumbs_up`), so letters, digits, `_`, `+` and `-`
+  // continue it and anything else — a space, punctuation — makes the `:` literal.
+  private static readonly EMOJI_QUERY_RE = /^[\p{L}\p{N}_+-]*$/u;
+
+  private handleEmojiAfterInsert(text: string): void {
+    if (!this.emojiSession && text === ':') {
+      const cur = this.currentInlineLeaf();
+      if (cur) {
+        const plain = inlinePlainText(cur.block.inline);
+        const colonOffset = cur.caret - 1; // the `:` just typed
+        const atBoundary = colonOffset === 0 || /\s/.test(plain[colonOffset - 1] ?? '');
+        if (atBoundary && plain[colonOffset] === ':') {
+          this.emojiSession = { blockId: cur.block.id, colonOffset, seeded: false };
+        }
+      }
+    }
+    this.refreshEmoji();
+  }
+
+  private refreshEmoji(): void {
+    if (!this.emojiSession) return;
+    const cur = this.currentInlineLeaf();
+    if (!this.emojiCaretIntact(cur)) return this.closeEmoji();
+    if (cur.caret <= this.emojiSession.colonOffset) return this.closeEmoji(); // caret moved before the `:`
+    const text = inlinePlainText(cur.block.inline);
+    if (text[this.emojiSession.colonOffset] !== ':') return this.closeEmoji();
+    const query = text.slice(this.emojiSession.colonOffset + 1, cur.caret);
+    if (!BlockSurface.EMOJI_QUERY_RE.test(query)) return this.closeEmoji();
+    // A merely-typed colon shows nothing until a character follows it: otherwise
+    // every colon in ordinary prose would flash the whole catalog for a beat. A
+    // seeded session was asked for, so it opens on the full grid straight away.
+    if (!this.emojiSession.seeded && query.length === 0) {
+      this.emojiCb?.(null);
+      return;
+    }
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return this.closeEmoji();
+    let rect = sel.getRangeAt(0).getBoundingClientRect();
+    if (rect.height === 0 && rect.width === 0) rect = cur.blockEl.getBoundingClientRect();
+    this.emojiCb?.({ rect, query, seeded: this.emojiSession.seeded });
+  }
+
+  /** Open a session deliberately, from the Insert catalog. Types the `:` through
+   *  the normal insert path so the document reads exactly as if it had been
+   *  typed, then force-opens the session — the word-boundary rule is a guard
+   *  against ACCIDENTAL triggers, and this trigger is not accidental, so a caret
+   *  mid-word still gets its picker. */
+  openEmojiPicker(): void {
+    if (!this.currentInlineLeaf()) return; // no prose caret to insert into
+    this.applyInsertText(':');
+    const cur = this.currentInlineLeaf();
+    if (!cur) return;
+    this.emojiSession = { blockId: cur.block.id, colonOffset: cur.caret - 1, seeded: true };
+    this.refreshEmoji();
+  }
+
+  /** Commit an emoji: replace the typed `:query` with the character itself. One
+   *  undo step, so the first undo restores the literal `:query` text — the same
+   *  contract the slash and tag commits make. */
+  applyEmojiCommand(char: string): void {
+    const session = this.emojiSession;
+    if (!session) return;
+    const cur = this.currentInlineLeaf();
+    if (!this.emojiCaretIntact(cur) || cur.caret <= session.colonOffset) {
+      this.closeEmoji();
+      return;
+    }
+    this.compoundEdit(() => {
+      const start = session.colonOffset;
+      // insertTextInInline splices into the run at `start`, so the emoji inherits
+      // the marks the `:` was typed under — no explicit mark handling needed.
+      let inline = deleteRangeInInline(cur.block.inline, start, cur.caret);
+      inline = insertTextInInline(inline, start, char);
+      this.commitInline(cur.block.id, inline, cur.blockEl, start + char.length);
+      this.closeEmoji();
+    });
+  }
+
+  closeEmoji(): void {
+    if (!this.emojiSession) return;
+    this.emojiSession = null;
+    this.emojiCb?.(null);
+  }
+
+  /** True while `cur` is a collapsed caret still in the emoji session's block.
+   *  Mirrors `tagCaretIntact`. */
+  private emojiCaretIntact(cur: SlashLeaf | null): cur is SlashLeaf {
+    return !!cur && !!this.emojiSession && cur.block.id === this.emojiSession.blockId && cur.collapsed;
+  }
+
+  /** Close an open emoji session when the selection moves out from under it —
+   *  the counterpart to refreshEmoji's after-edit close. */
+  private closeEmojiOnSelectionMove(): void {
+    if (!this.emojiSession) return;
+    if (!this.emojiCaretIntact(this.currentInlineLeaf())) this.closeEmoji();
+  }
+
   /** Close an open tag session when the selection moves out from under it — the
    *  pure-selection-move counterpart to refreshTag's after-edit close. */
   private closeTagOnSelectionMove(): void {
@@ -2637,6 +2785,7 @@ export class BlockSurface {
       this.dissolveOnUserSelection();
       this.closeSlashOnSelectionMove();
       this.closeTagOnSelectionMove();
+      this.closeEmojiOnSelectionMove();
       this.disarmFootnoteOnSelectionMove();
       this.emitSelection();
     });
@@ -4083,10 +4232,12 @@ export class BlockSurface {
       // the marker's own `#` / `/` opened a beat earlier, so it can't linger stale.
       this.closeSlash();
       this.closeTag();
+      this.closeEmoji();
       return;
     }
     this.handleSlashAfterInsert(text);
     this.handleTagAfterInsert(text);
+    this.handleEmojiAfterInsert(text);
   }
 
   private applyDeleteBackward(): void {
@@ -4216,6 +4367,9 @@ export class BlockSurface {
     }
     this.scheduleSerialize();
     this.refreshSlash();
+    // Backspacing a typo mid-query is routine while the picker is open, so the
+    // emoji session tracks deletes as well as inserts.
+    this.refreshEmoji();
   }
 
   private applyDeleteForward(): void {
@@ -4342,6 +4496,7 @@ export class BlockSurface {
       this.commitInline(leaf.id, deleteRangeInInline(leaf.inline, from, to), t.blockEl, from);
       this.scheduleSerialize();
       this.refreshSlash(); // an open slash menu tracks the edit, as plain delete does
+      this.refreshEmoji();
       return;
     }
     // A selection (delete it), no caret, or a leaf the scan doesn't own: identical

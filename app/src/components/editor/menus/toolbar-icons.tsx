@@ -403,6 +403,27 @@ export function IconFootnote(p: IconProps) {
   );
 }
 
+export function IconEmoji(p: IconProps) {
+  // A face reduced to the house language: an open ring, two solid eyes matching
+  // the footnote mark's disc, and a smile drawn with the same stroke weight as
+  // every other glyph here. Deliberately not a filled yellow emoji — the catalog
+  // rows are line icons, and one filled colour glyph would break the set.
+  return (
+    <Glyph {...p} viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8.25" fill="none" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="9.25" cy="10" r="1.15" />
+      <circle cx="14.75" cy="10" r="1.15" />
+      <path
+        d="M8.5 14.25c0.85 1.35 2.05 2.05 3.5 2.05s2.65-0.7 3.5-2.05"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </Glyph>
+  );
+}
+
 export function IconImage(p: IconProps) {
   // A framed picture: horizon ridge and a sun. The ridge meets the frame on both
   // sides so the glyph reads as a picture rather than a shape in a box, and the

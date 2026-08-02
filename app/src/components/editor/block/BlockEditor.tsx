@@ -34,6 +34,7 @@ import { LinkEditor } from '../menus/LinkEditor';
 import { BlockSlashMenu } from '../menus/BlockSlashMenu';
 import { BlockTableMenu } from '../menus/BlockTableMenu';
 import { BlockTagMenu } from '../menus/BlockTagMenu';
+import { BlockEmojiMenu } from '../menus/BlockEmojiMenu';
 import { CodeLangMenu } from '../menus/CodeLangMenu';
 import { SpellMenu, type SpellMenuTarget } from '../menus/SpellMenu';
 import { FindBar } from '../find/FindBar';
@@ -350,6 +351,7 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
       {ctx && <BlockSlashMenu surface={ctx.surface} />}
       {ctx && <BlockTableMenu surface={ctx.surface} />}
       {ctx && <BlockTagMenu surface={ctx.surface} />}
+      {ctx && <BlockEmojiMenu surface={ctx.surface} />}
       {ctx && <CodeLangMenu surface={ctx.surface} />}
       {ctx && spellcheck && (
         <SpellMenu

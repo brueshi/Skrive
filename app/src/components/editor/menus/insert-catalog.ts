@@ -29,7 +29,8 @@ import {
   IconTable,
   IconDivider,
   IconFootnote,
-  IconImage
+  IconImage,
+  IconEmoji
 } from './toolbar-icons';
 
 type IconC = ComponentType<{ size?: number; className?: string }>;
@@ -94,6 +95,10 @@ export const INSERT_CATALOG: InsertEntry[] = [
   // it lands at the caret. Table cells have no inline-atom insert path, so hide it
   // there (like the block entries).
   { id: 'footnote', title: 'Footnote', keywords: 'footnote note reference citation aside', Icon: IconFootnote, group: 'inline', spec: { kind: 'footnote' }, when: notInTable },
+  // Emoji opens the `:` picker rather than inserting anything — the writer still
+  // chooses. The input-rule hint is the literal trigger, which is a real wired
+  // rule (surface.handleEmojiAfterInsert), not an aspirational one.
+  { id: 'emoji', title: 'Emoji', keywords: 'emoji emoticon smiley face symbol reaction', Icon: IconEmoji, group: 'inline', spec: { kind: 'emoji' }, inputRuleHint: ':', when: notInTable },
   // Media — the only entry whose content comes from outside the document, and so
   // the only one that cannot complete synchronously: it opens the host's file
   // picker and lands once bytes come back (surface.insertPickedImage). Paste and
@@ -163,5 +168,7 @@ export function dispatchInsert(controller: MenuController, spec: BlockTypeSpec):
       return controller.insertFootnote();
     case 'image':
       return controller.insertImage();
+    case 'emoji':
+      return controller.insertEmoji();
   }
 }
