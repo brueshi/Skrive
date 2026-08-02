@@ -62,7 +62,29 @@ export function createSkriveBridge(transport: SkriveTransport): SkriveIpc {
       // in the envelope model; there is no event lane in this direction.
       flushComplete: () => {
         void invoke('app:flushComplete');
-      }
+      },
+      // Never rejects: a host without file associations doesn't implement the
+      // command, and "nothing to open" is the normal case, not an error. The
+      // catch also covers the result arriving mis-shaped, since this runs
+      // during boot where a throw would be noisy and useless.
+      takeOpenPaths: async () => {
+        try {
+          const { paths } = await invoke<{ paths?: unknown }>(
+            'app:takeOpenPaths'
+          );
+          if (!Array.isArray(paths)) return [];
+          return paths.filter((p): p is string => typeof p === 'string');
+        } catch {
+          return [];
+        }
+      },
+      onOpenPaths: (handler: (paths: string[]) => void) =>
+        transport.on('app:open-paths', (payload) => {
+          const paths = payload.paths;
+          if (!Array.isArray(paths)) return;
+          const clean = paths.filter((p): p is string => typeof p === 'string');
+          if (clean.length > 0) handler(clean);
+        })
     },
     links: {
       openExternal: async (url: string) => {

@@ -25,8 +25,10 @@ export const ENVELOPE_VERSION = 1;
  *  analysis lives in the renderer's project-model worker and the shell
  *  exposes project:snapshot instead; v3 = adds the host spelling oracle
  *  (`spell:*`), which only some hosts implement — see the `spell`
- *  namespace on the interface below. */
-export const SKRIVE_CONTRACT_VERSION = 3;
+ *  namespace on the interface below; v4 = adds OS-initiated document
+ *  opens (`app:takeOpenPaths` + the `app:open-paths` event), which only
+ *  hosts with file associations implement. */
+export const SKRIVE_CONTRACT_VERSION = 4;
 
 /** Hard cap on a serialized request. Oversize requests are rejected
  *  with PAYLOAD_TOO_LARGE before parsing. */
@@ -480,6 +482,31 @@ export interface SkriveIpc {
     onFlushBeforeQuit(handler: () => void): () => void;
     /** Tell main the pre-quit flush is done and it may proceed to quit. */
     flushComplete(): void;
+    /**
+     * Drain the absolute paths the OS asked this app to open — a Finder /
+     * Explorer double-click, `open -a Skrive note.md`, or a file argument on
+     * the command line. Empty when the app was launched normally.
+     *
+     * PULL, NOT PUSH, AND THAT IS THE POINT. On a cold launch the OS delivers
+     * the open before the renderer exists (on macOS it can even precede
+     * `applicationDidFinishLaunching`), and the envelope model has no
+     * renderer-to-shell event lane to announce readiness with. So the host
+     * queues, and this one call both drains the queue and marks the renderer
+     * ready — in a single main-thread hop, leaving no window in which an open
+     * can be dropped. Every open after it arrives on `onOpenPaths`.
+     *
+     * Call once, early in boot. Resolves `[]` rather than rejecting on a host
+     * with no file associations (same honest-probe posture as
+     * `spell.available`), so those hosts degrade quietly instead of erroring
+     * at every startup.
+     */
+    takeOpenPaths(): Promise<string[]>;
+    /**
+     * Fires when the OS asks an ALREADY-RUNNING app to open documents. Paths
+     * are absolute and may name files outside any open project — resolving
+     * them to a project is the renderer's job. Returns an unsubscribe function.
+     */
+    onOpenPaths(handler: (paths: string[]) => void): () => void;
   };
   links: {
     /**
