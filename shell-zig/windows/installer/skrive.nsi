@@ -40,6 +40,13 @@ Unicode true
 !define WV2_CLIENT "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 !define ARP_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
 
+; ProgIds for the document types Skrive registers as a handler for. Versionless
+; names on purpose: they are stable identities the shell keys associations to,
+; so bumping them on every release would strand the user's chosen default.
+!define PROGID_MD "Skrive.Markdown"
+!define PROGID_TXT "Skrive.Text"
+!define PROGID_HTML "Skrive.Html"
+
 Name "${APPNAME}"
 OutFile "${OUTFILE}"
 ; Per-user install: no admin prompt, lands in the user's profile.
@@ -99,7 +106,54 @@ Section "Install"
   WriteRegStr HKCU "${ARP_KEY}" "QuietUninstallString" "$\"$INSTDIR\Uninstall.exe$\" /S"
   WriteRegDWORD HKCU "${ARP_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${ARP_KEY}" "NoRepair" 1
+
+  Call RegisterFileTypes
 SectionEnd
+
+; File associations, so Explorer offers "Open with Skrive" for the document
+; types Skrive can open. HKCU\Software\Classes, matching this per-user install
+; — a machine-wide (HKLM) registration would need elevation for no benefit.
+;
+; OpenWithProgids, NOT the default handler: these are borrowed types other
+; editors already own, and installing Skrive must not silently take over every
+; .txt on the machine. This puts Skrive in the "Open with" list and lets the
+; user promote it themselves; Windows shows its own picker on first use.
+;
+; `%1` is quoted in the command so a path with spaces arrives as one argument.
+Function RegisterFileTypes
+  WriteRegStr HKCU "Software\Classes\${PROGID_MD}" "" "Markdown Document"
+  WriteRegStr HKCU "Software\Classes\${PROGID_MD}\DefaultIcon" "" "$INSTDIR\Skrive.exe,0"
+  WriteRegStr HKCU "Software\Classes\${PROGID_MD}\shell\open\command" "" '"$INSTDIR\Skrive.exe" "%1"'
+
+  WriteRegStr HKCU "Software\Classes\${PROGID_TXT}" "" "Plain Text Document"
+  WriteRegStr HKCU "Software\Classes\${PROGID_TXT}\DefaultIcon" "" "$INSTDIR\Skrive.exe,0"
+  WriteRegStr HKCU "Software\Classes\${PROGID_TXT}\shell\open\command" "" '"$INSTDIR\Skrive.exe" "%1"'
+
+  WriteRegStr HKCU "Software\Classes\${PROGID_HTML}" "" "HTML Document"
+  WriteRegStr HKCU "Software\Classes\${PROGID_HTML}\DefaultIcon" "" "$INSTDIR\Skrive.exe,0"
+  WriteRegStr HKCU "Software\Classes\${PROGID_HTML}\shell\open\command" "" '"$INSTDIR\Skrive.exe" "%1"'
+
+  WriteRegStr HKCU "Software\Classes\.md\OpenWithProgids" "${PROGID_MD}" ""
+  WriteRegStr HKCU "Software\Classes\.markdown\OpenWithProgids" "${PROGID_MD}" ""
+  WriteRegStr HKCU "Software\Classes\.txt\OpenWithProgids" "${PROGID_TXT}" ""
+  WriteRegStr HKCU "Software\Classes\.text\OpenWithProgids" "${PROGID_TXT}" ""
+  WriteRegStr HKCU "Software\Classes\.html\OpenWithProgids" "${PROGID_HTML}" ""
+  WriteRegStr HKCU "Software\Classes\.htm\OpenWithProgids" "${PROGID_HTML}" ""
+
+  ; Lists the extensions under the app itself, which is what populates the
+  ; "Open with > Choose another app" dialog and Default Apps.
+  WriteRegStr HKCU "Software\Classes\Applications\Skrive.exe\shell\open\command" "" '"$INSTDIR\Skrive.exe" "%1"'
+  WriteRegStr HKCU "Software\Classes\Applications\Skrive.exe\SupportedTypes" ".md" ""
+  WriteRegStr HKCU "Software\Classes\Applications\Skrive.exe\SupportedTypes" ".markdown" ""
+  WriteRegStr HKCU "Software\Classes\Applications\Skrive.exe\SupportedTypes" ".txt" ""
+  WriteRegStr HKCU "Software\Classes\Applications\Skrive.exe\SupportedTypes" ".text" ""
+  WriteRegStr HKCU "Software\Classes\Applications\Skrive.exe\SupportedTypes" ".html" ""
+  WriteRegStr HKCU "Software\Classes\Applications\Skrive.exe\SupportedTypes" ".htm" ""
+
+  ; Tell the shell the association table changed, so Explorer's context menu
+  ; picks it up without a sign-out. SHCNE_ASSOCCHANGED | SHCNF_IDLIST.
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'
+FunctionEnd
 
 ; Install the Edge WebView2 Evergreen Runtime if it is absent. The runtime
 ; advertises itself via the EdgeUpdate "pv" value (per-machine, then per-user);
@@ -138,4 +192,30 @@ Section "Uninstall"
   ; profile) is deliberately left in place — uninstall must not destroy it.
   DeleteRegKey HKCU "${ARP_KEY}"
   DeleteRegKey HKCU "Software\${APPNAME}"
+
+  ; File associations. The ProgId keys go entirely; from the per-extension
+  ; lists only OUR value is deleted (DeleteRegValue, not DeleteRegKey) — those
+  ; keys are shared, and removing them would take every other editor's
+  ; "Open with" entry down with us. DeleteRegKey /ifempty then tidies up only
+  ; if we were the last one listed.
+  DeleteRegKey HKCU "Software\Classes\${PROGID_MD}"
+  DeleteRegKey HKCU "Software\Classes\${PROGID_TXT}"
+  DeleteRegKey HKCU "Software\Classes\${PROGID_HTML}"
+
+  DeleteRegValue HKCU "Software\Classes\.md\OpenWithProgids" "${PROGID_MD}"
+  DeleteRegValue HKCU "Software\Classes\.markdown\OpenWithProgids" "${PROGID_MD}"
+  DeleteRegValue HKCU "Software\Classes\.txt\OpenWithProgids" "${PROGID_TXT}"
+  DeleteRegValue HKCU "Software\Classes\.text\OpenWithProgids" "${PROGID_TXT}"
+  DeleteRegValue HKCU "Software\Classes\.html\OpenWithProgids" "${PROGID_HTML}"
+  DeleteRegValue HKCU "Software\Classes\.htm\OpenWithProgids" "${PROGID_HTML}"
+  DeleteRegKey /ifempty HKCU "Software\Classes\.md\OpenWithProgids"
+  DeleteRegKey /ifempty HKCU "Software\Classes\.markdown\OpenWithProgids"
+  DeleteRegKey /ifempty HKCU "Software\Classes\.txt\OpenWithProgids"
+  DeleteRegKey /ifempty HKCU "Software\Classes\.text\OpenWithProgids"
+  DeleteRegKey /ifempty HKCU "Software\Classes\.html\OpenWithProgids"
+  DeleteRegKey /ifempty HKCU "Software\Classes\.htm\OpenWithProgids"
+
+  DeleteRegKey HKCU "Software\Classes\Applications\Skrive.exe"
+
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'
 SectionEnd
