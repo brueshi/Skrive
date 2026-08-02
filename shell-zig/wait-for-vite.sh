@@ -56,7 +56,13 @@ wait_for_vite() {
       return 1
     fi
     local count meta now
-    count="$(ls "$deps_dir" 2>/dev/null | wc -l | tr -d ' ')"
+    # `|| true` because the deps directory legitimately does not exist for part
+    # of this wait: Vite DELETES and recreates it when it optimizes from cold.
+    # Without this, `ls` fails, pipefail propagates that through the assignment,
+    # and the sourcing script's `set -e` kills the whole dev loop mid-wait — with
+    # no message, since neither timeout branch below is ever reached. A cleared
+    # cache is a routine thing to do, and it must not take the dev script down.
+    count="$( { ls "$deps_dir" 2>/dev/null || true; } | wc -l | tr -d ' ')"
     meta="$(stat -f %m "$deps_dir/_metadata.json" 2>/dev/null || echo none)"
     now="$count:$meta"
     # A server with no metadata yet has not finished its first optimize pass.
