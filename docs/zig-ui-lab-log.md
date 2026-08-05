@@ -1275,3 +1275,234 @@ seventh session, the two threads with standalone pull are the CoreText arc
 out of curiosity — neither is scheduled, neither is owed. The log closes
 green: every scene one draw call, idle at zero presents, and a component
 kit that would make a stranger hesitate. Question asked, question answered.
+
+---
+
+## 2026-08-05 — Stage 6: the accessibility spike — a diffed projection makes the window visible to VoiceOver
+
+**Branch:** `joe/skr-233-zig-ui-lab-hand-drawn-interface-research`
+(recreated off `main` at `a5f1704` — the Stage 5 branch had been merged and
+deleted). **Commit:** `ede1dcd` (code); log + artifacts follow in the next
+commit.
+
+**The frame.** Stage 5 closed with "park it," and its sharpest line item was
+accessibility: a hand-drawn UI starts at zero, and for a shipped writing app
+that is close to disqualifying on its own. Joe chose the plan's other
+sanctioned outcome — continue, aimed at the standalone public-library slot in
+the labs OSS plan, not the app — and Part II of the planning doc opens with
+the two framings that bound every stage of it: the hard no on replacing
+Skrive's frontend remains in force, and nothing here argues otherwise. Stage
+6 exists to convert the disqualifying unknown into a priced known: what does
+it actually take to make an immediate-mode, hand-drawn Zig UI visible to
+VoiceOver? Priced, partial, or impossible were all acceptable answers. **The
+answer is: priced, and the price is 647 lines.**
+
+**Toolchain.** All pins unchanged: Zig 0.16.0, sokol-zig `54776d6`, sokol-shdc
+`87a6914`. **No new dependency** — the bridge links the system objc runtime
+(`-lobjc`; AppKit was already there through sokol's Cocoa link) and hand-rolls
+its msgSend bindings after reading mitchellh/zig-objc for the calling
+conventions, per the plan's read-don't-import instruction. On arm64 the whole
+convention is one sentence: `objc_msgSend` is the single entry point for every
+return type, and you cast it to the exact C signature of the call you are
+making. (x86_64 would need the _stret/_fpret variant dance; noted, not built —
+the lab's daily driver and the eventual library's floor are both arm64.)
+
+**Session-start regression.** Branch cut clean: 33/33 tests, and a full
+`--bench` with every scene at 1 draw call, 0 presents in all four idle phases,
+atlas census identical to Stage 5 (1024², 236 glyphs, 9.6%, 0 growth). This
+run held 120Hz on the light scenes; the settle window's 19 presents is Stage
+4's same 150ms transition sampled at 120Hz instead of 60.
+
+**What was built — the architecture is Part II 11.1's, verbatim.**
+- `ui/ax.zig` (239 lines, pure Zig, zero objc) — the projection's data model
+  and diff. Widgets already registered with the Context every frame (the
+  focusables list, since Stage 3); Stage 6 widens that registration to carry
+  role / label / value / rect / disabled. A `Projection` retains last frame's
+  nodes and emits appear / update / disappear ops with per-field change
+  masks, plus an order-changed flag when membership or sequence moves
+  (registration order is draw order is VoiceOver's reading order). Runs only
+  on frames that rendered anyway; an idle window produces no registrations,
+  no diff, and no work — the retained tree simply persists for VoiceOver to
+  read.
+- `ui/ax_bridge.zig` (408 lines, the objc box, opened and scoped) — a thin
+  applier for the diff: a retained map of elements keyed by widget ID,
+  created on appear, mutated on change, torn down on disappear. One runtime
+  subclass (`ZigUIAXElement` : NSAccessibilityElement) carries the widget ID
+  in an ivar read via `ivar_getOffset`, and overrides
+  `accessibilityPerformPress`/`Pick` to forward that ID as synthetic input.
+  Elements hang off sokol's content view (`sapp.macosGetWindow()` →
+  `contentView`); frames go through `setAccessibilityFrameInParentSpace:`
+  with the y-flip (AppKit view space is y-up), which makes window *moves*
+  free — AppKit re-derives screen coordinates from the parent chain on
+  demand. Notifications only on real diffs: AXValueChanged per changed
+  element, AXLayoutChanged once per apply when order or rects moved,
+  AXUIElementDestroyed before teardown. No autorelease pool is assumed
+  anywhere: everything is alloc/init +1 and explicitly released after the
+  retaining setter takes it.
+- Roles per the spec: Button and IconButton project as AXButton, the toggle
+  as AXCheckBox with a 0/1 value, the segmented control as AXRadioGroup with
+  one AXRadioButton child per option (children parented to the group element,
+  frames relative to its rect). The toggle/segmented take the settings-row
+  label as their AX label — the shipped aria-label pattern, transcribed. The
+  stretch goal landed too: pane title, sub, section caps, and row
+  labels/descs register as AXStaticText, so the VO walk reads the pane like
+  the shipped settings page rather than bare controls in silence.
+- Backflow: `ax_activate_id` in the Input snapshot. A VO press lands in the
+  bridge's callback (main run loop, between frames), marks the frame dirty
+  exactly as a mouse event does, and next frame `interact()` fires on ID
+  match — inside the `!disabled` guard, no focus required (the AX cursor is
+  its own point of regard; stealing keyboard focus would fight the user).
+  Segmented options fire by their existing per-option interact IDs, so an AX
+  pick runs the identical selection path a click does.
+- Widget signatures: `ButtonOpts`/`ToggleOpts`/`SegmentedOpts`/
+  `IconButtonOpts` gained `ax_label`; `segmentedInteract` gained the option
+  labels (its registration needs them) — the session's one signature change,
+  carried through the four existing tests, same as Stage 4's precedent.
+
+**Tests: 49/49** (33 carried + 16 new). The new ones pin: the diff
+transitions (first-frame appears, no-op identical frames, value flip = one
+update with only the value bit, rect move, disappear carrying the retained
+copy, reorder flagging order-changed without ops, scene switch), the
+registrations (checkbox value follows the flip and is declared post-flip;
+radio group + children with the selected option at 1; draw order in, same
+order out, cleared per frame), and the equivalence contract: **an AX
+activation is indistinguishable from Space on the focused widget** (same
+fired, no armed state left behind), needs no focus and moves none, reaches
+non-focusable segmented options, and is inert on a disabled widget.
+
+**Verification — the three legs of Part II 11.2, and where each landed.**
+1. *Headless:* the 49 tests above; the diff and backflow never touch objc.
+2. *The dump — closed, and further than the spec asked.* The agent shell
+   turned out to hold Accessibility trust (`AXIsProcessTrusted` → true), so
+   the dump was run in-session rather than owed: `stage6-ax-dump.swift`
+   (committed next to its output so later stages can re-run it) walks the
+   lab's tree via `AXUIElementCreateApplication(pid)`. The output
+   (`stage6-ax-dump.txt`) shows every control in the benchmark scene with
+   correct role, label, value, and enabled state, and **pixel-exact screen
+   frames** — the title's AX frame lands at window y 44 + titlebar 32 +
+   `.settings-col` padding 44 = 120.0, to the pixel; the y-flip math survived
+   contact on the first dump. Beyond enumeration, the *backflow* was driven
+   end to end from outside the process, the same route VoiceOver takes:
+   `AXUIElementPerformAction(AXPress)` on the "Check spelling" AXCheckBox
+   flipped the real toggle (value 0 → 1 in the re-dump — through performPress
+   → synthetic input → interact() → render → re-registration → diff →
+   setValue); a press on the "Wide" AXRadioButton moved the selection
+   (Normal 1 → 0, Wide 0 → 1, and the option frames shifted the fraction of
+   a pixel the SemiBold active-weight resize causes — the Stage 5 finding,
+   now visible from outside the process through rect-update ops); and an
+   `AXObserver` subscribed to the checkbox received a live **AXValueChanged**
+   during a press, so the notifications demonstrably post, not just appear in
+   source.
+3. *The VoiceOver walk — owed to Joe, and the stage does not close without
+   it,* same as every tactile pass. VoiceOver cannot be driven from the agent
+   shell and I did not try. The walk: `./zig-out/bin/zig-ui --card`, ⌘F5,
+   VO-arrows through the pane (title, prose, rows, controls, in reading
+   order), VO-Space a toggle and watch it flip on screen, arrow through the
+   Line measure radio group, and — the one case the harness could not
+   arrange — park the VO cursor on a control, sit still, and confirm the
+   window stays quiet. The tree, actions, and notifications VoiceOver
+   consumes are all externally verified above; what remains is how the walk
+   *sounds*.
+
+**Frame-on-demand: holds, now measured under adversarial load.** The exit
+criterion asked for 0 idle presents with the bridge attached; the run did
+more: a loop hammered the process with **25 full AX-tree walks during the
+bench** — every attribute of every element, repeatedly, including through the
+idle phases — and all four idle phases still reported **0 presents in 15s**.
+"AX reads never dirty a frame" is a measured number now, not a design
+argument. (Reads answer from the retained elements' stored properties on the
+run loop; the render path is not involved, by construction — but construction
+claims are what Stage 2's HUD trap taught this lab to distrust, hence the
+hammer.) The kick-animation phase still settles (17 presents at 120Hz, then
+0), with its toggle flip flowing through a value diff and an AXValueChanged
+post mid-phase, observers or none. Every scene: **1 draw call** — AX adds
+zero draw cost by construction (it draws nothing), and zero atlas cost (236
+glyphs, 9.6%, 0 growth — census identical to Stage 5). Carried baselines
+re-confirmed at 120Hz within noise of the session-start run.
+
+**What fought back — honestly, almost nothing, and that is the finding.**
+- The objc interop cost **two compile errors total**: a name collision
+  (`sels.content_view` vs the file-scope `content_view`, Zig's ambiguous-
+  reference rule) and an anonymous-struct literal refusing to coerce to
+  `NSRect` through an `anytype` tuple (fixed by typing the local). The
+  msgSend cast-to-exact-signature pattern worked on the first build. The
+  runtime subclass, the ivar offset, the parent-space frames, the
+  notifications: all worked on the first dump. Reading zig-objc first (as
+  the plan ordered) is why — the conventions were understood before any
+  binding was written.
+- The Windows cross-compile was found **already broken — by Stage 5**, not
+  by this stage: `loadSystemSerif`'s `posix.openat(AT.FDCWD, ...)` does not
+  exist on the Windows std surface, and Stage 5 never re-ran the smoke build
+  after adding it. One comptime gate fixes it (the serif is a macOS system
+  file; other targets take the Inter SemiBold fallback path that already
+  existed), and the .exe builds again — which also proved the AX bridge's
+  own comptime gate keeps the objc file entirely out of non-macOS analysis.
+  Lesson, recorded: the cross-compile is a one-command gate and should be
+  run in any stage that touches platform-adjacent std surface.
+- TCC did not fight at all: the agent shell already held Accessibility
+  trust, so the dump leg that Part II 11.2 flagged as possibly Joe's turned
+  out runnable in-session. (The helpers still print NOT-TRUSTED and exit 2
+  if a future shell lacks it, with the one-command run handed over.)
+
+**Would the projection scale past a kit? The honest paragraph.** The
+architecture's cost structure is what makes it credible: the diff is O(n)
+compares per rendered frame over nodes the widgets were already registering
+for focus order, the bridge's per-op work is a handful of property sets, and
+idle costs nothing at all — none of that changes shape at a hundred nodes or
+a thousand. What does change shape past a kit: (1) *labels* — the lab's are
+all static literals, so the retained snapshot can hold slices; dynamic AX
+labels (a document title, a row count) need copying into owned storage, a
+real but bounded change to `ax.Node`. (2) *Hierarchy* — one level (group →
+option) is hand-rolled here with a parent field; a scrollable list or a tree
+view wants real containment, which is the same composite-widget pressure
+Stage 4's focusable finding named — the recurring shape is "one focus
+target, many hit targets, now many AX children," and a retained tree gets
+it free where this design pays per level. (3) *Text editing* — AXTextArea
+with selection ranges, line ranges, and marked text is a different animal
+from value-carrying controls, and nothing here prices it; it is the same
+"the rules around text, not the rasterizer" wall Stage 5 named, wearing an
+AX badge. (4) Windows would start from zero: UIA is a different protocol
+with a different projection, and none of the objc plumbing transfers —
+finding-level note, as the plan scoped. For the *library* slot this
+continuation aims at — a widget kit with focus, actions, values, and static
+text — the projection is not a partial story; it is the whole story, and it
+took one session.
+
+**Artifacts** in `docs/zig-ui-lab/`: `stage6-ax-dump.txt` (the tree, default
+state — every control with roles/labels/values/frames) and
+`stage6-ax-dump.swift` (the walker, committed beside its output so Stages
+7-9 can re-verify with one command; the press/observe helpers used for the
+backflow and notification proofs remain scratchpad-tier).
+
+**Exit criteria.**
+- *Dump shows correct roles/labels/values/frames for every benchmark-scene
+  control:* **pass** — and enabled state, and pixel-exact frames, and
+  externally driven activation on top.
+- *Headless tests cover registration, diff transitions, and AX-activation
+  equivalence; full suite passes:* **pass** — 49/49 (33 carried + 16 new).
+- *VoiceOver walk:* **owed to Joe** — recorded here as the stage's open leg;
+  the stage does not close without it (Stage 4's precedent). Everything the
+  walk consumes is verified from outside; the walk itself is a human's.
+- *Frame-on-demand with the bridge attached; 1 draw call:* **pass, measured
+  under a 25-dump read hammer** — 0 presents in every idle phase, every
+  scene 1 draw call, atlas untouched.
+- *Isolation:* **pass** — repo-wide grep finds `zig-ui` only under `labs/`
+  plus the two lab docs; `bun run typecheck` untouched; `rm -rf labs/`
+  still breaks nothing.
+- *The log prices the answer:* **pass** — this entry.
+
+**The priced answer.** Accessibility for an immediate-mode, hand-drawn Zig
+UI is a **bounded engineering cost, not a wall**: 239 lines of pure-Zig
+projection + 408 lines of objc bridge + ~90 lines of registration and glue
+across context/widgets/main — one session, no new dependency, no
+architectural strain (the projection is the focusables list grown up), and
+the standing invariants (1 draw call, 0 idle presents) did not move. The
+Stage 5 verdict's "close to disqualifying" line item, for the library's
+scope, is now a line item with a number on it. What that does to the
+sequence: Stages 7-9 proceed as planned — nothing in this result argues for
+resequencing, and two of its findings feed directly forward (Stage 7's
+reduced-motion obligation now has an AX story to be consistent with; Stage
+8's scroll containers will meet finding (2), hierarchy, head on — the first
+real test of whether the flat-with-parent-field projection needs to become
+a tree). The VoiceOver walk is Joe's, and the stage stays open until his
+hands say what the tree already shows.
