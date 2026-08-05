@@ -1393,16 +1393,14 @@ non-focusable segmented options, and is inert on a disabled widget.
    `AXObserver` subscribed to the checkbox received a live **AXValueChanged**
    during a press, so the notifications demonstrably post, not just appear in
    source.
-3. *The VoiceOver walk — owed to Joe, and the stage does not close without
-   it,* same as every tactile pass. VoiceOver cannot be driven from the agent
-   shell and I did not try. The walk: `./zig-out/bin/zig-ui --card`, ⌘F5,
-   VO-arrows through the pane (title, prose, rows, controls, in reading
-   order), VO-Space a toggle and watch it flip on screen, arrow through the
-   Line measure radio group, and — the one case the harness could not
-   arrange — park the VO cursor on a control, sit still, and confirm the
-   window stays quiet. The tree, actions, and notifications VoiceOver
-   consumes are all externally verified above; what remains is how the walk
-   *sounds*.
+3. *The VoiceOver walk — Joe's leg, closed same-session.* VoiceOver cannot
+   be driven from the agent shell and I did not try; the walk
+   (`./zig-out/bin/zig-ui --card`, ⌘F5, VO-arrows through the pane, VO-Space
+   a toggle, park the cursor on a control) was handed to Joe at the end of
+   the session and **he ran it and reported it good** — no changes asked
+   for. That completes the split exactly as 11.2 drew it: the tree, actions,
+   and notifications verified from outside the process by the harness, and
+   how the walk sounds verified by the person with ears on it.
 
 **Frame-on-demand: holds, now measured under adversarial load.** The exit
 criterion asked for 0 idle presents with the bridge attached; the run did
@@ -1480,9 +1478,9 @@ backflow and notification proofs remain scratchpad-tier).
   externally driven activation on top.
 - *Headless tests cover registration, diff transitions, and AX-activation
   equivalence; full suite passes:* **pass** — 49/49 (33 carried + 16 new).
-- *VoiceOver walk:* **owed to Joe** — recorded here as the stage's open leg;
-  the stage does not close without it (Stage 4's precedent). Everything the
-  walk consumes is verified from outside; the walk itself is a human's.
+- *VoiceOver walk:* **pass** — done by Joe at the keyboard in-session,
+  reported good, nothing changed. All three verification legs closed; the
+  stage closes with them.
 - *Frame-on-demand with the bridge attached; 1 draw call:* **pass, measured
   under a 25-dump read hammer** — 0 presents in every idle phase, every
   scene 1 draw call, atlas untouched.
@@ -1504,5 +1502,6 @@ resequencing, and two of its findings feed directly forward (Stage 7's
 reduced-motion obligation now has an AX story to be consistent with; Stage
 8's scroll containers will meet finding (2), hierarchy, head on — the first
 real test of whether the flat-with-parent-field projection needs to become
-a tree). The VoiceOver walk is Joe's, and the stage stays open until his
-hands say what the tree already shows.
+a tree). Joe walked it with VoiceOver at the end of the session and reported
+it good, so the stage closes with all three legs verified: the disqualifier
+is priced, and the price was one session.
