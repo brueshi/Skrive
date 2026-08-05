@@ -39,6 +39,12 @@ pub fn build(b: *std.Build) !void {
     // @cImport in gfx/text.zig; the implementation is its own C TU.
     root_module.addIncludePath(b.path("vendor/stb"));
     root_module.addCSourceFile(.{ .file = b.path("vendor/stb/stb_truetype.c") });
+    // The AX bridge (Stage 6) speaks to the objc runtime directly; AppKit
+    // itself arrives through sokol's Cocoa link. macOS only — the bridge is
+    // comptime-gated out of every other target.
+    if (target.result.os.tag == .macos) {
+        root_module.linkSystemLibrary("objc", .{});
+    }
     // Fonts are embedded (@embedFile by module name); assets/ sits outside
     // the src/ module root, so they arrive as anonymous imports.
     root_module.addAnonymousImport("Inter-Regular.ttf", .{ .root_source_file = b.path("assets/Inter-Regular.ttf") });

@@ -36,6 +36,7 @@ const std = @import("std");
 const sapp = @import("sokol").app;
 const draw = @import("draw.zig");
 const anim = @import("anim.zig");
+const ax = @import("ax.zig");
 
 /// The per-frame input snapshot main.zig hands to begin(). Positions are
 /// logical px (sokol reports mouse in framebuffer px; main divides by the DPI
@@ -57,6 +58,13 @@ pub const Input = struct {
     // Interact.focusable below.
     nav_prev: bool = false,
     nav_next: bool = false,
+    // Stage 6: an assistive-tech activation, by widget identity. A VoiceOver
+    // press arrives from the AX bridge as this edge, and interact() fires the
+    // matching widget through the identical machinery a Space press uses —
+    // synthetic input, not a parallel code path. Unlike Space it does not
+    // require focus: the AX cursor is its own point of regard, and moving
+    // keyboard focus under it would fight the user. 0 = none.
+    ax_activate_id: u64 = 0,
 };
 
 /// What a widget learns from a single interact() call. `hovered` and `pressed`
@@ -114,6 +122,14 @@ pub const Context = struct {
     /// anim.zig for why it is a separate file all the same.
     anim: anim.Store = .{},
 
+    // The Stage 6 widening of the registration: alongside the focusable list,
+    // widgets declare what they *are* — role, label, value, rect — and this
+    // frame's declarations become the AX projection's input (see ax.zig).
+    // Rebuilt every frame like the focusables; the diff against the retained
+    // tree happens outside the Context, in the projection.
+    ax_nodes: [ax.max_nodes]ax.Node = undefined,
+    ax_len: usize = 0,
+
     /// 64-bit hash of label + discriminator. The discriminator disambiguates
     /// repeated labels (two "OK" buttons). 0 is remapped to 1 so a real ID
     /// never collides with the "none" sentinel.
@@ -132,6 +148,7 @@ pub const Context = struct {
         self.input = input;
         self.hot_id = 0;
         self.next_len = 0;
+        self.ax_len = 0;
         self.anim.tickGeneration();
         self.anim.advance(dt);
         if (input.tab and self.focusables_len > 0) {
@@ -191,6 +208,9 @@ pub const Context = struct {
             if (opts.focusable and self.focus_id == wid and self.input.activate) {
                 fired = true; // Space/Enter on the focused widget
             }
+            if (self.input.ax_activate_id == wid) {
+                fired = true; // a VoiceOver press, routed here as synthetic input
+            }
         }
 
         return .{
@@ -202,6 +222,24 @@ pub const Context = struct {
             .has_focus = !disabled and opts.focusable and self.focus_id == wid,
             .fired = fired,
         };
+    }
+
+    /// Declare an accessible element for this frame. Called by widgets right
+    /// next to their interact() — the same per-frame registration discipline
+    /// as the focusable list, widened to say what the widget is. Order of
+    /// registration is draw order, which becomes VoiceOver's reading order.
+    /// Over-capacity registrations are dropped (assert in debug): the cap is
+    /// shared with max_focusables and no lab scene approaches it.
+    pub fn axRegister(self: *Context, node: ax.Node) void {
+        std.debug.assert(self.ax_len < ax.max_nodes);
+        if (self.ax_len >= ax.max_nodes) return;
+        self.ax_nodes[self.ax_len] = node;
+        self.ax_len += 1;
+    }
+
+    /// This frame's AX declarations, for the projection to diff.
+    pub fn axNodes(self: *const Context) []const ax.Node {
+        return self.ax_nodes[0..self.ax_len];
     }
 
     /// Swap in this frame's focusable list and report the cursor the platform
@@ -343,6 +381,84 @@ test "Tab walks focus in draw order and wraps both ways" {
     try testing.expectEqual(a, ctx.focus_id);
     runFrame(&ctx, .{ .tab = true, .shift = true }, &test_ids); // wrap backward
     try testing.expectEqual(c, ctx.focus_id);
+}
+
+test "AX activation is indistinguishable from Space on the focused widget" {
+    // Two identical widgets in two contexts: one activated by keyboard focus +
+    // Space, one by an AX press. The Interaction result must match — same
+    // fired, and neither leaves an armed active state behind.
+    const id = Context.id("a", 0);
+
+    var kb: Context = .{};
+    kb.begin(.{}, 0);
+    _ = kb.interact(id, box, .{});
+    _ = kb.end();
+    kb.begin(.{ .tab = true }, 0); // focus it
+    _ = kb.interact(id, box, .{});
+    _ = kb.end();
+    kb.begin(.{ .activate = true }, 0); // Space
+    const via_space = kb.interact(id, box, .{});
+    _ = kb.end();
+
+    var vo: Context = .{};
+    vo.begin(.{ .ax_activate_id = id }, 0);
+    const via_ax = vo.interact(id, box, .{});
+    _ = vo.end();
+
+    try testing.expect(via_space.fired and via_ax.fired);
+    try testing.expectEqual(@as(u64, 0), kb.active_id);
+    try testing.expectEqual(@as(u64, 0), vo.active_id);
+}
+
+test "AX activation needs no focus and does not move it" {
+    // The AX cursor is its own point of regard: a VO press on an unfocused
+    // widget fires it without stealing keyboard focus.
+    var ctx: Context = .{};
+    const a = test_ids[0];
+    const b = test_ids[1];
+    runFrame(&ctx, .{}, &test_ids);
+    runFrame(&ctx, .{ .tab = true }, &test_ids); // keyboard focus on a
+    try testing.expectEqual(a, ctx.focus_id);
+
+    ctx.begin(.{ .ax_activate_id = b }, 0);
+    _ = ctx.interact(a, .{ .x = 0, .y = 0, .w = 40, .h = 20 }, .{});
+    const it_b = ctx.interact(b, .{ .x = 50, .y = 0, .w = 40, .h = 20 }, .{});
+    _ = ctx.end();
+    try testing.expect(it_b.fired);
+    try testing.expectEqual(a, ctx.focus_id); // focus did not move
+}
+
+test "a disabled widget is inert to AX activation" {
+    var ctx: Context = .{};
+    const id = Context.id("a", 0);
+    ctx.begin(.{ .ax_activate_id = id }, 0);
+    const it = ctx.interact(id, box, .{ .disabled = true });
+    _ = ctx.end();
+    try testing.expect(!it.fired);
+}
+
+test "AX activation reaches non-focusable widgets (segmented options)" {
+    var ctx: Context = .{};
+    const id = Context.id("opt", 0);
+    ctx.begin(.{ .ax_activate_id = id }, 0);
+    const it = ctx.interact(id, box, .{ .focusable = false });
+    _ = ctx.end();
+    try testing.expect(it.fired);
+}
+
+test "AX registration: draw order in, same order out, cleared each frame" {
+    var ctx: Context = .{};
+    ctx.begin(.{}, 0);
+    ctx.axRegister(.{ .id = 1, .role = .button, .label = "Save", .rect = box });
+    ctx.axRegister(.{ .id = 2, .role = .checkbox, .label = "Check spelling", .value = 1, .rect = box });
+    _ = ctx.end();
+    try testing.expectEqual(@as(usize, 2), ctx.axNodes().len);
+    try testing.expectEqual(@as(u64, 1), ctx.axNodes()[0].id);
+    try testing.expectEqual(@as(u64, 2), ctx.axNodes()[1].id);
+
+    ctx.begin(.{}, 0); // a new frame starts a fresh registration list
+    _ = ctx.end();
+    try testing.expectEqual(@as(usize, 0), ctx.axNodes().len);
 }
 
 test "mouse focus shows no ring; Space activates the focused widget" {

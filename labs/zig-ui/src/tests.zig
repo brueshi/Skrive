@@ -8,4 +8,5 @@ test {
     _ = @import("ui/layout.zig");
     _ = @import("ui/anim.zig");
     _ = @import("ui/widgets.zig");
+    _ = @import("ui/ax.zig");
 }

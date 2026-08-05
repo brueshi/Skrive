@@ -31,6 +31,7 @@ const draw = @import("draw.zig");
 const context = @import("context.zig");
 const layout = @import("layout.zig");
 const anim = @import("anim.zig");
+const ax = @import("ax.zig");
 const tokens = @import("tokens.zig");
 const batch = @import("../gfx/batch.zig");
 const atlas_mod = @import("../gfx/atlas.zig");
@@ -74,6 +75,10 @@ pub const ButtonOpts = struct {
     /// frame (a toggle showing "on"/"off"). When null, identity keys off the
     /// display label.
     id_label: ?[]const u8 = null,
+    /// The accessible name, when the visible label is not it (a dynamic label
+    /// would also leave the retained AX snapshot pointing at dead storage —
+    /// see ax.Node.label). When null, the display label is the AX label.
+    ax_label: ?[]const u8 = null,
 };
 
 pub const ButtonResult = struct {
@@ -154,6 +159,16 @@ pub fn button(ctx: *Context, p: *const Painter, x: f32, y: f32, label: []const u
 
     const wid = Context.id(opts.id_label orelse label, opts.disc);
     const it = ctx.interact(wid, rect, .{ .disabled = opts.disabled });
+    ctx.axRegister(.{
+        .id = wid,
+        .role = .button,
+        // The display label is the accessible name (a changed label diffs
+        // into an update, which is what VoiceOver should hear); ax_label
+        // overrides when the visible text is not the right name.
+        .label = opts.ax_label orelse label,
+        .rect = rect,
+        .disabled = opts.disabled,
+    });
     const hover_t = ctx.anim.value(anim.Store.key(wid, 2), if (it.hovered and !it.pressed) 1 else 0);
     const v = resolve(opts.variant, hover_t, it.pressed, opts.disabled);
 
@@ -230,6 +245,11 @@ const knob_travel: f32 = toggle_w - 2 * toggle_pad - knob_size; // 17
 pub const ToggleOpts = struct {
     disabled: bool = false,
     disc: u64 = 0,
+    /// The accessible name. The control itself is unlabelled (so is the
+    /// shipped one — a bare switch whose settings row supplies the text via
+    /// aria-label), so the scene passes the row label here. Falls back to the
+    /// identity string, which is stable but not prose — scenes should pass it.
+    ax_label: ?[]const u8 = null,
 };
 
 pub const ToggleResult = struct {
@@ -251,6 +271,18 @@ pub fn toggleInteract(
     const wid = Context.id(id_label, opts.disc);
     const it = ctx.interact(wid, rect, .{ .disabled = opts.disabled });
     if (it.fired) value.* = !value.*;
+    // AXCheckBox with a 0/1 value, registered *after* the flip: the frame that
+    // fires renders the new state, and the projection must say what the frame
+    // shows — that post-flip declaration is what diffs into the ValueChanged
+    // notification VoiceOver announces.
+    ctx.axRegister(.{
+        .id = wid,
+        .role = .checkbox,
+        .label = opts.ax_label orelse id_label,
+        .value = if (value.*) 1 else 0,
+        .rect = rect,
+        .disabled = opts.disabled,
+    });
     // The ID travels back out with the decision so the drawing half animates
     // the same identity it interacted as: computing it twice is how a widget
     // quietly detaches from its own state (the Stage 3 dynamic-label bug).
@@ -358,6 +390,10 @@ const segmented_option_radius: f32 = tokens.segmented_option_radius;
 pub const SegmentedOpts = struct {
     disabled: bool = false,
     disc: u64 = 0,
+    /// The accessible name of the radio group; the settings row supplies it,
+    /// mirroring the shipped aria-label pattern. Falls back to the identity
+    /// string.
+    ax_label: ?[]const u8 = null,
 };
 
 pub const SegmentedResult = struct {
@@ -399,14 +435,18 @@ pub fn segmentedLayout(x: f32, y: f32, label_widths: []const f32) SegmentedLayou
 
 /// The decision half: per-option hit testing plus radiogroup keyboard. Pure
 /// over the context, so the tab-stop count and the arrow-key wrap are testable
-/// without a GPU.
+/// without a GPU. `options` carries the visible option labels (Stage 6): the
+/// AX projection declares one radio button per option, and a radio button's
+/// accessible name is its label text.
 pub fn segmentedInteract(
     ctx: *Context,
     id_label: []const u8,
     l: *const SegmentedLayout,
+    options: []const []const u8,
     selected: *usize,
     opts: SegmentedOpts,
 ) struct { group: context.Interaction, wid: u64 } {
+    std.debug.assert(options.len == l.len);
     const group_id = Context.id(id_label, opts.disc);
     // The group owns the Tab stop and the keyboard; it is registered first so
     // it is the focus target a click on any option leaves behind.
@@ -430,6 +470,30 @@ pub fn segmentedInteract(
         if (ctx.input.nav_prev) selected.* = (selected.* + n - 1) % n;
     }
     if (selected.* >= n and n > 0) selected.* = n - 1;
+
+    // AXRadioGroup with one AXRadioButton child per option. Registered after
+    // every way the selection can move this frame (click above, arrows just
+    // now), so the declared values are the frame's final state — the child
+    // whose value flips to 1 is what diffs into the ValueChanged VoiceOver
+    // announces. Group first: the bridge creates parents before children.
+    ctx.axRegister(.{
+        .id = group_id,
+        .role = .radio_group,
+        .label = opts.ax_label orelse id_label,
+        .rect = l.track,
+        .disabled = opts.disabled,
+    });
+    for (options, 0..) |option_label, i| {
+        ctx.axRegister(.{
+            .id = Context.id(id_label, opts.disc ^ (i + 1)),
+            .parent = group_id,
+            .role = .radio_button,
+            .label = option_label,
+            .value = if (i == selected.*) 1 else 0,
+            .rect = l.options[i],
+            .disabled = opts.disabled,
+        });
+    }
     return .{ .group = group, .wid = group_id };
 }
 
@@ -456,7 +520,7 @@ pub fn segmented(
     const l = segmentedLayout(x, y, widths[0..options.len]);
 
     const before = selected.*;
-    const r = segmentedInteract(ctx, id_label, &l, selected, opts);
+    const r = segmentedInteract(ctx, id_label, &l, options, selected, opts);
     const changed = selected.* != before;
 
     const pos = ctx.anim.value(anim.Store.key(r.wid, 0), @floatFromInt(selected.*));
@@ -549,6 +613,10 @@ pub const IconButtonOpts = struct {
     size: IconButtonSize = .md,
     disabled: bool = false,
     disc: u64 = 0,
+    /// The accessible name — an icon button has no text at all, so this is
+    /// the AX-tree equivalent of the shipped kit's mandatory aria-label.
+    /// Falls back to the identity string.
+    ax_label: ?[]const u8 = null,
 };
 
 pub fn iconButton(
@@ -564,6 +632,13 @@ pub fn iconButton(
     const rect: draw.Rect = .{ .x = x, .y = y, .w = side, .h = side };
     const wid = Context.id(id_label, opts.disc);
     const it = ctx.interact(wid, rect, .{ .disabled = opts.disabled });
+    ctx.axRegister(.{
+        .id = wid,
+        .role = .button,
+        .label = opts.ax_label orelse id_label,
+        .rect = rect,
+        .disabled = opts.disabled,
+    });
     const hover_t = ctx.anim.value(anim.Store.key(wid, 2), if (it.hovered) 1 else 0);
     drawIconButton(p, rect, icon, hover_t, opts.disabled);
     if (it.focused) drawFocusRing(p, rect, tokens.icon_button_radius);
@@ -744,6 +819,8 @@ test "toggle: identity is the id_label, so the value flipping cannot drop state"
     try testing.expectEqual(armed, ctx.active_id);
 }
 
+const t_seg_labels = [_][]const u8{ "Light", "Dark", "System" };
+
 fn threeOptions() SegmentedLayout {
     // Stand-in label widths; the real ones come from measureText.
     return segmentedLayout(0, 0, &.{ 30, 40, 50 });
@@ -768,10 +845,10 @@ test "segmented: clicking an option selects it" {
     const p: [2]f32 = .{ mid.x + mid.w / 2, mid.y + mid.h / 2 };
 
     ctx.begin(.{ .mouse = p, .mouse_down = true, .pressed = true }, 0);
-    _ = segmentedInteract(&ctx, "theme", &l, &sel, .{});
+    _ = segmentedInteract(&ctx, "theme", &l, &t_seg_labels, &sel, .{});
     _ = ctx.end();
     ctx.begin(.{ .mouse = p, .released = true }, 0);
-    _ = segmentedInteract(&ctx, "theme", &l, &sel, .{});
+    _ = segmentedInteract(&ctx, "theme", &l, &t_seg_labels, &sel, .{});
     _ = ctx.end();
     try testing.expectEqual(@as(usize, 1), sel);
 }
@@ -781,7 +858,7 @@ test "segmented: three options are one Tab stop, and focus stays on the group" {
     const l = threeOptions();
     var sel: usize = 0;
     ctx.begin(.{}, 0);
-    _ = segmentedInteract(&ctx, "theme", &l, &sel, .{});
+    _ = segmentedInteract(&ctx, "theme", &l, &t_seg_labels, &sel, .{});
     _ = ctx.end();
     try testing.expectEqual(@as(usize, 1), ctx.focusables_len);
     try testing.expectEqual(Context.id("theme", 0), ctx.focusables[0]);
@@ -790,7 +867,7 @@ test "segmented: three options are one Tab stop, and focus stays on the group" {
     // would stop working after a mouse selection.
     const last = l.options[2];
     ctx.begin(.{ .mouse = .{ last.x + 2, last.y + 2 }, .mouse_down = true, .pressed = true }, 0);
-    _ = segmentedInteract(&ctx, "theme", &l, &sel, .{});
+    _ = segmentedInteract(&ctx, "theme", &l, &t_seg_labels, &sel, .{});
     _ = ctx.end();
     try testing.expectEqual(Context.id("theme", 0), ctx.focus_id);
 }
@@ -802,12 +879,12 @@ test "segmented: arrows move the selection and wrap, but only when focused" {
 
     // Not focused: arrows do nothing.
     ctx.begin(.{ .nav_next = true }, 0);
-    _ = segmentedInteract(&ctx, "theme", &l, &sel, .{});
+    _ = segmentedInteract(&ctx, "theme", &l, &t_seg_labels, &sel, .{});
     _ = ctx.end();
     try testing.expectEqual(@as(usize, 0), sel);
 
     ctx.begin(.{ .tab = true }, 0); // Tab onto the group (list is populated now)
-    _ = segmentedInteract(&ctx, "theme", &l, &sel, .{});
+    _ = segmentedInteract(&ctx, "theme", &l, &t_seg_labels, &sel, .{});
     _ = ctx.end();
     try testing.expectEqual(Context.id("theme", 0), ctx.focus_id);
 
@@ -820,10 +897,86 @@ test "segmented: arrows move the selection and wrap, but only when focused" {
     };
     for (steps) |s| {
         ctx.begin(.{ .nav_next = s.next, .nav_prev = !s.next }, 0);
-        _ = segmentedInteract(&ctx, "theme", &l, &sel, .{});
+        _ = segmentedInteract(&ctx, "theme", &l, &t_seg_labels, &sel, .{});
         _ = ctx.end();
         try testing.expectEqual(s.want, sel);
     }
+}
+
+test "toggle: registers an AXCheckBox whose value follows the flip" {
+    var ctx: Context = .{};
+    var on = false;
+    // Untouched frame: value 0, the row label as the accessible name.
+    ctx.begin(.{}, 0);
+    _ = toggleInteract(&ctx, "bm-spellcheck", t_toggle, &on, .{ .ax_label = "Check spelling" });
+    _ = ctx.end();
+    try testing.expectEqual(@as(usize, 1), ctx.axNodes().len);
+    const node = ctx.axNodes()[0];
+    try testing.expectEqual(ax.Role.checkbox, node.role);
+    try testing.expectEqualStrings("Check spelling", node.label);
+    try testing.expectEqual(@as(i32, 0), node.value);
+    try testing.expect(!node.disabled);
+
+    // The frame that flips it declares the post-flip value — that is what the
+    // projection diffs into a ValueChanged.
+    ctx.begin(.{ .mouse = t_inside, .pressed = true, .released = true }, 0);
+    _ = toggleInteract(&ctx, "bm-spellcheck", t_toggle, &on, .{ .ax_label = "Check spelling" });
+    _ = ctx.end();
+    try testing.expect(on);
+    try testing.expectEqual(@as(i32, 1), ctx.axNodes()[0].value);
+}
+
+test "toggle: an AX activation flips it exactly like Space" {
+    var ctx: Context = .{};
+    var on = false;
+    const wid = Context.id("bm-spellcheck", 0);
+    ctx.begin(.{ .ax_activate_id = wid }, 0);
+    const r = toggleInteract(&ctx, "bm-spellcheck", t_toggle, &on, .{});
+    _ = ctx.end();
+    try testing.expect(r.changed and on);
+    // And a disabled toggle stays inert to the same synthetic input.
+    var off = false;
+    ctx.begin(.{ .ax_activate_id = Context.id("other", 0) }, 0);
+    const d = toggleInteract(&ctx, "other", t_toggle, &off, .{ .disabled = true });
+    _ = ctx.end();
+    try testing.expect(!d.changed and !off);
+}
+
+test "segmented: registers a radio group with one radio button per option" {
+    var ctx: Context = .{};
+    const l = threeOptions();
+    var sel: usize = 1;
+    ctx.begin(.{}, 0);
+    _ = segmentedInteract(&ctx, "theme", &l, &t_seg_labels, &sel, .{ .ax_label = "Theme" });
+    _ = ctx.end();
+
+    const nodes = ctx.axNodes();
+    try testing.expectEqual(@as(usize, 4), nodes.len);
+    try testing.expectEqual(ax.Role.radio_group, nodes[0].role);
+    try testing.expectEqualStrings("Theme", nodes[0].label);
+    try testing.expectEqual(ax.no_value, nodes[0].value);
+    const group_id = nodes[0].id;
+    for (nodes[1..], 0..) |node, i| {
+        try testing.expectEqual(ax.Role.radio_button, node.role);
+        try testing.expectEqual(group_id, node.parent);
+        try testing.expectEqualStrings(t_seg_labels[i], node.label);
+        try testing.expectEqual(@as(i32, if (i == 1) 1 else 0), node.value);
+    }
+}
+
+test "segmented: an AX press on a radio button selects its option" {
+    var ctx: Context = .{};
+    const l = threeOptions();
+    var sel: usize = 0;
+    // The option ids are the same ids the mouse path interacts with; the AX
+    // bridge fires them by identity. Pick option 2.
+    const opt2 = Context.id("theme", 0 ^ (2 + 1));
+    ctx.begin(.{ .ax_activate_id = opt2 }, 0);
+    _ = segmentedInteract(&ctx, "theme", &l, &t_seg_labels, &sel, .{});
+    _ = ctx.end();
+    try testing.expectEqual(@as(usize, 2), sel);
+    // The same frame's registration already declares the new selection.
+    try testing.expectEqual(@as(i32, 1), ctx.axNodes()[3].value);
 }
 
 test "segmented: disabled takes no Tab stop and ignores clicks" {
@@ -832,7 +985,7 @@ test "segmented: disabled takes no Tab stop and ignores clicks" {
     var sel: usize = 0;
     const mid = l.options[1];
     ctx.begin(.{ .mouse = .{ mid.x + 2, mid.y + 2 }, .pressed = true, .released = true }, 0);
-    _ = segmentedInteract(&ctx, "theme", &l, &sel, .{ .disabled = true });
+    _ = segmentedInteract(&ctx, "theme", &l, &t_seg_labels, &sel, .{ .disabled = true });
     _ = ctx.end();
     try testing.expectEqual(@as(usize, 0), sel);
     try testing.expectEqual(@as(usize, 0), ctx.focusables_len);

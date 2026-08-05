@@ -24,6 +24,7 @@
 //        zero absolute coordinates, resizing with the window
 //------------------------------------------------------------------------------
 const std = @import("std");
+const builtin = @import("builtin");
 const sokol = @import("sokol");
 const slog = sokol.log;
 const sg = sokol.gfx;
@@ -38,6 +39,12 @@ const draw = @import("ui/draw.zig");
 const ui_context = @import("ui/context.zig");
 const widgets = @import("ui/widgets.zig");
 const layout = @import("ui/layout.zig");
+const ax = @import("ui/ax.zig");
+// The AX bridge is objc and macOS-only; every call site is behind this
+// comptime gate, so the Windows cross-compile never analyzes the file
+// (Stage 6; the projection in ui/ax.zig itself is platform-free).
+const is_macos = builtin.target.os.tag == .macos;
+const ax_bridge = @import("ui/ax_bridge.zig");
 
 const inter_regular_ttf = @embedFile("Inter-Regular.ttf");
 const inter_medium_ttf = @embedFile("Inter-Medium.ttf");
@@ -256,6 +263,12 @@ const state = struct {
     var ev_activate: bool = false;
     var ev_nav_prev: bool = false;
     var ev_nav_next: bool = false;
+    // A VoiceOver activation, forwarded by the AX bridge as synthetic input
+    // (widget identity; 0 = none). Consumed and cleared like the other edges.
+    var ev_ax_activate: u64 = 0;
+    // The AX projection's retained snapshot + this frame's diff scratch.
+    var ax_projection: ax.Projection = .{};
+    var ax_ops: ax.OpList = .{};
     // Wall clock of the last *rendered* frame, which under frame-on-demand is
     // not the display interval. The animation store takes dt from this.
     var last_frame_ticks: u64 = 0;
@@ -365,12 +378,26 @@ fn loadSystemSerif() void {
     std.debug.print("serif: no Bold face in {d}-face collection; title falls back to Inter SemiBold\n", .{n});
 }
 
+/// The AX bridge's action callback: a VoiceOver press lands here (on the main
+/// run loop, between frames) and becomes next frame's synthetic input. This is
+/// the one AX path that marks the frame dirty — it is user input, exactly as a
+/// mouse click is; AX *reads* never reach any of this.
+fn axActivate(widget_id: u64) void {
+    if (bench.active) return; // --bench ignores all input, this included
+    state.ev_ax_activate = widget_id;
+    state.dirty = true;
+}
+
 export fn init() void {
     stime.setup();
     sg.setup(.{
         .environment = sglue.environment(),
         .logger = .{ .func = slog.func },
     });
+    if (comptime is_macos) {
+        ax_bridge.on_activate = &axActivate;
+        ax_bridge.attach(sapp.macosGetWindow());
+    }
     state.pass_action.colors[0] = .{
         .load_action = .CLEAR,
         .clear_value = .{ .r = clear_r, .g = clear_g, .b = clear_b, .a = 1 },
@@ -383,7 +410,11 @@ export fn init() void {
     // new face with a reused id would serve another weight's bitmaps.
     state.font_semibold = text_mod.Font.init(2, inter_semibold_ttf) catch @panic("zig-ui: Inter SemiBold failed to parse");
     state.font_light = text_mod.Font.init(3, inter_light_ttf) catch @panic("zig-ui: Inter Light failed to parse");
-    loadSystemSerif();
+    // The serif is read out of a macOS system .ttc; other targets fall back
+    // to Inter SemiBold the same way a missing file does. Also what keeps the
+    // posix openat call out of the Windows cross-compile (found when Stage 6
+    // re-ran the smoke build for the first time since Stage 5 added this).
+    if (comptime is_macos) loadSystemSerif();
     initStressRects();
     std.debug.print("backend: {t}\n", .{sg.queryBackend()});
     std.debug.print("device pixel ratio: {d}\n", .{sapp.dpiScale()});
@@ -750,6 +781,21 @@ fn benchmarkRows() [4]CardRow {
     };
 }
 
+/// Stage 6 stretch: the scene's prose registered as AXStaticText, so a
+/// VoiceOver walk reads the pane like the shipped settings page (title, sub,
+/// section cap, row labels and descriptions) rather than bare controls
+/// floating in silence. Identity is the text itself under a disc that keeps
+/// it out of the widgets' hash space; every string here is a static literal,
+/// which is what ax.Node.label's lifetime rule needs.
+fn axStaticText(text_str: []const u8, x: f32, y: f32, w: f32, h: f32) void {
+    state.ctx.axRegister(.{
+        .id = ui_context.Context.id(text_str, 0xa11_57a71c),
+        .role = .static_text,
+        .label = text_str,
+        .rect = .{ .x = x, .y = y, .w = w, .h = h },
+    });
+}
+
 fn buildCardScene(b: *batch_mod.Batch) void {
     const dpi = sapp.dpiScale();
     var p = painter(b);
@@ -797,7 +843,7 @@ fn buildCardScene(b: *batch_mod.Batch) void {
     const i_card = page.add(.{ .main = .{ .grow = 1 }, .cross = col_w });
     const page_rects = page.resolve();
 
-    _ = draw.text(b, &state.atlas, dpi, .{
+    const title_w = draw.text(b, &state.atlas, dpi, .{
         page_rects[i_title].x,
         page_rects[i_title].y + (title_box - title_m.lineHeight()) / 2,
     }, "Editor", .{
@@ -806,7 +852,8 @@ fn buildCardScene(b: *batch_mod.Batch) void {
         .color = skrive.fg,
         .letter_spacing = -0.25, // -0.01em at 25px, per .settings-pane-title
     });
-    _ = draw.text(b, &state.atlas, dpi, .{
+    axStaticText("Editor", page_rects[i_title].x, page_rects[i_title].y, title_w, title_box);
+    const sub_w = draw.text(b, &state.atlas, dpi, .{
         page_rects[i_sub].x,
         page_rects[i_sub].y + (sub_box - sub_m.lineHeight()) / 2,
     }, "Defaults for new documents and how writing behaves.", .{
@@ -814,7 +861,8 @@ fn buildCardScene(b: *batch_mod.Batch) void {
         .size = skrive.settings_sub_size,
         .color = skrive.muted,
     });
-    _ = draw.text(b, &state.atlas, dpi, .{
+    axStaticText("Defaults for new documents and how writing behaves.", page_rects[i_sub].x, page_rects[i_sub].y, sub_w, sub_box);
+    const cap_w = draw.text(b, &state.atlas, dpi, .{
         page_rects[i_cap].x + 2,
         page_rects[i_cap].y + (cap_box - cap_m.lineHeight()) / 2,
     }, "WRITING", .{
@@ -823,6 +871,7 @@ fn buildCardScene(b: *batch_mod.Batch) void {
         .color = skrive.settings_cap,
         .letter_spacing = 0.77, // 0.07em at 11px
     });
+    axStaticText("WRITING", page_rects[i_cap].x + 2, page_rects[i_cap].y, cap_w, cap_box);
 
     // The card column: one child per row, plus a hairline between them. Its
     // height is never written down anywhere — Fit.content computes it.
@@ -881,7 +930,7 @@ fn buildCardScene(b: *batch_mod.Batch) void {
 
         // Labels draw centred in their CSS line boxes (18px/16px), the same
         // half-leading placement the browser gives them.
-        _ = draw.text(b, &state.atlas, dpi, .{
+        const row_label_w = draw.text(b, &state.atlas, dpi, .{
             text_rects[i_label].x,
             text_rects[i_label].y + (skrive.settings_label_line_height - label_m.lineHeight()) / 2,
         }, row.label, .{
@@ -889,7 +938,8 @@ fn buildCardScene(b: *batch_mod.Batch) void {
             .size = skrive.settings_label_size,
             .color = skrive.fg,
         });
-        _ = draw.text(b, &state.atlas, dpi, .{
+        axStaticText(row.label, text_rects[i_label].x, text_rects[i_label].y, row_label_w, skrive.settings_label_line_height);
+        const row_desc_w = draw.text(b, &state.atlas, dpi, .{
             text_rects[i_desc].x,
             text_rects[i_desc].y + (skrive.settings_desc_line_height - desc_m.lineHeight()) / 2,
         }, row.desc, .{
@@ -897,14 +947,17 @@ fn buildCardScene(b: *batch_mod.Batch) void {
             .size = skrive.settings_desc_size,
             .color = skrive.muted,
         });
+        axStaticText(row.desc, text_rects[i_desc].x, text_rects[i_desc].y, row_desc_w, skrive.settings_desc_line_height);
 
+        // The row label doubles as the control's accessible name — the
+        // shipped aria-label pattern (the control itself is unlabelled).
         const ctl = row_rects[i_ctl];
         switch (row.control) {
             .toggle => |value| {
-                if (widgets.toggle(&state.ctx, &p, ctl.x, ctl.y, row.id, value, .{}).changed) fired = true;
+                if (widgets.toggle(&state.ctx, &p, ctl.x, ctl.y, row.id, value, .{ .ax_label = row.label }).changed) fired = true;
             },
             .segmented => |sg_ctl| {
-                if (widgets.segmented(&state.ctx, &p, ctl.x, ctl.y, row.id, sg_ctl.options, sg_ctl.selected, .{}).changed) fired = true;
+                if (widgets.segmented(&state.ctx, &p, ctl.x, ctl.y, row.id, sg_ctl.options, sg_ctl.selected, .{ .ax_label = row.label }).changed) fired = true;
             },
         }
     }
@@ -924,12 +977,13 @@ fn buildCardScene(b: *batch_mod.Batch) void {
     const i_strip_row = strip.add(.{ .main = .{ .content = widgets.button_h } });
     const strip_rects = strip.resolve();
 
-    _ = draw.text(b, &state.atlas, dpi, .{ strip_rects[i_strip_cap].x + 2, strip_rects[i_strip_cap].y }, "CONTROLS", .{
+    const strip_cap_w = draw.text(b, &state.atlas, dpi, .{ strip_rects[i_strip_cap].x + 2, strip_rects[i_strip_cap].y }, "CONTROLS", .{
         .font = &state.font_semibold,
         .size = skrive.settings_cap_size,
         .color = skrive.settings_cap,
         .letter_spacing = 0.77,
     });
+    axStaticText("CONTROLS", strip_rects[i_strip_cap].x + 2, strip_rects[i_strip_cap].y, strip_cap_w, cap_m.lineHeight());
 
     var controls = layout.Box.row(strip_rects[i_strip_row], .{ .gap = 12, .cross = .center });
     const i_b1 = controls.add(.{ .main = .{ .content = widgets.buttonWidth(&p, "Save", .{}) }, .cross = widgets.button_h });
@@ -949,12 +1003,12 @@ fn buildCardScene(b: *batch_mod.Batch) void {
     }
     _ = widgets.button(&state.ctx, &p, c_rects[i_b3].x, c_rects[i_b3].y, "Cancel", .{ .variant = .secondary });
     _ = widgets.button(&state.ctx, &p, c_rects[i_b4].x, c_rects[i_b4].y, "Add", .{ .disabled = true });
-    if (widgets.iconButton(&state.ctx, &p, c_rects[i_ic1].x, c_rects[i_ic1].y, .pin, "bm-pin", .{}).fired) {
+    if (widgets.iconButton(&state.ctx, &p, c_rects[i_ic1].x, c_rects[i_ic1].y, .pin, "bm-pin", .{ .ax_label = "Pin" }).fired) {
         state.toast_visible = !state.toast_visible;
         fired = true;
     }
-    _ = widgets.iconButton(&state.ctx, &p, c_rects[i_ic2].x, c_rects[i_ic2].y, .search, "bm-search", .{});
-    _ = widgets.iconButton(&state.ctx, &p, c_rects[i_ic3].x, c_rects[i_ic3].y, .plus, "bm-plus", .{});
+    _ = widgets.iconButton(&state.ctx, &p, c_rects[i_ic2].x, c_rects[i_ic2].y, .search, "bm-search", .{ .ax_label = "Search" });
+    _ = widgets.iconButton(&state.ctx, &p, c_rects[i_ic3].x, c_rects[i_ic3].y, .plus, "bm-plus", .{ .ax_label = "New" });
 
     if (state.toast_visible) buildDemoToast(b, win.w / 2 - 178, win.h - 110);
     if (fired) state.dirty = true;
@@ -1118,6 +1172,7 @@ export fn frame() void {
         .activate = state.ev_activate,
         .nav_prev = state.ev_nav_prev,
         .nav_next = state.ev_nav_next,
+        .ax_activate_id = state.ev_ax_activate,
     }, dt);
 
     const t_build = stime.now();
@@ -1143,6 +1198,16 @@ export fn frame() void {
     state.ev_activate = false;
     state.ev_nav_prev = false;
     state.ev_nav_next = false;
+    state.ev_ax_activate = 0;
+
+    // Project this frame's AX registrations onto the retained element tree:
+    // diff (pure Zig), then apply the delta through the objc bridge. Runs only
+    // on frames that rendered anyway; costs nothing when idle and never marks
+    // the frame dirty — the projection is an output of the frame, not an input.
+    if (comptime is_macos) {
+        ax.Projection.diff(&state.ax_projection, state.ctx.axNodes(), &state.ax_ops);
+        ax_bridge.apply(&state.ax_ops, @as(f32, @floatFromInt(sapp.height())) / sapp.dpiScale());
+    }
 
     // The animation half of frame-on-demand, and the only place it can be
     // decided: *after* the scene is built, because a widget retargets its
