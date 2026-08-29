@@ -427,3 +427,71 @@ disabling each in turn.
 **Next.** Stage 6 — the two numbers. Cold-start replay and warm search
 latency at design scale, per tier, with a SQLite FTS5 arm over the same corpus
 and query set.
+
+---
+
+## Stage 6 — the two numbers, and the control arm (2026-08-29)
+
+**Goal.** Produce the evidence SKR-139 exists for: cold-start replay and warm
+search latency at design scale, in both encodings, against a SQLite FTS5 arm
+over the same blocks and the same queries.
+
+**Result.** Full numbers in `labs/zig-data-engine/docs/results.md`. 52/52
+tests. The short version is three findings, and the third is the one that
+matters most.
+
+**The bespoke index is faster on every query shape** — 16x on single terms
+(0.58 µs against 9.25 µs), 7.6x on conjunctions, and 2.5–4x on prefixes. On
+what a writer actually types, a word or two words, it answers in single-digit
+microseconds where SQLite takes tens.
+
+**The tail is result-set size, and it belongs to neither arm.** A
+one-character prefix matches 31,632 blocks, and both engines spend their time
+materializing a result set nobody reads — an interface shows ten rows. The
+6 ms median there is the cost of building a 31k-element answer, so the fix is
+a top-k cutoff with early termination, not a faster index. Until that exists
+neither arm meets the search plan's repaint-within-a-frame budget on short
+prefixes; the bespoke arm misses by less, which is not the same as meeting it.
+
+**SQLite reopens an existing index in 1.6 ms where the engine rebuilds in
+667 ms.** This is the sharpest result of the spike and it is architectural
+rather than incidental: the engine plan makes indexes derived and never
+logged, so every start pays a full rebuild, while SQLite persists its index
+and opens the file. A 400x gap on the cold path is not a tuning difference,
+and it is the strongest argument the spike produced *against* the design as
+written.
+
+The phase breakdown says what to do about it. Of the 667 ms, index
+construction is 306 ms, decode 206 ms, and read-and-replay 112 ms — and index
+construction is 296 ms in the `.md` tier too, doing identical work. So the
+cold path is dominated by rebuilding a structure the plan explicitly declines
+to persist, and the lever is snapshotting the index, not compacting the log
+payload. Which also settles stage 3's deferred question with a number: the
+pretty-printed JSON payload costs about 100 ms at design scale, real but
+smaller than the rebuild sitting next to it.
+
+**The two encodings produced 39,872 blocks and term counts six apart** (90,316
+against 90,322), which is the corpus doing its job — same content, two
+encodings, encoding as the only variable. Search latency is indistinguishable
+between them, as it must be, since they build the same index. Their whole
+difference is on the cold path.
+
+**What the numbers do not cover, stated in the results doc rather than left
+implied.** The page cache is warm, so these are cold-process, warm-disk
+figures. SQLite's *build* number is a floor and not a like comparison, since
+it is handed pre-tokenized text; its *reopen* number is the honest one.
+Neither arm was measured on ranking quality, which is not a latency question.
+And nothing here measures incremental re-index — the property most specific to
+this design, and invisible in a cold start that indexes every block once
+either way.
+
+**Stage additions.** `src/markdown_scan.zig`, a block-level scanner rather
+than a parser, because the engine reads `.md` only to derive search and
+backlinks and needs block boundaries, kinds and links — not a document model.
+Its tests pin the 1:1 block correspondence between the two encodings, which is
+what makes the two arms comparable in the first place.
+
+**Next.** Stage 7 — the decisions, written down: Path A against Path B,
+bespoke against SQLite, the two `.folio` spec drifts from stage 3, the
+forward-compatibility question left by `unknown_type` in stage 2, and the
+index-snapshot question this stage just raised.

@@ -32,6 +32,20 @@ pub fn build(b: *std.Build) void {
     const corpus_step = b.step("corpus", "Generate a synthetic corpus at a chosen tier");
     corpus_step.dependOn(&corpus_run.step);
 
+    // The benchmark. Separate from the tests because it needs a corpus on
+    // disk and reports numbers rather than asserting on them.
+    const bench_module = b.createModule(.{
+        .root_source_file = b.path("src/bench_main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const bench_exe = b.addExecutable(.{ .name = "bench", .root_module = bench_module });
+    b.installArtifact(bench_exe);
+    const bench_run = b.addRunArtifact(bench_exe);
+    if (b.args) |args| bench_run.addArgs(args);
+    const bench_step = b.step("bench", "Measure cold start and warm search against a corpus");
+    bench_step.dependOn(&bench_run.step);
+
     const test_module = b.createModule(.{
         .root_source_file = b.path("src/tests.zig"),
         .target = target,

@@ -9,4 +9,5 @@ test {
     _ = @import("folio_test.zig");
     _ = @import("corpus_test.zig");
     _ = @import("index_test.zig");
+    _ = @import("markdown_test.zig");
 }
