@@ -548,3 +548,58 @@ identity. The short-prefix tail remains a result-set-size problem belonging to
 neither arm.
 
 **Next.** Stage 7, with the evidence now actually sufficient to decide on.
+
+---
+
+## Stage 7 — the decisions (2026-08-29)
+
+The spike's output. Record: `labs/zig-data-engine/docs/decisions.md`.
+
+**Path A, and the hedge was never needed.** The fault harness is green under
+every modelled fault; LMDB was not built. Reversible, since both substrates
+present the same four-operation seam.
+
+**The headline decision is more qualified than either side of the original
+argument, and the qualification is the useful part.** The plan leans on search
+being latency-bound and governs everything with "build bespoke only where the
+user feels it." Measured, bespoke is 15x faster than SQLite FTS5 on a
+single-term query — and 0.62 µs against 9.54 µs is a difference nobody can
+perceive. Cold start is 18.5 ms against 1.6 ms; also imperceptible. **The
+speed argument for a bespoke engine does not survive its own discipline.**
+
+What survives: a durability surface small enough to have been exhaustively
+fuzzed; block-level incremental re-index at 3.3 µs against 1,079 µs for the
+containing `.md` file; and ranking control, which is §7's actual argument and
+which this spike never measured. So the recommendation is to proceed *and to
+build the ranking first rather than last*, since it is now the whole remaining
+justification — with an adopted kill criterion if it does not deliver. That
+call is the owner's and is marked as such in the record.
+
+**Three things the spike added to B2's scope that were not in the plan:**
+top-k with early termination (a one-character prefix matches 28,619 blocks and
+neither arm meets the frame budget); index snapshots, with their
+machine-specific layout and separate checksum; and forward-compatible replay,
+where an unknown record type must be skipped rather than ending the log.
+
+**Corrections applied to `docs/folio-schema-v1.md`**, which matters more than
+the plan amendments because it is the public portability contract: `table.widths`
+is now documented, §9's "no floats in v1" is corrected along with a note that
+readers must round-trip a number's source token rather than re-deriving it from
+a parsed float, and §7's "the engine stores nothing canonical" is narrowed —
+re-scanning rebuilds every derived fact and restores identity, but no file scan
+reconstructs history, because a file holds a document's present and not its past.
+
+**SKR-292 filed** for the anchor-comment code that survived its own retirement:
+`anchor.ts` is still imported by `parse.ts`, `serialize.ts` and `index.ts`, so
+the app writes id comments into `.md` under a contract the plan removed. Two
+incompatible identity schemes in the tree at once, and the B2 integration would
+have hit it.
+
+**SKR-61 updated** with the outcome, the reframing, the new scope and the kill
+criterion. SKR-139 stays In Progress until the branch is merged, per the
+repository's cadence.
+
+**On the estimate.** "A few days" was right about the dangerous part —
+skeleton, seams and durability gate were roughly that. It was wrong about how
+much has to exist before the dangerous part can be measured against anything
+real.
