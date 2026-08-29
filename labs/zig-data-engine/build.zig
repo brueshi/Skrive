@@ -46,6 +46,33 @@ pub fn build(b: *std.Build) void {
     const bench_step = b.step("bench", "Measure cold start and warm search against a corpus");
     bench_step.dependOn(&bench_run.step);
 
+    // The ranking comparison. Prints rather than asserts: whether a ranking
+    // is better is a judgement about meaning, not something a test decides.
+    const compare_module = b.createModule(.{
+        .root_source_file = b.path("src/compare_main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const compare_exe = b.addExecutable(.{ .name = "compare", .root_module = compare_module });
+    b.installArtifact(compare_exe);
+    const compare_run = b.addRunArtifact(compare_exe);
+    if (b.args) |args| compare_run.addArgs(args);
+    const compare_step = b.step("compare", "Rank real prose with and without the Skrive signals");
+    compare_step.dependOn(&compare_run.step);
+
+    // Known-item retrieval evaluation, with automatic ground truth.
+    const eval_module = b.createModule(.{
+        .root_source_file = b.path("src/eval_main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const eval_exe = b.addExecutable(.{ .name = "eval", .root_module = eval_module });
+    b.installArtifact(eval_exe);
+    const eval_run = b.addRunArtifact(eval_exe);
+    if (b.args) |args| eval_run.addArgs(args);
+    const eval_step = b.step("eval", "Score retrieval by how well a document finds itself");
+    eval_step.dependOn(&eval_run.step);
+
     const test_module = b.createModule(.{
         .root_source_file = b.path("src/tests.zig"),
         .target = target,

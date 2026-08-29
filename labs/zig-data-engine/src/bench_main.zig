@@ -230,6 +230,20 @@ pub fn main(init: std.process.Init) !void {
 
     if (emit_blocks) |path| try writeOut(io, path, blocks_out.items);
 
+    // ---- footprint --------------------------------------------------------
+    //
+    // The plan's premise is that a personal corpus fits in RAM comfortably,
+    // and this engine runs on someone's own machine alongside everything else
+    // they have open. A structure-by-structure count says which part to
+    // attack; peak process RSS says what the machine actually felt, including
+    // the transient cost of building the thing, which is usually higher than
+    // what it settles at.
+    // The build has settled, so hand back the capacity it over-allocated.
+    const fp_before_shrink = idx.footprint().total();
+    idx.shrinkToFit();
+    const fp = idx.footprint();
+    const peak_rss = peakResidentBytes();
+
     // ---- cold start via a persisted index ---------------------------------
     //
     // The rebuild above is what the engine plan describes: indexes are
@@ -423,7 +437,6 @@ pub fn main(init: std.process.Init) !void {
         \\  "queries": {d},
         \\  "repeats": {d},
         \\  "overall": {{ "p50_us": {d:.3}, "p90_us": {d:.3}, "p99_us": {d:.3}, "max_us": {d:.3} }},
-        \\  "by_shape": [
         \\
     , .{
         tier,            block_count,
@@ -439,6 +452,28 @@ pub fn main(init: std.process.Init) !void {
         queries.len,     repeats,
         us(percentile(all.items, 50)), us(percentile(all.items, 90)),
         us(percentile(all.items, 99)), us(percentile(all.items, 100)),
+    });
+
+    // Its own call: a format string is capped at 32 arguments, and the
+    // footprint alone spends fourteen.
+    try report.print(gpa,
+        \\  "footprint_bytes": {{
+        \\    "total": {d}, "before_shrink": {d}, "per_block": {d}, "vs_corpus_text": {d:.2}, "peak_process_rss": {d},
+        \\    "term_text": {d}, "term_table": {d}, "dictionary_order": {d}, "dictionary_hash": {d},
+        \\    "postings_live": {d}, "postings_slack": {d}, "postings_headers": {d},
+        \\    "block_table": {d}, "block_terms": {d}, "backlinks": {d}
+        \\  }},
+        \\  "by_shape": [
+        \\
+    , .{
+        fp.total(),
+        fp_before_shrink,
+        fp.total() / @max(block_count, 1),
+        @as(f64, @floatFromInt(fp.total())) / @as(f64, @floatFromInt(@max(bytes_read, 1))),
+        peak_rss,
+        fp.term_text,     fp.term_table,   fp.dictionary_order, fp.dictionary_hash,
+        fp.postings_live, fp.postings_slack, fp.postings_headers,
+        fp.block_table,   fp.block_terms,  fp.backlinks,
     });
 
     var first = true;
@@ -589,6 +624,15 @@ fn percentile(sorted: []const u64, p: usize) u64 {
     if (sorted.len == 0) return 0;
     const at = (sorted.len - 1) * p / 100;
     return sorted[at];
+}
+
+/// Peak resident set size for this process. `maxrss` is bytes on Darwin and
+/// kilobytes on Linux, which is a genuine platform difference rather than an
+/// inconsistency worth papering over.
+fn peakResidentBytes() usize {
+    const self_usage = std.posix.getrusage(0);
+    const raw: usize = @intCast(self_usage.maxrss);
+    return if (@import("builtin").os.tag == .macos) raw else raw * 1024;
 }
 
 fn fail(message: []const u8) error{BadUsage} {

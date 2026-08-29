@@ -82,6 +82,65 @@ in lazily from disk and does almost no work at open, while a RAM-resident
 engine loads everything up front by design. An order of magnitude at this
 scale is not a difference a person can perceive.
 
+## 1b. Memory footprint
+
+The plan's premise is that a personal corpus fits in RAM comfortably, and this
+engine runs on someone's own machine beside everything else they have open.
+Counted structure by structure rather than sampled, so the answer says which
+part to attack.
+
+| tier | blocks | prose | index | per block | peak process RSS |
+|---|---|---|---|---|---|
+| small | 372 | 0.14 MB | 0.5 MB | 1,427 B | 4.3 MB |
+| real | 2,026 | 0.90 MB | 3.2 MB | 1,597 B | 12.3 MB |
+| design | 39,872 | 18.5 MB | **41.2 MB** | 1,033 B | **124.2 MB** |
+
+**The index costs about 2.2x the prose it indexes**, and the per-block cost
+*falls* with scale — 1,427 bytes at the small tier against 1,033 at the design
+tier — because the dictionary amortizes as more blocks share terms. The
+premise holds at this size.
+
+**Peak RSS is 3x the steady-state index**, and that is the number that matters
+for not disturbing the machine. The transient is the build: the whole 50 MB
+log is read into memory at once, the index passes through a pre-shrink 52.7 MB,
+and the snapshot is materialized as a single 34 MB buffer. None of those need
+to be resident simultaneously — streaming the log replay and the snapshot
+write would cut most of it, and neither is hard.
+
+Where the 41.2 MB goes:
+
+| structure | | share |
+|---|---|---|
+| `block_terms` | 15.95 MB | 38.7% |
+| postings | 15.95 MB | 38.7% |
+| dictionary (hash, table, text, order) | 5.57 MB | 13.5% |
+| postings list headers | 2.21 MB | 5.4% |
+| block table | 1.11 MB | 2.7% |
+| backlinks | 0.43 MB | 1.1% |
+
+Two things stand out.
+
+**Reclaiming over-allocated capacity saved 22% for free.** Postings lists grow
+geometrically, so a bulk build left 11.5 MB of capacity nobody asked for —
+52.7 MB became 41.2 MB by handing it back once the build settles. Slack is
+reported separately from live bytes for exactly this reason: a single total
+cannot distinguish an oversized design from an oversized allocation strategy.
+
+**`block_terms` is the largest structure and it is not the index.** Those
+16 MB — 39% of the total — exist solely so an update can diff a block's old
+terms against its new ones. Once the block arena exists (plan §5.1, and the
+spike never built it) the arena holds each block's content, so the old term
+list can be recovered by re-tokenizing the old block: microseconds of work per
+edit in exchange for 39% of the index's memory. **That trade should be made
+when the arena lands**, and it would take the design tier to roughly 25 MB,
+about 1.4x its prose.
+
+**Extrapolating**, at five times this corpus — 10,000 documents, ~200,000
+blocks, ~90 MB of prose — the index lands near 200 MB and peak build RSS
+somewhere past 500 MB unless the transients are streamed. That is the point
+where this stops being a background citizen on a laptop, and it is close
+enough to be worth designing for rather than discovering.
+
 ## 2. Warm search latency
 
 Median, with the p99 in the second table. Both arms answer identical queries
@@ -131,6 +190,179 @@ once either way. It would show up in a measurement this stage does not make:
 the cost of re-indexing after a single block edit, where `.folio` touches one
 block and `.md` re-indexes its whole file.
 
+## 5. Ranking, against FTS5, on real prose
+
+Measured 2026-08-29 on this repository's `planning/` directory — 74 documents,
+4,031 blocks, 1.0MB of prose the owner wrote. Synthetic text cannot answer
+this question: there is no sense in which one block of generated words is more
+relevant than another, so relevance was invisible to every earlier
+measurement.
+
+Three rankings over identical blocks, identical term frequencies and identical
+queries: our BM25 alone, our BM25 plus the Skrive signals, and SQLite FTS5's
+`bm25()`. FTS5's `doc` and `kind` columns are UNINDEXED so both engines match
+block body only — leaving them searchable let FTS5 match filename text our
+index never sees, which is a difference in *what* is indexed rather than in
+how it is ranked.
+
+### The result
+
+**On eight queries, the top document agreed every time.** An average of 3.2 of
+5 documents overlapped. The Skrive signals reorder positions two through five;
+they did not change the best answer on any query tested.
+
+That is the honest answer to the question D2 asked, and it is not the one the
+engine plan assumed. **Ranking order is not where this engine differentiates.**
+
+### Where it does differ, and it is not ranking
+
+- **Terms satisfied across a document.** `durability harness` returns four
+  documents against FTS5's one, because FTS5's `AND` is per row and rows are
+  blocks. Getting the same from FTS5 means indexing whole documents and losing
+  block precision, or reimplementing the grouping above it.
+- **Structural breadcrumbs.** Every result names the section it came from —
+  "SKR-199 — export pipeline: `.folio` → Markdown / HTML / TXT / RTF". That
+  comes from the block model and the heading relation; a generic index over
+  block rows has nothing to build it from.
+- **Grouped results.** One entry per document with its best blocks beneath it,
+  rather than a flat list one long document can fill.
+
+So the differentiator is the **shape of the result**, not the order. That is a
+weaker claim than the plan made, and a real one.
+
+### Two defects real prose found that synthetic text could not
+
+- **Headings were weighted 4.0**, set when scoring was raw term frequency and a
+  short heading needed the lift. BM25 already rewards brevity through length
+  normalization, so the old weight double-counted: two-word headings scoring
+  2.7 outranked substantive paragraphs scoring 8.7. Retuned to 1.5.
+- **Document scoring ignored coverage.** A document whose best block answered
+  half the query outranked one whose best block answered all of it, which put
+  a heading called "Typographic identity" above the document actually about
+  block identity for the query `block identity`. The document score is now
+  weighted by its best block's coverage.
+
+### A gap this comparison exposed
+
+**Document titles and paths are not indexed.** A file named
+`navigation-panels-plan.md` should rank for `navigation` and currently cannot,
+because only block bodies are indexed. FTS5 got this for free while its `doc`
+column was searchable, and the results were visibly better for it. This is
+cheap to add and likely worth more than any weight tuning.
+
+## 6. Known-item retrieval
+
+Eight eyeballed queries cannot settle a ranking question. This is the
+objective version: for each of 74 documents, build a query from that
+document's own most distinctive terms and ask how far down the results the
+document comes back. The ground truth is free and unarguable — the query was
+made from this document, so this document is the answer. It is also the
+dominant way people search their own notes: not "show me everything about X"
+but "find the thing I know I wrote".
+
+Two query sets. **content** uses the highest tf-idf terms from the body,
+excluding the title. **title** uses the document's name. Every arm indexes the
+same blocks, title blocks included.
+
+### Where a document's evidence lives
+
+Skrive signals all off, sweeping only the mix between scoring blocks and
+scoring whole documents:
+
+| mix | content MRR | content @1 | title MRR | title @1 |
+|---|---|---|---|---|
+| blocks only | 0.9268 | 64/74 | 0.9865 | 72/74 |
+| 0.35 | 0.9369 | 65/74 | 0.9865 | 72/74 |
+| **0.65** | **0.9797** | **71/74** | **0.9865** | **72/74** |
+| 0.85 | 0.9865 | 72/74 | 0.9707 | 70/74 |
+| documents only | 1.0000 | 74/74 | 0.7854 | 49/74 |
+
+**Neither granularity wins both, and the failure modes are opposite.** A
+document's evidence for a content query is spread across its blocks, so any
+best-block-plus-tail aggregation throws most of it away — pure block scoring
+finds the right document 64 times in 74 where pure document scoring finds it
+every time. But a title is a short block of its own, and at document
+granularity it dissolves into the body: pure document scoring drops to 49/74
+on titles. Scoring at both granularities and mixing at 0.65 is within a point
+of the best of either, on both sets. That is now the default.
+
+### Against SQLite
+
+| set | ours | FTS5, block rows | FTS5, document rows |
+|---|---|---|---|
+| content | 0.9797 | 0.2635 | **1.0000** |
+| title | 0.9865 | 0.9865 | 0.7854 |
+
+The FTS5 block-row column is reported and should be discounted: its `AND` is
+per row, so a query drawn from terms scattered across a document matches
+nothing and it misses 53 of 74. That is a schema chosen badly, not FTS5
+ranking badly, and quoting it as a win would be quoting a handicap we picked.
+
+Against the schema a competent fallback would actually build, **SQLite matches
+or beats us on each set individually** — and, like us, no single SQLite schema
+wins both. Getting both from SQLite means maintaining two tables and merging
+them, which is the same architecture reached from the other direction.
+
+### The ablation, and it is not what the plan assumed
+
+Measured two ways, because one of them is misleading on its own.
+
+**Subtractive** — each signal removed from the full set:
+
+| set | all signals | no block kind | no heading | no recency | no backlink | none (BM25) |
+|---|---|---|---|---|---|---|
+| content | 0.9527 | 0.9662 | 0.9662 | 0.9595 | 0.9527 | **0.9797** |
+| title | 0.9797 | 0.9459 | 0.9797 | 0.9797 | 0.9865 | **0.9865** |
+
+**Additive** — each signal alone on top of BM25:
+
+| set | BM25 only | + block kind | + heading | + recency | + backlink |
+|---|---|---|---|---|---|
+| content | **0.9797** | 0.9662 | 0.9730 | 0.9730 | 0.9797 |
+| title | **0.9865** | 0.9865 | 0.9527 | 0.9865 | 0.9797 |
+
+**Not one signal improves either query set over plain BM25.** Every one is
+neutral or worse on both.
+
+The two tables together are the point. Subtractively, block-kind weighting
+looks essential on titles — removing it costs six documents. Additively it
+gains nothing at all. It was only ever compensating for damage the other
+signals were doing, and a subtractive ablation alone would have kept it on
+that evidence.
+
+**Decision: the signals are off by default** (2026-08-29). They are kept
+rather than deleted, and `Weights.with_signals` turns them on, for two
+reasons. Known-item retrieval is the task least able to show recency and
+backlink weight — one document is correct and there is nothing to
+disambiguate, which is exactly the case those signals exist for. And
+block-kind weighting still orders the blocks *within* a result, which this
+evaluation never scored.
+
+### It replicates on a second corpus
+
+`docs/`, 174 documents, a harder corpus of handoffs and references where many
+files resemble each other:
+
+| mix | content MRR | title MRR |
+|---|---|---|
+| blocks only | 0.6857 | **0.6386** |
+| 0.65 | 0.7014 | 0.6317 |
+| documents only | **0.7241** | 0.6136 |
+
+Same shape: documents win content, blocks win titles, the mix sits between.
+Absolute numbers are much lower — 100 of 173 at rank one against 71 of 74 —
+which is what a corpus of near-duplicate documents does to known-item search,
+and is itself worth knowing before promising anything about search quality.
+
+**The caveat, stated because it is real and not because it rescues the
+result.** Known-item retrieval is exactly the task least able to show recency
+and backlink weight in a good light: one document is correct, it usually has
+overwhelming term evidence, and there is nothing to disambiguate. Those
+signals are meant for the ambiguous case, where several documents are
+plausible and the recent or well-referenced one is likelier to be wanted —
+which needs a human judgement this harness cannot make. What can be said is
+that they do not help here, and measurably hurt.
+
 ## 4. What this does not measure
 
 - **Page cache is warm.** The corpus was just written, so these are
@@ -144,6 +376,9 @@ block and `.md` re-indexes its whole file.
   Skrive-native ranking is better than FTS5's is the argument in the engine
   plan's §7, and it is not a latency question.
 - **Single-threaded, single-writer**, as the design specifies.
+- **`vs_corpus_text` in the raw JSON compares against bytes read**, which for
+  the `.folio` tier is the JSON, not the prose. The prose comparisons in §1b
+  are computed against the Markdown tier's byte count.
 - **The incremental comparison is between encodings, not between engines.**
   §3b measures `.folio` against `.md` inside this index; it does not show that
   SQLite could not do the same given block-level rows.

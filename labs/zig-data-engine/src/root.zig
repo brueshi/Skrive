@@ -57,15 +57,36 @@ const index_mod = @import("index.zig");
 pub const Index = index_mod.Index;
 pub const TermId = index_mod.TermId;
 pub const BlockRef = index_mod.BlockRef;
+pub const DocRef = index_mod.DocRef;
 pub const Posting = index_mod.Posting;
 pub const BlockInfo = index_mod.BlockInfo;
+pub const Footprint = index_mod.Index.Footprint;
 
 const search_mod = @import("search.zig");
 pub const Hit = search_mod.Hit;
 pub const Query = search_mod.Query;
 pub const parseQuery = search_mod.parseQuery;
 pub const runQuery = search_mod.run;
+pub const runQueryWith = search_mod.runWith;
+pub const SearchOptions = search_mod.Options;
+pub const DocHit = search_mod.DocHit;
+pub const BlockHit = search_mod.BlockHit;
+pub const runDocuments = search_mod.runDocuments;
+pub const freeDocHits = search_mod.freeDocHits;
+pub const FactsResolver = search_mod.FactsResolver;
 
 const index_snapshot = @import("index_snapshot.zig");
 pub const saveIndex = index_snapshot.save;
 pub const loadIndex = index_snapshot.load;
+
+const rank_mod = @import("rank.zig");
+pub const Weights = rank_mod.Weights;
+pub const RankContext = rank_mod.Context;
+pub const DocFacts = rank_mod.DocFacts;
+pub const Boost = rank_mod.Boost;
+pub const boostFor = rank_mod.boostFor;
+
+pub const vault = @import("vault.zig");
+pub const loadVault = vault.load;
+pub const DocInfo = index_mod.DocInfo;
+pub const no_heading = index_mod.no_heading;

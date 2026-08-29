@@ -69,6 +69,18 @@ pub fn scan(gpa: std.mem.Allocator, source: []const u8) ![]Scanned {
             continue;
         }
 
+        // An ATX heading is exactly one line. It closes whatever preceded it
+        // and does not absorb what follows, blank line or not — writers
+        // routinely put a heading directly above its first paragraph, and
+        // gluing them together makes the heading's text the paragraph's text
+        // and poisons both the index and the breadcrumb.
+        if (isAtxHeading(trimmed)) {
+            try push(gpa, &out, source, block_start, block_end);
+            try push(gpa, &out, source, line_start, line_start + line.len);
+            block_start = null;
+            continue;
+        }
+
         if (block_start == null) block_start = line_start;
         block_end = line_start + line.len;
     }
@@ -91,16 +103,18 @@ fn push(
     try out.append(gpa, .{ .kind = kindOf(text), .text = text });
 }
 
+/// One to six hashes followed by a space. `#notatag` is prose.
+fn isAtxHeading(trimmed: []const u8) bool {
+    if (trimmed.len == 0 or trimmed[0] != '#') return false;
+    var i: usize = 0;
+    while (i < trimmed.len and trimmed[i] == '#') i += 1;
+    return i <= 6 and i < trimmed.len and trimmed[i] == ' ';
+}
+
 fn kindOf(text: []const u8) BlockKind {
     const trimmed = std.mem.trimStart(u8, text, " \t");
     if (std.mem.startsWith(u8, trimmed, "```")) return .code;
-    if (std.mem.startsWith(u8, trimmed, "#")) {
-        // ATX heading only when the hashes are followed by a space.
-        var i: usize = 0;
-        while (i < trimmed.len and trimmed[i] == '#') i += 1;
-        if (i <= 6 and i < trimmed.len and trimmed[i] == ' ') return .heading;
-        return .paragraph;
-    }
+    if (trimmed[0] == '#') return if (isAtxHeading(trimmed)) .heading else .paragraph;
     if (std.mem.startsWith(u8, trimmed, ">")) return .quote;
     if (std.mem.startsWith(u8, trimmed, "|")) return .table_cell;
     if (std.mem.startsWith(u8, trimmed, "[^")) return .footnote;

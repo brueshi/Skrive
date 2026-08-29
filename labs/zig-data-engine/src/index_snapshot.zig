@@ -46,7 +46,7 @@ const TermId = index_mod.TermId;
 const BlockRef = index_mod.BlockRef;
 
 pub const magic = "SKIDX001".*;
-pub const version: u32 = 3;
+pub const version: u32 = 6;
 
 /// Guards the raw-copy sections below. The snapshot stores postings and
 /// per-block term lists as native-endian machine words and restores them with
@@ -119,8 +119,18 @@ pub fn save(gpa: std.mem.Allocator, idx: *const Index) ![]u8 {
     try w.u32v(@intCast(idx.blocks.items.len));
     for (idx.blocks.items, idx.block_live.items) |info, live| {
         try w.u32v(info.doc);
+        try w.u32v(info.length);
+        try w.u32v(info.heading);
         try body.append(gpa, @intFromEnum(info.kind));
         try body.append(gpa, @intFromBool(live));
+    }
+
+    try w.u32v(@intCast(idx.docs.items.len));
+    for (idx.docs.items) |d| {
+        try w.bytes(d.path);
+        try w.u32v(@bitCast(@as(u32, @truncate(@as(u64, @bitCast(d.modified_millis)) >> 32))));
+        try w.u32v(@truncate(@as(u64, @bitCast(d.modified_millis))));
+        try w.u32v(d.inbound);
     }
 
     for (idx.postings.items) |list| {
@@ -131,6 +141,13 @@ pub fn save(gpa: std.mem.Allocator, idx: *const Index) ![]u8 {
     for (idx.block_terms.items) |bt| {
         try w.u32v(@intCast(bt.len));
         try body.appendSlice(gpa, std.mem.sliceAsBytes(bt));
+    }
+
+    try w.u32v(idx.heading_labels.count());
+    var labels = idx.heading_labels.iterator();
+    while (labels.next()) |entry| {
+        try w.u32v(entry.key_ptr.*);
+        try w.bytes(entry.value_ptr.*);
     }
 
     try w.u32v(@intCast(idx.backlinks.count()));
@@ -192,14 +209,42 @@ pub fn load(gpa: std.mem.Allocator, image: []const u8) LoadError!Index {
     try idx.block_terms.ensureTotalCapacity(gpa, block_count);
     for (0..block_count) |_| {
         const doc = try r.u32v();
+        const length = try r.u32v();
+        const heading = try r.u32v();
         if (r.at + 2 > r.src.len) return error.Damaged;
         const kind_tag = r.src[r.at];
         const live = r.src[r.at + 1] != 0;
         r.at += 2;
         const kind = std.enums.fromInt(tokenize.BlockKind, kind_tag) orelse return error.Damaged;
-        idx.blocks.appendAssumeCapacity(.{ .doc = doc, .kind = kind });
+        idx.blocks.appendAssumeCapacity(.{
+            .doc = doc,
+            .kind = kind,
+            .heading = heading,
+            .length = length,
+        });
         idx.block_live.appendAssumeCapacity(live);
         idx.block_terms.appendAssumeCapacity(&.{});
+        if (live) {
+            idx.live_blocks += 1;
+            idx.total_tokens += length;
+        }
+    }
+
+    const doc_count = try r.u32v();
+    try idx.docs.ensureTotalCapacity(gpa, doc_count);
+    for (0..doc_count) |_| {
+        const path = try gpa.dupe(u8, try r.bytes());
+        errdefer gpa.free(path);
+        const hi: u64 = try r.u32v();
+        const lo: u64 = try r.u32v();
+        const inbound = try r.u32v();
+        const ref: index_mod.DocRef = @intCast(idx.docs.items.len);
+        idx.docs.appendAssumeCapacity(.{
+            .path = path,
+            .modified_millis = @bitCast((hi << 32) | lo),
+            .inbound = inbound,
+        });
+        try idx.by_path.put(gpa, path, ref);
     }
 
     for (0..term_count) |id| {
@@ -214,6 +259,14 @@ pub fn load(gpa: std.mem.Allocator, image: []const u8) LoadError!Index {
         const slice = try gpa.alloc(index_mod.TermPost, n);
         try r.copyInto(std.mem.sliceAsBytes(slice));
         idx.block_terms.items[b] = slice;
+    }
+
+    const label_count = try r.u32v();
+    try idx.heading_labels.ensureTotalCapacity(gpa, label_count);
+    for (0..label_count) |_| {
+        const ref = try r.u32v();
+        const text = try gpa.dupe(u8, try r.bytes());
+        idx.heading_labels.putAssumeCapacity(ref, text);
     }
 
     const backlink_count = try r.u32v();

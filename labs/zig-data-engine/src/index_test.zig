@@ -19,6 +19,7 @@ fn tokens(gpa: std.mem.Allocator, text: []const u8, kind: root.BlockKind) ![]Tok
     return out.toOwnedSlice(gpa);
 }
 
+/// Blocks matching a query, in rank order.
 fn searchBlocks(
     idx: *const root.Index,
     gpa: std.mem.Allocator,
@@ -33,6 +34,18 @@ fn searchBlocks(
 
     const out = try gpa.alloc(root.BlockRef, hits.len);
     for (hits, out) |h, *slot| slot.* = h.block;
+    return out;
+}
+
+/// The same, sorted by block. For assertions about *which* blocks match,
+/// which must not be coupled to how they happen to rank.
+fn matchingBlocks(
+    idx: *const root.Index,
+    gpa: std.mem.Allocator,
+    text: []const u8,
+) ![]root.BlockRef {
+    const out = try searchBlocks(idx, gpa, text);
+    std.mem.sort(root.BlockRef, out, {}, std.sort.asc(root.BlockRef));
     return out;
 }
 
@@ -51,15 +64,15 @@ test "a conjunction returns only blocks holding every term" {
     try idx.putBlock(1, .{ .doc = 0, .kind = .paragraph }, try tokens(arena, "alpha delta", .paragraph));
     try idx.putBlock(2, .{ .doc = 1, .kind = .paragraph }, try tokens(arena, "beta gamma", .paragraph));
 
-    const both = try searchBlocks(&idx, gpa, "alpha beta ");
+    const both = try matchingBlocks(&idx, gpa, "alpha beta ");
     defer gpa.free(both);
     try std.testing.expectEqualSlices(root.BlockRef, &.{0}, both);
 
-    const one = try searchBlocks(&idx, gpa, "gamma ");
+    const one = try matchingBlocks(&idx, gpa, "gamma ");
     defer gpa.free(one);
     try std.testing.expectEqualSlices(root.BlockRef, &.{ 0, 2 }, one);
 
-    const none = try searchBlocks(&idx, gpa, "absent ");
+    const none = try matchingBlocks(&idx, gpa, "absent ");
     defer gpa.free(none);
     try std.testing.expectEqual(@as(usize, 0), none.len);
 }
@@ -79,16 +92,16 @@ test "the trailing token matches as a prefix" {
     try idx.putBlock(3, .{ .doc = 0, .kind = .paragraph }, try tokens(arena, "unrelated", .paragraph));
 
     // Mid-word: still being typed, so it matches by prefix.
-    const typing = try searchBlocks(&idx, gpa, "reconcil");
+    const typing = try matchingBlocks(&idx, gpa, "reconcil");
     defer gpa.free(typing);
     try std.testing.expectEqualSlices(root.BlockRef, &.{ 0, 1 }, typing);
 
     // Finished: an exact term, so the longer word no longer matches.
-    const finished = try searchBlocks(&idx, gpa, "reconcile ");
+    const finished = try matchingBlocks(&idx, gpa, "reconcile ");
     defer gpa.free(finished);
     try std.testing.expectEqualSlices(root.BlockRef, &.{0}, finished);
 
-    const broad = try searchBlocks(&idx, gpa, "rec");
+    const broad = try matchingBlocks(&idx, gpa, "rec");
     defer gpa.free(broad);
     try std.testing.expectEqual(@as(usize, 3), broad.len);
 }
@@ -137,9 +150,18 @@ test "headings outrank prose for the same term" {
     try idx.putBlock(0, .{ .doc = 0, .kind = .paragraph }, try tokens(arena, "durability", .paragraph));
     try idx.putBlock(1, .{ .doc = 0, .kind = .heading }, try tokens(arena, "durability", .heading));
 
-    const hits = try searchBlocks(&idx, gpa, "durability ");
+    // Block-kind weighting is off by default, so this asks for it: the test
+    // is about the signal working when enabled, not about the default.
+    var query_arena = std.heap.ArenaAllocator.init(gpa);
+    defer query_arena.deinit();
+    const query = try root.parseQuery(query_arena.allocator(), "durability ");
+    const hits = try root.runQueryWith(&idx, gpa, query, .{
+        .weights = root.Weights.with_signals,
+    });
     defer gpa.free(hits);
-    try std.testing.expectEqualSlices(root.BlockRef, &.{ 1, 0 }, hits);
+
+    try std.testing.expectEqual(@as(root.BlockRef, 1), hits[0].block);
+    try std.testing.expectEqual(@as(root.BlockRef, 0), hits[1].block);
 }
 
 test "backlinks resolve to their source blocks" {

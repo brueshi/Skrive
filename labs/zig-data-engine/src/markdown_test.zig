@@ -62,6 +62,26 @@ test "a fenced block keeps its blank lines instead of splitting on them" {
     try std.testing.expect(std.mem.indexOf(u8, blocks[1].text, "const b = 2;") != null);
 }
 
+test "a heading does not absorb the paragraph beneath it" {
+    const gpa = std.testing.allocator;
+    // No blank line between them, which is how people actually write.
+    const source =
+        \\## The flush-ack fix
+        \\The host was waiting on an acknowledgement that never came.
+        \\
+        \\Separate paragraph.
+        \\
+    ;
+    const blocks = try markdown.scan(gpa, source);
+    defer gpa.free(blocks);
+
+    try std.testing.expectEqual(@as(usize, 3), blocks.len);
+    try std.testing.expectEqual(root.BlockKind.heading, blocks[0].kind);
+    try std.testing.expectEqualStrings("## The flush-ack fix", std.mem.trimEnd(u8, blocks[0].text, "\n"));
+    try std.testing.expectEqual(root.BlockKind.paragraph, blocks[1].kind);
+    try std.testing.expect(std.mem.startsWith(u8, blocks[1].text, "The host was waiting"));
+}
+
 test "a hash without a space is prose, not a heading" {
     const gpa = std.testing.allocator;
     const blocks = try markdown.scan(gpa, "#notaheading is a tag\n");
