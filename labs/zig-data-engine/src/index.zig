@@ -111,6 +111,12 @@ pub const Index = struct {
     docs: std.ArrayList(DocInfo) = .empty,
     by_path: std.StringHashMapUnmanaged(DocRef) = .empty,
 
+    /// Original text of heading blocks, for breadcrumbs. Only headings are
+    /// kept: the index otherwise stores terms rather than text, and a
+    /// breadcrumb rebuilt from lowercased tokens reads like a ransom note.
+    /// Headings are few and short, so this costs almost nothing.
+    heading_labels: std.AutoHashMapUnmanaged(BlockRef, []const u8) = .empty,
+
     pub fn init(gpa: std.mem.Allocator) Index {
         return .{ .gpa = gpa };
     }
@@ -140,6 +146,10 @@ pub const Index = struct {
         for (self.docs.items) |d| self.gpa.free(d.path);
         self.docs.deinit(self.gpa);
         self.by_path.deinit(self.gpa);
+
+        var labels = self.heading_labels.valueIterator();
+        while (labels.next()) |v| self.gpa.free(v.*);
+        self.heading_labels.deinit(self.gpa);
 
         self.* = undefined;
     }
@@ -407,6 +417,25 @@ pub const Index = struct {
         try self.docs.append(self.gpa, .{ .path = owned, .modified_millis = modified_millis });
         try self.by_path.put(self.gpa, owned, ref);
         return ref;
+    }
+
+    /// Record a heading's text as authored, trimmed of its leading hashes.
+    pub fn setHeadingLabel(self: *Index, ref: BlockRef, text: []const u8) !void {
+        var label = std.mem.trim(u8, text, " \t\r\n");
+        label = std.mem.trimStart(u8, label, "#");
+        label = std.mem.trim(u8, label, " \t");
+
+        const gop = try self.heading_labels.getOrPut(self.gpa, ref);
+        if (gop.found_existing) self.gpa.free(gop.value_ptr.*);
+        gop.value_ptr.* = try self.gpa.dupe(u8, label);
+    }
+
+    /// The heading a block sits under, as authored, or null.
+    pub fn breadcrumb(self: *const Index, block: BlockRef) ?[]const u8 {
+        const info = self.blocks.items[block];
+        const heading = if (info.kind == .heading) block else info.heading;
+        if (heading == no_heading) return null;
+        return self.heading_labels.get(heading);
     }
 
     pub fn document(self: *const Index, ref: DocRef) DocInfo {

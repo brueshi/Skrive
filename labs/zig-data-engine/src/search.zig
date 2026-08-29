@@ -247,3 +247,183 @@ fn unionPostings(idx: *const Index, gpa: std.mem.Allocator, terms: []const TermI
     }.call);
     return out;
 }
+
+// ---- document-level results ------------------------------------------------
+
+pub const BlockHit = struct {
+    block: BlockRef,
+    score: f32,
+    base: f32,
+    /// How many of the query's terms this block itself carries.
+    matched_terms: u32,
+};
+
+pub const DocHit = struct {
+    doc: index_mod.DocRef,
+    score: f32,
+    /// Best first. Owned.
+    blocks: []BlockHit,
+};
+
+pub fn freeDocHits(gpa: std.mem.Allocator, hits: []DocHit) void {
+    for (hits) |h| gpa.free(h.blocks);
+    gpa.free(hits);
+}
+
+/// How much a document's second and subsequent matching blocks add.
+///
+/// Small, and **decaying**. A document that mentions the topic once in
+/// exactly the right place should beat one that mentions it glancingly in
+/// nine, so the best block has to dominate; but a document genuinely *about*
+/// the topic should still edge out one that merely name-drops it, which is
+/// what the tail contributes. Summing every block instead would rank by
+/// length, which is the failure this whole aggregation exists to avoid.
+///
+/// A flat weight per extra block did not achieve that: four extras at 0.15
+/// each add 60%, enough for five mediocre matches to beat one excellent one.
+/// Decaying geometrically caps the tail near a third of the best block, so
+/// the second match matters and the fifth barely does.
+const secondary_weight: f32 = 0.15;
+const secondary_decay: f32 = 0.6;
+const secondary_blocks: usize = 4;
+
+/// The maximum number of query terms coverage can track, bounded by the bitset
+/// used to record which terms a document has seen.
+pub const max_query_terms = 64;
+
+/// Search, returning documents with their matching blocks rather than a flat
+/// list of blocks.
+///
+/// **Terms are satisfied across a document, not within a block.** A flat
+/// block search is a strict conjunction, so "durability harness" only matches
+/// where both words land in the same paragraph — which on real prose returns
+/// almost nothing, because a writer introduces a subject in one paragraph and
+/// develops it in the next. Requiring every term somewhere in the document,
+/// and then ranking blocks within it by how much of the query they carry,
+/// matches how documents are actually written.
+///
+/// It also fixes crowding: one long relevant document previously filled every
+/// slot in the results.
+pub fn runDocuments(
+    idx: *const Index,
+    gpa: std.mem.Allocator,
+    query: Query,
+    options: Options,
+) ![]DocHit {
+    const ctx = rank.Context.init(idx, options.weights, options.now_millis);
+
+    var terms: std.ArrayList(TermId) = .empty;
+    defer terms.deinit(gpa);
+    var owned_union: ?[]Posting = null;
+    defer if (owned_union) |u| gpa.free(u);
+
+    var lists: std.ArrayList([]const Posting) = .empty;
+    defer lists.deinit(gpa);
+
+    for (query.terms) |term| {
+        const id = idx.lookup(term) orelse return &.{};
+        try terms.append(gpa, id);
+        try lists.append(gpa, idx.postingsFor(id));
+    }
+    if (query.prefix) |prefix| {
+        const expansion = try idx.prefixTerms(gpa, prefix);
+        defer gpa.free(expansion);
+        if (expansion.len == 0) return &.{};
+        owned_union = try unionPostings(idx, gpa, expansion);
+        var rarest = expansion[0];
+        for (expansion) |candidate| {
+            if (idx.documentFrequency(candidate) < idx.documentFrequency(rarest)) rarest = candidate;
+        }
+        try terms.append(gpa, rarest);
+        try lists.append(gpa, owned_union.?);
+    }
+
+    if (lists.items.len == 0 or lists.items.len > max_query_terms) return &.{};
+    const all_terms: u64 = if (lists.items.len == 64)
+        std.math.maxInt(u64)
+    else
+        (@as(u64, 1) << @intCast(lists.items.len)) - 1;
+
+    // Accumulate per block: the BM25 sum so far and which terms it carries.
+    const Partial = struct { base: f32 = 0, mask: u64 = 0 };
+    var partials: std.AutoArrayHashMapUnmanaged(BlockRef, Partial) = .empty;
+    defer partials.deinit(gpa);
+
+    for (lists.items, 0..) |list, term_index| {
+        for (list) |posting| {
+            const gop = try partials.getOrPut(gpa, posting.block);
+            if (!gop.found_existing) gop.value_ptr.* = .{};
+            gop.value_ptr.base += ctx.termScore(terms.items[term_index], posting.block, posting.freq);
+            gop.value_ptr.mask |= @as(u64, 1) << @intCast(term_index);
+        }
+    }
+
+    // Fold blocks into their documents, unioning coverage as we go.
+    const DocAccum = struct { mask: u64 = 0, blocks: std.ArrayList(BlockHit) = .empty };
+    var docs: std.AutoArrayHashMapUnmanaged(index_mod.DocRef, DocAccum) = .empty;
+    defer {
+        for (docs.values()) |*d| d.blocks.deinit(gpa);
+        docs.deinit(gpa);
+    }
+
+    for (partials.keys(), partials.values()) |block, partial| {
+        const info = idx.blocks.items[block];
+        const facts = if (options.facts) |r| r.get(block) else defaultFacts(idx, block);
+        const boost = rank.boostFor(ctx, block, facts, headingMatches(idx, terms.items, block));
+
+        const gop = try docs.getOrPut(gpa, info.doc);
+        if (!gop.found_existing) gop.value_ptr.* = .{};
+        gop.value_ptr.mask |= partial.mask;
+        try gop.value_ptr.blocks.append(gpa, .{
+            .block = block,
+            .score = partial.base * boost.product(),
+            .base = partial.base,
+            .matched_terms = @popCount(partial.mask),
+        });
+    }
+
+    var hits: std.ArrayList(DocHit) = .empty;
+    errdefer {
+        for (hits.items) |h| gpa.free(h.blocks);
+        hits.deinit(gpa);
+    }
+
+    for (docs.keys(), docs.values()) |doc, *accum| {
+        if (accum.mask != all_terms) continue;
+
+        std.mem.sort(BlockHit, accum.blocks.items, {}, struct {
+            fn call(_: void, a: BlockHit, b: BlockHit) bool {
+                if (a.matched_terms != b.matched_terms) return a.matched_terms > b.matched_terms;
+                if (a.score != b.score) return a.score > b.score;
+                return a.block < b.block;
+            }
+        }.call);
+
+        var score = accum.blocks.items[0].score;
+        const tail = @min(accum.blocks.items.len, secondary_blocks + 1);
+        var factor = secondary_weight;
+        for (accum.blocks.items[1..tail]) |b| {
+            score += factor * b.score;
+            factor *= secondary_decay;
+        }
+
+        try hits.append(gpa, .{
+            .doc = doc,
+            .score = score,
+            .blocks = try gpa.dupe(BlockHit, accum.blocks.items),
+        });
+    }
+
+    std.mem.sort(DocHit, hits.items, {}, struct {
+        fn call(_: void, a: DocHit, b: DocHit) bool {
+            if (a.score != b.score) return a.score > b.score;
+            return a.doc < b.doc;
+        }
+    }.call);
+
+    if (options.limit != 0 and hits.items.len > options.limit) {
+        for (hits.items[options.limit..]) |h| gpa.free(h.blocks);
+        hits.shrinkRetainingCapacity(options.limit);
+    }
+    return hits.toOwnedSlice(gpa);
+}

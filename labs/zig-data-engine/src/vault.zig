@@ -85,7 +85,10 @@ pub fn load(
             const ref = next_block;
             next_block += 1;
 
-            if (scanned.kind == .heading) section = ref;
+            if (scanned.kind == .heading) {
+                section = ref;
+                try idx.setHeadingLabel(ref, scanned.text);
+            }
 
             try idx.putBlock(ref, .{
                 .doc = doc,

@@ -106,6 +106,7 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("## `{s}`\n\n", .{text});
         try report(gpa, io, &idx, text, "BM25 only", root.Weights.bm25_only, now, top);
         try report(gpa, io, &idx, text, "BM25 + Skrive signals", .{}, now, top);
+        try reportGrouped(gpa, &idx, text, .{}, now, top);
         std.debug.print("\n", .{});
     }
 
@@ -160,6 +161,51 @@ fn report(
         std.debug.print("{d}. `{s}` — {t}, score {d:.3} (base {d:.3}), {d} inbound\n", .{
             n, doc.path, info.kind, hit.score, hit.base, doc.inbound,
         });
+    }
+    std.debug.print("\n", .{});
+}
+
+/// The grouped form: documents, each showing its best matching blocks with a
+/// heading breadcrumb, which is what the search plan actually specifies.
+fn reportGrouped(
+    gpa: std.mem.Allocator,
+    idx: *const root.Index,
+    text: []const u8,
+    weights: root.Weights,
+    now: i64,
+    top: usize,
+) !void {
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    const query = try root.parseQuery(a, try std.fmt.allocPrint(a, "{s} ", .{text}));
+    const hits = try root.runDocuments(idx, gpa, query, .{
+        .weights = weights,
+        .now_millis = now,
+        .limit = top,
+    });
+    defer root.freeDocHits(gpa, hits);
+
+    std.debug.print("**Grouped by document** — {d} documents\n\n", .{hits.len});
+    if (hits.len == 0) {
+        std.debug.print("_no results_\n\n", .{});
+        return;
+    }
+
+    for (hits, 1..) |hit, n| {
+        const doc = idx.docs.items[hit.doc];
+        std.debug.print("{d}. `{s}` — score {d:.3}, {d} matching blocks, {d} inbound\n", .{
+            n, doc.path, hit.score, hit.blocks.len, doc.inbound,
+        });
+        const show = @min(hit.blocks.len, 3);
+        for (hit.blocks[0..show]) |b| {
+            const info = idx.blocks.items[b.block];
+            const crumb = idx.breadcrumb(b.block) orelse "—";
+            std.debug.print("     › {s} · {t}, {d}/{d} terms, {d:.3}\n", .{
+                crumb, info.kind, b.matched_terms, query.terms.len + @intFromBool(query.prefix != null), b.score,
+            });
+        }
     }
     std.debug.print("\n", .{});
 }
