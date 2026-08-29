@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "docId": "01kxdzpqjvrzggzm9z0133rcxb",
+  "docMeta": {
+    "title": null,
+    "createdAt": "2026-07-13T14:57:08.190Z"
+  },
+  "blocks": [
+    {
+      "id": "xa9j9e7781",
+      "type": "heading",
+      "level": 2,
+      "inline": [
+        {
+          "kind": "text",
+          "text": "Performance and cost-effectiveness",
+          "marks": {}
+        }
+      ]
+    },
+    {
+      "id": "oqsbcxex9a",
+      "type": "paragraph",
+      "inline": [
+        {
+          "kind": "text",
+          "text": "that is something ",
+          "marks": {}
+        }
+      ]
+    },
+    {
+      "id": "7z7seiwkcd",
+      "type": "paragraph",
+      "inline": [
+        {
+          "kind": "text",
+          "text": "The charts in this section show how performance changes according to the model’s effort setting, which customers can use to optimize for intelligence or conserve tokens for faster and cheaper results. Opus 5 excels on valuable software ",
+          "marks": {
+            "strong": true
+          }
+        },
+        {
+          "kind": "text",
+          "text": "engineering",
+          "marks": {
+            "em": true,
+            "strong": true
+          }
+        },
+        {
+          "kind": "text",
+          "text": " tasks. For example, on Frontier-Bench v0.1, Opus 5 surpasses all other models, and more than doubles Opus 4.8’s performance at a lower cost per task. On CursorBench 3.2, at max effort, the model performs within 0.5% of Fable 5’s",
+          "marks": {
+            "strong": true
+          }
+        },
+        {
+          "kind": "footnote_ref",
+          "label": "1",
+          "marks": {}
+        },
+        {
+          "kind": "text",
+          "text": " peak score, but at half the cost per task; it also achieves greater performance at a given cost than all other models on high, xhigh, and max effort.",
+          "marks": {
+            "strong": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "qg7h3r2ntg",
+      "type": "paragraph",
+      "inline": [
+        {
+          "kind": "text",
+          "text": "Claude Opus 5 provides greatly improved performance for the same cost as its predecessor, Opus 4.8. ",
+          "marks": {}
+        }
+      ]
+    },
+    {
+      "id": "yjnbq552cd",
+      "type": "paragraph",
+      "inline": [
+        {
+          "kind": "text",
+          "text": "Here are som misspelled words ",
+          "marks": {}
+        }
+      ]
+    },
+    {
+      "id": "kw6sc0auv8",
+      "type": "paragraph",
+      "inline": [
+        {
+          "kind": "text",
+          "text": "Actually that is the wrong answer ",
+          "marks": {}
+        }
+      ]
+    },
+    {
+      "id": "snlb29sp94",
+      "type": "footnote_definition",
+      "label": "1",
+      "children": [
+        {
+          "id": "l0v58jiypb",
+          "type": "paragraph",
+          "inline": [
+            {
+              "kind": "text",
+              "text": "Fable 5 was briefly suspended by the US government due to supply chain concerns",
+              "marks": {}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "euccochrq6",
+      "type": "table",
+      "align": [
+        null,
+        null
+      ],
+      "rows": [
+        [
+          [
+            {
+              "kind": "text",
+              "text": "test",
+              "marks": {}
+            }
+          ],
+          [
+            {
+              "kind": "text",
+              "text": "test",
+              "marks": {}
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "kind": "text",
+              "text": "test1",
+              "marks": {}
+            }
+          ],
+          [
+            {
+              "kind": "text",
+              "text": "test2",
+              "marks": {}
+            }
+          ]
+        ]
+      ]
+    }
+  ]
+}

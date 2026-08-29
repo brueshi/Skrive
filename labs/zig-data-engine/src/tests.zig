@@ -6,4 +6,5 @@
 test {
     _ = @import("seam_test.zig");
     _ = @import("log_test.zig");
+    _ = @import("folio_test.zig");
 }

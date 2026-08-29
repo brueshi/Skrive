@@ -23,6 +23,23 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    // Conformance fixtures live outside `src/`, so they arrive as anonymous
+    // imports. They are canonical `.folio` bytes -- see fixtures/README.md --
+    // and the round-trip tests assert the writer reproduces them exactly.
+    const fixtures = [_][]const u8{
+        "app-written.folio",
+        "minimal.folio",
+        "kitchen-sink.folio",
+        "table-widths.folio",
+        "meta-extra.folio",
+        "escapes.folio",
+    };
+    for (fixtures) |name| {
+        test_module.addAnonymousImport(name, .{
+            .root_source_file = b.path(b.fmt("fixtures/{s}", .{name})),
+        });
+    }
+
     const unit_tests = b.addTest(.{ .root_module = test_module });
     const run_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run the zig-data-engine lab unit tests");

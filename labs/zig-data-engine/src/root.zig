@@ -41,3 +41,10 @@ pub const decodeSnapshot = snapshot.decode;
 const recover_mod = @import("recover.zig");
 pub const Recovery = recover_mod.Recovery;
 pub const recover = recover_mod.recover;
+
+pub const folio = @import("folio.zig");
+pub const parseFolio = @import("folio_parse.zig").parseDocument;
+pub const parseFolioBlock = @import("folio_parse.zig").parseBlock;
+pub const FolioParseError = @import("folio_parse.zig").ParseError;
+pub const writeFolio = @import("folio_write.zig").writeDocument;
+pub const writeFolioBlock = @import("folio_write.zig").writeBlock;

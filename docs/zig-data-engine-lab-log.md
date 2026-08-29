@@ -219,3 +219,66 @@ cache re-run green.
 **Next.** Stage 3 — the arena and the block encoding. `PutBlock` payloads stop
 being opaque and become encoded `.folio` blocks, conformance-checked against
 the published schema through the existing parity-harness pattern.
+
+---
+
+## Stage 3 — the arena and the block encoding (2026-08-29)
+
+**Goal.** Stop `PutBlock` payloads being opaque bytes. Decode `.folio` into an
+arena-allocated typed tree, write it back, and prove the bytes match what the
+app writes — the check that keeps "one encoding, three consumers" true rather
+than merely asserted.
+
+**Result: green.** 34/34 tests. Every fixture parses and re-writes
+byte-for-byte, including one the app itself produced.
+
+**What landed.** `src/folio.zig` (the typed model), `src/folio_parse.zig` (a
+tolerant reader), `src/folio_write.zig` (the canonical writer),
+`src/folio_test.zig`, and a six-file fixture corpus with its provenance
+recorded in `fixtures/README.md`.
+
+**The decision that mattered: numbers are carried as their source token.**
+The canonical form is `JSON.stringify(doc, null, 2) + "\n"`, so a file's
+numbers were formatted by JavaScript. Reproducing those bytes from a parsed
+`f64` would mean reimplementing ECMAScript number formatting in Zig and hoping
+the two agree forever — a silent-drift machine of exactly the kind the "widen
+together" rule exists to prevent. `std.json`'s `parse_numbers = false` yields
+the verbatim token instead, so byte-identity is structural rather than a
+coincidence, and the engine parses a number only where it wants one. This also
+made the float problem below a non-issue rather than a research project.
+
+**Two drifts found between the shipping code and the public spec.** Both
+matter because the spec is the portability contract, not just documentation:
+
+- **`table.widths` ships but is undocumented.** `app/src/lib/folio/types.ts:116`
+  declares it and `serialize.ts:95` emits it; `docs/folio-schema-v1.md` §5
+  never mentions it. A field that reaches real files is absent from the
+  documented schema.
+- **§9's "no floats in v1" is false.** `normalizeWidths`
+  (`app/src/lib/blocksurface/table-chrome.ts:292`) rounds column weights to
+  four decimal places, so floats are in `.folio` files today.
+
+The lab implements the real behavior and the spec should be amended. Filed for
+stage 7 rather than fixed mid-stage.
+
+**Why the fixture corpus is what it is.** A self-consistent encoder
+round-trips its own output forever while disagreeing with the app about
+something small — whether `/` is escaped, say. Only a fixture the app wrote
+catches that, so `app-written.folio` is a verbatim copy of the repository's
+`testfolio.folio`. It arrived **already canonical**, which independently
+confirms the canonical rule describes the real output format. The other five
+fixtures cover what it does not: every block type, every inline kind, every
+mark, links with and without titles, empty containers, ragged and empty
+tables, fractional widths, preserved `docMeta` extras, and the full escape
+range including control characters, CJK and emoji.
+
+**Verification.** Beyond the green run, the writer was mutated to escape `/`
+as `\/` — legal JSON that `JSON.stringify` never emits. The round-trip test
+failed and the **idempotence test still passed**, which is the point in
+miniature: self-consistency would have shipped the divergence, and only the
+app-written fixture caught it.
+
+**Next.** Stage 4 — a corpus at design scale. The largest fixture in the
+repository is `docs/fixtures/perf-100` at 404K across 100 files, and there is
+exactly one `.folio`; the plan's premise is tens of megabytes and tens of
+thousands of blocks. Nothing can be measured honestly until that gap closes.

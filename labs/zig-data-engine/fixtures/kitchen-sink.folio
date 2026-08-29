@@ -1,0 +1,279 @@
+{
+  "schemaVersion": 1,
+  "docId": "01j9zc4t8b2n5q0w7e3r6y9u1d",
+  "docMeta": {
+    "title": "Kitchen sink",
+    "createdAt": "2026-07-02T18:05:00.000Z"
+  },
+  "blocks": [
+    {
+      "id": "h1a2b3c4d5",
+      "type": "heading",
+      "level": 1,
+      "inline": [
+        {
+          "kind": "text",
+          "text": "Title",
+          "marks": {}
+        }
+      ]
+    },
+    {
+      "id": "p1a2b3c4d5",
+      "type": "paragraph",
+      "inline": [
+        {
+          "kind": "text",
+          "text": "A ",
+          "marks": {}
+        },
+        {
+          "kind": "text",
+          "text": "bold",
+          "marks": {
+            "strong": true
+          }
+        },
+        {
+          "kind": "text",
+          "text": "all",
+          "marks": {
+            "em": true,
+            "strong": true,
+            "code": true,
+            "strikethrough": true,
+            "underline": true
+          }
+        },
+        {
+          "kind": "text",
+          "text": "linked",
+          "marks": {
+            "link": {
+              "href": "https://skrive.md",
+              "title": null
+            }
+          }
+        },
+        {
+          "kind": "text",
+          "text": "titled",
+          "marks": {
+            "em": true,
+            "link": {
+              "href": "https://skrive.md",
+              "title": "A title"
+            }
+          }
+        },
+        {
+          "kind": "break",
+          "marks": {}
+        },
+        {
+          "kind": "image",
+          "url": "assets/diagram.png",
+          "alt": "A diagram",
+          "title": null,
+          "marks": {}
+        },
+        {
+          "kind": "image",
+          "url": "assets/b.png",
+          "alt": "",
+          "title": "Cap",
+          "marks": {
+            "em": true
+          }
+        },
+        {
+          "kind": "tag",
+          "name": "project/skrive",
+          "marks": {}
+        },
+        {
+          "kind": "footnote_ref",
+          "label": "1",
+          "marks": {}
+        }
+      ]
+    },
+    {
+      "id": "c1a2b3c4d5",
+      "type": "code_block",
+      "lang": "ts",
+      "meta": null,
+      "text": "const x = 1\nconst y = 2\n"
+    },
+    {
+      "id": "c2a2b3c4d5",
+      "type": "code_block",
+      "lang": "",
+      "meta": "extra meta",
+      "text": ""
+    },
+    {
+      "id": "r1a2b3c4d5",
+      "type": "horizontal_rule"
+    },
+    {
+      "id": "q1a2b3c4d5",
+      "type": "blockquote",
+      "children": [
+        {
+          "id": "p4a2b3c4d5",
+          "type": "paragraph",
+          "inline": [
+            {
+              "kind": "text",
+              "text": "quoted",
+              "marks": {
+                "em": true
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "b1a2b3c4d5",
+      "type": "bullet_list",
+      "spread": false,
+      "items": [
+        {
+          "spread": false,
+          "checked": true,
+          "children": [
+            {
+              "id": "p2a2b3c4d5",
+              "type": "paragraph",
+              "inline": [
+                {
+                  "kind": "text",
+                  "text": "done",
+                  "marks": {}
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "spread": true,
+          "checked": false,
+          "children": [
+            {
+              "id": "p3a2b3c4d5",
+              "type": "paragraph",
+              "inline": [
+                {
+                  "kind": "text",
+                  "text": "todo",
+                  "marks": {}
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "spread": false,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "o1a2b3c4d5",
+      "type": "ordered_list",
+      "start": 3,
+      "spread": true,
+      "items": [
+        {
+          "spread": false,
+          "children": [
+            {
+              "id": "p5a2b3c4d5",
+              "type": "paragraph",
+              "inline": [
+                {
+                  "kind": "text",
+                  "text": "three",
+                  "marks": {}
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "f1a2b3c4d5",
+      "type": "footnote_definition",
+      "label": "1",
+      "children": [
+        {
+          "id": "p6a2b3c4d5",
+          "type": "paragraph",
+          "inline": [
+            {
+              "kind": "text",
+              "text": "the note",
+              "marks": {}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t1a2b3c4d5",
+      "type": "table",
+      "align": [
+        "left",
+        null,
+        "center",
+        "right"
+      ],
+      "rows": [
+        [
+          [
+            {
+              "kind": "text",
+              "text": "A",
+              "marks": {
+                "strong": true
+              }
+            }
+          ],
+          [],
+          [
+            {
+              "kind": "text",
+              "text": "C",
+              "marks": {}
+            }
+          ],
+          [
+            {
+              "kind": "text",
+              "text": "D",
+              "marks": {}
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "kind": "text",
+              "text": "1",
+              "marks": {}
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "t2a2b3c4d5",
+      "type": "table",
+      "align": [],
+      "rows": []
+    }
+  ]
+}
