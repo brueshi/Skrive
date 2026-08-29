@@ -20,6 +20,7 @@ const index_mod = @import("index.zig");
 const tokenize = @import("tokenize.zig");
 
 const Index = index_mod.Index;
+const DocRef = index_mod.DocRef;
 const BlockRef = index_mod.BlockRef;
 const TermId = index_mod.TermId;
 
@@ -48,6 +49,19 @@ pub const Weights = struct {
     /// Documents other documents point at are more likely to be the one being
     /// looked for.
     backlink_weight: f32 = 0.15,
+
+    /// How much of a document's score comes from scoring the document as a
+    /// whole rather than from aggregating its best blocks.
+    ///
+    /// Known-item evaluation showed why this has to exist. Aggregating blocks
+    /// found the right document 65 times in 74; scoring whole documents found
+    /// it 74 times in 74, because a document's evidence for a query is spread
+    /// across its blocks and any best-block-plus-tail formula throws most of
+    /// it away. The reverse held for short-field queries, where a title is a
+    /// block of its own and dissolves into noise at document granularity.
+    /// Neither granularity wins both, so the engine scores at both and this
+    /// is the mix.
+    document_weight: f32 = 0.65,
 
     /// Everything off but the BM25 core. The control arm for measuring
     /// whether any of the above earns its place.
@@ -98,6 +112,38 @@ pub const Context = struct {
         const b = self.weights.b;
         const norm = 1.0 - b + b * (len / @max(self.average_length, 1.0));
         return self.idf(term) * (f * (k1 + 1.0)) / (f + k1 * norm);
+    }
+
+    /// BM25 over a whole document rather than one block.
+    ///
+    /// The same formula at a different granularity: term frequencies summed
+    /// across the document's blocks, length normalized against the mean document
+    /// length, and inverse document frequency counted in documents rather than
+    /// blocks. A document's evidence for a query is spread across it, and any
+    /// best-block-plus-tail aggregation discards most of that.
+    pub fn documentScore(
+        self: Context,
+        doc: index_mod.DocRef,
+        freqs: []const u32,
+        docs_containing: []const u32,
+    ) f32 {
+        if (doc >= self.idx.docs.items.len) return 0;
+        const len: f32 = @floatFromInt(self.idx.docs.items[doc].length);
+        const average = self.idx.averageDocumentLength();
+        const total: f32 = @floatFromInt(@max(self.idx.docs.items.len, 1));
+        const k1 = self.weights.k1;
+        const b = self.weights.b;
+        const norm = 1.0 - b + b * (len / @max(average, 1.0));
+
+        var score: f32 = 0;
+        for (freqs, docs_containing) |freq, containing| {
+            if (freq == 0) continue;
+            const f: f32 = @floatFromInt(freq);
+            const n: f32 = @floatFromInt(@max(containing, 1));
+            const idf_doc = @log(1.0 + (total - n + 0.5) / (n + 0.5));
+            score += idf_doc * (f * (k1 + 1.0)) / (f + k1 * norm);
+        }
+        return score;
     }
 };
 

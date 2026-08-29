@@ -20,6 +20,12 @@ const folio = @import("folio.zig");
 /// purpose: what matters to a searcher is prominence, not construct.
 pub const BlockKind = enum(u8) {
     heading,
+    /// A document's name, as a synthetic block: the filename stem plus the
+    /// first heading. Not content the writer typed in that position, but the
+    /// strongest single statement of what a document is *about*, and until
+    /// now entirely unsearchable — a file called `navigation-panels-plan.md`
+    /// could not be found by searching for "navigation".
+    title,
     paragraph,
     list_item,
     table_cell,
@@ -44,6 +50,7 @@ pub const BlockKind = enum(u8) {
     /// for length, not compensation for one that does not.
     pub fn weight(self: BlockKind) f32 {
         return switch (self) {
+            .title => 1.6,
             .heading => 1.5,
             .paragraph => 1.0,
             .list_item => 1.0,

@@ -60,6 +60,19 @@ pub fn build(b: *std.Build) void {
     const compare_step = b.step("compare", "Rank real prose with and without the Skrive signals");
     compare_step.dependOn(&compare_run.step);
 
+    // Known-item retrieval evaluation, with automatic ground truth.
+    const eval_module = b.createModule(.{
+        .root_source_file = b.path("src/eval_main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const eval_exe = b.addExecutable(.{ .name = "eval", .root_module = eval_module });
+    b.installArtifact(eval_exe);
+    const eval_run = b.addRunArtifact(eval_exe);
+    if (b.args) |args| eval_run.addArgs(args);
+    const eval_step = b.step("eval", "Score retrieval by how well a document finds itself");
+    eval_step.dependOn(&eval_run.step);
+
     const test_module = b.createModule(.{
         .root_source_file = b.path("src/tests.zig"),
         .target = target,

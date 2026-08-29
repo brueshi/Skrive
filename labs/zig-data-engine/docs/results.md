@@ -250,6 +250,86 @@ because only block bodies are indexed. FTS5 got this for free while its `doc`
 column was searchable, and the results were visibly better for it. This is
 cheap to add and likely worth more than any weight tuning.
 
+## 6. Known-item retrieval
+
+Eight eyeballed queries cannot settle a ranking question. This is the
+objective version: for each of 74 documents, build a query from that
+document's own most distinctive terms and ask how far down the results the
+document comes back. The ground truth is free and unarguable — the query was
+made from this document, so this document is the answer. It is also the
+dominant way people search their own notes: not "show me everything about X"
+but "find the thing I know I wrote".
+
+Two query sets. **content** uses the highest tf-idf terms from the body,
+excluding the title. **title** uses the document's name. Every arm indexes the
+same blocks, title blocks included.
+
+### Where a document's evidence lives
+
+Skrive signals all off, sweeping only the mix between scoring blocks and
+scoring whole documents:
+
+| mix | content MRR | content @1 | title MRR | title @1 |
+|---|---|---|---|---|
+| blocks only | 0.9268 | 64/74 | 0.9865 | 72/74 |
+| 0.35 | 0.9369 | 65/74 | 0.9865 | 72/74 |
+| **0.65** | **0.9797** | **71/74** | **0.9865** | **72/74** |
+| 0.85 | 0.9865 | 72/74 | 0.9707 | 70/74 |
+| documents only | 1.0000 | 74/74 | 0.7854 | 49/74 |
+
+**Neither granularity wins both, and the failure modes are opposite.** A
+document's evidence for a content query is spread across its blocks, so any
+best-block-plus-tail aggregation throws most of it away — pure block scoring
+finds the right document 64 times in 74 where pure document scoring finds it
+every time. But a title is a short block of its own, and at document
+granularity it dissolves into the body: pure document scoring drops to 49/74
+on titles. Scoring at both granularities and mixing at 0.65 is within a point
+of the best of either, on both sets. That is now the default.
+
+### Against SQLite
+
+| set | ours | FTS5, block rows | FTS5, document rows |
+|---|---|---|---|
+| content | 0.9797 | 0.2635 | **1.0000** |
+| title | 0.9865 | 0.9865 | 0.7854 |
+
+The FTS5 block-row column is reported and should be discounted: its `AND` is
+per row, so a query drawn from terms scattered across a document matches
+nothing and it misses 53 of 74. That is a schema chosen badly, not FTS5
+ranking badly, and quoting it as a win would be quoting a handicap we picked.
+
+Against the schema a competent fallback would actually build, **SQLite matches
+or beats us on each set individually** — and, like us, no single SQLite schema
+wins both. Getting both from SQLite means maintaining two tables and merging
+them, which is the same architecture reached from the other direction.
+
+### The ablation, and it is not what the plan assumed
+
+Every Skrive signal, measured by removing it:
+
+| set | all signals | no block kind | no heading | no recency | no backlink | none (BM25) |
+|---|---|---|---|---|---|---|
+| content | 0.9527 | 0.9662 | 0.9662 | 0.9595 | 0.9527 | **0.9797** |
+| title | 0.9797 | 0.9459 | 0.9797 | 0.9797 | 0.9865 | **0.9865** |
+
+**BM25 alone beats BM25 plus every Skrive signal, on both sets.** Removing any
+single signal improves content retrieval or leaves it unchanged. Only
+block-kind weighting earns its place anywhere, and only on titles, where
+removing it costs 6 documents — and it costs content retrieval about as much
+as it gains.
+
+The honest reading: on the one search task with objective ground truth, the
+Skrive-native signals cost roughly three points of MRR and gain nothing.
+
+**The caveat, stated because it is real and not because it rescues the
+result.** Known-item retrieval is exactly the task least able to show recency
+and backlink weight in a good light: one document is correct, it usually has
+overwhelming term evidence, and there is nothing to disambiguate. Those
+signals are meant for the ambiguous case, where several documents are
+plausible and the recent or well-referenced one is likelier to be wanted —
+which needs a human judgement this harness cannot make. What can be said is
+that they do not help here, and measurably hurt.
+
 ## 4. What this does not measure
 
 - **Page cache is warm.** The corpus was just written, so these are

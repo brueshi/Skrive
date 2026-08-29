@@ -46,6 +46,9 @@ pub const DocInfo = struct {
     /// Owned, relative to the vault root.
     path: []const u8,
     modified_millis: i64,
+    /// Total tokens across the document's blocks, for document-level length
+    /// normalization.
+    length: u64 = 0,
     /// Blocks elsewhere that link here. Resolved after a load, since a link
     /// may point at a document not yet walked.
     inbound: u32 = 0,
@@ -310,6 +313,13 @@ pub const Index = struct {
         return self.postings.items[term].items.len;
     }
 
+    /// Mean document length in tokens.
+    pub fn averageDocumentLength(self: *const Index) f32 {
+        if (self.docs.items.len == 0) return 1.0;
+        return @as(f32, @floatFromInt(self.total_tokens)) /
+            @as(f32, @floatFromInt(self.docs.items.len));
+    }
+
     /// Mean block length in tokens, for length normalization.
     pub fn averageBlockLength(self: *const Index) f32 {
         if (self.live_blocks == 0) return 1.0;
@@ -389,7 +399,12 @@ pub const Index = struct {
         var stored = info;
         stored.length = @intCast(tokens.len);
         if (!self.block_live.items[ref]) self.live_blocks += 1;
-        self.total_tokens = self.total_tokens - self.blocks.items[ref].length + stored.length;
+        const previous_length = self.blocks.items[ref].length;
+        self.total_tokens = self.total_tokens - previous_length + stored.length;
+        if (stored.doc < self.docs.items.len) {
+            const d = &self.docs.items[stored.doc];
+            d.length = d.length + stored.length - previous_length;
+        }
         self.blocks.items[ref] = stored;
         self.block_live.items[ref] = true;
     }
@@ -402,6 +417,10 @@ pub const Index = struct {
         self.block_live.items[ref] = false;
         self.live_blocks -= 1;
         self.total_tokens -= self.blocks.items[ref].length;
+        const doc_ref = self.blocks.items[ref].doc;
+        if (doc_ref < self.docs.items.len) {
+            self.docs.items[doc_ref].length -= self.blocks.items[ref].length;
+        }
         self.blocks.items[ref].length = 0;
     }
 

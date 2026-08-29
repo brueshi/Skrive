@@ -361,7 +361,11 @@ pub fn runDocuments(
         (@as(u64, 1) << @intCast(lists.items.len)) - 1;
 
     // Accumulate per block: the BM25 sum so far and which terms it carries.
-    const Partial = struct { base: f32 = 0, mask: u64 = 0 };
+    const Partial = struct {
+        base: f32 = 0,
+        mask: u64 = 0,
+        freqs: [max_query_terms]u32 = @splat(0),
+    };
     var partials: std.AutoArrayHashMapUnmanaged(BlockRef, Partial) = .empty;
     defer partials.deinit(gpa);
 
@@ -371,15 +375,37 @@ pub fn runDocuments(
             if (!gop.found_existing) gop.value_ptr.* = .{};
             gop.value_ptr.base += ctx.termScore(terms.items[term_index], posting.block, posting.freq);
             gop.value_ptr.mask |= @as(u64, 1) << @intCast(term_index);
+            gop.value_ptr.freqs[term_index] = posting.freq;
         }
     }
 
     // Fold blocks into their documents, unioning coverage as we go.
-    const DocAccum = struct { mask: u64 = 0, blocks: std.ArrayList(BlockHit) = .empty };
+    const DocAccum = struct {
+        mask: u64 = 0,
+        blocks: std.ArrayList(BlockHit) = .empty,
+        /// Term frequencies summed over the whole document, for scoring it as
+        /// one field rather than as a pile of blocks.
+        doc_freq: [max_query_terms]u32 = @splat(0),
+    };
     var docs: std.AutoArrayHashMapUnmanaged(index_mod.DocRef, DocAccum) = .empty;
     defer {
         for (docs.values()) |*d| d.blocks.deinit(gpa);
         docs.deinit(gpa);
+    }
+
+    // Distinct documents per term, for document-granularity IDF. Counted
+    // during the same walk rather than stored, since it changes with every
+    // edit and is cheap to derive from postings we are already touching.
+    var doc_hits: [max_query_terms]u32 = @splat(0);
+    var seen_docs: std.AutoHashMapUnmanaged(u64, void) = .empty;
+    defer seen_docs.deinit(gpa);
+    for (lists.items, 0..) |list, term_index| {
+        for (list) |posting| {
+            const doc_ref = idx.blocks.items[posting.block].doc;
+            const key = (@as(u64, doc_ref) << 8) | @as(u64, @intCast(term_index));
+            const gop = try seen_docs.getOrPut(gpa, key);
+            if (!gop.found_existing) doc_hits[term_index] += 1;
+        }
     }
 
     for (partials.keys(), partials.values()) |block, partial| {
@@ -390,6 +416,11 @@ pub fn runDocuments(
         const gop = try docs.getOrPut(gpa, info.doc);
         if (!gop.found_existing) gop.value_ptr.* = .{};
         gop.value_ptr.mask |= partial.mask;
+        for (0..lists.items.len) |t| {
+            if (partial.mask & (@as(u64, 1) << @intCast(t)) != 0) {
+                gop.value_ptr.doc_freq[t] += partial.freqs[t];
+            }
+        }
         try gop.value_ptr.blocks.append(gpa, .{
             .block = block,
             .score = partial.base * boost.product(),
@@ -419,13 +450,22 @@ pub fn runDocuments(
         const covered: f32 = @floatFromInt(accum.blocks.items[0].matched_terms);
         const concentration = coverage_floor + (1.0 - coverage_floor) * (covered / term_count);
 
-        var score = accum.blocks.items[0].score * concentration;
+        var block_component = accum.blocks.items[0].score * concentration;
         const tail = @min(accum.blocks.items.len, secondary_blocks + 1);
         var factor = secondary_weight;
         for (accum.blocks.items[1..tail]) |b| {
-            score += factor * b.score;
+            block_component += factor * b.score;
             factor *= secondary_decay;
         }
+
+        const doc_component = ctx.documentScore(doc, accum.doc_freq[0..lists.items.len], doc_hits[0..lists.items.len]);
+        const boost = rank.boostFor(ctx, accum.blocks.items[0].block, if (options.facts) |r|
+            r.get(accum.blocks.items[0].block)
+        else
+            defaultFacts(idx, accum.blocks.items[0].block), false);
+
+        const w = options.weights.document_weight;
+        const score = (1.0 - w) * block_component + w * doc_component * boost.product();
 
         try hits.append(gpa, .{
             .doc = doc,
