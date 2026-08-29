@@ -36,19 +36,45 @@ pub const Weights = struct {
     /// all; at 1 it is penalized in full proportion to its length.
     b: f32 = 0.75,
 
+    // ---- the Skrive-native signals, all off by default ----
+    //
+    // **Turned off on evidence, 2026-08-29.** Known-item retrieval over 74
+    // real documents put each signal alone on top of BM25, and not one
+    // improved either query set:
+    //
+    //     signal alone     content   title
+    //     BM25 only        0.9797    0.9865
+    //     + block kind     0.9662    0.9865
+    //     + heading        0.9730    0.9527
+    //     + recency        0.9730    0.9865
+    //     + backlink       0.9797    0.9797
+    //
+    // A subtractive ablation had suggested block-kind weighting was earning
+    // its place on titles. It was not: removing it hurt only because it was
+    // compensating for damage the other signals were doing. Measured alone it
+    // gains nothing, which is why both ablations exist.
+    //
+    // They are kept, not deleted, for two reasons. Known-item retrieval is
+    // the task least able to show recency and backlink weight — one document
+    // is correct and there is nothing to disambiguate, which is exactly the
+    // case those signals are for. And the block-kind weights still shape
+    // which *block* is shown inside a result, which this evaluation never
+    // scored. `Weights.with_signals` turns them on for anyone who wants to
+    // test that case.
+
     /// Multiplier by block kind. A term in a heading is a stronger signal
     /// than the same term in a footnote, and a term in a code block is mostly
     /// an identifier.
-    use_block_kind: bool = true,
+    use_block_kind: bool = false,
     /// Blocks under a heading that also matches the query rank higher: the
     /// section is about the thing being searched for, not just mentioning it.
-    heading_proximity: f32 = 0.35,
+    heading_proximity: f32 = 0,
     /// Recently touched documents rank higher, decaying over this half-life.
     recency_half_life_days: f32 = 30.0,
-    recency_weight: f32 = 0.20,
+    recency_weight: f32 = 0,
     /// Documents other documents point at are more likely to be the one being
     /// looked for.
-    backlink_weight: f32 = 0.15,
+    backlink_weight: f32 = 0,
 
     /// How much of a document's score comes from scoring the document as a
     /// whole rather than from aggregating its best blocks.
@@ -63,13 +89,20 @@ pub const Weights = struct {
     /// is the mix.
     document_weight: f32 = 0.65,
 
-    /// Everything off but the BM25 core. The control arm for measuring
-    /// whether any of the above earns its place.
-    pub const bm25_only: Weights = .{
-        .use_block_kind = false,
-        .heading_proximity = 0,
-        .recency_weight = 0,
-        .backlink_weight = 0,
+    /// Everything off but the BM25 core. Identical to the default now that
+    /// the signals are off; kept as a name so evaluation output and tests say
+    /// what they mean rather than relying on what the default happens to be.
+    pub const bm25_only: Weights = .{};
+
+    /// Every Skrive signal on, at the values they were tuned to before the
+    /// evaluation retired them. For testing the ambiguous-query case the
+    /// known-item harness cannot see, and for anything that wants block-kind
+    /// weighting to order blocks within a result.
+    pub const with_signals: Weights = .{
+        .use_block_kind = true,
+        .heading_proximity = 0.35,
+        .recency_weight = 0.20,
+        .backlink_weight = 0.15,
     };
 };
 

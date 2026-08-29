@@ -148,6 +148,9 @@ test "the control weights disable every Skrive signal" {
     try std.testing.expectEqual(@as(f32, 1.0), boost.product());
 }
 
+// The signals are off by default on evidence; these tests turn them on
+// explicitly, because what they check is that each signal does what it claims
+// when asked for — not that anyone should be asking.
 test "block kind lifts a heading above prose" {
     const gpa = std.testing.allocator;
     var arena_state = std.heap.ArenaAllocator.init(gpa);
@@ -159,7 +162,7 @@ test "block kind lifts a heading above prose" {
     try put(&idx, arena, 0, "target", .paragraph);
     try put(&idx, arena, 1, "target", .heading);
 
-    const hits = try topHits(&idx, gpa, "target ", .{});
+    const hits = try topHits(&idx, gpa, "target ", .{ .weights = root.Weights.with_signals });
     defer gpa.free(hits);
     try std.testing.expectEqual(@as(root.BlockRef, 1), hits[0].block);
 
@@ -203,7 +206,7 @@ test "backlink weight saturates so a hub cannot swamp the ranking" {
     defer idx.deinit();
     try put(&idx, arena_state.allocator(), 0, "target", .paragraph);
 
-    const ctx = root.RankContext.init(&idx, .{}, 0);
+    const ctx = root.RankContext.init(&idx, root.Weights.with_signals, 0);
     const none = root.boostFor(ctx, 0, .{ .inbound_links = 0 }, false).backlink;
     const one = root.boostFor(ctx, 0, .{ .inbound_links = 1 }, false).backlink;
     const many = root.boostFor(ctx, 0, .{ .inbound_links = 500 }, false).backlink;
@@ -224,7 +227,7 @@ test "a heading that matches lifts the blocks under it" {
     defer idx.deinit();
     try put(&idx, arena_state.allocator(), 0, "target", .paragraph);
 
-    const ctx = root.RankContext.init(&idx, .{}, 0);
+    const ctx = root.RankContext.init(&idx, root.Weights.with_signals, 0);
     const under_matching = root.boostFor(ctx, 0, .{}, true).heading;
     const elsewhere = root.boostFor(ctx, 0, .{}, false).heading;
 

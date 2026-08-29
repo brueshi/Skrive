@@ -31,11 +31,19 @@ const Config = struct {
 /// so a metric that does not move says that signal is not earning its place.
 const configs = [_]Config{
     .{ .name = "bm25_only", .weights = root.Weights.bm25_only },
-    .{ .name = "all_signals", .weights = .{} },
-    .{ .name = "no_block_kind", .weights = .{ .use_block_kind = false } },
-    .{ .name = "no_heading", .weights = .{ .heading_proximity = 0 } },
-    .{ .name = "no_recency", .weights = .{ .recency_weight = 0 } },
-    .{ .name = "no_backlink", .weights = .{ .backlink_weight = 0 } },
+    .{ .name = "all_signals", .weights = root.Weights.with_signals },
+    .{ .name = "no_block_kind", .weights = without(.use_block_kind) },
+    .{ .name = "no_heading", .weights = without(.heading_proximity) },
+    .{ .name = "no_recency", .weights = without(.recency_weight) },
+    .{ .name = "no_backlink", .weights = without(.backlink_weight) },
+    // Each signal alone on top of BM25. The subtractive ablation above
+    // measures a signal in the presence of the others, which cannot tell an
+    // unhelpful signal from one whose contribution is already being made
+    // elsewhere.
+    .{ .name = "only_block_kind", .weights = only(.{ .use_block_kind = true }) },
+    .{ .name = "only_heading", .weights = only(.{ .heading_proximity = 0.35 }) },
+    .{ .name = "only_recency", .weights = only(.{ .recency_weight = 0.20 }) },
+    .{ .name = "only_backlink", .weights = only(.{ .backlink_weight = 0.15 }) },
     // Granularity, with every Skrive signal off, to isolate where the
     // evidence for a document actually lives.
     .{ .name = "blocks_only", .weights = blend(0.0) },
@@ -44,6 +52,34 @@ const configs = [_]Config{
     .{ .name = "mixed_0.85", .weights = blend(0.85) },
     .{ .name = "documents_only", .weights = blend(1.0) },
 };
+
+fn without(comptime field: std.meta.FieldEnum(root.Weights)) root.Weights {
+    var weights = root.Weights.with_signals;
+    switch (field) {
+        .use_block_kind => weights.use_block_kind = false,
+        .heading_proximity => weights.heading_proximity = 0,
+        .recency_weight => weights.recency_weight = 0,
+        .backlink_weight => weights.backlink_weight = 0,
+        else => unreachable,
+    }
+    return weights;
+}
+
+const Signal = struct {
+    use_block_kind: bool = false,
+    heading_proximity: f32 = 0,
+    recency_weight: f32 = 0,
+    backlink_weight: f32 = 0,
+};
+
+fn only(signal: Signal) root.Weights {
+    var weights = root.Weights.bm25_only;
+    weights.use_block_kind = signal.use_block_kind;
+    weights.heading_proximity = signal.heading_proximity;
+    weights.recency_weight = signal.recency_weight;
+    weights.backlink_weight = signal.backlink_weight;
+    return weights;
+}
 
 fn blend(w: f32) root.Weights {
     var weights = root.Weights.bm25_only;

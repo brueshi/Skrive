@@ -305,21 +305,54 @@ them, which is the same architecture reached from the other direction.
 
 ### The ablation, and it is not what the plan assumed
 
-Every Skrive signal, measured by removing it:
+Measured two ways, because one of them is misleading on its own.
+
+**Subtractive** — each signal removed from the full set:
 
 | set | all signals | no block kind | no heading | no recency | no backlink | none (BM25) |
 |---|---|---|---|---|---|---|
 | content | 0.9527 | 0.9662 | 0.9662 | 0.9595 | 0.9527 | **0.9797** |
 | title | 0.9797 | 0.9459 | 0.9797 | 0.9797 | 0.9865 | **0.9865** |
 
-**BM25 alone beats BM25 plus every Skrive signal, on both sets.** Removing any
-single signal improves content retrieval or leaves it unchanged. Only
-block-kind weighting earns its place anywhere, and only on titles, where
-removing it costs 6 documents — and it costs content retrieval about as much
-as it gains.
+**Additive** — each signal alone on top of BM25:
 
-The honest reading: on the one search task with objective ground truth, the
-Skrive-native signals cost roughly three points of MRR and gain nothing.
+| set | BM25 only | + block kind | + heading | + recency | + backlink |
+|---|---|---|---|---|---|
+| content | **0.9797** | 0.9662 | 0.9730 | 0.9730 | 0.9797 |
+| title | **0.9865** | 0.9865 | 0.9527 | 0.9865 | 0.9797 |
+
+**Not one signal improves either query set over plain BM25.** Every one is
+neutral or worse on both.
+
+The two tables together are the point. Subtractively, block-kind weighting
+looks essential on titles — removing it costs six documents. Additively it
+gains nothing at all. It was only ever compensating for damage the other
+signals were doing, and a subtractive ablation alone would have kept it on
+that evidence.
+
+**Decision: the signals are off by default** (2026-08-29). They are kept
+rather than deleted, and `Weights.with_signals` turns them on, for two
+reasons. Known-item retrieval is the task least able to show recency and
+backlink weight — one document is correct and there is nothing to
+disambiguate, which is exactly the case those signals exist for. And
+block-kind weighting still orders the blocks *within* a result, which this
+evaluation never scored.
+
+### It replicates on a second corpus
+
+`docs/`, 174 documents, a harder corpus of handoffs and references where many
+files resemble each other:
+
+| mix | content MRR | title MRR |
+|---|---|---|
+| blocks only | 0.6857 | **0.6386** |
+| 0.65 | 0.7014 | 0.6317 |
+| documents only | **0.7241** | 0.6136 |
+
+Same shape: documents win content, blocks win titles, the mix sits between.
+Absolute numbers are much lower — 100 of 173 at rank one against 71 of 74 —
+which is what a corpus of near-duplicate documents does to known-item search,
+and is itself worth knowing before promising anything about search quality.
 
 **The caveat, stated because it is real and not because it rescues the
 result.** Known-item retrieval is exactly the task least able to show recency

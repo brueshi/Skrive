@@ -150,9 +150,18 @@ test "headings outrank prose for the same term" {
     try idx.putBlock(0, .{ .doc = 0, .kind = .paragraph }, try tokens(arena, "durability", .paragraph));
     try idx.putBlock(1, .{ .doc = 0, .kind = .heading }, try tokens(arena, "durability", .heading));
 
-    const hits = try searchBlocks(&idx, gpa, "durability ");
+    // Block-kind weighting is off by default, so this asks for it: the test
+    // is about the signal working when enabled, not about the default.
+    var query_arena = std.heap.ArenaAllocator.init(gpa);
+    defer query_arena.deinit();
+    const query = try root.parseQuery(query_arena.allocator(), "durability ");
+    const hits = try root.runQueryWith(&idx, gpa, query, .{
+        .weights = root.Weights.with_signals,
+    });
     defer gpa.free(hits);
-    try std.testing.expectEqualSlices(root.BlockRef, &.{ 1, 0 }, hits);
+
+    try std.testing.expectEqual(@as(root.BlockRef, 1), hits[0].block);
+    try std.testing.expectEqual(@as(root.BlockRef, 0), hits[1].block);
 }
 
 test "backlinks resolve to their source blocks" {
