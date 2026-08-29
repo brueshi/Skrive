@@ -8,4 +8,5 @@ test {
     _ = @import("log_test.zig");
     _ = @import("folio_test.zig");
     _ = @import("corpus_test.zig");
+    _ = @import("index_test.zig");
 }

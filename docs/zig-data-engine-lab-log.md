@@ -358,3 +358,72 @@ with positions, incremental patch on `PutBlock`, and prefix queries on the
 trailing token. Prefix support is in scope from the start because it
 determines the data structure, and retrofitting it is a rewrite rather than a
 fix.
+
+---
+
+## Stage 5 — the inverted index (2026-08-29)
+
+**Goal.** The index the whole engine argument rests on: interned dictionary,
+postings, incremental maintenance, and prefix queries on the trailing token.
+
+**Result.** 47/47. Conjunctive queries, prefix queries, block-kind ranking and
+backlinks all work, and an incrementally updated index is byte-identical to a
+freshly built one.
+
+**What landed.** `src/tokenize.zig` (blocks to terms, with the block kind a
+term came from), `src/index.zig` (dictionary, postings, block table,
+backlinks), `src/search.zig` (query parsing and execution), and
+`src/index_test.zig`.
+
+**Postings carry a frequency, not positions.** The search plan wants match
+offsets for snippet highlighting, and the obvious reading is to store every
+position. That costs roughly a word of memory per word of corpus — around 10MB
+at the design tier — to avoid re-scanning the ten blocks actually displayed,
+which is microseconds. Offsets are recomputed from the matched block's own
+text at display time instead. If phrase search later needs positions for
+*intersection* rather than display, that is the moment to revisit; storing
+them now would be paying for a feature that does not exist yet.
+
+**The dictionary is prefix-searchable by construction**, because a hash map
+cannot answer a prefix query and search-as-you-type makes every trailing token
+one. Terms live in an array sorted by text, with newly interned terms held in
+a small unsorted overlay merged when it fills. Two details matter:
+
+- **The overlay cap is a fixed 1024, not a fraction of the dictionary.** The
+  two costs pull opposite ways — every prefix query scans the whole overlay,
+  so it must stay small, while every merge touches the whole sorted run, so
+  merging must stay rare. A fraction would have let the overlay reach tens of
+  thousands of terms at corpus scale and put that scan on every keystroke.
+- **A merge merges two ordered runs; it does not re-sort the concatenation.**
+  The first implementation re-sorted, which is O(n log n) of string
+  comparisons per merge. At roughly a hundred merges over a hundred thousand
+  terms that is the difference between imperceptible and seconds — and it
+  would have surfaced at stage 6 as a bad number attributed to the wrong
+  thing.
+
+**The incremental update is a real diff.** A block's terms are kept sorted, and
+an update merge-walks the old list against the new: terms only in the old are
+removed, terms only in the new are inserted, and terms in both are touched
+only when the frequency actually moved. Postings are kept sorted by block so
+insert and remove are a binary search rather than a scan of a list that, for a
+common term, is tens of thousands long.
+
+**Mutation testing found two vacuous tests, again.**
+
+- Removing the frequency-update branch of the diff — the subtlest line in the
+  stage — **passed every test**. The fixture happened to keep every retained
+  term at the same count across the edit, and the corpus-driven case put an
+  empty draft first, so every term was a fresh insert. Both now exercise a
+  retained term whose frequency moves, and the mutation fails both.
+- Raising the overlay cap from 64 to 1024 silently made the merge test
+  vacuous: its 900 terms no longer crossed the threshold, so no merge
+  happened. It now uses 3,000 terms and asserts a merge counter rather than
+  trusting a term count to cross a constant defined in another file — a test
+  coupled to a tunable should assert the path, not the tuning.
+
+Both halves of the prefix structure were then confirmed load-bearing by
+disabling each in turn.
+
+**Next.** Stage 6 — the two numbers. Cold-start replay and warm search
+latency at design scale, per tier, with a SQLite FTS5 arm over the same corpus
+and query set.

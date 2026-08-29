@@ -48,3 +48,20 @@ pub const parseFolioBlock = @import("folio_parse.zig").parseBlock;
 pub const FolioParseError = @import("folio_parse.zig").ParseError;
 pub const writeFolio = @import("folio_write.zig").writeDocument;
 pub const writeFolioBlock = @import("folio_write.zig").writeBlock;
+
+pub const tokenize = @import("tokenize.zig");
+pub const BlockKind = tokenize.BlockKind;
+pub const harvest = tokenize.harvest;
+
+const index_mod = @import("index.zig");
+pub const Index = index_mod.Index;
+pub const TermId = index_mod.TermId;
+pub const BlockRef = index_mod.BlockRef;
+pub const Posting = index_mod.Posting;
+pub const BlockInfo = index_mod.BlockInfo;
+
+const search_mod = @import("search.zig");
+pub const Hit = search_mod.Hit;
+pub const Query = search_mod.Query;
+pub const parseQuery = search_mod.parseQuery;
+pub const runQuery = search_mod.run;
