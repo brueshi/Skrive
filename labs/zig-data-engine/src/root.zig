@@ -59,6 +59,7 @@ pub const TermId = index_mod.TermId;
 pub const BlockRef = index_mod.BlockRef;
 pub const Posting = index_mod.Posting;
 pub const BlockInfo = index_mod.BlockInfo;
+pub const Footprint = index_mod.Index.Footprint;
 
 const search_mod = @import("search.zig");
 pub const Hit = search_mod.Hit;

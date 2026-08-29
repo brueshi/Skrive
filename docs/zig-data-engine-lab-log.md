@@ -603,3 +603,50 @@ repository's cadence.
 skeleton, seams and durability gate were roughly that. It was wrong about how
 much has to exist before the dangerous part can be measured against anything
 real.
+
+---
+
+## Stage 8 — the footprint (2026-08-29)
+
+The one claim the spike had measured nothing about, and the premise the whole
+bespoke argument rests on: that a personal corpus fits in RAM comfortably on a
+machine doing other things.
+
+**It holds, with room.** At the design tier the index is **41.2 MB against
+18.5 MB of prose** — about 2.2x — and the per-block cost *falls* with scale,
+1,427 bytes at the small tier against 1,033 at the design tier, because the
+dictionary amortizes as more blocks share terms.
+
+**Peak process RSS is 124 MB, three times the steady-state index**, and that
+is the number that matters for not disturbing someone's machine. The transient
+is entirely the build: the whole 50 MB log is read in at once, the index
+passes through a pre-shrink 52.7 MB, and the snapshot is materialized as a
+single 34 MB buffer. None of those need to be resident together. Streaming the
+replay and the snapshot write would cut most of it and neither is hard.
+
+**Two findings from the breakdown.**
+
+Reclaiming over-allocated capacity saved 22% for nothing. Postings lists grow
+geometrically, so a bulk build had accumulated 11.5 MB of capacity nobody
+asked for; handing it back once the build settles took 52.7 MB to 41.2 MB.
+That is why the accounting reports slack apart from live bytes — one total
+cannot tell an oversized design from an oversized allocation strategy.
+
+The largest remaining structure is not the index. `block_terms` is 16 MB,
+39% of the total, and exists solely so an update can diff a block's old terms
+against its new ones. Once the block arena exists — plan §5.1, which this
+spike never built — the arena holds each block's content, so the old term list
+can be recovered by re-tokenizing the old block instead: microseconds per edit
+in exchange for 39% of the index's memory. **That trade should be made when
+the arena lands**, taking the design tier to roughly 25 MB, about 1.4x its
+prose.
+
+**Extrapolated**, five times this corpus lands the index near 200 MB and peak
+build RSS past 500 MB unless the transients are streamed. That is where this
+stops being a background citizen on a laptop, and it is close enough to design
+for rather than discover.
+
+**Method note.** Structures are counted exactly rather than sampled, so the
+number attributes to a cause. Peak RSS comes from `getrusage`, whose `maxrss`
+is bytes on Darwin and kilobytes on Linux — a real platform difference, not an
+inconsistency to paper over.

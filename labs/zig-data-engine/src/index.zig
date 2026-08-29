@@ -356,6 +356,88 @@ pub const Index = struct {
         return entry.items;
     }
 
+    /// Release the unused capacity growable containers accumulate.
+    ///
+    /// Postings lists grow geometrically, so after a bulk build roughly a
+    /// third of the postings memory is capacity nobody asked for — 11MB of a
+    /// 53MB index at design scale. This gives it back. Call it when a build
+    /// settles, not between edits: an append to a shrunk list reallocates, so
+    /// doing this constantly trades memory for churn in the other direction.
+    pub fn shrinkToFit(self: *Index) void {
+        for (self.postings.items) |*list| {
+            if (list.capacity > list.items.len) {
+                list.shrinkAndFree(self.gpa, list.items.len);
+            }
+        }
+    }
+
+    /// Where the index's memory actually goes.
+    ///
+    /// The engine plan's central premise is that a personal corpus fits in
+    /// RAM comfortably, and that premise is what makes a bespoke in-memory
+    /// engine reasonable rather than reckless. It is also the one claim the
+    /// spike measured nothing about. This counts the structures exactly
+    /// rather than sampling the process, so the answer says *which* structure
+    /// to attack when the total is too large.
+    ///
+    /// Slack is reported apart from live bytes because growable containers
+    /// over-allocate, and a number that hides the difference cannot tell an
+    /// oversized design from an oversized allocation strategy.
+    pub const Footprint = struct {
+        term_text: usize = 0,
+        term_table: usize = 0,
+        dictionary_order: usize = 0,
+        dictionary_hash: usize = 0,
+        postings_live: usize = 0,
+        postings_slack: usize = 0,
+        postings_headers: usize = 0,
+        block_table: usize = 0,
+        block_terms: usize = 0,
+        backlinks: usize = 0,
+
+        pub fn total(self: Footprint) usize {
+            return self.term_text + self.term_table + self.dictionary_order +
+                self.dictionary_hash + self.postings_live + self.postings_slack +
+                self.postings_headers + self.block_table + self.block_terms +
+                self.backlinks;
+        }
+    };
+
+    pub fn footprint(self: *const Index) Footprint {
+        var f = Footprint{};
+
+        for (self.terms.items) |t| f.term_text += t.len;
+        f.term_table = self.terms.capacity * @sizeOf([]const u8);
+        f.dictionary_order = (self.sorted.capacity + self.overlay.capacity) * @sizeOf(TermId);
+
+        // The hash map's backing layout is internal, so this is an estimate:
+        // one key slice, one value and one metadata byte per slot.
+        f.dictionary_hash = self.by_text.capacity() *
+            (@sizeOf([]const u8) + @sizeOf(TermId) + 1);
+
+        for (self.postings.items) |list| {
+            f.postings_live += list.items.len * @sizeOf(Posting);
+            f.postings_slack += (list.capacity - list.items.len) * @sizeOf(Posting);
+        }
+        f.postings_headers = self.postings.capacity * @sizeOf(std.ArrayList(Posting));
+
+        f.block_table = self.blocks.capacity * @sizeOf(BlockInfo) +
+            self.block_live.capacity * @sizeOf(bool) +
+            self.block_terms.capacity * @sizeOf([]TermPost);
+
+        for (self.block_terms.items) |bt| f.block_terms += bt.len * @sizeOf(TermPost);
+
+        var it = self.backlinks.iterator();
+        while (it.next()) |entry| {
+            f.backlinks += entry.key_ptr.*.len +
+                entry.value_ptr.capacity * @sizeOf(BlockRef);
+        }
+        f.backlinks += self.backlinks.capacity() *
+            (@sizeOf([]const u8) + @sizeOf(std.ArrayList(BlockRef)) + 1);
+
+        return f;
+    }
+
     /// A deterministic rendering of the index's meaningful state, for
     /// comparing an incrementally updated index against a freshly built one.
     ///

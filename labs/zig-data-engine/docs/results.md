@@ -82,6 +82,65 @@ in lazily from disk and does almost no work at open, while a RAM-resident
 engine loads everything up front by design. An order of magnitude at this
 scale is not a difference a person can perceive.
 
+## 1b. Memory footprint
+
+The plan's premise is that a personal corpus fits in RAM comfortably, and this
+engine runs on someone's own machine beside everything else they have open.
+Counted structure by structure rather than sampled, so the answer says which
+part to attack.
+
+| tier | blocks | prose | index | per block | peak process RSS |
+|---|---|---|---|---|---|
+| small | 372 | 0.14 MB | 0.5 MB | 1,427 B | 4.3 MB |
+| real | 2,026 | 0.90 MB | 3.2 MB | 1,597 B | 12.3 MB |
+| design | 39,872 | 18.5 MB | **41.2 MB** | 1,033 B | **124.2 MB** |
+
+**The index costs about 2.2x the prose it indexes**, and the per-block cost
+*falls* with scale — 1,427 bytes at the small tier against 1,033 at the design
+tier — because the dictionary amortizes as more blocks share terms. The
+premise holds at this size.
+
+**Peak RSS is 3x the steady-state index**, and that is the number that matters
+for not disturbing the machine. The transient is the build: the whole 50 MB
+log is read into memory at once, the index passes through a pre-shrink 52.7 MB,
+and the snapshot is materialized as a single 34 MB buffer. None of those need
+to be resident simultaneously — streaming the log replay and the snapshot
+write would cut most of it, and neither is hard.
+
+Where the 41.2 MB goes:
+
+| structure | | share |
+|---|---|---|
+| `block_terms` | 15.95 MB | 38.7% |
+| postings | 15.95 MB | 38.7% |
+| dictionary (hash, table, text, order) | 5.57 MB | 13.5% |
+| postings list headers | 2.21 MB | 5.4% |
+| block table | 1.11 MB | 2.7% |
+| backlinks | 0.43 MB | 1.1% |
+
+Two things stand out.
+
+**Reclaiming over-allocated capacity saved 22% for free.** Postings lists grow
+geometrically, so a bulk build left 11.5 MB of capacity nobody asked for —
+52.7 MB became 41.2 MB by handing it back once the build settles. Slack is
+reported separately from live bytes for exactly this reason: a single total
+cannot distinguish an oversized design from an oversized allocation strategy.
+
+**`block_terms` is the largest structure and it is not the index.** Those
+16 MB — 39% of the total — exist solely so an update can diff a block's old
+terms against its new ones. Once the block arena exists (plan §5.1, and the
+spike never built it) the arena holds each block's content, so the old term
+list can be recovered by re-tokenizing the old block: microseconds of work per
+edit in exchange for 39% of the index's memory. **That trade should be made
+when the arena lands**, and it would take the design tier to roughly 25 MB,
+about 1.4x its prose.
+
+**Extrapolating**, at five times this corpus — 10,000 documents, ~200,000
+blocks, ~90 MB of prose — the index lands near 200 MB and peak build RSS
+somewhere past 500 MB unless the transients are streamed. That is the point
+where this stops being a background citizen on a laptop, and it is close
+enough to be worth designing for rather than discovering.
+
 ## 2. Warm search latency
 
 Median, with the p99 in the second table. Both arms answer identical queries
@@ -144,6 +203,9 @@ block and `.md` re-indexes its whole file.
   Skrive-native ranking is better than FTS5's is the argument in the engine
   plan's §7, and it is not a latency question.
 - **Single-threaded, single-writer**, as the design specifies.
+- **`vs_corpus_text` in the raw JSON compares against bytes read**, which for
+  the `.folio` tier is the JSON, not the prose. The prose comparisons in §1b
+  are computed against the Markdown tier's byte count.
 - **The incremental comparison is between encodings, not between engines.**
   §3b measures `.folio` against `.md` inside this index; it does not show that
   SQLite could not do the same given block-level rows.
