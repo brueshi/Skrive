@@ -56,3 +56,76 @@ the failure, and restoring.
 with a real `std.fs` implementation and a deterministic fault-injecting
 simulation, and the clock injected the same way. This is the stage that cannot
 be retrofitted, so it precedes every line of log code.
+
+---
+
+## Stage 1 — the injected seams (2026-08-29)
+
+**Goal.** Put all durable I/O and all time behind interfaces before a single
+line of log code exists. This is the stage that cannot be retrofitted: crash
+injection at every byte offset is impossible against code that calls `std.fs`
+directly, and threading a seam through a finished storage engine afterward is
+the expensive version of this work.
+
+**What landed.**
+
+- `src/storage.zig` — a four-operation `Storage` vtable (`append`, `sync`,
+  `readAll`, `size`) in the `std.mem.Allocator` idiom, a closed four-member
+  error set, and `Fault` as a `union(FaultClass)` so the injection tag set
+  cannot drift from the model.
+- `src/real_storage.zig` — the on-disk backend, on `std.Io`, appending by
+  positional write against a cursor it owns rather than the file's shared seek
+  position. Opens without truncating: an existing log is the record of truth.
+- `src/sim_storage.zig` — the in-memory backend. Models `committed` versus
+  `pending` bytes across the fsync barrier and produces the post-crash byte
+  image for a given fault.
+- `src/clock.zig` — a one-method `Clock` seam with real and simulated
+  implementations.
+
+**Decision: a narrow bespoke seam, not `std.Io`.** Zig 0.16 already has an
+injected I/O interface and `shell-zig/core` threads one, so standing on it was
+the obvious move and it is the wrong one here, on three counts. The faults
+that matter are byte-image properties of a log — truncate at N, tear a sector,
+flip a bit, lose the unsynced tail — not syscall behaviors, so injecting at
+`std.Io` granularity means reconstructing the byte image anyway. The engine
+plan requires the hand-rolled log and the LMDB fallback to present the same
+API upward, and `std.Io` cannot express "LMDB is underneath". And the
+governing discipline is to shrink the dangerous surface until it can be
+exhaustively tested; four operations can be, a general I/O interface cannot.
+`RealStorage` is still implemented *on* `std.Io`, so the real path stays
+idiomatic. Reversible if it proves wrong — nothing above the seam knows.
+
+**Four of the five fault classes are implemented.** Truncation, torn sector,
+bit flip, and lost unsynced tail are all pure transformations of a byte image,
+so they cost little and arrive now. `corrupt_snapshot` returns
+`error.NoSnapshot` — not a stub, a true statement about a storage that holds
+only a log. It gets a real implementation when snapshots land in stage 2.
+
+Two modelling choices worth recording, because they make the faults harder
+than the obvious reading:
+
+- **Lost pages read back as zeroes, not as a shorter file.** A reader then
+  faces plausible-length garbage rather than a clean short read, which is the
+  more adversarial case and the one a naive length-prefix reader gets wrong.
+- **`lost_unsynced_tail` is a survivor mask, not a prefix.** Page-cache loss
+  is page-granular and out of order, so the fault takes a bitmask over pending
+  pages and the harness sweeps every subset. A prefix-only model would have
+  quietly excused the reordering case.
+
+**`std.time.milliTimestamp` is gone in 0.16** — wall time is an `std.Io`
+capability now (`std.Io.Timestamp.now(io, .real)`). That is a small argument
+in favor of the seam rather than against it: the standard library reached the
+same conclusion about time that this lab reaches about storage.
+
+**Verification.** `zig build test --summary all` reports 11/11 passing from a
+cleared cache. The load-bearing test — a lost unsynced tail never costs a
+synced byte, swept across every subset of the pending pages — was confirmed
+non-vacuous by widening the loss window to include committed bytes, observing
+the failure at the expected assertion, and restoring. Truncation is asserted
+at every byte offset of the seeded log, which is the sweep shape stage 2's
+record framing will inherit.
+
+**Next.** Stage 2 — record framing, append and replay, and the harness that
+hammers them. The payload stays opaque bytes there: the log does not need to
+understand blocks to be proven correct, and the most dangerous code in the
+project deserves the simplest possible fixtures.
