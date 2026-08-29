@@ -31,7 +31,9 @@ pub const TermId = u32;
 pub const BlockRef = u32;
 pub const DocRef = u32;
 
-pub const Posting = struct {
+/// `extern` so the layout is guaranteed and a snapshot can restore a whole
+/// postings list with one copy instead of reading two integers at a time.
+pub const Posting = extern struct {
     block: BlockRef,
     freq: u32,
 };
@@ -43,7 +45,7 @@ pub const BlockInfo = struct {
 
 /// One term's contribution to one block, kept sorted by term so the update
 /// path can diff two of these with a merge walk.
-const TermPost = struct {
+pub const TermPost = extern struct {
     term: TermId,
     freq: u32,
 

@@ -495,3 +495,56 @@ what makes the two arms comparable in the first place.
 bespoke against SQLite, the two `.folio` spec drifts from stage 3, the
 forward-compatibility question left by `unknown_type` in stage 2, and the
 index-snapshot question this stage just raised.
+
+---
+
+## Stage 6b — the two missing measurements (2026-08-29)
+
+Stage 6's numbers left the bespoke-versus-SQLite question unanswerable in both
+directions: the cold-start deficit had a suspected fix nobody had tried, and
+the property that most justifies building an index at all was untested. Both
+measured now; `labs/zig-data-engine/docs/results.md` carries the full table.
+
+**Persisting the index takes cold start from 687 ms to 18.5 ms.** A 37x
+improvement, and it moves the number from a visible pause to below perception.
+The snapshot is 34 MB, saves in 11 ms, and is verified byte-identical to the
+rebuilt index before its load time is reported. It does not violate the rule
+that indexes are derived and never logged — nothing enters the write-ahead
+log, and a snapshot that fails validation is discarded and rebuilt.
+
+**Getting there took three attempts and I was wrong twice**, which is worth
+recording because both wrong answers were the plausible ones:
+
+1. *Build the term dictionary's hash map lazily* — 90,000 inserts skipped on a
+   read-only start. Saved nothing, and made exact-term queries 5x slower by
+   pushing them onto a binary search. Reverted.
+2. *Restore postings with one copy instead of reading two integers at a time*
+   — roughly four million per-element reads eliminated. Moved the number 6%.
+3. *Replace the snapshot's CRC32 with Wyhash.* A table-driven CRC32 runs at a
+   few hundred megabytes a second, so checksumming a 34 MB body cost ~85 ms —
+   more than everything else in the load put together. That was the whole
+   cost.
+
+The lesson is the ordinary one and I re-learned it the slow way: two rounds of
+reasoning about where the time *should* be went to allocation and to loop
+overhead, and splitting the measurement found it immediately in a checksum
+nobody had thought about. The log keeps CRC32, where it guards durability over
+records of a few hundred bytes; the snapshot only has to answer "trust this or
+rebuild?", and a fast non-cryptographic hash answers that just as well.
+
+**Re-indexing after an edit is 3.3 µs for a `.folio` block against 1,079 µs
+for a whole `.md` file** — 328x, or 16x per block. This is the property stable
+block ids exist to buy, invisible in a cold start that indexes every block
+once, and it is the strongest measured argument for the block-identity design.
+Stated precisely in the results doc: it compares two encodings *inside* this
+engine, and does not show that SQLite could not do the same given block-level
+rows and ids to key them on.
+
+**Where the comparison now stands.** Search: bespoke faster on every shape,
+15x on single terms. Cold start: 18.5 ms against SQLite's 1.6 ms, an order of
+magnitude apart and both imperceptible, where before it was 400x and one of
+them was not. Incremental update: measured, and strongly in favour of block
+identity. The short-prefix tail remains a result-set-size problem belonging to
+neither arm.
+
+**Next.** Stage 7, with the evidence now actually sufficient to decide on.

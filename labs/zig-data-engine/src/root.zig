@@ -65,3 +65,7 @@ pub const Hit = search_mod.Hit;
 pub const Query = search_mod.Query;
 pub const parseQuery = search_mod.parseQuery;
 pub const runQuery = search_mod.run;
+
+const index_snapshot = @import("index_snapshot.zig");
+pub const saveIndex = index_snapshot.save;
+pub const loadIndex = index_snapshot.load;

@@ -23,32 +23,64 @@ python3 bench/sqlite_arm.py --blocks corpus/blocks.tsv --queries corpus/queries.
 
 ## 1. Cold start to searchable
 
-| | total | read + replay | decode | index |
-|---|---|---|---|---|
-| `.folio` (log replay) | **667 ms** | 112 ms | 206 ms | 306 ms |
-| `.md` (file scan) | **456 ms** | — | 106 ms | 296 ms |
-| SQLite, rebuild from scratch | 831 ms | — | — | — |
-| **SQLite, reopen an existing index** | **1.6 ms** | — | — | — |
+| | total |
+|---|---|
+| `.folio`, rebuilding the index from the log | 687 ms |
+| `.md`, rebuilding the index from the files | 667 ms |
+| **`.folio`, loading a persisted index** | **18.5 ms** |
+| **`.md`, loading a persisted index** | **17.5 ms** |
+| SQLite, rebuilding from scratch | 907 ms |
+| SQLite, reopening an existing index | 1.6 ms |
 
-Three things fall out of that table.
+Rebuild, by phase:
 
-**Index construction is the dominant cost and it is encoding-independent.**
-Roughly 300 ms in both tiers, 46% of the `.folio` cold start and 65% of the
-`.md` one, doing identical work. Anything that makes cold start materially
-faster has to attack this number, not the format.
+| | read + replay | decode | index |
+|---|---|---|---|
+| `.folio` | 112 ms | 206 ms | 326 ms |
+| `.md` | — | 83 ms | 305 ms |
 
-**The pretty-printed JSON payload costs about 100 ms.** `.folio` decode is
-206 ms against Markdown's 106 ms for the same 39,872 blocks. That is the
-measurement stage 3 deferred when it chose to keep one human-readable
-serialization rather than add a compact second one for the log. It is a real
-cost and a modest one — and it is smaller than the index rebuild it sits next
-to, which is the more useful thing to know.
+**Index construction dominates the rebuild and is encoding-independent** —
+about 315 ms in both tiers, doing identical work. That is what made
+persisting the index worth trying, and the pretty-printed JSON payload's
+~120 ms decode penalty the smaller of the two levers. (That penalty is also
+the number stage 3 deferred when it kept one human-readable serialization
+rather than adding a compact second one for the log.)
 
-**SQLite reopens in 1.6 ms where the engine rebuilds in 667 ms.** This is the
-sharpest result in the spike and it is architectural, not incidental: the
-engine plan makes indexes derived and never logged, so every start pays a full
-rebuild, while SQLite persists its index and simply opens the file. A 400x
-difference on the cold path is not a tuning gap.
+**Persisting the index closes almost all of the gap: 687 ms becomes 18.5 ms**,
+a 37x improvement that takes cold start from a visible pause to below
+perception. The snapshot is 34 MB, saves in 11 ms, loads in 14 ms after a
+4.6 ms read, and is verified byte-identical to the rebuilt index before its
+time is reported. This does not violate the engine plan's rule that indexes
+are derived and never logged: nothing here enters the write-ahead log, and a
+snapshot that fails validation is discarded and rebuilt. It is a cache, and
+it is treated as one.
+
+Getting there took three attempts, and the two that failed are worth
+recording because they were both plausible:
+
+1. **Building the term dictionary's hash map lazily** — 90,000 inserts skipped
+   on a read-only start. Saved nothing on load and made exact-term queries 5x
+   slower, so it was reverted.
+2. **Restoring postings with one copy instead of reading two integers at a
+   time** — about four million per-element reads eliminated. Moved the number
+   by 6%.
+3. **Replacing the snapshot's CRC32 with Wyhash.** A table-driven CRC32 runs
+   at a few hundred megabytes a second, so checksumming a 34 MB body cost
+   ~85 ms — more than everything else in the load combined. This was the
+   whole cost. The log keeps CRC32, where it guards durability over records of
+   a few hundred bytes; the snapshot only needs to answer "is this intact
+   enough to trust, or rebuild?", and a fast non-cryptographic hash answers it
+   just as well.
+
+Loading into an arena rather than a general allocator costs 11 ms against
+14 ms, so roughly 3 ms of what remains is allocator overhead. The residual is
+the 34 MB read and the copies themselves.
+
+**What is left against SQLite is 18.5 ms versus 1.6 ms**, and the remaining
+difference is architectural rather than a tuning gap: SQLite pages its index
+in lazily from disk and does almost no work at open, while a RAM-resident
+engine loads everything up front by design. An order of magnitude at this
+scale is not a difference a person can perceive.
 
 ## 2. Warm search latency
 
@@ -57,22 +89,22 @@ over identical block text, in process.
 
 | shape | bespoke p50 | SQLite p50 | ratio | avg hits |
 |---|---|---|---|---|
-| single term | **0.58 µs** | 9.25 µs | 15.8x | 2,620 |
-| conjunction | **3.17 µs** | 24.08 µs | 7.6x | 5 |
-| 3-char prefix | **720 µs** | 2,187 µs | 3.0x | 12,065 |
-| 2-char prefix | **2,797 µs** | 7,076 µs | 2.5x | 21,874 |
-| 1-char prefix | **6,128 µs** | 23,130 µs | 3.8x | 31,632 |
+| single term | **0.62 µs** | 9.54 µs | 15.3x | 2,620 |
+| conjunction | **2.79 µs** | 23.75 µs | 8.5x | 6 |
+| 3-char prefix | **282 µs** | 1,950 µs | 6.9x | 12,065 |
+| 2-char prefix | **2,489 µs** | 7,355 µs | 3.0x | 17,637 |
+| 1-char prefix | **5,252 µs** | 27,349 µs | 5.2x | 28,619 |
 
 | shape | bespoke p99 | SQLite p99 |
 |---|---|---|
-| single term | 1,643 µs | 5,584 µs |
-| conjunction | 8.7 µs | 65 µs |
-| 3-char prefix | 3,298 µs | 11,660 µs |
-| 2-char prefix | 4,536 µs | 18,510 µs |
-| 1-char prefix | 9,913 µs | 45,117 µs |
+| single term | 1,703 µs | 5,663 µs |
+| conjunction | 14 µs | 66 µs |
+| 3-char prefix | 3,180 µs | 11,046 µs |
+| 2-char prefix | 5,112 µs | 18,979 µs |
+| 1-char prefix | 10,419 µs | 45,916 µs |
 
-**The bespoke index is faster on every query shape**, by 16x on single terms
-and 2.5–4x on prefixes. On the shapes a writer actually types — a word, or two
+**The bespoke index is faster on every query shape**, by 15x on single terms
+and 3–7x on prefixes. On the shapes a writer actually types — a word, or two
 words — it answers in single-digit microseconds against SQLite's tens.
 
 **But the tail is result-set size, not index structure, and it belongs to
@@ -112,5 +144,9 @@ block and `.md` re-indexes its whole file.
   Skrive-native ranking is better than FTS5's is the argument in the engine
   plan's §7, and it is not a latency question.
 - **Single-threaded, single-writer**, as the design specifies.
-- **No incremental-update measurement.** The property most specific to this
-  design is untested here; see §3.
+- **The incremental comparison is between encodings, not between engines.**
+  §3b measures `.folio` against `.md` inside this index; it does not show that
+  SQLite could not do the same given block-level rows.
+- **The snapshot is machine-specific.** Postings are stored as native-endian
+  machine words, which is what makes the load a copy rather than a parse. A
+  snapshot moved between machines fails its check and is rebuilt.

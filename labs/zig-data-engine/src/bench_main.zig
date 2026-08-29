@@ -47,6 +47,7 @@ pub fn main(init: std.process.Init) !void {
     var emit_blocks: ?[]const u8 = null;
     var out_path: ?[]const u8 = null;
     var repeats: usize = 25;
+    var edit_samples: usize = 200;
 
     const args = try init.minimal.args.toSlice(arena);
     var i: usize = 1;
@@ -61,6 +62,7 @@ pub fn main(init: std.process.Init) !void {
         else if (std.mem.eql(u8, a, "--emit-blocks")) emit_blocks = args[i]
         else if (std.mem.eql(u8, a, "--out")) out_path = args[i]
         else if (std.mem.eql(u8, a, "--repeats")) repeats = try std.fmt.parseInt(usize, args[i], 10)
+        else if (std.mem.eql(u8, a, "--edits")) edit_samples = try std.fmt.parseInt(usize, args[i], 10)
         else {
             std.debug.print("{s}", .{usage});
             return fail("unknown argument");
@@ -78,6 +80,19 @@ pub fn main(init: std.process.Init) !void {
 
     var blocks_out: std.ArrayList(u8) = .empty;
     defer blocks_out.deinit(gpa);
+
+    // Blocks (and, for `.md`, whole files) kept aside so the edit benchmark
+    // can re-index real content rather than a synthetic block.
+    const Sample = struct {
+        ref: root.BlockRef,
+        kind: tokenize.BlockKind,
+        tokens: []const tokenize.Token,
+    };
+    var samples_arena = std.heap.ArenaAllocator.init(gpa);
+    defer samples_arena.deinit();
+    const sa = samples_arena.allocator();
+    var edit_blocks: std.ArrayList(Sample) = .empty;
+    var edit_files: std.ArrayList([]const u8) = .empty;
 
     var build_ns: u64 = 0;
     var cold_ns: u64 = 0;
@@ -156,6 +171,17 @@ pub fn main(init: std.process.Init) !void {
                 index_ns += elapsed(io, t_index);
 
                 if (emit_blocks != null) try appendBlockRow(gpa, &blocks_out, ordinal, kind, h.tokens);
+                if (ordinal % 97 == 0 and edit_blocks.items.len < edit_samples) {
+                    const copied = try sa.alloc(tokenize.Token, h.tokens.len);
+                    for (h.tokens, copied) |t, *slot| {
+                        slot.* = .{ .text = try sa.dupe(u8, t.text), .kind = t.kind };
+                    }
+                    try edit_blocks.append(sa, .{
+                        .ref = @intCast(ordinal),
+                        .kind = kind,
+                        .tokens = copied,
+                    });
+                }
                 block_count += 1;
             }
         }
@@ -171,6 +197,9 @@ pub fn main(init: std.process.Init) !void {
             const bytes = try dir.readFileAlloc(io, entry.name, gpa, .unlimited);
             defer gpa.free(bytes);
             bytes_read += bytes.len;
+            if (edit_files.items.len < edit_samples and edit_files.items.len * 13 < block_count + 13) {
+                try edit_files.append(sa, try sa.dupe(u8, entry.name));
+            }
 
             var file_arena = std.heap.ArenaAllocator.init(gpa);
             defer file_arena.deinit();
@@ -200,6 +229,112 @@ pub fn main(init: std.process.Init) !void {
     }
 
     if (emit_blocks) |path| try writeOut(io, path, blocks_out.items);
+
+    // ---- cold start via a persisted index ---------------------------------
+    //
+    // The rebuild above is what the engine plan describes: indexes are
+    // derived, so every start reconstructs them. This measures the
+    // alternative — write the index once, load it next time — because the
+    // rebuild is the whole of the 400x cold-start gap against SQLite, and
+    // SQLite's advantage there is precisely that it does not rebuild.
+    var snapshot_save_ms: f64 = 0;
+    var snapshot_load_ms: f64 = 0;
+    var snapshot_load_arena_ms: f64 = 0;
+    var snapshot_read_ms: f64 = 0;
+    var snapshot_bytes: usize = 0;
+    var snapshot_verified = false;
+    {
+        const t_save = std.Io.Timestamp.now(io, .awake);
+        const image = try root.saveIndex(gpa, &idx);
+        defer gpa.free(image);
+        snapshot_save_ms = ms(elapsed(io, t_save));
+        snapshot_bytes = image.len;
+
+        const snap_path = try std.fmt.allocPrint(arena, "{s}/index.snap", .{corpus_root});
+        try writeOut(io, snap_path, image);
+
+        const t_read_snap = std.Io.Timestamp.now(io, .awake);
+        const from_disk = try std.Io.Dir.cwd().readFileAlloc(io, snap_path, gpa, .unlimited);
+        defer gpa.free(from_disk);
+        snapshot_read_ms = ms(elapsed(io, t_read_snap));
+
+        const t_load = std.Io.Timestamp.now(io, .awake);
+        var restored = try root.loadIndex(gpa, from_disk);
+        defer restored.deinit();
+        snapshot_load_ms = ms(elapsed(io, t_load));
+
+        // Loading again into an arena, to separate the cost of the work from
+        // the cost of the allocator doing it. A load is ~220,000 small
+        // allocations — one per term, per term's postings list, and per
+        // block's term list — and if those dominate, the lever is a flat
+        // layout rather than anything about the format.
+        const t_arena = std.Io.Timestamp.now(io, .awake);
+        var load_arena = std.heap.ArenaAllocator.init(gpa);
+        defer load_arena.deinit();
+        var arena_restored = try root.loadIndex(load_arena.allocator(), from_disk);
+        snapshot_load_arena_ms = ms(elapsed(io, t_arena));
+        _ = &arena_restored;
+
+        // A number for a structure that answers differently is worthless, so
+        // the restored index is checked against the rebuilt one before its
+        // load time is reported.
+        const a = try idx.dump(gpa);
+        defer gpa.free(a);
+        const b = try restored.dump(gpa);
+        defer gpa.free(b);
+        snapshot_verified = std.mem.eql(u8, a, b);
+    }
+
+    // ---- incremental re-index ---------------------------------------------
+    //
+    // The claim stable block ids are supposed to buy, and the one a cold
+    // start cannot see because it indexes every block exactly once. A
+    // `.folio` save re-indexes the edited block; a `.md` save has no block
+    // identity to key on and re-indexes the whole file.
+    var edit_samples_us: std.ArrayList(u64) = .empty;
+    defer edit_samples_us.deinit(gpa);
+    var edited_units: usize = 0;
+
+    if (is_folio) {
+        for (edit_blocks.items) |sample| {
+            // An edit that changes one word, which is what typing does.
+            const mutated = try gpa.alloc(tokenize.Token, sample.tokens.len + 1);
+            defer gpa.free(mutated);
+            @memcpy(mutated[0..sample.tokens.len], sample.tokens);
+            mutated[sample.tokens.len] = .{ .text = "amended", .kind = sample.kind };
+
+            const t = std.Io.Timestamp.now(io, .awake);
+            try idx.putBlock(sample.ref, .{ .doc = 0, .kind = sample.kind }, mutated);
+            try edit_samples_us.append(gpa, elapsed(io, t));
+            edited_units += 1;
+        }
+    } else {
+        var dir = try std.Io.Dir.cwd().openDir(io, try std.fmt.allocPrint(arena, "{s}/md", .{corpus_root}), .{ .iterate = true });
+        defer dir.close(io);
+        for (edit_files.items, 0..) |name, k| {
+            const bytes = try dir.readFileAlloc(io, name, gpa, .unlimited);
+            defer gpa.free(bytes);
+
+            var file_arena = std.heap.ArenaAllocator.init(gpa);
+            defer file_arena.deinit();
+            const fa = file_arena.allocator();
+
+            // Re-index every block in the file, since without stable ids
+            // there is no way to know which one changed.
+            const base: root.BlockRef = @intCast(k * 13);
+            const t = std.Io.Timestamp.now(io, .awake);
+            var at: root.BlockRef = base;
+            for (try markdown.scan(fa, bytes)) |scanned| {
+                const h = try markdown.harvest(fa, scanned);
+                try idx.putBlock(at, .{ .doc = 0, .kind = scanned.kind }, h.tokens);
+                at += 1;
+            }
+            try edit_samples_us.append(gpa, elapsed(io, t));
+            edited_units += at - base;
+        }
+    }
+    std.mem.sort(u64, edit_samples_us.items, {}, std.sort.asc(u64));
+
 
     // ---- the query set ----------------------------------------------------
     var queries: []Query = undefined;
@@ -283,6 +418,8 @@ pub fn main(init: std.process.Init) !void {
         \\  "build_ms": {d:.2},
         \\  "cold_start_ms": {d:.2},
         \\  "cold_start_phases_ms": {{ "read_and_replay": {d:.2}, "decode": {d:.2}, "index": {d:.2} }},
+        \\  "index_snapshot": {{ "bytes": {d}, "save_ms": {d:.2}, "read_ms": {d:.2}, "load_ms": {d:.2}, "load_arena_ms": {d:.2}, "verified_identical": {} }},
+        \\  "reindex_after_edit": {{ "unit": "{s}", "samples": {d}, "blocks_touched": {d}, "p50_us": {d:.2}, "p99_us": {d:.2} }},
         \\  "queries": {d},
         \\  "repeats": {d},
         \\  "overall": {{ "p50_us": {d:.3}, "p90_us": {d:.3}, "p99_us": {d:.3}, "max_us": {d:.3} }},
@@ -293,6 +430,12 @@ pub fn main(init: std.process.Init) !void {
         idx.termCount(), bytes_read,
         ms(build_ns),    ms(cold_ns),
         ms(read_ns),     ms(decode_ns),  ms(index_ns),
+        snapshot_bytes,  snapshot_save_ms, snapshot_read_ms,
+        snapshot_load_ms, snapshot_load_arena_ms, snapshot_verified,
+        if (is_folio) "one block" else "whole file",
+        edit_samples_us.items.len, edited_units,
+        us(percentile(edit_samples_us.items, 50)),
+        us(percentile(edit_samples_us.items, 99)),
         queries.len,     repeats,
         us(percentile(all.items, 50)), us(percentile(all.items, 90)),
         us(percentile(all.items, 99)), us(percentile(all.items, 100)),
