@@ -287,6 +287,22 @@ const secondary_weight: f32 = 0.15;
 const secondary_decay: f32 = 0.6;
 const secondary_blocks: usize = 4;
 
+/// How much a document is discounted when its best block answers only part of
+/// the query.
+///
+/// Terms being satisfiable across blocks is what makes real prose findable,
+/// but taken alone it ranks a document whose best block matches half the
+/// query above one whose best block matches all of it — which on this
+/// repository's planning notes put a heading called "Typographic identity"
+/// above the document actually about block identity, for the query "block
+/// identity". A query answered in one place is a better answer than the same
+/// terms scattered across a file.
+///
+/// The floor is deliberately generous rather than proportional: a document
+/// that genuinely develops a subject across paragraphs should still compete,
+/// only not win on a partial match alone.
+const coverage_floor: f32 = 0.4;
+
 /// The maximum number of query terms coverage can track, bounded by the bitset
 /// used to record which terms a document has seen.
 pub const max_query_terms = 64;
@@ -399,7 +415,11 @@ pub fn runDocuments(
             }
         }.call);
 
-        var score = accum.blocks.items[0].score;
+        const term_count: f32 = @floatFromInt(lists.items.len);
+        const covered: f32 = @floatFromInt(accum.blocks.items[0].matched_terms);
+        const concentration = coverage_floor + (1.0 - coverage_floor) * (covered / term_count);
+
+        var score = accum.blocks.items[0].score * concentration;
         const tail = @min(accum.blocks.items.len, secondary_blocks + 1);
         var factor = secondary_weight;
         for (accum.blocks.items[1..tail]) |b| {

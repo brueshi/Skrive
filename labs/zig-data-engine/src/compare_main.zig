@@ -44,6 +44,7 @@ pub fn main(init: std.process.Init) !void {
     var dir_path: ?[]const u8 = null;
     var queries_path: ?[]const u8 = null;
     var emit_blocks: ?[]const u8 = null;
+    var emit_rankings: ?[]const u8 = null;
     var top: usize = 8;
 
     const args = try init.minimal.args.toSlice(arena);
@@ -55,6 +56,7 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, a, "--dir")) dir_path = args[i]
         else if (std.mem.eql(u8, a, "--queries")) queries_path = args[i]
         else if (std.mem.eql(u8, a, "--emit-blocks")) emit_blocks = args[i]
+        else if (std.mem.eql(u8, a, "--emit-rankings")) emit_rankings = args[i]
         else if (std.mem.eql(u8, a, "--top")) top = try std.fmt.parseInt(usize, args[i], 10)
         else {
             std.debug.print("{s}", .{usage});
@@ -111,6 +113,106 @@ pub fn main(init: std.process.Init) !void {
     }
 
     if (emit_blocks) |path| try emitBlocks(gpa, io, &idx, path);
+    if (emit_rankings) |path| try emitRankings(gpa, io, &idx, queries.items, now, top, path);
+}
+
+/// Both of our rankings, per query, as documents. Consumed by
+/// `bench/rank_compare.py`, which adds the FTS5 arm and renders the three
+/// together — so the comparison is made from one set of numbers rather than
+/// by reading three separate outputs side by side and hoping.
+/// JSON string escaping. Breadcrumbs are authored heading text, so they
+/// contain whatever a writer put in a heading — quotes, backslashes and
+/// control characters included.
+fn appendJsonString(gpa: std.mem.Allocator, out: *std.ArrayList(u8), text: []const u8) !void {
+    const hex = "0123456789abcdef";
+    try out.append(gpa, '"');
+    for (text) |c| switch (c) {
+        '"' => try out.appendSlice(gpa, "\\\""),
+        '\\' => try out.appendSlice(gpa, "\\\\"),
+        0x08 => try out.appendSlice(gpa, "\\b"),
+        0x09 => try out.appendSlice(gpa, "\\t"),
+        0x0a => try out.appendSlice(gpa, "\\n"),
+        0x0c => try out.appendSlice(gpa, "\\f"),
+        0x0d => try out.appendSlice(gpa, "\\r"),
+        else => {
+            if (c < 0x20) {
+                try out.appendSlice(gpa, "\\u00");
+                try out.append(gpa, hex[(c >> 4) & 0xf]);
+                try out.append(gpa, hex[c & 0xf]);
+            } else {
+                try out.append(gpa, c);
+            }
+        },
+    };
+    try out.append(gpa, '"');
+}
+
+fn emitRankings(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    idx: *const root.Index,
+    queries: []const []const u8,
+    now: i64,
+    top: usize,
+    path: []const u8,
+) !void {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(gpa);
+    try out.appendSlice(gpa, "{\n  \"queries\": [\n");
+
+    for (queries, 0..) |text, qi| {
+        if (qi != 0) try out.appendSlice(gpa, ",\n");
+        try out.appendSlice(gpa, "    {\n      \"query\": ");
+        try appendJsonString(gpa, &out, text);
+        try out.appendSlice(gpa, ",\n");
+        try appendRanking(gpa, &out, idx, text, "bm25_only", root.Weights.bm25_only, now, top);
+        try out.appendSlice(gpa, ",\n");
+        try appendRanking(gpa, &out, idx, text, "skrive", .{}, now, top);
+        try out.appendSlice(gpa, "\n    }");
+    }
+    try out.appendSlice(gpa, "\n  ]\n}\n");
+
+    const file = try std.Io.Dir.cwd().createFile(io, path, .{});
+    defer file.close(io);
+    try file.writePositionalAll(io, out.items, 0);
+}
+
+fn appendRanking(
+    gpa: std.mem.Allocator,
+    out: *std.ArrayList(u8),
+    idx: *const root.Index,
+    text: []const u8,
+    label: []const u8,
+    weights: root.Weights,
+    now: i64,
+    top: usize,
+) !void {
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    const query = try root.parseQuery(a, try std.fmt.allocPrint(a, "{s} ", .{text}));
+    const hits = try root.runDocuments(idx, gpa, query, .{
+        .weights = weights,
+        .now_millis = now,
+        .limit = top,
+    });
+    defer root.freeDocHits(gpa, hits);
+
+    try out.print(gpa, "      \"{s}\": [", .{label});
+    for (hits, 0..) |hit, n| {
+        if (n != 0) try out.appendSlice(gpa, ", ");
+        const doc = idx.docs.items[hit.doc];
+        const crumb = idx.breadcrumb(hit.blocks[0].block) orelse "";
+        try out.appendSlice(gpa, "{\"path\": ");
+        try appendJsonString(gpa, out, doc.path);
+        try out.print(gpa, ", \"score\": {d:.3}, \"blocks\": {d}, \"section\": ", .{
+            hit.score, hit.blocks.len,
+        });
+        try appendJsonString(gpa, out, crumb);
+        try out.append(gpa, '}');
+    }
+    try out.appendSlice(gpa, "]");
 }
 
 fn countLinked(idx: *const root.Index) usize {

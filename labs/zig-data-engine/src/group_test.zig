@@ -171,6 +171,36 @@ test "extra matching blocks help a document but do not decide it" {
     try std.testing.expect(hits[1].score > hits[1].blocks[0].score);
 }
 
+test "a document answering the whole query beats one answering half of it" {
+    const gpa = std.testing.allocator;
+    var f = Fixture.init(gpa);
+    defer f.deinit();
+
+    // Its best block is a short heading carrying only the common term, which
+    // BM25 scores highly for being brief.
+    const partial = try f.doc("partial.md");
+    _ = try f.block(partial, .heading, root.no_heading, "identity");
+    _ = try f.block(partial, .paragraph, root.no_heading, "block mentioned far away in other prose");
+
+    // Its best block is longer, scores lower on its own, and answers the
+    // whole question.
+    const whole = try f.doc("whole.md");
+    _ = try f.block(whole, .paragraph, root.no_heading, "block identity is what this paragraph is about");
+
+    for (0..40) |_| _ = try f.block(try f.doc("filler.md"), .paragraph, root.no_heading, "identity filler");
+
+    const hits = try f.search(gpa, "block identity ");
+    defer root.freeDocHits(gpa, hits);
+
+    try std.testing.expectEqual(@as(usize, 2), hits.len);
+    try std.testing.expectEqual(whole, hits[0].doc);
+    try std.testing.expectEqual(@as(u32, 2), hits[0].blocks[0].matched_terms);
+
+    // The partial document's leading block genuinely scores higher; it is the
+    // document ranking that puts the complete answer first.
+    try std.testing.expect(hits[1].blocks[0].score > hits[0].blocks[0].score);
+}
+
 test "a limit caps documents rather than blocks" {
     const gpa = std.testing.allocator;
     var f = Fixture.init(gpa);

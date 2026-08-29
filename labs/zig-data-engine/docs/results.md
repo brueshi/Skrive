@@ -190,6 +190,66 @@ once either way. It would show up in a measurement this stage does not make:
 the cost of re-indexing after a single block edit, where `.folio` touches one
 block and `.md` re-indexes its whole file.
 
+## 5. Ranking, against FTS5, on real prose
+
+Measured 2026-08-29 on this repository's `planning/` directory — 74 documents,
+4,031 blocks, 1.0MB of prose the owner wrote. Synthetic text cannot answer
+this question: there is no sense in which one block of generated words is more
+relevant than another, so relevance was invisible to every earlier
+measurement.
+
+Three rankings over identical blocks, identical term frequencies and identical
+queries: our BM25 alone, our BM25 plus the Skrive signals, and SQLite FTS5's
+`bm25()`. FTS5's `doc` and `kind` columns are UNINDEXED so both engines match
+block body only — leaving them searchable let FTS5 match filename text our
+index never sees, which is a difference in *what* is indexed rather than in
+how it is ranked.
+
+### The result
+
+**On eight queries, the top document agreed every time.** An average of 3.2 of
+5 documents overlapped. The Skrive signals reorder positions two through five;
+they did not change the best answer on any query tested.
+
+That is the honest answer to the question D2 asked, and it is not the one the
+engine plan assumed. **Ranking order is not where this engine differentiates.**
+
+### Where it does differ, and it is not ranking
+
+- **Terms satisfied across a document.** `durability harness` returns four
+  documents against FTS5's one, because FTS5's `AND` is per row and rows are
+  blocks. Getting the same from FTS5 means indexing whole documents and losing
+  block precision, or reimplementing the grouping above it.
+- **Structural breadcrumbs.** Every result names the section it came from —
+  "SKR-199 — export pipeline: `.folio` → Markdown / HTML / TXT / RTF". That
+  comes from the block model and the heading relation; a generic index over
+  block rows has nothing to build it from.
+- **Grouped results.** One entry per document with its best blocks beneath it,
+  rather than a flat list one long document can fill.
+
+So the differentiator is the **shape of the result**, not the order. That is a
+weaker claim than the plan made, and a real one.
+
+### Two defects real prose found that synthetic text could not
+
+- **Headings were weighted 4.0**, set when scoring was raw term frequency and a
+  short heading needed the lift. BM25 already rewards brevity through length
+  normalization, so the old weight double-counted: two-word headings scoring
+  2.7 outranked substantive paragraphs scoring 8.7. Retuned to 1.5.
+- **Document scoring ignored coverage.** A document whose best block answered
+  half the query outranked one whose best block answered all of it, which put
+  a heading called "Typographic identity" above the document actually about
+  block identity for the query `block identity`. The document score is now
+  weighted by its best block's coverage.
+
+### A gap this comparison exposed
+
+**Document titles and paths are not indexed.** A file named
+`navigation-panels-plan.md` should rank for `navigation` and currently cannot,
+because only block bodies are indexed. FTS5 got this for free while its `doc`
+column was searchable, and the results were visibly better for it. This is
+cheap to add and likely worth more than any weight tuning.
+
 ## 4. What this does not measure
 
 - **Page cache is warm.** The corpus was just written, so these are
