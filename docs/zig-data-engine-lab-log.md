@@ -282,3 +282,79 @@ app-written fixture caught it.
 repository is `docs/fixtures/perf-100` at 404K across 100 files, and there is
 exactly one `.folio`; the plan's premise is tens of megabytes and tens of
 thousands of blocks. Nothing can be measured honestly until that gap closes.
+
+---
+
+## Stage 4 — a corpus at design scale (2026-08-29)
+
+**Goal.** Close the gap between what can be measured and what the plan argues
+from. The repository's largest fixture is `docs/fixtures/perf-100` at 404K
+across 100 files; the engine plan's premise is tens of megabytes and tens of
+thousands of blocks.
+
+**Result.** `zig build corpus` produces three tiers, reproducibly:
+
+| tier | documents | blocks | words | distinct | `.folio` | `.md` |
+|---|---|---|---|---|---|---|
+| small | 20 | 372 | 22k | 2.4k | 398K | 143K |
+| real | 100 | 2,026 | 125k | 14k | 2.4M | 904K |
+| design | 2,000 | 39,872 | 2.45M | 113k | 47.7M | 18.5M |
+
+**Written in Zig, in the lab, rather than extending
+`scripts/build-perf-fixture.ts`.** The isolation invariant is the reason: a
+lab that needs repository tooling to produce its own inputs is not
+self-contained and does not graduate cleanly. The generator being Zig also
+means the corpus is produced by the toolchain that consumes it, with no bun
+in the loop.
+
+**Every document is emitted twice**, `.folio` and `.md`, from one generated
+block tree. That makes the encoding the only variable when the two index paths
+are compared — `.folio` blocks carry stable ids and index incrementally, `.md`
+blocks key on `(path, ordinal)` and re-index whole files.
+
+**The vocabulary is Zipf-distributed, and that is the whole point.** Search
+cost is dominated by postings-list length. Uniformly sampled words would give
+every term a short postings list and make search look fast for a reason that
+has nothing to do with the index. Words are also built from syllables rather
+than random letters, so the vocabulary clusters by prefix the way a real one
+does — which is what makes prefix queries, the search-as-you-type path,
+behave realistically.
+
+**Two realism corrections during the stage, both caught by looking at output
+rather than by a test.** Tags were initially sampled from the Zipf
+distribution and came out as `#the` and `#a`, which would have made
+tag-filtered retrieval meaningless to measure; they now come from a bounded
+pool of distinctive terms with reuse and nesting. And the vocabulary was a
+fixed 5,000 words, which the design tier exhausted — with 2.4M tokens even
+the rarest term landed seven times, leaving no terms that appear once, while
+real text is 40-60% such terms.
+
+**The vocabulary pools are deliberately larger than Heaps' law predicts.** The
+design tier lands at roughly a 4.6% type-token ratio against real English
+prose's ~1%, so its dictionary is several times larger than a natural corpus
+of the same length. A fixed pool cannot reproduce both a realistic type-token
+ratio and a realistic singleton tail, because real vocabulary is generative
+rather than sampled. Given the choice, this errs toward the harder corpus:
+dictionary and prefix search are tested against more terms than reality, not
+fewer, which is the direction a gate should err.
+
+**The distribution test was vacuous and the mutation check caught it.** It
+tallied words by tokenizing the *serialized* form, so the top frequencies were
+JSON keys — `kind` and `marks` appear once per inline node and swamp every
+real word. Replacing Zipf with uniform sampling left it passing. It now walks
+the block tree and counts only prose text, and the same mutation fails it.
+Worth recording as the second time in this lab a test looked fine and proved
+nothing until it was deliberately broken.
+
+**Verification.** 39/39 from a cleared cache. On disk, two runs of the same
+tier and seed are byte-identical, a different seed produces a different
+corpus, and swapping the per-document arena provably does not change what is
+generated. Every generated document survives the same parse-and-rewrite
+round trip the conformance fixtures do, so the corpus is genuinely `.folio`
+rather than something only this generator would accept.
+
+**Next.** Stage 5 — the inverted index: interned token dictionary, postings
+with positions, incremental patch on `PutBlock`, and prefix queries on the
+trailing token. Prefix support is in scope from the start because it
+determines the data structure, and retrofitting it is a rewrite rather than a
+fix.

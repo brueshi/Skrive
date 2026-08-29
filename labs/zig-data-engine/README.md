@@ -59,6 +59,23 @@ Zig 0.16.0, matching the pin in `shell-zig/core`. From this directory:
 zig build test    # unit tests, headless
 ```
 
+## The corpus
+
+The repository's largest fixture is 404K across 100 files; the engine plan
+argues from tens of megabytes and tens of thousands of blocks. `zig build
+corpus` generates the corpus that premise describes, seeded and clock-free so
+the same arguments reproduce the same bytes:
+
+```
+zig build corpus -Doptimize=ReleaseFast -- --tier design --out corpus/design
+```
+
+Tiers are `small` (20 documents), `real` (100, matching the existing perf
+fixture) and `design` (2,000 documents, ~40k blocks, 18MB of Markdown and
+48MB of `.folio`). Every document is written in both encodings from one
+generated block tree, so the encoding is the only variable when the two index
+paths are compared. Output is gitignored.
+
 The staged plan — decision record, stage ladder, exit criteria — lives in
 `planning/skr-139-spike-plan.md` (disk-only, not committed). The running
 session log is `docs/zig-data-engine-lab-log.md`.

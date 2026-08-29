@@ -18,6 +18,20 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // The corpus generator. An executable rather than a test so a
+    // design-scale corpus can be produced on demand and kept out of the repo.
+    const corpus_module = b.createModule(.{
+        .root_source_file = b.path("src/corpus_main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const corpus_exe = b.addExecutable(.{ .name = "corpus", .root_module = corpus_module });
+    b.installArtifact(corpus_exe);
+    const corpus_run = b.addRunArtifact(corpus_exe);
+    if (b.args) |args| corpus_run.addArgs(args);
+    const corpus_step = b.step("corpus", "Generate a synthetic corpus at a chosen tier");
+    corpus_step.dependOn(&corpus_run.step);
+
     const test_module = b.createModule(.{
         .root_source_file = b.path("src/tests.zig"),
         .target = target,
