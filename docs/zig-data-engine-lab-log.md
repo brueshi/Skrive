@@ -129,3 +129,93 @@ record framing will inherit.
 hammers them. The payload stays opaque bytes there: the log does not need to
 understand blocks to be proven correct, and the most dangerous code in the
 project deserves the simplest possible fixtures.
+
+---
+
+## Stage 2 — the log, and the harness that hammers it (2026-08-29)
+
+**Goal.** The durability gate. Record framing, append, replay, snapshot
+validation and fallback — and every fault class in the model injected against
+them. This is the stage that decides whether Path A survives.
+
+**Result: the gate is green.** 25/25 tests pass from a cleared cache, across
+roughly 800 replays of a deliberately awkward 80-byte log.
+
+**What landed.**
+
+- `src/log.zig` — the wire format `[len:u32][crc32:u32][type:u8][payload]`,
+  little-endian throughout, plus `Log.append` and `replay`.
+- `src/snapshot.zig` — snapshot framing
+  (`[magic:8][log_offset:u64][len:u32][crc32:u32][payload]`), the
+  `SnapshotStore` seam, and a simulated backing that can corrupt or truncate a
+  stored snapshot.
+- `src/recover.zig` — newest trustworthy snapshot, then the log tail after it.
+- `src/log_test.zig` — the harness.
+
+**The payload is opaque bytes**, as planned. The log does not need to
+understand blocks to be proven correct, and the most dangerous code in the
+project deserves the simplest fixtures. Block encoding lands on a log that is
+already green.
+
+**Three framing decisions.**
+
+- **Record type 0 is invalid.** Tags start at 1, so a zeroed page is rejected
+  for two independent reasons rather than one. The checksum was already
+  sufficient; this is defense in depth aimed at exactly the shape fault class
+  4 injects.
+- **The checksum covers the length field.** Not because a damaged length would
+  otherwise slip through — it would fail the limit check or redirect the
+  reader to a span whose payload fails its own checksum — but because it makes
+  the length verifiable before it is trusted, so damage is reported where it
+  happened instead of one record later. Defense in depth and diagnosis, not a
+  unique detector. (An earlier draft of this comment overstated it.)
+- **A bounded maximum payload length.** A corrupted length must never become a
+  huge allocation. The limit check runs before anything is sized from the
+  field.
+
+**`unknown_type` is unreachable from corruption.** Because the checksum covers
+the tag, a valid-checksum record with an unrecognized type can only come from
+a future writer. Stage 2 stops replay there. Skipping such a record instead —
+its length is known, so skipping is possible — is the forward-compatible
+behavior, and it is a versioning decision that belongs with the schema work
+rather than here. Carried to stage 7.
+
+**Snapshot validation is stronger than "it decodes."** A snapshot whose
+recorded log offset runs past the log we actually have is internally
+consistent, correctly checksummed, and still wrong. `recover` rejects it and
+falls back. This is the case the fault model lists under class 5 that no
+checksum will ever catch, and it has its own test.
+
+**Only a simulated snapshot store landed.** The seam's job at this stage is to
+make the corrupt-snapshot fault injectable and the fallback testable, and the
+payload is opaque bytes until the arena exists. A real on-disk store arrives
+with stage 3, when there is something real to write. Stated as scope, not
+discovered later.
+
+**The sweeps, all exhaustive.** Sampling is a weaker claim to make when the
+exhaustive one is affordable, and at this log size it is:
+
+- truncation at all 81 byte offsets;
+- every single-bit flip at every byte — 640 cases — each asserted to be caught
+  at or before its own record;
+- every 8-byte sector zeroed in turn;
+- every subset of the pending pages after a mid-log sync;
+- every byte of the newer snapshot corrupted in turn, each asserted to fall
+  back to the prior known-good one at the correct log position;
+- every truncation length of a snapshot.
+
+The invariant behind all of them is stated once in the harness: **replay never
+returns a record that differs from what was appended, and never returns a
+partial one.** A crash may cost unconfirmed records; it may never invent or
+damage a confirmed one.
+
+**Verification.** Two mutations confirmed the harness is load-bearing rather
+than decorative. Disabling the checksum comparison failed exactly four tests —
+zeroed page, torn sector, bit flip, lost unsynced tail — which is the precise
+set that depends on corruption detection. Disabling the snapshot log-position
+bounds check failed exactly the test written for it. Both restored, clean
+cache re-run green.
+
+**Next.** Stage 3 — the arena and the block encoding. `PutBlock` payloads stop
+being opaque and become encoded `.folio` blocks, conformance-checked against
+the published schema through the existing parity-harness pattern.

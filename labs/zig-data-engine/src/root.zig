@@ -1,9 +1,9 @@
 //! zig-data-engine — the public surface of the lab.
 //!
-//! Stage 1 establishes the seams every later stage is written against: all
-//! durable I/O behind `Storage`, all time behind `Clock`. The engine itself
-//! arrives on top of them, so it is testable under simulated faults from its
-//! first commit.
+//! Stage 1 established the seams: all durable I/O behind `Storage`, all time
+//! behind `Clock`. Stage 2 puts the durable log on top of them — framing,
+//! append, replay, snapshots, and recovery — which is the code that can lose
+//! data and therefore the code the fault harness exists for.
 
 pub const FaultClass = @import("fault.zig").FaultClass;
 
@@ -20,3 +20,24 @@ const clock = @import("clock.zig");
 pub const Clock = clock.Clock;
 pub const RealClock = clock.RealClock;
 pub const SimClock = clock.SimClock;
+
+const log = @import("log.zig");
+pub const Log = log.Log;
+pub const Record = log.Record;
+pub const RecordType = log.RecordType;
+pub const Replay = log.Replay;
+pub const StopReason = log.StopReason;
+pub const replay = log.replay;
+pub const header_len = log.header_len;
+pub const max_payload_len = log.max_payload_len;
+
+const snapshot = @import("snapshot.zig");
+pub const Snapshot = snapshot.Snapshot;
+pub const SnapshotStore = snapshot.SnapshotStore;
+pub const SimSnapshotStore = snapshot.SimSnapshotStore;
+pub const encodeSnapshot = snapshot.encode;
+pub const decodeSnapshot = snapshot.decode;
+
+const recover_mod = @import("recover.zig");
+pub const Recovery = recover_mod.Recovery;
+pub const recover = recover_mod.recover;
