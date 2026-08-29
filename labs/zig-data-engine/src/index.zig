@@ -38,9 +38,24 @@ pub const Posting = extern struct {
     freq: u32,
 };
 
+/// No enclosing heading. A sentinel rather than an optional so the block
+/// table stays a flat array of fixed-size records.
+pub const no_heading: BlockRef = std.math.maxInt(BlockRef);
+
+pub const DocInfo = struct {
+    /// Owned, relative to the vault root.
+    path: []const u8,
+    modified_millis: i64,
+    /// Blocks elsewhere that link here. Resolved after a load, since a link
+    /// may point at a document not yet walked.
+    inbound: u32 = 0,
+};
+
 pub const BlockInfo = struct {
     doc: DocRef,
     kind: BlockKind,
+    /// The heading this block sits under, or `no_heading`.
+    heading: BlockRef = no_heading,
     /// Token count, for length normalization. A term appearing once in a
     /// six-word heading means more than the same term once in a
     /// three-hundred-word block, and a scorer without this systematically
@@ -93,6 +108,9 @@ pub const Index = struct {
     live_blocks: usize = 0,
     total_tokens: u64 = 0,
 
+    docs: std.ArrayList(DocInfo) = .empty,
+    by_path: std.StringHashMapUnmanaged(DocRef) = .empty,
+
     pub fn init(gpa: std.mem.Allocator) Index {
         return .{ .gpa = gpa };
     }
@@ -118,6 +136,10 @@ pub const Index = struct {
             entry.value_ptr.deinit(self.gpa);
         }
         self.backlinks.deinit(self.gpa);
+
+        for (self.docs.items) |d| self.gpa.free(d.path);
+        self.docs.deinit(self.gpa);
+        self.by_path.deinit(self.gpa);
 
         self.* = undefined;
     }
@@ -371,6 +393,51 @@ pub const Index = struct {
         self.live_blocks -= 1;
         self.total_tokens -= self.blocks.items[ref].length;
         self.blocks.items[ref].length = 0;
+    }
+
+    /// Register a document, or return the existing ref for a path already
+    /// seen. Paths are the identity here because `.md` has no `docId`; a
+    /// `.folio` vault would key on the id in the file instead.
+    pub fn addDocument(self: *Index, path: []const u8, modified_millis: i64) !DocRef {
+        if (self.by_path.get(path)) |existing| return existing;
+
+        const owned = try self.gpa.dupe(u8, path);
+        errdefer self.gpa.free(owned);
+        const ref: DocRef = @intCast(self.docs.items.len);
+        try self.docs.append(self.gpa, .{ .path = owned, .modified_millis = modified_millis });
+        try self.by_path.put(self.gpa, owned, ref);
+        return ref;
+    }
+
+    pub fn document(self: *const Index, ref: DocRef) DocInfo {
+        return self.docs.items[ref];
+    }
+
+    /// Count inbound links per document, once every path is known.
+    ///
+    /// A link target is written as it appeared in the source, so it is
+    /// matched by suffix against known paths rather than resolved: a note
+    /// linking to `note-7.md` from a sibling directory means the same file a
+    /// link to `folder/note-7.md` means, and neither spelling should be lost
+    /// because it did not match a string exactly.
+    pub fn resolveInboundLinks(self: *Index) !void {
+        for (self.docs.items) |*d| d.inbound = 0;
+
+        var it = self.backlinks.iterator();
+        while (it.next()) |entry| {
+            const target = entry.key_ptr.*;
+            const count: u32 = @intCast(entry.value_ptr.items.len);
+            if (self.by_path.get(target)) |exact| {
+                self.docs.items[exact].inbound += count;
+                continue;
+            }
+            for (self.docs.items) |*d| {
+                if (std.mem.endsWith(u8, d.path, target)) {
+                    d.inbound += count;
+                    break;
+                }
+            }
+        }
     }
 
     pub fn addBacklink(self: *Index, target: []const u8, from: BlockRef) !void {

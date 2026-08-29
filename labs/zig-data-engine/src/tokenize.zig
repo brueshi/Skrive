@@ -27,19 +27,30 @@ pub const BlockKind = enum(u8) {
     quote,
     footnote,
 
-    /// Baseline relevance multiplier. Headings name things, so a match in one
-    /// is a stronger signal than the same word buried in prose; code is
-    /// mostly identifiers and noise. These are starting values to be tuned
-    /// against real queries, not tuned values.
+    /// Baseline relevance multiplier.
+    ///
+    /// **Retuned against real prose (2026-08-29), and the original values
+    /// were wrong for an instructive reason.** Headings were weighted 4.0
+    /// back when scoring was raw term frequency, where a short heading and a
+    /// long paragraph containing a term scored the same and the heading
+    /// needed the lift. BM25 changed that: length normalization already
+    /// rewards a term appearing in a six-word heading over the same term in a
+    /// three-hundred-word paragraph. Keeping 4.0 on top double-counted, and
+    /// on this repository's own planning documents it put two-word headings
+    /// with a base score of 2.7 above substantive paragraphs scoring 8.7 —
+    /// the title of a section outranking the section.
+    ///
+    /// So these are now modest adjustments to a scorer that already accounts
+    /// for length, not compensation for one that does not.
     pub fn weight(self: BlockKind) f32 {
         return switch (self) {
-            .heading => 4.0,
+            .heading => 1.5,
             .paragraph => 1.0,
             .list_item => 1.0,
             .table_cell => 0.9,
-            .quote => 0.8,
-            .footnote => 0.6,
-            .code => 0.4,
+            .quote => 0.9,
+            .footnote => 0.7,
+            .code => 0.5,
         };
     }
 };

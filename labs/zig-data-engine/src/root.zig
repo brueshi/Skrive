@@ -80,3 +80,8 @@ pub const RankContext = rank_mod.Context;
 pub const DocFacts = rank_mod.DocFacts;
 pub const Boost = rank_mod.Boost;
 pub const boostFor = rank_mod.boostFor;
+
+pub const vault = @import("vault.zig");
+pub const loadVault = vault.load;
+pub const DocInfo = index_mod.DocInfo;
+pub const no_heading = index_mod.no_heading;

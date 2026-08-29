@@ -159,8 +159,8 @@ pub fn runWith(
             base += ctx.termScore(terms.items[i], seed.block, found.freq);
         }
 
-        const facts = if (options.facts) |r| r.get(seed.block) else rank.DocFacts{};
-        const boost = rank.boostFor(ctx, seed.block, facts, false);
+        const facts = if (options.facts) |r| r.get(seed.block) else defaultFacts(idx, seed.block);
+        const boost = rank.boostFor(ctx, seed.block, facts, headingMatches(idx, terms.items, seed.block));
         try hits.append(gpa, .{
             .block = seed.block,
             .score = base * boost.product(),
@@ -179,6 +179,35 @@ pub fn runWith(
         hits.shrinkRetainingCapacity(options.limit);
     }
     return hits.toOwnedSlice(gpa);
+}
+
+/// Document facts straight from the index, when the caller supplies no
+/// resolver of its own. A vault load fills these in; a synthetic corpus
+/// leaves them neutral.
+fn defaultFacts(idx: *const Index, block: BlockRef) rank.DocFacts {
+    const doc_ref = idx.blocks.items[block].doc;
+    if (doc_ref >= idx.docs.items.len) return .{};
+    const doc = idx.docs.items[doc_ref];
+    return .{
+        .modified_millis = if (doc.modified_millis == 0) null else doc.modified_millis,
+        .inbound_links = doc.inbound,
+    };
+}
+
+/// Does the heading this block sits under also match the query?
+///
+/// Any query term is enough, deliberately. The signal being reached for is
+/// "this section is about the thing you asked for", and a heading rarely
+/// contains a whole query — a section called "Durability" should lift its
+/// paragraphs for the query "durability harness" even though it never says
+/// "harness".
+fn headingMatches(idx: *const Index, terms: []const TermId, block: BlockRef) bool {
+    const heading = idx.blocks.items[block].heading;
+    if (heading == index_mod.no_heading) return false;
+    for (terms) |term| {
+        if (find(idx.postingsFor(term), heading) != null) return true;
+    }
+    return false;
 }
 
 fn find(list: []const Posting, block: BlockRef) ?Posting {
