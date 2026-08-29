@@ -179,7 +179,8 @@ children, so the array is a **tree**. Every block object begins with `id` then
 ### Table
 
 ```json
-{ "id": "…", "type": "table", "align": ["left", null, "right"], "rows": [
+{ "id": "…", "type": "table", "align": ["left", null, "right"],
+  "widths": [0.3333, 0.25, 0.4167], "rows": [
   [ [ … ], [ … ], [ … ] ],
   [ [ … ], [ … ], [ … ] ]
 ] }
@@ -187,6 +188,11 @@ children, so the array is a **tree**. Every block object begins with `id` then
 
 - **`align`** — array length = column count; each `"left" | "right" | "center" |
   null`, from the header.
+- **`widths`** (optional) — per-column relative width weights, array length =
+  column count. Present only when the table has custom column widths; absent
+  entirely otherwise. Values are fractions that sum to approximately 1,
+  rounded to four decimal places. `.folio`-only: GFM has no width syntax, so
+  Markdown export drops them.
 - **`rows`** — row 0 is the header; the rest are body rows. Each **cell is an
   inline array** (§6). Ragged rows are permitted natively (a row may have fewer or
   more cells than the header) — the native format has no column-clamp, which is
@@ -249,9 +255,16 @@ document. The schema honors this: no block references another by position or by 
 shared table; identity is the intrinsic `id`; a container carries its children
 inline. Per-block history therefore logs a block subtree keyed by `id`.
 
-The engine consumes this encoding but **stores nothing canonical** — it is a
-rebuildable index over the files (§0.6). Deleting the engine's data and re-scanning
-the `.folio` files reconstructs every managed fact.
+The engine consumes this encoding and is **catalog, index, history and
+durability accelerator — never custodian** (§0.6): the words always live in the
+files, and losing the engine never costs content. It does not follow that the
+engine holds nothing of its own. Per-block history is store-only and **no file
+scan reconstructs it**, because a file holds a document's present and not its
+past. Re-scanning the `.folio` files rebuilds every *derived* fact — the search
+index, backlinks, the path/identity map — and restores identity, since each
+file carries its own `docId` and block ids. What it cannot restore is history.
+This is the data-engine plan §2.1 asymmetry: store loss costs history, never
+words.
 
 ---
 
@@ -282,7 +295,12 @@ git and backup tools; a no-op save rewrites nothing). The writer guarantees:
 - **Pretty-printed**, 2-space indent, LF, single trailing newline, UTF-8 no BOM, no
   trailing whitespace.
 - **Arrays in document order**; no incidental reordering.
-- **Numbers** as minimal decimal integers (levels, `start`); no floats in v1.
+- **Numbers** as minimal decimal integers where the field is an integer
+  (`schemaVersion`, `heading.level`, `ordered_list.start`). `table.widths` is
+  the one float-valued field (§5); its values are written exactly as the
+  writer produced them, and a reader **must round-trip a number's source token
+  verbatim** rather than re-deriving it from a parsed float, or byte-identity
+  is lost the moment two implementations format a decimal differently.
 
 Preserved unknown keys (§4) sort deterministically (append in first-seen order,
 retained across the round trip) so forward-compatible additions stay diff-stable.

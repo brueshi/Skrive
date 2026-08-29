@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "docId": "01j9zc4t8b2n5q0w7e3r6y9u3f",
+  "docMeta": {
+    "title": "Extras",
+    "createdAt": "2026-07-02T18:05:00.000Z",
+    "zzzLast": "kept",
+    "aNested": {
+      "deep": [
+        1,
+        2,
+        {
+          "x": null
+        }
+      ],
+      "flag": true
+    },
+    "emptyObj": {},
+    "emptyArr": []
+  },
+  "blocks": []
+}
