@@ -66,7 +66,17 @@ pub const Hit = search_mod.Hit;
 pub const Query = search_mod.Query;
 pub const parseQuery = search_mod.parseQuery;
 pub const runQuery = search_mod.run;
+pub const runQueryWith = search_mod.runWith;
+pub const SearchOptions = search_mod.Options;
+pub const FactsResolver = search_mod.FactsResolver;
 
 const index_snapshot = @import("index_snapshot.zig");
 pub const saveIndex = index_snapshot.save;
 pub const loadIndex = index_snapshot.load;
+
+const rank_mod = @import("rank.zig");
+pub const Weights = rank_mod.Weights;
+pub const RankContext = rank_mod.Context;
+pub const DocFacts = rank_mod.DocFacts;
+pub const Boost = rank_mod.Boost;
+pub const boostFor = rank_mod.boostFor;

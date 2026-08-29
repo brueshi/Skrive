@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const index_mod = @import("index.zig");
+const rank = @import("rank.zig");
 const tokenize = @import("tokenize.zig");
 
 const Index = index_mod.Index;
@@ -18,6 +19,31 @@ const TermId = index_mod.TermId;
 pub const Hit = struct {
     block: BlockRef,
     score: f32,
+    /// The BM25 sum before Skrive-specific boosts, kept so an experiment can
+    /// see what the signals actually moved rather than only the total.
+    base: f32 = 0,
+};
+
+/// What the caller knows about documents that the index does not. Optional:
+/// with no resolver, recency and backlink boosts simply do not fire, which is
+/// also how the BM25-only control arm runs.
+pub const FactsResolver = struct {
+    ptr: *anyopaque,
+    lookup: *const fn (ptr: *anyopaque, block: BlockRef) rank.DocFacts,
+
+    pub inline fn get(self: FactsResolver, block: BlockRef) rank.DocFacts {
+        return self.lookup(self.ptr, block);
+    }
+};
+
+pub const Options = struct {
+    weights: rank.Weights = .{},
+    now_millis: i64 = 0,
+    facts: ?FactsResolver = null,
+    /// Stop after this many results. Retrieval still scans the candidate
+    /// list, but nothing beyond the cut is kept or sorted — which is what
+    /// makes a one-character prefix affordable.
+    limit: usize = 0,
 };
 
 pub const Query = struct {
@@ -63,6 +89,20 @@ fn lower(gpa: std.mem.Allocator, raw: []const u8) ![]const u8 {
 /// Run a query. Results are ordered by descending score, ties broken by block
 /// so the ordering is total and reproducible.
 pub fn run(idx: *const Index, gpa: std.mem.Allocator, query: Query) ![]Hit {
+    return runWith(idx, gpa, query, .{});
+}
+
+pub fn runWith(
+    idx: *const Index,
+    gpa: std.mem.Allocator,
+    query: Query,
+    options: Options,
+) ![]Hit {
+    const ctx = rank.Context.init(idx, options.weights, options.now_millis);
+    // Term ids run parallel to the postings lists, because scoring needs the
+    // term to compute its inverse document frequency.
+    var terms: std.ArrayList(TermId) = .empty;
+    defer terms.deinit(gpa);
     var lists: std.ArrayList([]const Posting) = .empty;
     defer {
         // Only the prefix union is owned; term postings belong to the index.
@@ -74,7 +114,8 @@ pub fn run(idx: *const Index, gpa: std.mem.Allocator, query: Query) ![]Hit {
 
     for (query.terms) |term| {
         const id = idx.lookup(term) orelse return &.{};
-        lists.append(gpa, idx.postingsFor(id)) catch |e| return e;
+        try terms.append(gpa, id);
+        try lists.append(gpa, idx.postingsFor(id));
     }
 
     if (query.prefix) |prefix| {
@@ -82,29 +123,49 @@ pub fn run(idx: *const Index, gpa: std.mem.Allocator, query: Query) ![]Hit {
         defer gpa.free(expansion);
         if (expansion.len == 0) return &.{};
         owned_union = try unionPostings(idx, gpa, expansion);
+        // A prefix union has no single term, so it is scored against the
+        // rarest expansion it merged: the closest honest stand-in for "what
+        // the user is about to finish typing".
+        var rarest = expansion[0];
+        for (expansion) |candidate| {
+            if (idx.documentFrequency(candidate) < idx.documentFrequency(rarest)) rarest = candidate;
+        }
+        try terms.append(gpa, rarest);
         try lists.append(gpa, owned_union.?);
     }
 
     if (lists.items.len == 0) return &.{};
 
     // Intersect starting from the shortest list, so the walk is bounded by
-    // the rarest term rather than the commonest.
-    std.mem.sort([]const Posting, lists.items, {}, struct {
-        fn call(_: void, a: []const Posting, b: []const Posting) bool {
-            return a.len < b.len;
+    // the rarest term rather than the commonest. Terms travel with their
+    // lists so scoring can still name the term behind each posting.
+    var order = try gpa.alloc(usize, lists.items.len);
+    defer gpa.free(order);
+    for (order, 0..) |*slot, i| slot.* = i;
+    std.mem.sort(usize, order, lists.items, struct {
+        fn call(ls: []const []const Posting, a: usize, b: usize) bool {
+            return ls[a].len < ls[b].len;
         }
     }.call);
 
     var hits: std.ArrayList(Hit) = .empty;
     errdefer hits.deinit(gpa);
 
-    outer: for (lists.items[0]) |seed| {
-        var score: f32 = weightOf(idx, seed.block) * @as(f32, @floatFromInt(seed.freq));
-        for (lists.items[1..]) |list| {
-            const found = find(list, seed.block) orelse continue :outer;
-            score += weightOf(idx, seed.block) * @as(f32, @floatFromInt(found.freq));
+    const seed_list = lists.items[order[0]];
+    outer: for (seed_list) |seed| {
+        var base = ctx.termScore(terms.items[order[0]], seed.block, seed.freq);
+        for (order[1..]) |i| {
+            const found = find(lists.items[i], seed.block) orelse continue :outer;
+            base += ctx.termScore(terms.items[i], seed.block, found.freq);
         }
-        try hits.append(gpa, .{ .block = seed.block, .score = score });
+
+        const facts = if (options.facts) |r| r.get(seed.block) else rank.DocFacts{};
+        const boost = rank.boostFor(ctx, seed.block, facts, false);
+        try hits.append(gpa, .{
+            .block = seed.block,
+            .score = base * boost.product(),
+            .base = base,
+        });
     }
 
     std.mem.sort(Hit, hits.items, {}, struct {
@@ -114,11 +175,10 @@ pub fn run(idx: *const Index, gpa: std.mem.Allocator, query: Query) ![]Hit {
         }
     }.call);
 
+    if (options.limit != 0 and hits.items.len > options.limit) {
+        hits.shrinkRetainingCapacity(options.limit);
+    }
     return hits.toOwnedSlice(gpa);
-}
-
-fn weightOf(idx: *const Index, block: BlockRef) f32 {
-    return idx.blocks.items[block].kind.weight();
 }
 
 fn find(list: []const Posting, block: BlockRef) ?Posting {

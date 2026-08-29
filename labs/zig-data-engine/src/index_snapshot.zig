@@ -46,7 +46,7 @@ const TermId = index_mod.TermId;
 const BlockRef = index_mod.BlockRef;
 
 pub const magic = "SKIDX001".*;
-pub const version: u32 = 3;
+pub const version: u32 = 4;
 
 /// Guards the raw-copy sections below. The snapshot stores postings and
 /// per-block term lists as native-endian machine words and restores them with
@@ -119,6 +119,7 @@ pub fn save(gpa: std.mem.Allocator, idx: *const Index) ![]u8 {
     try w.u32v(@intCast(idx.blocks.items.len));
     for (idx.blocks.items, idx.block_live.items) |info, live| {
         try w.u32v(info.doc);
+        try w.u32v(info.length);
         try body.append(gpa, @intFromEnum(info.kind));
         try body.append(gpa, @intFromBool(live));
     }
@@ -192,14 +193,19 @@ pub fn load(gpa: std.mem.Allocator, image: []const u8) LoadError!Index {
     try idx.block_terms.ensureTotalCapacity(gpa, block_count);
     for (0..block_count) |_| {
         const doc = try r.u32v();
+        const length = try r.u32v();
         if (r.at + 2 > r.src.len) return error.Damaged;
         const kind_tag = r.src[r.at];
         const live = r.src[r.at + 1] != 0;
         r.at += 2;
         const kind = std.enums.fromInt(tokenize.BlockKind, kind_tag) orelse return error.Damaged;
-        idx.blocks.appendAssumeCapacity(.{ .doc = doc, .kind = kind });
+        idx.blocks.appendAssumeCapacity(.{ .doc = doc, .kind = kind, .length = length });
         idx.block_live.appendAssumeCapacity(live);
         idx.block_terms.appendAssumeCapacity(&.{});
+        if (live) {
+            idx.live_blocks += 1;
+            idx.total_tokens += length;
+        }
     }
 
     for (0..term_count) |id| {

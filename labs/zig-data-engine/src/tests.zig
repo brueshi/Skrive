@@ -11,4 +11,5 @@ test {
     _ = @import("index_test.zig");
     _ = @import("markdown_test.zig");
     _ = @import("index_snapshot_test.zig");
+    _ = @import("rank_test.zig");
 }

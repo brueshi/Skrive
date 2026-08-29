@@ -41,6 +41,12 @@ pub const Posting = extern struct {
 pub const BlockInfo = struct {
     doc: DocRef,
     kind: BlockKind,
+    /// Token count, for length normalization. A term appearing once in a
+    /// six-word heading means more than the same term once in a
+    /// three-hundred-word block, and a scorer without this systematically
+    /// prefers long blocks for no better reason than that they contain more
+    /// words.
+    length: u32 = 0,
 };
 
 /// One term's contribution to one block, kept sorted by term so the update
@@ -81,6 +87,11 @@ pub const Index = struct {
     /// Overlay merges performed. Exposed so a test can assert it exercised
     /// the merge path rather than assuming the threshold was crossed.
     merges: usize = 0,
+
+    /// Live block count and total token count, maintained incrementally so
+    /// average block length is available at query time without a scan.
+    live_blocks: usize = 0,
+    total_tokens: u64 = 0,
 
     pub fn init(gpa: std.mem.Allocator) Index {
         return .{ .gpa = gpa };
@@ -262,6 +273,18 @@ pub const Index = struct {
         return self.postings.items[term].items;
     }
 
+    /// How many live blocks contain this term. The other half of IDF.
+    pub fn documentFrequency(self: *const Index, term: TermId) usize {
+        return self.postings.items[term].items.len;
+    }
+
+    /// Mean block length in tokens, for length normalization.
+    pub fn averageBlockLength(self: *const Index) f32 {
+        if (self.live_blocks == 0) return 1.0;
+        return @as(f32, @floatFromInt(self.total_tokens)) /
+            @as(f32, @floatFromInt(self.live_blocks));
+    }
+
     // ---- blocks -----------------------------------------------------------
 
     pub fn blockCount(self: *const Index) usize {
@@ -330,7 +353,12 @@ pub const Index = struct {
 
         self.gpa.free(previous);
         self.block_terms.items[ref] = try next.toOwnedSlice(self.gpa);
-        self.blocks.items[ref] = info;
+
+        var stored = info;
+        stored.length = @intCast(tokens.len);
+        if (!self.block_live.items[ref]) self.live_blocks += 1;
+        self.total_tokens = self.total_tokens - self.blocks.items[ref].length + stored.length;
+        self.blocks.items[ref] = stored;
         self.block_live.items[ref] = true;
     }
 
@@ -340,6 +368,9 @@ pub const Index = struct {
         self.gpa.free(self.block_terms.items[ref]);
         self.block_terms.items[ref] = &.{};
         self.block_live.items[ref] = false;
+        self.live_blocks -= 1;
+        self.total_tokens -= self.blocks.items[ref].length;
+        self.blocks.items[ref].length = 0;
     }
 
     pub fn addBacklink(self: *Index, target: []const u8, from: BlockRef) !void {
