@@ -94,3 +94,30 @@ typecheck, vitest app 1606 + lab 66 (render tests added under jsdom), parity
 26/26, latency 64/64, macOS smoke, production build. One trap: a local `host`
 rect inside the reorder drag shadowed the new `host` parameter; renamed. By-hand
 shell pass for hover, resize, and reorder is the owner's.
+
+## 2026-09-08 — Stage 3, look and chrome (SKR-302)
+
+Two table styles chosen in Settings and stamped on the root as
+`data-table-style`, the measure-rule pattern, so a switch is one repaint and
+the renderer never learns which is on. Grid (default): 1px frame at radius-sm,
+every cell ruled, header filled with `--skrive-table-head` (light-dark
+#f3f3f5 / #26282c), 0.5em 0.7em padding, radius carried by the corner cells
+because a table ignores overflow clipping. Prose: horizontal rules only, muted
+rule under the header, first and last columns flush to the prose edges. The
+header is a weight step (600), never a size step, in both.
+
+Adding the preference touched three copies of the default state: the shared
+`AppUiState`, the Zig-embedded default in `shell-zig/core/src/persistence.zig`,
+and the escaped bytes in `shell-zig/fixtures/persistence.jsonl`; the app-state
+parity test and the parity corpus each caught one of the two I would have
+missed.
+
+The append rails became one 20px `+` per axis, centered on the right and
+bottom edges (`appendSize` / `appendGap` in the geometry); the hover zone
+shrank to match. The selection and drag tints gained `:root th/td` selectors
+so they outrank the prose header override at equal specificity.
+
+Evidence: `docs/table-surface/at-rest-{grid,prose}-{light,dark}.png` and
+`hover-{grid,prose}-light.png`, taken in Chromium through the harness page
+with the editor stylesheet loaded. Gates: typecheck, vitest app 1606 + lab 66,
+parity 26/26, latency 64/64, macOS smoke, production build.
