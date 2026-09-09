@@ -119,8 +119,9 @@ so the seam is the package boundary and nothing else.
    and mutates through intents. The app's render case calls the builder and
    its `table-chrome.ts` is a small adapter over the block surface's methods.
    Rendered HTML was diffed byte-identical before and after.
-3. **Build against the contract**: grid selection, clipboard grid codec,
-   overflow and sticky header, motion, the visual system from the Paper pass.
+3. **Build against the contract**: the two styles and one `+` per axis (done),
+   the menu on demand, the grid selection, and the clipboard grid codec (done);
+   overflow and sticky header, motion (next).
 4. **Sit.** Dogfood in Skrive before any README for outsiders, license files,
    or subtree split.
 

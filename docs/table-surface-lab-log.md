@@ -121,3 +121,56 @@ Evidence: `docs/table-surface/at-rest-{grid,prose}-{light,dark}.png` and
 `hover-{grid,prose}-light.png`, taken in Chromium through the harness page
 with the editor stylesheet loaded. Gates: typecheck, vitest app 1606 + lab 66,
 parity 26/26, latency 64/64, macOS smoke, production build.
+
+## 2026-09-09 — Stage 3, interaction model (SKR-303)
+
+Three commits, one per piece, in the order that keeps every affordance
+reachable between them.
+
+**Menu on demand** (d37d374). Right-click on a cell, or Shift+F10 / the
+ContextMenu key with the caret in one, opens the table menu for that cell's
+row and column; `BlockEditor`'s context-menu handler gained a table branch
+after the squiggle branch. `TableChromeHost` gained `select(tableId, slice)`,
+and a handle click calls it and nothing else; the menu state became a cell
+target and stopped riding the slice selection.
+
+**One selection primitive** (86f4181). `src/selection.ts` holds the
+arithmetic (normalize, shape, extend, escalate, stepDown, fullSlices) against
+grid dimensions rather than the model, so the chrome can use the same answer
+from the rendered table; `remove-rows` / `remove-columns` are inclusive-range
+intents and ops (the singular ones are now made of them); `CONTRACT_VERSION`
+is 1. The chrome paints the wash on covered cells synchronously off the
+selection and structure signals, one ring from measured edges, and lights the
+handles of full slices. On the surface `tableSel` and the native cross-cell
+`CrossCellSelection` are gone: a drag past a cell's edge, Shift+click,
+Shift+Arrow at a cell edge, Cmd+A (text, cell, table, document), Escape,
+Backspace clears, Cmd+Backspace removes only full slices, typing over, and a
+native range reaching across cells is adopted as the grid selection by the
+selection observer. The menu targets the selection's shape with plural labels.
+
+Two engine facts found through the Chromium harness, both invisible in jsdom:
+Chromium re-seats a caret at the document start whenever a focused editable
+holds no selection, on the next user event, which dissolved the rectangle
+instantly, so the surface parks a hidden collapsed caret in the selection's
+home cell instead of removing the selection (the shipped block selection has
+the same exposure and was left alone). And during a pointer drag Chromium
+extends its own range from any base it finds, and no cancelled event stops it
+(pointermove and mousemove both tried), so for the length of a drag the
+surface holds no selection at all and parks the home caret on release.
+WKWebView's behavior on the drag is the owner's by-hand pass.
+
+**Clipboard grid** (e9ea5bb). `src/clipboard.ts`: `gridCodec` encodes
+tab-separated text (spreadsheet quoting) plus an HTML table carrying each
+cell's markup, decodes the HTML table first and TSV second, null when the
+payload is not a grid; fixtures shaped like Numbers, Sheets, and Excel.
+`fillCells` grows through `insertRow`/`insertColumn`. Copy and cut of a
+rectangle write the payload; a grid pasted with the caret in a cell fills from
+that cell, grows, and lands the caret at the last filled cell; a one-cell
+payload stays the ordinary paste. Cell text is read as inline Markdown per
+line with hard breaks between lines.
+
+Gates, each commit: typecheck; vitest app 1609 / 1629 / 1635 and lab 66 / 90
+/ 105; parity 26/26; latency 64 / 67 / 67 (four grid-selection specs added,
+the old Shift+Arrow spec rewritten to the rectangle); macOS smoke PASS;
+production build. Owed to the owner in the real shell: drag-select, handle
+click, Shift+click, the parked caret under WKWebView, and a paste from Numbers.
