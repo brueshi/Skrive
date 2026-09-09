@@ -14,7 +14,18 @@
 // a click that closes a motionless press tidies any gesture whose pointerup
 // was dropped.
 
-import { CELL_COL_ATTR, CELL_DRAGGING_ATTR, CELL_ROW_ATTR, type Box, type CellRef, type TableGeometry, type TableIntent } from './contract';
+import {
+  CELL_COL_ATTR,
+  CELL_DRAGGING_ATTR,
+  CELL_ROW_ATTR,
+  CELL_SELECTED_ATTR,
+  type Box,
+  type CellRect,
+  type CellRef,
+  type GridSelection,
+  type TableGeometry,
+  type TableIntent
+} from './contract';
 import {
   dropIndicatorRect,
   hoverZone,
@@ -28,6 +39,7 @@ import {
   type GutterSlot
 } from './geometry';
 import { applyLiveColWidths } from './render';
+import { fullSlices, normalize, type FullSlices, type GridDims } from './selection';
 
 /** A viewport rect in the scroller's content coordinate space. */
 function contentBox(
@@ -110,7 +122,8 @@ export type TableChromeHost = {
   layer: HTMLElement;
   tableIdOf(table: HTMLTableElement): string | null;
   findTable(tableId: string): HTMLTableElement | null;
-  getSelection(): SliceSelection | null;
+  /** The grid selection the host holds, with the table it belongs to. */
+  getSelection(): TableSelection | null;
   onSelectionChange(fn: () => void): () => void;
   onStructureChange(fn: () => void): () => void;
   apply(tableId: string, intent: TableIntent<never>): void;
@@ -123,8 +136,26 @@ export type TableChromeHost = {
   clearCaret(): void;
 };
 
-/** A grip-selected row or column, as the shipped surface tracks it. */
-export type SliceSelection = { tableId: string; kind: 'row' | 'col'; index: number };
+/** The one selection primitive, addressed to a table. */
+export type TableSelection = { readonly tableId: string; readonly selection: GridSelection };
+
+/** The grid's dimensions, read from the rendered table: the header row's cell
+ *  count is the column count, as in the model. */
+function dimsOfTable(table: HTMLTableElement): GridDims {
+  return { rows: table.rows.length, cols: table.rows[0]?.cells.length ?? 0 };
+}
+
+/** The union box of a cell rectangle, from measured edges. */
+function rectBox(geom: TableGeometry, rect: CellRect): Box {
+  const x = geom.colEdges[rect.minCol]!;
+  const y = geom.rowEdges[rect.minRow]!;
+  return {
+    x,
+    y,
+    width: geom.colEdges[rect.maxCol + 1]! - x,
+    height: geom.rowEdges[rect.maxRow + 1]! - y
+  };
+}
 
 export type TableChromeHandle = { destroy(): void };
 
@@ -149,8 +180,8 @@ export function attachTableChrome(host: TableChromeHost): TableChromeHandle {
   let active: HTMLTableElement | null = null;
   let hoverRow: number | null = null;
   let hoverCol: number | null = null;
-  // The surface's grip-selection, so the selected handle stays lit while the
-  // selection is active, independent of hover.
+  // The host's grid selection, so the wash, the ring, and the lit handles of a
+  // full slice persist while it is active, independent of hover.
   let selection = host.getSelection();
   let scheduled = false;
   let rafId = 0;
@@ -168,19 +199,27 @@ export function attachTableChrome(host: TableChromeHost): TableChromeHandle {
     layer.textContent = '';
   };
 
-  /** Does this slot address the selected row/column? */
-  const isSelectedSlot = (blockId: string, slot: GutterSlot): boolean =>
-    selection !== null &&
-    selection.tableId === blockId &&
-    slot.kind === (selection.kind === 'col' ? 'col-handle' : 'row-handle') &&
-    slot.index === selection.index;
+  /** The rows and columns the selection covers in full, for `blockId`'s table. */
+  const selectedSlices = (blockId: string, table: HTMLTableElement): FullSlices | null => {
+    if (!selection || selection.tableId !== blockId) return null;
+    const dims = dimsOfTable(table);
+    if (dims.rows === 0 || dims.cols === 0) return null;
+    return fullSlices(normalize(selection.selection, dims), dims);
+  };
+
+  /** Does this handle address a row or column the selection covers in full? */
+  const isSelectedSlot = (full: FullSlices | null, slot: GutterSlot): boolean => {
+    if (!full) return false;
+    const range = slot.kind === 'col-handle' ? full.cols : slot.kind === 'row-handle' ? full.rows : null;
+    return range !== null && slot.index >= range[0] && slot.index <= range[1];
+  };
 
   /** Build one slot's button and append it. */
-  const renderSlot = (blockId: string, table: HTMLTableElement, slot: GutterSlot): void => {
+  const renderSlot = (blockId: string, table: HTMLTableElement, slot: GutterSlot, full: FullSlices | null): void => {
     const el = document.createElement('button');
     el.type = 'button';
     el.className = `${SLOT_CLASS} ${SLOT_CLASS}--${slot.kind}`;
-    if (isSelectedSlot(blockId, slot)) el.classList.add('is-selected');
+    if (isSelectedSlot(full, slot)) el.classList.add('is-selected');
     el.style.transform = `translate(${slot.x}px, ${slot.y}px)`;
     el.style.width = `${slot.width}px`;
     el.style.height = `${slot.height}px`;
@@ -381,9 +420,24 @@ export function attachTableChrome(host: TableChromeHost): TableChromeHandle {
     layer.appendChild(el);
   };
 
-  /** Render one table's chrome. `hovered` tables get the full set (rails + the
-   *  hover handles); a table that only carries a selection gets just its selected
-   *  handle, so the selection stays visible with the mouse away. */
+  /** The one ring around the selected rectangle, in the chrome layer. */
+  const renderSelectionRing = (geom: TableGeometry, table: HTMLTableElement): void => {
+    if (!selection) return;
+    const dims = dimsOfTable(table);
+    if (dims.rows === 0 || dims.cols === 0) return;
+    const box = rectBox(geom, normalize(selection.selection, dims));
+    const ring = document.createElement('div');
+    ring.className = `${SLOT_CLASS} ${SLOT_CLASS}--selection`;
+    ring.style.transform = `translate(${box.x}px, ${box.y}px)`;
+    ring.style.width = `${box.width}px`;
+    ring.style.height = `${box.height}px`;
+    layer.appendChild(ring);
+  };
+
+  /** Render one table's chrome. `hovered` tables get the full set (the append
+   *  buttons + the hover handles); a table that only carries a selection gets the
+   *  ring and the handles of its full slices, so the selection stays visible with
+   *  the mouse away. */
   const renderTable = (table: HTMLTableElement, hovered: boolean): void => {
     if (!table.isConnected) return;
     const blockId = host.tableIdOf(table);
@@ -396,21 +450,44 @@ export function attachTableChrome(host: TableChromeHost): TableChromeHandle {
     );
     if (!geom) return;
 
+    const full = selectedSlices(blockId, table);
     const slots = hovered ? tableGutterSlots(geom, { row: hoverRow, col: hoverCol }) : [];
-    // Ensure the selected handle is present even when its slice isn't the hovered
-    // one (or the table isn't hovered at all).
-    if (selection && selection.tableId === blockId) {
-      const already = slots.some((s) => isSelectedSlot(blockId, s));
-      if (!already) {
-        const s = tableHandleSlot(geom, selection.kind, selection.index);
+    // The handles of every fully covered row and column are present even when the
+    // slice isn't the hovered one (or the table isn't hovered at all).
+    if (full) {
+      const wanted: Array<['row' | 'col', number]> = [];
+      if (full.rows) for (let i = full.rows[0]; i <= full.rows[1]; i++) wanted.push(['row', i]);
+      if (full.cols) for (let i = full.cols[0]; i <= full.cols[1]; i++) wanted.push(['col', i]);
+      for (const [kind, index] of wanted) {
+        const handleKind = kind === 'col' ? 'col-handle' : 'row-handle';
+        if (slots.some((s) => s.kind === handleKind && s.index === index)) continue;
+        const s = tableHandleSlot(geom, kind, index);
         if (s) slots.push(s);
       }
     }
-    for (const slot of slots) renderSlot(blockId, table, slot);
+    for (const slot of slots) renderSlot(blockId, table, slot, full);
+    if (full) renderSelectionRing(geom, table);
     // Resize strips are a hover-only refinement on the interior column boundaries;
     // they carry a drag, not a click, so they render on their own path.
     if (hovered) {
       for (const slot of tableResizeSlots(geom)) renderResizeSlot(blockId, table, slot);
+    }
+  };
+
+  /** The wash: mark every covered cell, synchronously, so a selection change or
+   *  a structural rebuild never shows a frame without it. O(covered cells). */
+  const paintSelectedCells = (): void => {
+    for (const el of surface.querySelectorAll(`[${CELL_SELECTED_ATTR}]`)) el.removeAttribute(CELL_SELECTED_ATTR);
+    if (!selection) return;
+    const table = host.findTable(selection.tableId);
+    if (!table) return;
+    const dims = dimsOfTable(table);
+    if (dims.rows === 0 || dims.cols === 0) return;
+    const rect = normalize(selection.selection, dims);
+    for (let r = rect.minRow; r <= rect.maxRow; r++) {
+      const row = table.rows[r];
+      if (!row) continue;
+      for (let c = rect.minCol; c <= rect.maxCol; c++) row.cells[c]?.setAttribute(CELL_SELECTED_ATTR, '');
     }
   };
 
@@ -421,7 +498,7 @@ export function attachTableChrome(host: TableChromeHost): TableChromeHandle {
     if (active && !active.isConnected) active = null;
 
     // The tables to draw: the hovered one (full chrome) and, if different, the one
-    // carrying the selection (its handle only).
+    // carrying the selection (its ring and lit handles only).
     if (active) renderTable(active, true);
     if (selection) {
       const selTable = layerSelectedTable();
@@ -538,15 +615,19 @@ export function attachTableChrome(host: TableChromeHost): TableChromeHandle {
       const blockId = host.tableIdOf(active);
       active = blockId ? host.findTable(blockId) : null;
     }
+    // The rebuilt cells lost their wash; put it back before the frame paints.
+    paintSelectedCells();
     if (active || selection) schedule();
   });
 
-  // The selected handle stays lit off the surface's selection state, so it
-  // persists with the mouse away and clears when the selection dissolves.
+  // The wash, the ring, and the lit handles ride the host's selection state, so
+  // they persist with the mouse away and clear when the selection dissolves.
   const unsubscribeSelection = host.onSelectionChange(() => {
     selection = host.getSelection();
+    paintSelectedCells();
     schedule();
   });
+  paintSelectedCells();
 
   // No scroll listener: the layer lives inside the scroller and its slots are
   // placed in content coordinates, so they ride the scroll for free — the same
@@ -572,6 +653,8 @@ export function attachTableChrome(host: TableChromeHost): TableChromeHandle {
       if (scheduled) cancelAnimationFrame(rafId);
       cancelHide();
       active = null;
+      selection = null;
+      paintSelectedCells();
       clear();
     }
   };

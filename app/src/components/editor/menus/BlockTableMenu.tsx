@@ -1,5 +1,6 @@
-// The table menu for the bespoke surface. Opened on demand for a cell: a
-// right-click on the cell, or the keyboard menu key with the caret in it. The
+// The table menu for the bespoke surface. Opened on demand for a cell rectangle:
+// a right-click on a cell, or the keyboard menu key with the caret in one or a
+// grid selection active (the menu then targets the selection's shape). The
 // affordance grammar homes table structural editing in per-block chrome, and this
 // is where mid-table insertion (insert around), column alignment, and delete
 // live, alongside the append buttons and the ⌥⌘ keyboard chords. Never the side
@@ -21,40 +22,59 @@ import './menus.css';
 
 type TableMenuItem = { label: string; run: () => void; danger?: boolean; checked?: boolean };
 
-/** The column's current alignment, or null (default). Read from the live document
- *  so the alignment group can mark the active option. */
-function currentAlign(surface: BlockSurface, tableId: string, col: number): TableAlign {
+/** The alignment the covered columns share, or null when they differ or are all
+ *  default. Read from the live document so the alignment group can mark the
+ *  active option. */
+function currentAlign(surface: BlockSurface, tableId: string, from: number, to: number): TableAlign {
   const table = surface.getDocument().blocks.find((b) => b.id === tableId);
-  return table?.type === 'table' ? (table.align[col] ?? null) : null;
+  if (table?.type !== 'table') return null;
+  const first = table.align[from] ?? null;
+  for (let c = from + 1; c <= to; c++) if ((table.align[c] ?? null) !== first) return null;
+  return first;
 }
 
-/** The command groups for a cell's menu, rendered with a separator between groups:
- *  insert-around for the row and the column, the column's alignment (left / center
- *  / right, the current one checked and a re-pick toggling back to default), then
- *  delete row and delete column. Each command closes the menu; insert lands the
- *  caret in the new cell, delete routes through removeTable*At, and alignment
- *  re-serializes the delimiter row. */
+/** The command groups for a rectangle's menu, rendered with a separator between
+ *  groups: insert-around (above the first row, below the last, left of the first
+ *  column, right of the last), the covered columns' alignment (left / center /
+ *  right, the shared value checked and a re-pick toggling back to default), then
+ *  delete rows and delete columns, plural when the rectangle spans more than one.
+ *  Each command closes the menu; insert lands the caret in the new cell, delete
+ *  routes through removeTable*At, and alignment re-serializes the delimiter row. */
 function groupsFor(surface: BlockSurface, state: TableMenuState): TableMenuItem[][] {
-  const { tableId, row, col } = state;
+  const { tableId, cells } = state;
+  const { minRow, maxRow, minCol, maxCol } = cells;
   const close = () => surface.closeTableMenu();
-  const active = currentAlign(surface, tableId, col);
+  const active = currentAlign(surface, tableId, minCol, maxCol);
   const alignItem = (label: string, value: Exclude<TableAlign, null>): TableMenuItem => ({
     label,
     checked: active === value,
-    // Re-picking the current alignment clears it back to the default.
-    run: () => (surface.setColumnAlignment(tableId, col, active === value ? null : value), close())
+    // Re-picking the shared alignment clears the columns back to the default.
+    run: () => {
+      for (let c = minCol; c <= maxCol; c++) surface.setColumnAlignment(tableId, c, active === value ? null : value);
+      close();
+    }
   });
+  const rows = maxRow - minRow + 1;
+  const cols = maxCol - minCol + 1;
   return [
     [
-      { label: 'Insert row above', run: () => (surface.insertTableRowAt(tableId, row, col), close()) },
-      { label: 'Insert row below', run: () => (surface.insertTableRowAt(tableId, row + 1, col), close()) },
-      { label: 'Insert column left', run: () => (surface.insertTableColumnAt(tableId, col, row), close()) },
-      { label: 'Insert column right', run: () => (surface.insertTableColumnAt(tableId, col + 1, row), close()) }
+      { label: 'Insert row above', run: () => (surface.insertTableRowAt(tableId, minRow, minCol), close()) },
+      { label: 'Insert row below', run: () => (surface.insertTableRowAt(tableId, maxRow + 1, minCol), close()) },
+      { label: 'Insert column left', run: () => (surface.insertTableColumnAt(tableId, minCol, minRow), close()) },
+      { label: 'Insert column right', run: () => (surface.insertTableColumnAt(tableId, maxCol + 1, minRow), close()) }
     ],
     [alignItem('Align left', 'left'), alignItem('Align center', 'center'), alignItem('Align right', 'right')],
     [
-      { label: 'Delete row', danger: true, run: () => (surface.removeTableRowAt(tableId, row), close()) },
-      { label: 'Delete column', danger: true, run: () => (surface.removeTableColumnAt(tableId, col), close()) }
+      {
+        label: rows > 1 ? 'Delete rows' : 'Delete row',
+        danger: true,
+        run: () => (surface.removeTableRowsAt(tableId, minRow, maxRow), close())
+      },
+      {
+        label: cols > 1 ? 'Delete columns' : 'Delete column',
+        danger: true,
+        run: () => (surface.removeTableColumnsAt(tableId, minCol, maxCol), close())
+      }
     ]
   ];
 }

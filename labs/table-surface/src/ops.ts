@@ -69,8 +69,18 @@ export function insertColumn<Cell>(m: TableModel<Cell>, index: number, emptyCell
 
 /** Remove row `index`. Null when out of range or it would empty the table. */
 export function removeRow<Cell>(m: TableModel<Cell>, index: number): TableModel<Cell> | null {
-  if (m.rows.length <= 1 || index < 0 || index >= m.rows.length) return null;
-  const rows = [...m.rows.slice(0, index), ...m.rows.slice(index + 1)];
+  return removeRows(m, index, index);
+}
+
+/**
+ * Remove rows `from` through `to` (inclusive) as one change. Null when the
+ * range is out of order or out of range, or when it would empty the table.
+ */
+export function removeRows<Cell>(m: TableModel<Cell>, from: number, to: number): TableModel<Cell> | null {
+  const n = m.rows.length;
+  if (from < 0 || to < from || to >= n) return null;
+  if (to - from + 1 >= n) return null;
+  const rows = [...m.rows.slice(0, from), ...m.rows.slice(to + 1)];
   return withWidths(m, { rows }, m.widths);
 }
 
@@ -80,20 +90,32 @@ export function removeRow<Cell>(m: TableModel<Cell>, index: number): TableModel<
  * table has a single column.
  */
 export function removeColumn<Cell>(m: TableModel<Cell>, index: number): TableModel<Cell> | null {
+  return removeColumns(m, index, index);
+}
+
+/**
+ * Remove columns `from` through `to` (inclusive) as one change: the cells, the
+ * align entries, and the weights in lockstep. A ragged row keeps whatever it
+ * has beyond its own end. Null when the range is out of order or out of range,
+ * or when it would leave no column.
+ */
+export function removeColumns<Cell>(m: TableModel<Cell>, from: number, to: number): TableModel<Cell> | null {
   const cols = colCount(m);
-  if (cols <= 1 || index < 0 || index >= cols) return null;
+  if (from < 0 || to < from || to >= cols) return null;
+  if (to - from + 1 >= cols) return null;
+  const count = to - from + 1;
   const rows = m.rows.map((row) => {
-    if (index >= row.length) return row;
+    if (from >= row.length) return row;
     const next = [...row];
-    next.splice(index, 1);
+    next.splice(from, count);
     return next;
   });
   const align = [...m.align];
-  align.splice(index, 1);
+  align.splice(from, count);
   let widths: number[] | undefined;
   if (m.widths) {
     widths = [...m.widths];
-    widths.splice(index, 1);
+    widths.splice(from, count);
   }
   return withWidths(m, { align, rows }, widths);
 }
@@ -187,6 +209,10 @@ export const reduce: Reduce = (model, intent, emptyCell) => {
       return removeRow(model, intent.index);
     case 'remove-column':
       return removeColumn(model, intent.index);
+    case 'remove-rows':
+      return removeRows(model, intent.from, intent.to);
+    case 'remove-columns':
+      return removeColumns(model, intent.from, intent.to);
     case 'move-row':
       return moveRow(model, intent.from, intent.to);
     case 'move-column':

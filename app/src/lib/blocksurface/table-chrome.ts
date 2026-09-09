@@ -8,6 +8,7 @@
 
 import {
   attachTableChrome as attachSurfaceChrome,
+  cellRect,
   type TableChromeHandle,
   type TableIntent
 } from '@skrive/table-surface';
@@ -84,7 +85,7 @@ export function attachTableChrome({ surface, scroller, layer, blockSurface }: Ta
     apply,
     select: (tableId, slice) =>
       slice.kind === 'col' ? blockSurface.selectTableColumn(tableId, slice.index) : blockSurface.selectTableRow(tableId, slice.index),
-    requestMenu: (tableId, target, anchor) => blockSurface.openTableMenu(tableId, target, anchor),
+    requestMenu: (tableId, target, anchor) => blockSurface.openTableMenu(tableId, cellRect(target, target), anchor),
     clearCaret: () => blockSurface.clearCaret()
   });
 }

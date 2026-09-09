@@ -10,7 +10,9 @@ import {
   moveRow,
   reduce,
   removeColumn,
+  removeColumns,
   removeRow,
+  removeRows,
   setColumnAlign,
   setColumnWidths,
   type TableModel
@@ -137,6 +139,60 @@ describe('removeColumn', () => {
   });
 });
 
+describe('removeRows', () => {
+  const THREE = () =>
+    grid([
+      ['a', 'b'],
+      ['1', '2'],
+      ['3', '4'],
+      ['5', '6']
+    ]);
+
+  it('removes an inclusive range as one change', () => {
+    expect(removeRows(THREE(), 1, 2)!.rows).toEqual([
+      ['a', 'b'],
+      ['5', '6']
+    ]);
+  });
+
+  it('declines a range that would empty the table, is out of order, or out of range', () => {
+    expect(removeRows(THREE(), 0, 3)).toBeNull();
+    expect(removeRows(THREE(), 2, 1)).toBeNull();
+    expect(removeRows(THREE(), 1, 4)).toBeNull();
+    expect(removeRows(THREE(), -1, 0)).toBeNull();
+  });
+
+  it('is what removeRow is made of', () => {
+    expect(removeRow(THREE(), 2)).toEqual(removeRows(THREE(), 2, 2));
+  });
+});
+
+describe('removeColumns', () => {
+  const WIDE = () =>
+    grid([['a', 'b', 'c', 'd'], ['1', '2', '3', '4']], { align: ['left', null, 'right', 'center'], widths: [1, 2, 3, 4] });
+
+  it('removes the cells, align entries, and weights of an inclusive range in lockstep', () => {
+    const m = removeColumns(WIDE(), 1, 2)!;
+    expect(m.rows).toEqual([
+      ['a', 'd'],
+      ['1', '4']
+    ]);
+    expect(m.align).toEqual(['left', 'center']);
+    expect(m.widths).toEqual([1, 4]);
+  });
+
+  it('leaves a ragged row its own end', () => {
+    const m = removeColumns(grid([['a', 'b', 'c'], ['x']]), 1, 2)!;
+    expect(m.rows).toEqual([['a'], ['x']]);
+  });
+
+  it('declines a range that would leave no column, is out of order, or out of range', () => {
+    expect(removeColumns(WIDE(), 0, 3)).toBeNull();
+    expect(removeColumns(WIDE(), 2, 1)).toBeNull();
+    expect(removeColumns(WIDE(), 3, 4)).toBeNull();
+  });
+});
+
 describe('setColumnAlign', () => {
   it('sets the alignment and pads a short align array to the header width', () => {
     const m = setColumnAlign(grid([['a', 'b', 'c']], { align: [null] }), 2, 'right')!;
@@ -212,6 +268,8 @@ describe('reduce', () => {
     expect(reduce(TWO(), { type: 'insert-row', index: 2 }, empty)!.rows.length).toBe(3);
     expect(reduce(TWO(), { type: 'set-align', col: 1, align: 'center' }, empty)!.align).toEqual([null, 'center']);
     expect(reduce(TWO(), { type: 'remove-row', index: 9 }, empty)).toBeNull();
+    expect(reduce(grid([['a', 'b'], ['1', '2'], ['3', '4']]), { type: 'remove-rows', from: 1, to: 2 }, empty)!.rows).toEqual([['a', 'b']]);
+    expect(reduce(grid([['a', 'b', 'c']]), { type: 'remove-columns', from: 0, to: 1 }, empty)!.rows).toEqual([['c']]);
   });
 
   it('declines fill-cells until the clipboard work lands', () => {

@@ -8,8 +8,9 @@
 //    leaf-local paths Backspace already uses (editCodeText / commitCell),
 //    instead of deleteAcross (which only ever addresses a CROSS-leaf range) or
 //    clearTableCells (which would otherwise wipe the whole cell);
-//  - cross-cell / table-crossing selections already worked post-166 and stay
-//    that way;
+//  - a rectangle of cells is the grid selection (never a native range across
+//    cells): cut writes its payload and clears the covered cells; a
+//    table-crossing selection clamps to the prose edges as before;
 //  - a block selected as a unit (SKR-203) now gets a real cut instead of a
 //    total no-op;
 //  - a genuinely undeletable range (two adjacent barriers, no prose between)
@@ -131,19 +132,16 @@ describe('cut within a single table cell (F34)', () => {
   });
 });
 
-describe('cut over a cross-cell selection (already fixed by SKR-166)', () => {
+describe('cut over a grid selection (a rectangle of cells)', () => {
   it('clears the covered cells (table shape intact) with the copy payload on the clipboard', () => {
     const surfaceForCopy = new BlockSurface({ container, doc: parseDocument(`${TABLE}\n`) });
-    const c0copy = container.querySelector('[data-cell-row="1"][data-cell-col="0"]')!;
-    const c1copy = container.querySelector('[data-cell-row="1"][data-cell-col="1"]')!;
-    select(c0copy.firstChild!, 0, c1copy.firstChild!, c1copy.textContent!.length);
+    surfaceForCopy.selectTableCells(tableBlock(surfaceForCopy).id, { row: 1, col: 0 }, { row: 1, col: 1 });
     const { text: copyText } = fireCopy(container);
-    void surfaceForCopy;
+    expect(copyText, 'a rectangle copies as tab-separated cells').toBe('1\t2');
+    surfaceForCopy.destroy();
 
     const surface = new BlockSurface({ container, doc: parseDocument(`${TABLE}\n`) });
-    const c0 = container.querySelector('[data-cell-row="1"][data-cell-col="0"]')!;
-    const c1 = container.querySelector('[data-cell-row="1"][data-cell-col="1"]')!;
-    select(c0.firstChild!, 0, c1.firstChild!, c1.textContent!.length);
+    surface.selectTableCells(tableBlock(surface).id, { row: 1, col: 0 }, { row: 1, col: 1 });
 
     const { text: cutText, defaultPrevented } = fireCut(container);
 
@@ -153,6 +151,10 @@ describe('cut over a cross-cell selection (already fixed by SKR-166)', () => {
     expect(table.rows[1]!.map(plain), 'covered cells cleared').toEqual(['', '']);
     expect(table.rows[0]!.map(plain), 'header row untouched').toEqual(['a', 'b']);
     expect(table.rows.length, 'shape unchanged').toBe(2);
+    expect(surface.getTableSelection(), 'the selection is spent').toBeNull();
+
+    surface.undo();
+    expect(tableBlock(surface).rows[1]!.map(plain), 'one undo restores the cells').toEqual(['1', '2']);
   });
 });
 
@@ -239,23 +241,20 @@ describe('cut declines rather than degrade to copy when genuinely undeletable', 
   });
 });
 
-describe('Enter over a cross-cell selection (SKR-164, sibling of SKR-166)', () => {
-  it('clears the covered cells and lands the caret per the existing in-cell Enter semantics', () => {
+describe('Enter over a grid selection', () => {
+  it('dissolves to a caret in the anchor cell and leaves the cells alone', () => {
     const threeRowTable = '| a | b |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |';
     const surface = new BlockSurface({ container, doc: parseDocument(`${threeRowTable}\n`) });
-    const c0 = container.querySelector('[data-cell-row="1"][data-cell-col="0"]')!;
-    const c1 = container.querySelector('[data-cell-row="1"][data-cell-col="1"]')!;
-    select(c0.firstChild!, 0, c1.firstChild!, c1.textContent!.length);
+    surface.selectTableCells(tableBlock(surface).id, { row: 1, col: 0 }, { row: 1, col: 1 });
 
     key(surface, { key: 'Enter' });
 
     const table = tableBlock(surface);
-    expect(table.rows[1]!.map(plain), 'covered cells cleared').toEqual(['', '']);
+    expect(table.rows[1]!.map(plain), 'cells untouched').toEqual(['1', '2']);
     expect(table.rows.length, 'shape unchanged').toBe(3);
-    // Normal in-cell Enter steps to the row below (F46): the caret should now sit
-    // in the next row, not still in row 1.
+    expect(surface.getTableSelection()).toBeNull();
     const t = cellTargetOf(surface);
-    expect(t?.row, 'caret stepped to the row below, the ordinary Enter-in-cell move').toBe(2);
+    expect(t?.row, 'caret in the anchor cell').toBe(1);
     expect(t?.col).toBe(0);
   });
 });

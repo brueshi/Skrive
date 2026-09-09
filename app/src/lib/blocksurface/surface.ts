@@ -22,8 +22,23 @@ import { DecorationStore } from './decorations';
 import { HighlightBus } from './highlight/highlight-bus';
 import { SpellBus } from '../spellcheck/spell-bus';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
-import { collapsedRange, isCollapsed, type DocPos, type DocRange, type LeafAddr } from './doc-position';
-import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertBlockBefore, insertTableColumn, insertTableRow, mergeBackward, mergeForward, moveBlock, moveTableColumn, moveTableRow, removeBlocks, removeFootnote, removeTableColumn, removeTableRow, replaceAcross, setColumnAlignment, setTableColumnWidths } from './range-ops';
+import { collapsedRange, isCollapsed, samePos, type DocPos, type DocRange, type LeafAddr } from './doc-position';
+import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertBlockBefore, insertTableColumn, insertTableRow, mergeBackward, mergeForward, moveBlock, moveTableColumn, moveTableRow, removeBlocks, removeFootnote, removeTableColumns, removeTableRows, replaceAcross, setColumnAlignment, setTableColumnWidths } from './range-ops';
+import {
+  anchorOf,
+  cellRect,
+  dimsOf,
+  escalate,
+  extend,
+  fullSlices,
+  normalize,
+  stepDown,
+  type CellRect,
+  type CellRef,
+  type Direction,
+  type GridSelection,
+  type TableSelection
+} from '@skrive/table-surface';
 import { blockIndexOf, findBlockById, updateBlockById, updateBlockInTop } from './tree';
 import { enterInContainer, exitContainer, splitBlockAt, type StructuralResult } from './structural';
 import { graftIntoContainer, spliceParsedAtLeaf } from './paste-graft';
@@ -78,16 +93,16 @@ export type BlockTypeSpec =
  *  Null when the menu is closed. */
 export type SlashMenuState = { rect: DOMRect; query: string; kind: 'block' | 'inline' };
 
-/** What the table menu needs: where to anchor (the pointer, or the caret), the
- *  table it acts on, and the cell whose row and column the commands address.
- *  Null when the menu is closed. Opened on demand by a right-click on a cell or
- *  the keyboard menu key, never as the side effect of a click; the React popover
- *  renders insert-around / align / delete against these coordinates. */
+/** What the table menu needs: where to anchor (the pointer, or the selection),
+ *  the table it acts on, and the cell rectangle the commands address: a single
+ *  cell under a right-click, or the grid selection's shape. Null when the menu is
+ *  closed. Opened on demand by a right-click on a cell or the keyboard menu key,
+ *  never as the side effect of a click; the React popover renders insert-around /
+ *  align / delete against these coordinates. */
 export type TableMenuState = {
   rect: DOMRect;
   tableId: string;
-  row: number;
-  col: number;
+  cells: CellRect;
 };
 
 /** What the inline-tag (`#`) autocomplete needs: where to anchor and the query
@@ -193,10 +208,23 @@ function summariesEqual(a: SelectionInfo | null, b: SelectionInfo | null): boole
 // suppression. Every block element carries BLOCK_ID_ATTR; this rides on the same
 // element.
 const BLOCK_SELECTED_ATTR = 'data-block-selected';
-// Marks each cell of a grip-selected table row or column (SKR-266 B2). Like
-// BLOCK_SELECTED_ATTR it is a view-only ring the surface paints; the model is
-// untouched until the row/column is actually removed.
-const CELL_SELECTED_ATTR = 'data-cell-selected';
+// Held on the surface while a press in a cell is being dragged into a rectangle:
+// the stylesheet turns text selection off under it, so the browser's own drag
+// never paints a highlight across cells while the grid selection grows.
+const GRID_SELECTING_CLASS = 'sk-grid-selecting';
+// Held on the surface while a grid selection is active: the stylesheet hides the
+// caret, which is parked in the selection's home cell (see gridHome) rather than
+// removed, because a focused editable with NO selection is unstable in Chromium
+// (it re-seats a caret at the document start on the next event) and the block
+// surface needs the caret's cell for typing over the rectangle anyway.
+const GRID_SELECTED_CLASS = 'sk-grid-selected';
+/** Arrow key to grid direction, for the rectangle's keyboard extension. */
+const ARROW_DIRECTIONS: Record<string, Direction> = {
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+  ArrowLeft: 'left',
+  ArrowRight: 'right'
+};
 /** How far the pointer may travel between mousedown and mouseup and still count as a
  *  press rather than a drag. A trackpad wobbles a pixel or two under a finger; a
  *  drag-select does not (SKR-239). */
@@ -251,16 +279,6 @@ type SlashLeaf = { block: InlineTextBlock; blockEl: HTMLElement; caret: number; 
 type RunScan = (text: string, caret: number, isCode: boolean, direction: 'backward' | 'forward') => [number, number];
 const wordScan: RunScan = (text, caret, _isCode, direction) => wordBoundaryRange(text, caret, direction);
 const lineScan: RunScan = (text, caret, isCode, direction) => lineBoundaryRange(text, caret, direction, isCode);
-
-/** An in-table cross-cell selection: the rectangle of covered cells to clear. */
-type CrossCellSelection = {
-  kind: 'cells';
-  tableId: string;
-  minRow: number;
-  maxRow: number;
-  minCol: number;
-  maxCol: number;
-};
 
 /** A cross-block selection reduced to two block-leaf endpoints in document order,
  *  with any table-cell endpoint mapped to the table's barrier position. */
@@ -319,8 +337,8 @@ export class BlockSurface {
   // which is where block elements are rebuilt or removed and any geometry an
   // overlay measured goes stale. Empty until an overlay subscribes.
   private readonly structureListeners = new Set<() => void>();
-  // Table row/column selection-change listeners (the chrome keeps the selected
-  // handle lit off this). Empty until the chrome subscribes.
+  // Grid selection-change listeners (the table chrome paints the wash, the ring,
+  // and the lit handles off this). Empty until the chrome subscribes.
   private readonly tableSelectionListeners = new Set<() => void>();
   // Block selection-change listeners (the per-block chrome keeps the selected
   // block's grip lit off this). A channel of its own rather than a share of
@@ -440,13 +458,25 @@ export class BlockSurface {
   // on the surface, so keydown still routes here. Plural-ready (it feeds
   // removeBlocks) though today's gestures only ever select a single block.
   private blockSel: string[] = [];
-  // A grip-selected table row or column (SKR-266 B2): persistent, coordinate-
-  // addressed state set by a chrome handle click. Like blockSel it can't ride the
-  // live DOM selection — a handle click leaves no selection to read and WKWebView
-  // would collapse one anyway — so while it is active the DOM selection is cleared
-  // but focus stays on the surface, and keydown owns Delete/Escape. Mutually
-  // exclusive with blockSel.
-  private tableSel: { tableId: string; kind: 'row' | 'col'; index: number } | null = null;
+  // The grid selection: one cell rectangle (a row, a column, and the whole table
+  // are rectangles that span the grid), addressed to its table. Persistent,
+  // coordinate-addressed state like blockSel: it can't ride the live DOM selection
+  // (a handle click leaves none, and WKWebView would collapse one), so while it is
+  // active the DOM selection is cleared, focus stays on the surface, and keydown
+  // owns its keys. Mutually exclusive with blockSel. The table chrome paints it.
+  private gridSel: TableSelection | null = null;
+  // Where the caret is parked while the grid selection holds: the rectangle's
+  // anchor cell (the whole table's: the cell the caret came from), at the offset
+  // it had. Escape returns here and typing over the rectangle lands here. The
+  // selection observer treats a live caret AT this position as the surface's own,
+  // and any other range as the writer moving on.
+  private gridHome: { tableId: string; cell: CellRef; pos: DocPos } | null = null;
+  // A press in a cell that may become a rectangle drag: armed on pointerdown,
+  // active once the pointer crosses the origin cell's edge, gone on release.
+  private gridDrag: { tableId: string; tableEl: HTMLElement; origin: CellRef; active: boolean } | null = null;
+  // Set when a rectangle drag releases, so the click the browser fires afterward
+  // (on the surface, when released off the table) does not place a caret over it.
+  private gridClickSuppressed = false;
   // A drag that started from inside this surface (a selection being dragged),
   // as opposed to content dragged in from another app (SKR-165). Internal moves
   // are refused honestly (dropEffect 'none') rather than silently mishandled —
@@ -496,6 +526,9 @@ export class BlockSurface {
     // fallback (WKWebView drops pointerup on a motionless press, but click fires).
     this.container.addEventListener('mousedown', this.onPointerDown);
     window.addEventListener('mouseup', this.onPointerUp);
+    // The rectangle drag: a press in a cell arms it; the window listeners it adds
+    // on the way follow the pointer off the table and are removed on release.
+    this.container.addEventListener('pointerdown', this.onGridPointerDown);
     this.container.addEventListener('dragstart', this.onDragStart, true);
     this.container.addEventListener('dragover', this.onDragOver, true);
     this.container.addEventListener('drop', this.onDrop, true);
@@ -594,9 +627,10 @@ export class BlockSurface {
   /** Undo the last edit (Cmd/Ctrl+Z). Restores the prior document and selection,
    *  bypassing the setter so the restore isn't itself recorded. */
   undo(): void {
-    // Any block selection is transient surface state, not in history; drop it so a
-    // restored doc never carries a stale ring (SKR-203).
+    // Any block or grid selection is transient surface state, not in history; drop
+    // it so a restored doc never carries a stale ring (SKR-203).
     this.clearBlockSelectionState();
+    this.clearTableSelectionState();
     const restored = this.history.undo({ doc: this._doc, sel: readSelection(this.container) });
     if (!restored) return;
     this._doc = restored.doc;
@@ -616,6 +650,7 @@ export class BlockSurface {
   /** Redo the last undone edit (Cmd/Ctrl+Shift+Z / Cmd+Y). */
   redo(): void {
     this.clearBlockSelectionState();
+    this.clearTableSelectionState();
     const restored = this.history.redo({ doc: this._doc, sel: readSelection(this.container) });
     if (!restored) return;
     this._doc = restored.doc;
@@ -908,6 +943,8 @@ export class BlockSurface {
     this.container.removeEventListener('click', this.onClick);
     this.container.removeEventListener('mousedown', this.onPointerDown);
     window.removeEventListener('mouseup', this.onPointerUp);
+    this.container.removeEventListener('pointerdown', this.onGridPointerDown);
+    this.endGridDrag();
     this.container.removeEventListener('dragstart', this.onDragStart, true);
     this.container.removeEventListener('dragover', this.onDragOver, true);
     this.container.removeEventListener('drop', this.onDrop, true);
@@ -927,9 +964,9 @@ export class BlockSurface {
     // A block is selected as a unit (SKR-203): its keys (delete / type-over /
     // dissolve / ⌘A-to-document) are owned here, ahead of every prose handler.
     if (this.blockSel.length > 0 && this.handleBlockSelectionKey(e)) return;
-    // A table row/column is grip-selected (SKR-266 B2): Delete removes it, Escape
-    // dissolves it. Owned here for the same reason — the DOM selection is cleared.
-    if (this.tableSel && this.handleTableSelectionKey(e)) return;
+    // A grid selection is active: its keys (clear / remove / extend / escalate /
+    // dissolve / type-over) are owned here for the same reason.
+    if (this.gridSel && this.handleGridSelectionKey(e)) return;
     // Cmd/Ctrl+Shift+V = paste literally (escape hatch for prose with incidental
     // * - # that would otherwise be read as Markdown). The native shell doesn't
     // issue a paste event for this chord, so we read the clipboard ourselves and
@@ -1047,6 +1084,12 @@ export class BlockSurface {
     // rather than in each handler: it is one rule about what an arrow *means*, and both
     // handlers are only reached from this site.
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      // One exception to the modified-arrow bail: Shift+Arrow at the edge of a cell
+      // starts a cell rectangle instead of running a text highlight across cells.
+      if (e.shiftKey && !e.metaKey && !e.altKey && !e.ctrlKey && this.extendGridFromCaret(ARROW_DIRECTIONS[e.key]!)) {
+        e.preventDefault();
+        return;
+      }
       if (e.shiftKey || e.metaKey || e.altKey || e.ctrlKey) return;
       if (this.handleTableArrow(e) || this.handleCodeArrow(e)) e.preventDefault();
       return;
@@ -2806,13 +2849,43 @@ export class BlockSurface {
    *  self-inflicted-dissolution guard. Lives in the observer, not scattered
    *  handlers, so every user-driven selection change routes through one place. */
   private dissolveOnUserSelection(): void {
-    if (this.blockSel.length === 0 && !this.tableSel) return;
+    // The rectangle drag owns the pointer; the browser's own range is re-parked on
+    // every move and must not read as the writer placing a caret.
+    if (this.gridDrag?.active) return;
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) return;
     const range = sel.getRangeAt(0);
     if (!this.container.contains(range.startContainer)) return;
+    // A native range that reaches across cells of one table (a keyboard extension
+    // chord, a triple-click) becomes the grid selection: one primitive, and no
+    // text highlight ever runs across cells.
+    if (!range.collapsed && this.adoptCrossCellRange()) return;
+    if (this.blockSel.length === 0 && !this.gridSel) return;
+    // The grid selection's own parked caret is not the writer moving on.
+    if (this.gridSel && range.collapsed && this.liveCaretIsGridHome()) return;
     this.clearBlockSelectionState();
     this.clearTableSelectionState();
+  }
+
+  /** Is the live caret exactly where the grid selection parked it? */
+  private liveCaretIsGridHome(): boolean {
+    const home = this.gridHome;
+    if (!home) return false;
+    const live = readSelection(this.container);
+    return !!live && isCollapsed(live) && samePos(live.anchor, home.pos);
+  }
+
+  /** Turn a live DOM range whose ends sit in two different cells of one table
+   *  into the grid selection. False when the range is not that shape. */
+  private adoptCrossCellRange(): boolean {
+    const r = readSelection(this.container);
+    if (!r) return false;
+    const a = r.anchor.leaf;
+    const f = r.focus.leaf;
+    if (a.kind !== 'cell' || f.kind !== 'cell' || a.tableId !== f.tableId) return false;
+    if (a.row === f.row && a.col === f.col) return false;
+    this.setTableSelection(a.tableId, { kind: 'cells', anchor: { row: a.row, col: a.col }, focus: { row: f.row, col: f.col } });
+    return true;
   }
 
   /** Close an open slash session when the selection moves out from under it —
@@ -3041,9 +3114,10 @@ export class BlockSurface {
       return;
     }
     if (this.composing) return; // IME composes natively; reconcile on end
-    // A block selection owns input in keydown (SKR-203); swallow any native input
-    // event that still slips through while it is active so nothing edits behind it.
-    if (this.blockSel.length > 0) {
+    // A block or grid selection owns input in keydown (SKR-203); swallow any native
+    // input event that still slips through while one is active so nothing edits
+    // behind it.
+    if (this.blockSel.length > 0 || this.gridSel) {
       e.preventDefault();
       return;
     }
@@ -3393,7 +3467,12 @@ export class BlockSurface {
   // Cut then deletes the selected range. Collapsed selections are left to the
   // browser (nothing to copy).
   private onCopy = (event: Event): void => {
-    this.writeSelectionToClipboard(event as ClipboardEvent);
+    const e = event as ClipboardEvent;
+    if (this.gridSel) {
+      this.writeGridSelectionToClipboard(e);
+      return;
+    }
+    this.writeSelectionToClipboard(e);
   };
 
   // Cut (SKR-164): deletability is decided BEFORE anything touches the clipboard,
@@ -3407,6 +3486,12 @@ export class BlockSurface {
       this.cutBlockSelection(e);
       return;
     }
+    // A grid selection cuts as its copy payload, then clears the covered cells; the
+    // table and its shape survive, as they do under Backspace.
+    if (this.gridSel) {
+      if (this.writeGridSelectionToClipboard(e)) this.clearGridSelectionCells();
+      return;
+    }
     const range = readSelection(this.container);
     if (!range || isCollapsed(range)) return; // nothing selected: leave to the browser
     const plan = this.planRangeCutDeletion();
@@ -3417,6 +3502,26 @@ export class BlockSurface {
     if (!this.writeSelectionToClipboard(e)) return; // nothing serializes either: leave to the browser
     plan();
   };
+
+  /** Write the grid selection to the clipboard as tab-separated rows of the
+   *  covered cells' plain text. False when there is nothing to write. */
+  private writeGridSelectionToClipboard(e: ClipboardEvent): boolean {
+    const data = e.clipboardData;
+    const sel = this.gridSel;
+    if (!data || !sel) return false;
+    const table = this.tableBlockById(sel.tableId);
+    if (!table) return false;
+    const rect = normalize(sel.selection, dimsOf(table));
+    const lines: string[] = [];
+    for (let r = rect.minRow; r <= rect.maxRow; r++) {
+      const cells: string[] = [];
+      for (let c = rect.minCol; c <= rect.maxCol; c++) cells.push(inlinePlainText(table.rows[r]?.[c] ?? []));
+      lines.push(cells.join('\t'));
+    }
+    data.setData('text/plain', lines.join('\n'));
+    e.preventDefault();
+    return true;
+  }
 
   // Write the current selection to the clipboard as Markdown (text/plain) + its
   // rendered HTML (text/html). Returns false (declining the event) when there's
@@ -3880,6 +3985,16 @@ export class BlockSurface {
   // document position (SKR-192, extending PR #62's below-last affordance).
   private onClick = (event: Event): void => {
     const e = event as MouseEvent;
+    // A click closes a press whose pointerup WKWebView may have dropped (a
+    // motionless press never activates a rectangle, so this is only tidying).
+    this.endGridDrag();
+    // The click that follows a rectangle drag released off the table lands on the
+    // surface and would place a caret over the selection just made.
+    if (this.gridClickSuppressed) {
+      this.gridClickSuppressed = false;
+      this.onPointerUp();
+      return;
+    }
     // A drag that selected text also fires a click, on the common ancestor of its
     // endpoints — the container, once the drag leaves the block it started in. Every
     // affordance below assumes a click means "put the caret here"; against a live
@@ -3958,10 +4073,148 @@ export class BlockSurface {
   // progress so the selection bubble stays hidden while the range grows; release
   // (window mouseup / click) clears it and re-emits so the bubble appears settled.
   private onPointerDown = (event: Event): void => {
-    this.pointerDown = true;
     const e = event as MouseEvent;
+    // Shift+click in another cell extends the grid selection there; claimed on
+    // mousedown so the browser never starts its own cross-cell text range.
+    if (e.shiftKey && e.button === 0 && this.extendGridToClick(e)) {
+      e.preventDefault();
+      return;
+    }
+    // Any other press ends a grid selection outright: the caret the press places
+    // is the writer moving on, wherever it lands (a drag from a cell builds a
+    // fresh rectangle from its own origin).
+    if (!e.shiftKey) this.clearTableSelectionState();
+    this.pointerDown = true;
     this.downPoint = { x: e.clientX, y: e.clientY };
   };
+
+  // --- grid selection: the pointer gestures ----------------------------------
+
+  /** Arm a rectangle drag on a plain press in a cell. The press itself is left
+   *  to the browser (it places the caret); only a move past the cell's edge takes
+   *  the pointer. */
+  private onGridPointerDown = (event: Event): void => {
+    const e = event as PointerEvent;
+    if (e.button !== 0 || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+    const cell = this.cellCoordsOf(e.target as Node | null);
+    if (!cell) return;
+    const tableEl = this.leafElementById(cell.tableId);
+    if (!tableEl) return;
+    this.endGridDrag();
+    this.gridDrag = { tableId: cell.tableId, tableEl, origin: { row: cell.row, col: cell.col }, active: false };
+    window.addEventListener('pointermove', this.onGridPointerMove);
+    window.addEventListener('pointerup', this.onGridPointerUp);
+    window.addEventListener('pointercancel', this.onGridPointerUp);
+  };
+
+  private onGridPointerMove = (event: Event): void => {
+    const drag = this.gridDrag;
+    if (!drag) return;
+    const e = event as PointerEvent;
+    const focus = this.cellNearPoint(drag.tableEl, e.clientX, e.clientY);
+    if (!focus) return;
+    if (!drag.active) {
+      if (focus.row === drag.origin.row && focus.col === drag.origin.col) return;
+      drag.active = true;
+      this.container.classList.add(GRID_SELECTING_CLASS);
+    }
+    const current = this.gridSel;
+    const focusMoved =
+      !current ||
+      current.tableId !== drag.tableId ||
+      current.selection.kind !== 'cells' ||
+      current.selection.focus.row !== focus.row ||
+      current.selection.focus.col !== focus.col;
+    if (focusMoved) this.setTableSelection(drag.tableId, { kind: 'cells', anchor: drag.origin, focus });
+    // For the length of the drag the surface holds NO text selection: the browser
+    // extends its own range from whatever base it finds on every move, and no
+    // cancelled event stops it, but with no base there is nothing to extend. The
+    // home caret is parked on release. (The drag guard keeps the selection
+    // observer from reading the empty selection as the writer moving on.)
+    window.getSelection()?.removeAllRanges();
+  };
+
+  private onGridPointerUp = (): void => {
+    const active = this.gridDrag?.active ?? false;
+    this.endGridDrag();
+    if (!active) return;
+    this.gridClickSuppressed = true;
+    this.parkGridHome();
+  };
+
+  /** Tear the drag down: its window listeners and the selection-off class. The
+   *  rectangle it built stays; release finalizes, it does not dissolve. */
+  private endGridDrag(): void {
+    if (!this.gridDrag) return;
+    this.gridDrag = null;
+    window.removeEventListener('pointermove', this.onGridPointerMove);
+    window.removeEventListener('pointerup', this.onGridPointerUp);
+    window.removeEventListener('pointercancel', this.onGridPointerUp);
+    this.container.classList.remove(GRID_SELECTING_CLASS);
+  }
+
+  /** The cell of a table under, or nearest to, a viewport point: the row whose
+   *  band holds the point's y and the column whose band holds its x, each clamped
+   *  to the grid, so a drag that runs off the table keeps its edge cell. Null
+   *  without layout. */
+  private cellNearPoint(tableEl: HTMLElement, x: number, y: number): CellRef | null {
+    const rows = Array.from((tableEl as HTMLTableElement).rows);
+    const header = rows[0];
+    if (!header || header.cells.length === 0) return null;
+    let row = 0;
+    for (let i = 0; i < rows.length; i++) if (rows[i]!.getBoundingClientRect().top <= y) row = i;
+    let col = 0;
+    const cells = Array.from(header.cells);
+    for (let i = 0; i < cells.length; i++) if (cells[i]!.getBoundingClientRect().left <= x) col = i;
+    return { row, col };
+  }
+
+  /** Shift+click in a cell extends the grid selection to that cell: from the
+   *  rectangle's anchor when one is active, else from the caret's cell when the
+   *  click lands in another cell of the same table. False otherwise, so a
+   *  Shift+click within the caret's own cell keeps its native text extension. */
+  private extendGridToClick(e: MouseEvent): boolean {
+    const cell = this.cellCoordsOf(e.target as Node | null);
+    if (!cell) return false;
+    const focus = { row: cell.row, col: cell.col };
+    const current = this.gridSel;
+    if (current && current.tableId === cell.tableId) {
+      this.setTableSelection(cell.tableId, { kind: 'cells', anchor: anchorOf(current.selection), focus });
+      return true;
+    }
+    const caret = this.cellTarget();
+    if (!caret || caret.tableId !== cell.tableId || (caret.row === cell.row && caret.col === cell.col)) return false;
+    this.setTableSelection(cell.tableId, { kind: 'cells', anchor: { row: caret.row, col: caret.col }, focus });
+    return true;
+  }
+
+  /** Shift+Arrow with the text selection's focus at the edge of its cell in the
+   *  arrow's direction starts a rectangle from that cell to its neighbor, so no
+   *  text highlight ever runs across cells. Mid-text, or mid-lines vertically, the
+   *  native text extension keeps the key; so does the grid's own edge, where the
+   *  native extension steps out of the table. False when not claimed. */
+  private extendGridFromCaret(dir: Direction): boolean {
+    const cell = this.cellTarget();
+    if (!cell || cell.spansCells) return false;
+    const len = inlineLength(cell.inline);
+    const backward = !cell.collapsed && isSelectionBackward(window.getSelection()!);
+    const focus = backward ? cell.start : cell.end;
+    const atEdge =
+      dir === 'left'
+        ? focus === 0
+        : dir === 'right'
+          ? focus === len
+          : this.caretOnCellEdgeLine(cell.cellEl, dir === 'up' ? 'first' : 'last');
+    if (!atEdge) return false;
+    const table = this.tableBlockById(cell.tableId);
+    if (!table) return false;
+    const at = { row: cell.row, col: cell.col };
+    const single: GridSelection = { kind: 'cells', anchor: at, focus: at };
+    const next = extend(single, dir, dimsOf(table));
+    if (next === single) return false;
+    this.setTableSelection(cell.tableId, next);
+    return true;
+  }
 
   private onPointerUp = (): void => {
     if (!this.pointerDown) return; // only act when a drag was actually in progress
@@ -4764,7 +5017,6 @@ export class BlockSurface {
     if (!range || isCollapsed(range)) return null;
     const norm = this.normalizeSelection(range);
     if (!norm) return null;
-    if (norm.kind === 'cells') return () => this.clearCrossCells(norm);
     if (norm.start.id === norm.end.id) return null; // single leaf: the block-local path handles it
     const result = deleteAcross(this.doc.blocks, norm.start.id, norm.start.offset, norm.end.id, norm.end.offset);
     return result ? () => this.applyStructural(result) : null;
@@ -4778,10 +5030,6 @@ export class BlockSurface {
     if (!range || isCollapsed(range)) return;
     const norm = this.normalizeSelection(range);
     if (!norm) return;
-    if (norm.kind === 'cells') {
-      this.replaceCrossCells(norm, text);
-      return;
-    }
     if (norm.start.id === norm.end.id) return;
     const r = replaceAcross(this.doc.blocks, norm.start.id, norm.start.offset, norm.end.id, norm.end.offset, text);
     if (r) {
@@ -4792,24 +5040,15 @@ export class BlockSurface {
     }
   }
 
-  // Classify a cross-endpoint selection into the two barrier-aware shapes
-  // (SKR-166 / F55): an in-table cross-cell selection (both endpoints cells of the
-  // same table) that clears the covered cells, versus a block range whose cell
-  // endpoints are mapped to their table's barrier position so deleteAcross snaps
-  // them inward. Endpoints are returned in document order. Null when unaddressable.
-  private normalizeSelection(range: DocRange): CrossCellSelection | NormalizedBlockRange | null {
+  // Normalize a cross-endpoint selection to a block range whose cell endpoints
+  // are mapped to their table's barrier position, so deleteAcross snaps them
+  // inward (SKR-166 / F55). A range that reaches across cells of one table never
+  // survives to here: the selection observer turns it into the grid selection,
+  // and the grid selection's keys own the clear. Endpoints are returned in
+  // document order. Null when unaddressable.
+  private normalizeSelection(range: DocRange): NormalizedBlockRange | null {
     const a = range.anchor.leaf;
     const f = range.focus.leaf;
-    if (a.kind === 'cell' && f.kind === 'cell' && a.tableId === f.tableId) {
-      return {
-        kind: 'cells',
-        tableId: a.tableId,
-        minRow: Math.min(a.row, f.row),
-        maxRow: Math.max(a.row, f.row),
-        minCol: Math.min(a.col, f.col),
-        maxCol: Math.max(a.col, f.col)
-      };
-    }
     // Map a cell endpoint to its table's barrier position (offset is irrelevant —
     // deleteAcross snaps a barrier endpoint away). A prose endpoint keeps its offset.
     const anchor = a.kind === 'cell' ? { id: a.tableId, offset: 0 } : { id: a.id, offset: range.anchor.offset };
@@ -4820,38 +5059,6 @@ export class BlockSurface {
     if (ai < 0 || fi < 0) return null;
     const [start, end] = ai < fi || (ai === fi && anchor.offset <= focus.offset) ? [anchor, focus] : [focus, anchor];
     return { kind: 'blocks', start, end };
-  }
-
-  // Empty every cell the selection covers, then land the caret at the top-left of
-  // the cleared block. The table and its shape survive (the Docs cross-cell delete).
-  private clearCrossCells(sel: CrossCellSelection): void {
-    const blocks = clearTableCells(this.doc.blocks, sel.tableId, sel.minRow, sel.minCol, sel.maxRow, sel.maxCol);
-    if (!blocks) return;
-    this.doc = { ...this.doc, blocks };
-    this.reconcile();
-    const table = findBlockById(this.doc.blocks, sel.tableId);
-    if (table && table.type === 'table') this.focusCell(table, sel.minRow, sel.minCol, 0);
-    this.scheduleSerialize();
-    this.closeSlash();
-  }
-
-  // Clear the covered cells, then type `text` into the top-left one — the cross-cell
-  // equivalent of replacing a prose selection.
-  private replaceCrossCells(sel: CrossCellSelection, text: string): void {
-    const cleared = clearTableCells(this.doc.blocks, sel.tableId, sel.minRow, sel.minCol, sel.maxRow, sel.maxCol);
-    if (!cleared) return;
-    const blocks = updateBlockById(cleared, sel.tableId, (b) => {
-      if (b.type !== 'table') return b;
-      const rows = b.rows.map((row, r) =>
-        r === sel.minRow ? row.map((cell, c) => (c === sel.minCol ? insertTextInInline([], 0, text) : cell)) : row
-      );
-      return { ...b, rows, dirty: true } as BlockNode;
-    });
-    this.doc = { ...this.doc, blocks };
-    this.reconcile();
-    const table = findBlockById(this.doc.blocks, sel.tableId);
-    if (table && table.type === 'table') this.focusCell(table, sel.minRow, sel.minCol, text.length);
-    this.scheduleSerialize();
   }
 
   // --- block selection: a code block / table as a unit (SKR-203) ------------
@@ -5039,10 +5246,13 @@ export class BlockSurface {
   private handleSelectAll(): boolean {
     const cell = this.cellTarget();
     if (cell) {
+      // In a cell the ladder is the grid's: the cell's text, then the cell, then
+      // the table, then (with the grid selection active) the document.
       const len = inlineLength(cell.inline);
-      const full = len === 0 || (!cell.spansCells && cell.start === 0 && cell.end === len);
-      if (full) this.selectBlock(cell.tableId);
-      else setSelectionRange(cell.cellEl, 0, len);
+      const covered = len === 0 || (!cell.spansCells && cell.start === 0 && cell.end === len);
+      const step = escalate(null, { cell: { row: cell.row, col: cell.col }, textCovered: covered });
+      if (step.kind === 'text') setSelectionRange(cell.cellEl, 0, len);
+      else if (step.kind === 'grid') this.setTableSelection(cell.tableId, step.selection);
       return true;
     }
     const t = this.leafTarget();
@@ -5130,27 +5340,44 @@ export class BlockSurface {
     if (el) setCaret(el, 0);
   }
 
-  // --- table row/column selection: a grip-selected slice (SKR-266 B2) --------
+  // --- grid selection: one cell rectangle, addressed to its table ------------
 
-  /** Select a whole table column by its grip. Coordinate-addressed — the chrome
-   *  passes the clicked column outright, so nothing is inferred from a caret. */
+  /** Select a whole column by its handle: the rectangle spanning every row. */
   selectTableColumn(tableId: string, index: number): void {
-    this.setTableSelection(tableId, 'col', index);
+    const table = this.tableBlockById(tableId);
+    if (!table) return;
+    this.setTableSelection(tableId, {
+      kind: 'cells',
+      anchor: { row: 0, col: index },
+      focus: { row: Math.max(0, table.rows.length - 1), col: index }
+    });
   }
 
-  /** Select a whole table row by its grip. */
+  /** Select a whole row by its handle: the rectangle spanning every column. */
   selectTableRow(tableId: string, index: number): void {
-    this.setTableSelection(tableId, 'row', index);
+    const table = this.tableBlockById(tableId);
+    if (!table) return;
+    this.setTableSelection(tableId, {
+      kind: 'cells',
+      anchor: { row: index, col: 0 },
+      focus: { row: index, col: Math.max(0, (table.rows[0]?.length ?? 1) - 1) }
+    });
   }
 
-  /** The grip-selected row/column, or null. The table chrome reads it to keep the
-   *  selected handle lit while the selection is active, independent of hover. */
-  getTableSelection(): { tableId: string; kind: 'row' | 'col'; index: number } | null {
-    return this.tableSel;
+  /** Select the rectangle between two cells (the pointer drag's shape). */
+  selectTableCells(tableId: string, anchor: CellRef, focus: CellRef): void {
+    if (!this.tableBlockById(tableId)) return;
+    this.setTableSelection(tableId, { kind: 'cells', anchor, focus });
   }
 
-  /** Subscribe to table row/column selection changes (set and cleared). The chrome
-   *  keeps the selected handle painted off this signal. Returns an unsubscribe. */
+  /** The grid selection, or null. The table chrome reads it to paint the wash,
+   *  the ring, and the lit handles while it is active, independent of hover. */
+  getTableSelection(): TableSelection | null {
+    return this.gridSel;
+  }
+
+  /** Subscribe to grid selection changes (set and cleared). The chrome paints off
+   *  this signal. Returns an unsubscribe. */
   onTableSelectionChange(fn: () => void): () => void {
     this.tableSelectionListeners.add(fn);
     return () => {
@@ -5162,87 +5389,231 @@ export class BlockSurface {
     for (const fn of this.tableSelectionListeners) fn();
   }
 
-  /** Store the selection as authoritative state, paint the row/column, then clear
-   *  the DOM selection while KEEPING focus on the surface — so keydown owns
-   *  Delete/Escape and the state never depends on a WKWebView-collapsible
-   *  selection. Mirrors selectBlock; supersedes any block-as-unit selection. */
-  private setTableSelection(tableId: string, kind: 'row' | 'col', index: number): void {
+  private tableBlockById(tableId: string): TableBlock | null {
+    const block = findBlockById(this.doc.blocks, tableId);
+    return block && block.type === 'table' ? block : null;
+  }
+
+  /** Store the selection as authoritative state and park the caret, collapsed and
+   *  hidden, in its home cell (see gridHome) — so keydown owns its keys, the
+   *  state never depends on a WKWebView-collapsible range, and no engine finds a
+   *  focused editable without a caret. Supersedes any block-as-unit selection. */
+  private setTableSelection(tableId: string, selection: GridSelection): void {
+    const table = this.tableBlockById(tableId);
+    if (!table) return;
     this.clearBlockSelectionState();
-    this.tableSel = { tableId, kind, index };
-    this.renderTableSelection();
-    window.getSelection()?.removeAllRanges();
+    const rows = table.rows.length;
+    const cols = table.rows[0]?.length ?? 0;
+    if (rows === 0 || cols === 0) return;
+    const wanted = stepDown(selection) ?? this.gridHome?.cell ?? this.rememberedCell(tableId) ?? { row: 0, col: 0 };
+    const cell = { row: Math.min(wanted.row, rows - 1), col: Math.min(wanted.col, cols - 1) };
+    // A caret already in the home cell keeps its offset (a home already parked
+    // there keeps it too), so Escape returns the writer exactly where the gesture
+    // found them.
+    const prior = this.gridHome;
+    const priorOffset =
+      prior && prior.tableId === tableId && prior.cell.row === cell.row && prior.cell.col === cell.col ? prior.pos.offset : null;
+    const live = priorOffset === null ? this.cellTarget() : null;
+    const offset =
+      priorOffset ?? (live && live.tableId === tableId && live.row === cell.row && live.col === cell.col ? live.start : 0);
+    this.gridSel = { tableId, selection };
+    this.gridHome = { tableId, cell, pos: { leaf: { kind: 'cell', tableId, row: cell.row, col: cell.col }, offset } };
+    this.container.classList.add(GRID_SELECTED_CLASS);
+    // Mid-drag the surface deliberately holds no selection (see onGridPointerMove).
+    if (!this.gridDrag?.active) this.parkGridHome();
     this.container.focus();
     this.notifyTableSelection();
     this.emitSelection();
   }
 
-  /** Paint the selection tint: clear any stale marks, then mark every cell in the
-   *  selected row or column. Idempotent, so a repaint after a reconcile is safe. */
-  private renderTableSelection(): void {
-    for (const el of this.container.querySelectorAll(`[${CELL_SELECTED_ATTR}]`)) {
-      el.removeAttribute(CELL_SELECTED_ATTR);
-    }
-    const sel = this.tableSel;
-    if (!sel) return;
-    const table = this.leafElementById(sel.tableId);
+  /** Put the caret at the grid selection's home, collapsed. A no-op without one. */
+  private parkGridHome(): void {
+    const home = this.gridHome;
+    if (!home) return;
+    const table = this.tableBlockById(home.tableId);
     if (!table) return;
-    // Cells carry data-cell-row / data-cell-col (render.ts); a row is all cells at
-    // one row index, a column all cells at one column index.
-    const key = sel.kind === 'row' ? 'data-cell-row' : 'data-cell-col';
-    for (const cell of table.querySelectorAll(`[${key}="${sel.index}"]`)) {
-      cell.setAttribute(CELL_SELECTED_ATTR, '');
-    }
+    this.focusCell(table, home.cell.row, home.cell.col, home.pos.offset);
   }
 
-  /** Clear the table-selection state and its tint, without moving the caret. */
+  /** Clear the grid selection. The caret stays parked in the home cell, which is
+   *  where a dissolve lands anyway. */
   private clearTableSelectionState(): void {
-    if (!this.tableSel) return;
-    this.tableSel = null;
-    for (const el of this.container.querySelectorAll(`[${CELL_SELECTED_ATTR}]`)) {
-      el.removeAttribute(CELL_SELECTED_ATTR);
-    }
+    if (!this.gridSel) return;
+    this.gridSel = null;
+    this.gridHome = null;
+    this.container.classList.remove(GRID_SELECTED_CLASS);
     this.notifyTableSelection();
   }
 
-  /** Keys owned while a table row/column is selected. Delete removes the slice;
-   *  Escape and the arrows dissolve back to a caret; a printable key ends the
-   *  selection at the slice's first cell (typing into a whole-row selection is not
-   *  meaningful). Undo/redo and other chords fall through. */
-  private handleTableSelectionKey(e: KeyboardEvent): boolean {
-    if (e.isComposing) return false;
+  /** Keys owned while a grid selection is active. Backspace/Delete clear the
+   *  covered cells; with Cmd/Ctrl they remove the rows or columns the rectangle
+   *  covers in full (structure goes only behind a modifier). Shift+Arrow extends,
+   *  Cmd+A escalates, Escape / Enter / Tab / a plain arrow dissolve to a caret, a
+   *  printable key clears and types into the anchor. Undo/redo and other chords
+   *  fall through. */
+  private handleGridSelectionKey(e: KeyboardEvent): boolean {
+    const sel = this.gridSel;
+    if (!sel || e.isComposing) return false;
     const key = e.key;
-    // A delete chord with a modifier (⌥⌫, ⌘⌫, …) reduces to "remove the slice",
-    // exactly as plain Backspace/Delete does — the modifier is irrelevant here.
+    const cmd = e.metaKey || e.ctrlKey;
+    if (cmd && !e.altKey && !e.shiftKey && key.toLowerCase() === 'a') {
+      e.preventDefault();
+      const step = escalate(sel.selection, null);
+      if (step.kind === 'grid') {
+        this.setTableSelection(sel.tableId, step.selection);
+      } else {
+        this.clearTableSelectionState();
+        this.selectDocument();
+      }
+      return true;
+    }
     if ((key === 'Backspace' || key === 'Delete') && !e.shiftKey) {
       e.preventDefault();
-      this.deleteSelectedTableSlice();
+      if (cmd) this.removeGridSelectionSlices();
+      else this.clearGridSelectionCells();
+      return true;
+    }
+    const dir = ARROW_DIRECTIONS[key];
+    if (dir && e.shiftKey && !cmd && !e.altKey) {
+      e.preventDefault();
+      const table = this.tableBlockById(sel.tableId);
+      if (table) {
+        const next = extend(sel.selection, dir, dimsOf(table));
+        if (next !== sel.selection) this.setTableSelection(sel.tableId, next);
+      }
       return true;
     }
     // Let undo/redo (and any other chord) run through the normal handler.
-    if (e.metaKey || e.ctrlKey || e.altKey) return false;
-    if (
-      key === 'Escape' ||
-      key === 'ArrowUp' ||
-      key === 'ArrowDown' ||
-      key === 'ArrowLeft' ||
-      key === 'ArrowRight' ||
-      key.length === 1
-    ) {
+    if (cmd || e.altKey) return false;
+    if (key === 'Escape' || key === 'Enter' || key === 'Tab' || dir) {
       e.preventDefault();
-      this.dissolveTableSelectionToCaret();
+      this.dissolveGridSelectionToCaret();
+      return true;
+    }
+    if (key.length === 1) {
+      e.preventDefault();
+      this.typeOverGridSelection(key);
       return true;
     }
     return false;
   }
 
+  /** The grid selection as a normalized rectangle against its table, or null. */
+  private gridSelectionRect(): { tableId: string; table: TableBlock; rect: CellRect; selection: GridSelection } | null {
+    const sel = this.gridSel;
+    if (!sel) return null;
+    const table = this.tableBlockById(sel.tableId);
+    if (!table) return null;
+    return { tableId: sel.tableId, table, rect: normalize(sel.selection, dimsOf(table)), selection: sel.selection };
+  }
+
+  /** Backspace / Delete: empty every covered cell and land the caret in the home
+   *  cell. The table and its shape survive; one undo step. */
+  private clearGridSelectionCells(): void {
+    const g = this.gridSelectionRect();
+    const home = this.gridHome;
+    if (!g || !home) return;
+    this.clearTableSelectionState();
+    const blocks = clearTableCells(this.doc.blocks, g.tableId, g.rect.minRow, g.rect.minCol, g.rect.maxRow, g.rect.maxCol);
+    if (!blocks) return;
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    this.focusCellClamped(g.tableId, home.cell, 0);
+    this.pruneOrphanedFootnotes();
+    this.scheduleSerialize();
+    this.closeSlash();
+  }
+
+  /** A printable key over a rectangle: clear it and type into the home cell, the
+   *  cell equivalent of replacing a prose selection. One undo step. */
+  private typeOverGridSelection(text: string): void {
+    const g = this.gridSelectionRect();
+    const home = this.gridHome;
+    if (!g || !home) return;
+    this.clearTableSelectionState();
+    const cleared = clearTableCells(this.doc.blocks, g.tableId, g.rect.minRow, g.rect.minCol, g.rect.maxRow, g.rect.maxCol);
+    if (!cleared) return;
+    const at = home.cell;
+    const blocks = updateBlockById(cleared, g.tableId, (b) => {
+      if (b.type !== 'table') return b;
+      const rows = b.rows.map((row, r) =>
+        r === at.row ? row.map((cell, c) => (c === at.col ? insertTextInInline([], 0, text) : cell)) : row
+      );
+      return { ...b, rows, dirty: true } as BlockNode;
+    });
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    this.focusCellClamped(g.tableId, at, text.length);
+    this.pruneOrphanedFootnotes();
+    this.scheduleSerialize();
+  }
+
+  /** Cmd+Backspace / Cmd+Delete: remove the rows or columns the rectangle covers
+   *  in full, as one undo step; a rectangle covering the whole table removes the
+   *  table. A partial rectangle has no structure to remove, so the chord clears
+   *  its cells exactly as the plain key does. */
+  private removeGridSelectionSlices(): void {
+    const g = this.gridSelectionRect();
+    if (!g) return;
+    const full = fullSlices(g.rect, dimsOf(g.table));
+    if (full.rows && full.cols) {
+      this.clearTableSelectionState();
+      const r = deleteBlock(this.doc.blocks, g.tableId);
+      if (r) this.applyStructural(r);
+      this.closeSlash();
+      return;
+    }
+    if (full.rows) this.removeTableSlices(g.tableId, 'row', full.rows[0], full.rows[1]);
+    else if (full.cols) this.removeTableSlices(g.tableId, 'col', full.cols[0], full.cols[1]);
+    else this.clearGridSelectionCells();
+  }
+
+  /** Land the caret in a cell, clamped to the table's current shape. */
+  private focusCellClamped(tableId: string, at: CellRef, offset: number): void {
+    const table = this.tableBlockById(tableId);
+    if (!table) return;
+    const rows = table.rows.length;
+    const cols = table.rows[0]?.length ?? 0;
+    if (rows === 0 || cols === 0) return;
+    this.focusCell(table, Math.min(at.row, rows - 1), Math.min(at.col, cols - 1), offset);
+  }
+
+  /** Escape (and any plain key that ends the selection): back to the text caret
+   *  parked in the home cell — the rectangle's anchor, or for the whole table the
+   *  cell the caret came from. Re-parked in case an engine dropped it. */
+  private dissolveGridSelectionToCaret(): void {
+    const home = this.gridHome;
+    this.clearTableSelectionState();
+    if (!home) return;
+    this.focusCellClamped(home.tableId, home.cell, home.pos.offset);
+    this.emitSelection();
+  }
+
+  /** The cell the caret last sat in within `tableId`, from the saved selection. */
+  private rememberedCell(tableId: string): CellRef | null {
+    const saved = this.lastSelection;
+    if (!saved || !('tableId' in saved) || saved.tableId !== tableId) return null;
+    return { row: saved.row, col: saved.col };
+  }
+
   /** Remove a table row by coordinate (the table menu's Delete row). */
   removeTableRowAt(tableId: string, index: number): void {
-    this.removeTableSlice(tableId, 'row', index);
+    this.removeTableSlices(tableId, 'row', index, index);
+  }
+
+  /** Remove rows `from` through `to` (the menu over a multi-row selection). */
+  removeTableRowsAt(tableId: string, from: number, to: number): void {
+    this.removeTableSlices(tableId, 'row', from, to);
   }
 
   /** Remove a table column by coordinate (the table menu's Delete column). */
   removeTableColumnAt(tableId: string, index: number): void {
-    this.removeTableSlice(tableId, 'col', index);
+    this.removeTableSlices(tableId, 'col', index, index);
+  }
+
+  /** Remove columns `from` through `to` (the menu over a multi-column selection). */
+  removeTableColumnsAt(tableId: string, from: number, to: number): void {
+    this.removeTableSlices(tableId, 'col', from, to);
   }
 
   /** Set a column's alignment (the table menu's align controls). A no-op op (same
@@ -5306,24 +5677,17 @@ export class BlockSurface {
     this.scheduleSerialize();
   }
 
-  /** Remove the currently grip-selected row or column (keyboard Delete). */
-  private deleteSelectedTableSlice(): void {
-    const sel = this.tableSel;
-    if (!sel) return;
-    this.removeTableSlice(sel.tableId, sel.kind, sel.index);
-  }
-
-  /** Remove one row or column as one undo step, landing the caret in the surviving
-   *  table. Removing the last row/column would empty the table, so the op returns
-   *  null and we delete the whole table instead — the documented contract of
-   *  removeTableRow/removeTableColumn. Coordinate-addressed, so both the keyboard
-   *  Delete and the menu's Delete route through it. */
-  private removeTableSlice(tableId: string, kind: 'row' | 'col', index: number): void {
+  /** Remove a run of rows or columns as one undo step, landing the caret in the
+   *  surviving table. Removing every row or column would empty the table, so the
+   *  op returns null and we delete the whole table instead — the documented
+   *  contract of removeTableRows/removeTableColumns. Coordinate-addressed, so the
+   *  keyboard chord and the menu's Delete both route through it. */
+  private removeTableSlices(tableId: string, kind: 'row' | 'col', from: number, to: number): void {
     this.clearTableSelectionState();
     const blocks =
       kind === 'row'
-        ? removeTableRow(this.doc.blocks, tableId, index)
-        : removeTableColumn(this.doc.blocks, tableId, index);
+        ? removeTableRows(this.doc.blocks, tableId, from, to)
+        : removeTableColumns(this.doc.blocks, tableId, from, to);
     if (!blocks) {
       const r = deleteBlock(this.doc.blocks, tableId);
       if (r) this.applyStructural(r);
@@ -5332,49 +5696,86 @@ export class BlockSurface {
     }
     this.doc = { ...this.doc, blocks };
     this.reconcile();
-    const table = findBlockById(this.doc.blocks, tableId);
-    if (table && table.type === 'table') {
+    const table = this.tableBlockById(tableId);
+    if (table) {
       const rows = table.rows.length;
       const cols = table.rows[0]?.length ?? 0;
-      // Land in the slice that took the removed one's place (clamped to the end).
-      const row = kind === 'row' ? Math.min(index, rows - 1) : 0;
-      const col = kind === 'col' ? Math.min(index, cols - 1) : 0;
+      // Land in the slice that took the removed run's place (clamped to the end).
+      const row = kind === 'row' ? Math.min(from, rows - 1) : 0;
+      const col = kind === 'col' ? Math.min(from, cols - 1) : 0;
       this.focusCell(table, Math.max(0, row), Math.max(0, col), 0);
     }
     this.scheduleSerialize();
     this.closeSlash();
   }
 
-  // --- table menu: the on-demand popover for a cell's row and column ---------
+  // --- table menu: the on-demand popover for a cell rectangle ----------------
 
-  /** Open the table menu for a cell, anchored to `rect`. The menu is on demand:
-   *  it selects nothing and moves no caret, so a dismiss leaves the writer exactly
-   *  where the gesture found them. The React menu renders insert-around / align /
-   *  delete against the cell's row and column. */
-  openTableMenu(tableId: string, target: { row: number; col: number }, rect: DOMRect): void {
-    this.tableMenu = { rect, tableId, row: target.row, col: target.col };
+  /** Open the table menu for a cell rectangle, anchored to `rect`. The menu is on
+   *  demand: it selects nothing and moves no caret, so a dismiss leaves the writer
+   *  exactly where the gesture found them. The React menu renders insert-around /
+   *  align / delete against the rectangle's rows and columns. */
+  openTableMenu(tableId: string, cells: CellRect, rect: DOMRect): void {
+    this.tableMenu = { rect, tableId, cells };
     this.tableMenuCb?.(this.tableMenu);
   }
 
   /** Open the table menu for the cell containing `node` (a right-click's target),
-   *  anchored at the pointer. False when `node` is not inside a cell of this
+   *  anchored at the pointer: the grid selection's shape when the cell is inside
+   *  it, else that one cell. False when `node` is not inside a cell of this
    *  surface, so the caller can leave the event to the platform menu. */
   openTableMenuAtNode(node: Node | null, clientX: number, clientY: number): boolean {
     const cell = this.cellCoordsOf(node);
     if (!cell) return false;
-    this.openTableMenu(cell.tableId, cell, new DOMRect(clientX, clientY, 0, 0));
+    const at = { row: cell.row, col: cell.col };
+    const g = this.gridSelectionRect();
+    const inside =
+      g !== null &&
+      g.tableId === cell.tableId &&
+      at.row >= g.rect.minRow &&
+      at.row <= g.rect.maxRow &&
+      at.col >= g.rect.minCol &&
+      at.col <= g.rect.maxCol;
+    this.openTableMenu(cell.tableId, inside ? g.rect : cellRect(at, at), new DOMRect(clientX, clientY, 0, 0));
     return true;
   }
 
-  /** Open the table menu for the caret's cell (the keyboard menu key), anchored at
-   *  the caret, or at the cell when layout gives the caret no rect. False when the
-   *  caret is not in a cell. */
+  /** Open the table menu from the keyboard menu key: for the grid selection,
+   *  anchored to its rectangle, else for the caret's cell, anchored at the caret
+   *  (or at the cell when layout gives the caret no rect). False when neither. */
   openTableMenuAtCaret(): boolean {
+    const g = this.gridSelectionRect();
+    if (g) {
+      this.openTableMenu(g.tableId, g.rect, this.rectOfCells(g.tableId, g.rect));
+      return true;
+    }
     const cell = this.cellTarget();
     if (!cell) return false;
-    const rect = this.caretRect() ?? cell.cellEl.getBoundingClientRect();
-    this.openTableMenu(cell.tableId, { row: cell.row, col: cell.col }, rect);
+    const at = { row: cell.row, col: cell.col };
+    this.openTableMenu(cell.tableId, cellRect(at, at), this.caretRect() ?? cell.cellEl.getBoundingClientRect());
     return true;
+  }
+
+  /** The viewport rect covering a cell rectangle, from its rendered cells. */
+  private rectOfCells(tableId: string, rect: CellRect): DOMRect {
+    const tableEl = this.leafElementById(tableId);
+    let box: DOMRect | null = null;
+    for (const corner of [
+      [rect.minRow, rect.minCol],
+      [rect.maxRow, rect.maxCol]
+    ]) {
+      const el = tableEl?.querySelector(`[data-cell-row="${corner[0]}"][data-cell-col="${corner[1]}"]`);
+      const r = el?.getBoundingClientRect();
+      if (!r) continue;
+      if (!box) {
+        box = r;
+        continue;
+      }
+      const left = Math.min(box.left, r.left);
+      const top = Math.min(box.top, r.top);
+      box = new DOMRect(left, top, Math.max(box.right, r.right) - left, Math.max(box.bottom, r.bottom) - top);
+    }
+    return box ?? new DOMRect(0, 0, 0, 0);
   }
 
   /** The table id and grid coordinates of the cell enclosing `node`, or null when
@@ -5397,20 +5798,6 @@ export class BlockSurface {
     if (!this.tableMenu) return;
     this.tableMenu = null;
     this.tableMenuCb?.(null);
-  }
-
-  /** Dissolve the table selection back to a text caret at the slice's first cell. */
-  private dissolveTableSelectionToCaret(): void {
-    const sel = this.tableSel;
-    this.clearTableSelectionState();
-    if (!sel) return;
-    const table = findBlockById(this.doc.blocks, sel.tableId);
-    if (table && table.type === 'table') {
-      const row = sel.kind === 'row' ? sel.index : 0;
-      const col = sel.kind === 'col' ? sel.index : 0;
-      this.focusCell(table, row, col, 0);
-    }
-    this.emitSelection();
   }
 
   private newInlineBlock(type: 'paragraph' | 'heading', inline: InlineNode[], level: number): BlockNode {
@@ -5583,7 +5970,7 @@ export class BlockSurface {
     collapsed: boolean;
     spansCells: boolean;
   } | null {
-    if (this.blockSel.length > 0) return null;
+    if (this.blockSel.length > 0 || this.gridSel) return null;
     const saved = this.lastSelection;
     if (!saved || !('tableId' in saved)) return null; // a saved leaf resolves through leafTarget instead
     const table = findBlockById(this.doc.blocks, saved.tableId);
@@ -5703,6 +6090,7 @@ export class BlockSurface {
   insertTableRowAt(tableId: string, index: number, col = 0): void {
     const blocks = insertTableRow(this.doc.blocks, tableId, index);
     if (!blocks) return;
+    this.clearTableSelectionState(); // the caret is about to land in the new row
     this.doc = { ...this.doc, blocks };
     this.reconcile();
     const table = findBlockById(this.doc.blocks, tableId);
@@ -5716,6 +6104,7 @@ export class BlockSurface {
   insertTableColumnAt(tableId: string, index: number, row = 0): void {
     const blocks = insertTableColumn(this.doc.blocks, tableId, index);
     if (!blocks) return;
+    this.clearTableSelectionState(); // the caret is about to land in the new column
     this.doc = { ...this.doc, blocks };
     this.reconcile();
     const table = findBlockById(this.doc.blocks, tableId);
@@ -6045,9 +6434,9 @@ export class BlockSurface {
     // And any overlay measuring block geometry directly: the elements it measured
     // may have just been replaced.
     for (const fn of this.structureListeners) fn();
-    // Repaint a live table-selection tint: reconcile rebuilt the cells it sat on.
-    // A now-out-of-range index simply matches no cells (safe).
-    if (this.tableSel) this.renderTableSelection();
+    // A grid selection's parked caret sat in a cell that was just rebuilt; park it
+    // again so no engine finds the focused editable without a caret.
+    if (this.gridSel) this.parkGridHome();
   }
 
   private scheduleSerialize(): void {

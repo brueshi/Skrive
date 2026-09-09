@@ -3,9 +3,10 @@
 // Selections touching barriers (SKR-166 / F54 + F55). A selection whose endpoint
 // sits inside a code block / table used to eat the gesture (silent no-op) or, for
 // ⌘A, degrade to a collapsed caret. These pin the fixed behaviour end to end: the
-// barrier survives while the prose around it is deleted, an in-table cross-cell
-// selection clears the covered cells, and readSelection resolves a container-level
-// boundary instead of collapsing. jsdom models enough Selection/Range for the
+// barrier survives while the prose around it is deleted, a rectangle of cells (the
+// grid selection, which a native range across cells becomes) clears the covered
+// cells, and readSelection resolves a container-level boundary instead of
+// collapsing. jsdom models enough Selection/Range for the
 // surface's cellTarget / leafTarget / readSelection to run against a real DOM.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -96,14 +97,17 @@ describe('Backspace over a barrier-crossing selection (F54)', () => {
   });
 });
 
-describe('In-table cross-cell selection (F55)', () => {
+describe('A rectangle of cells (the grid selection)', () => {
+  function key(surface: BlockSurface, init: KeyboardEventInit): void {
+    const e = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+    (surface as unknown as { onKeyDown: (e: Event) => void }).onKeyDown(e);
+  }
+
   it('Backspace across two cells clears their contents and keeps the table', () => {
     const surface = new BlockSurface({ container, doc: parseDocument(`${TABLE}\n`) });
-    const c0 = container.querySelector('[data-cell-row="1"][data-cell-col="0"]')!;
-    const c1 = container.querySelector('[data-cell-row="1"][data-cell-col="1"]')!;
-    select(c0.firstChild!, 0, c1.firstChild!, c1.textContent!.length);
+    surface.selectTableCells(tableBlock(surface).id, { row: 1, col: 0 }, { row: 1, col: 1 });
 
-    backspace(surface);
+    key(surface, { key: 'Backspace' });
 
     const table = tableBlock(surface);
     expect(table.rows[1]!.map(plain), 'covered cells cleared').toEqual(['', '']);
@@ -111,17 +115,30 @@ describe('In-table cross-cell selection (F55)', () => {
     expect(table.rows.length, 'shape unchanged').toBe(2);
   });
 
-  it('typing across two cells replaces them into the first cell, table survives', () => {
+  it('typing across two cells replaces them into the anchor cell, table survives', () => {
     const surface = new BlockSurface({ container, doc: parseDocument(`${TABLE}\n`) });
-    const c0 = container.querySelector('[data-cell-row="1"][data-cell-col="0"]')!;
-    const c1 = container.querySelector('[data-cell-row="1"][data-cell-col="1"]')!;
-    select(c0.firstChild!, 0, c1.firstChild!, c1.textContent!.length);
+    surface.selectTableCells(tableBlock(surface).id, { row: 1, col: 0 }, { row: 1, col: 1 });
 
-    typeText(surface, 'Z');
+    key(surface, { key: 'Z' });
 
     const table = tableBlock(surface);
     expect(plain(table.rows[1]![0]!)).toBe('Z');
     expect(plain(table.rows[1]![1]!)).toBe('');
     expect(table.rows.length).toBe(2);
+  });
+
+  it('a native range across two cells is not a text selection: the prose paths see no range to act on', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`${TABLE}\n`) });
+    const c0 = container.querySelector('[data-cell-row="1"][data-cell-col="0"]')!;
+    const c1 = container.querySelector('[data-cell-row="1"][data-cell-col="1"]')!;
+    select(c0.firstChild!, 0, c1.firstChild!, c1.textContent!.length);
+
+    // Before the selection observer converts it (a frame later) the range is
+    // transient; the delete path declines rather than acting on half a shape.
+    backspace(surface);
+    typeText(surface, 'Z');
+
+    const table = tableBlock(surface);
+    expect(table.rows[1]!.map(plain), 'untouched').toEqual(['1', '2']);
   });
 });

@@ -3,7 +3,7 @@
 // argues each line is ../README.md. Nothing here may import from the app.
 
 /** Bumped on any incompatible change while the seam settles. */
-export const CONTRACT_VERSION = 0;
+export const CONTRACT_VERSION = 1;
 
 // ---------------------------------------------------------------------------
 // Model. Cells are OPAQUE: the library never reads inside one. It compares
@@ -60,6 +60,9 @@ export type TableIntent<Cell> =
   | { readonly type: 'insert-column'; readonly index: number }
   | { readonly type: 'remove-row'; readonly index: number }
   | { readonly type: 'remove-column'; readonly index: number }
+  /** Inclusive ranges, so a multi-slice removal is one op and one history step. */
+  | { readonly type: 'remove-rows'; readonly from: number; readonly to: number }
+  | { readonly type: 'remove-columns'; readonly from: number; readonly to: number }
   /** `to` is a drop boundary, not a final index. Header never moves. */
   | { readonly type: 'move-row'; readonly from: number; readonly to: number }
   | { readonly type: 'move-column'; readonly from: number; readonly to: number }

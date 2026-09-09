@@ -18,7 +18,9 @@ import {
   moveColumn,
   moveRow,
   removeColumn,
+  removeColumns,
   removeRow,
+  removeRows,
   setColumnAlign,
   setColumnWidths,
   type TableModel
@@ -594,10 +596,22 @@ export function removeTableRow(blocks: BlockNode[], tableId: string, index: numb
   return updateTable(blocks, tableId, (m) => removeRow(m, index));
 }
 
+/** Remove rows `from` through `to` (inclusive) as one change. Null when it
+ *  would empty the table; the surface routes that to whole-table deletion. */
+export function removeTableRows(blocks: BlockNode[], tableId: string, from: number, to: number): BlockNode[] | null {
+  return updateTable(blocks, tableId, (m) => removeRows(m, from, to));
+}
+
 /** Remove column `index`. Null on a single-column table; the surface routes
  *  that to whole-table deletion. */
 export function removeTableColumn(blocks: BlockNode[], tableId: string, index: number): BlockNode[] | null {
   return updateTable(blocks, tableId, (m) => removeColumn(m, index));
+}
+
+/** Remove columns `from` through `to` (inclusive) as one change. Null when it
+ *  would leave no column; the surface routes that to whole-table deletion. */
+export function removeTableColumns(blocks: BlockNode[], tableId: string, from: number, to: number): BlockNode[] | null {
+  return updateTable(blocks, tableId, (m) => removeColumns(m, from, to));
 }
 
 /** Set column `col`'s alignment; the delimiter row re-serializes from it.

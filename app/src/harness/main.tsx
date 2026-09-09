@@ -154,6 +154,8 @@ declare global {
       beginLink(): boolean;
       commitLink(href: string): void;
       cancelLink(): void;
+      /** The grid selection (a cell rectangle addressed to its table), or null. */
+      tableSelection(): unknown;
     };
   }
 }
@@ -174,7 +176,8 @@ function BlockSurfaceMount({ body }: { body: string }) {
       toggleMark: (mark) => s.toggleMark(mark),
       beginLink: () => s.beginLink(),
       commitLink: (href) => s.commitLink(href),
-      cancelLink: () => s.cancelLink()
+      cancelLink: () => s.cancelLink(),
+      tableSelection: () => s.getTableSelection()
     };
     return () => {
       controller.destroy();

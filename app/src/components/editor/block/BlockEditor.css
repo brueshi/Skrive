@@ -783,13 +783,40 @@
   }
 }
 
-/* Selected row/column tint (SKR-266 B2): a calm accent wash on every cell of the
-   grip-selected slice, matching the block-selection ring's accent family and
-   holding in both themes via color-mix. A view-only marker; the model is
-   untouched until the slice is removed. */
+/* The grid selection: one wash and one ring. The wash is a calm accent tint on
+   every covered cell (the chrome marks them), matching the block-selection
+   ring's accent family and holding in both themes via color-mix; the ring is one
+   element in the chrome layer drawn around the rectangle from measured cell
+   rects. View-only; the model is untouched until a key acts on the selection. */
 :root .block-editor-surface th[data-cell-selected],
 :root .block-editor-surface td[data-cell-selected] {
   background: color-mix(in srgb, var(--skrive-accent) 16%, transparent);
+}
+
+.sk-table-chrome--selection {
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, var(--skrive-accent) 70%, transparent);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* While a press in a cell is being dragged into a rectangle, the browser's own
+   text selection is switched off under the surface so no highlight ever runs
+   across cells; the rectangle is the only thing that grows. */
+.block-editor-surface.sk-grid-selecting {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* While a grid selection holds, the caret is parked (collapsed) in the
+   rectangle's home cell rather than removed, and hidden: the rectangle is the
+   selection. Both the native caret and the custom-drawn one go. */
+.block-editor-surface.sk-grid-selected {
+  caret-color: transparent;
+}
+
+.block-editor-body:has(.block-editor-surface.sk-grid-selected) .skrive-caret {
+  visibility: hidden;
 }
 
 /* The append buttons: one + per axis, centered on the table's right edge and
