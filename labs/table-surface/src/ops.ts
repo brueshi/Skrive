@@ -3,7 +3,7 @@
 // declines (out of range, or a no-op that should earn no history step). Row 0
 // is the header and is pinned by the move ops.
 
-import type { CellRect, ColumnAlign, Reduce, TableModel } from './contract';
+import type { CellRect, CellRef, ColumnAlign, Reduce, TableModel } from './contract';
 
 type Rows<Cell> = ReadonlyArray<ReadonlyArray<Cell>>;
 
@@ -198,7 +198,40 @@ export function moveColumn<Cell>(m: TableModel<Cell>, from: number, to: number):
   return withWidths(m, { align, rows }, widths);
 }
 
-/** The intent dispatcher. `fill-cells` lands with the clipboard work. */
+/**
+ * Land a grid of cells with its top-left at `at`: the paste. With `grow` the
+ * table gains the rows and columns the grid needs (through insertRow and
+ * insertColumn, so align and widths keep their invariants); without it the
+ * grid is clipped to the table. Null for an empty grid or an `at` outside the
+ * table.
+ */
+export function fillCells<Cell>(
+  m: TableModel<Cell>,
+  at: CellRef,
+  grid: ReadonlyArray<ReadonlyArray<Cell>>,
+  grow: boolean,
+  emptyCell: () => Cell
+): TableModel<Cell> | null {
+  const gridCols = grid.reduce((w, r) => Math.max(w, r.length), 0);
+  if (grid.length === 0 || gridCols === 0) return null;
+  if (at.row < 0 || at.row >= m.rows.length || at.col < 0 || at.col >= colCount(m)) return null;
+  let next: TableModel<Cell> = m;
+  if (grow) {
+    while (next.rows.length < at.row + grid.length) next = insertRow(next, next.rows.length, emptyCell);
+    while (colCount(next) < at.col + gridCols) next = insertColumn(next, colCount(next), emptyCell);
+  }
+  const rows = next.rows.map((row, r) => {
+    const source = grid[r - at.row];
+    if (!source) return row;
+    return row.map((cell, c) => {
+      const incoming = source[c - at.col];
+      return c >= at.col && incoming !== undefined ? incoming : cell;
+    });
+  });
+  return withWidths(next, { rows }, next.widths);
+}
+
+/** The intent dispatcher. */
 export const reduce: Reduce = (model, intent, emptyCell) => {
   switch (intent.type) {
     case 'insert-row':
@@ -224,6 +257,6 @@ export const reduce: Reduce = (model, intent, emptyCell) => {
     case 'clear-cells':
       return clearCells(model, intent.rect, emptyCell);
     case 'fill-cells':
-      return null;
+      return fillCells(model, intent.at, intent.grid, intent.grow, emptyCell);
   }
 };

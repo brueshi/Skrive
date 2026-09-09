@@ -13,6 +13,7 @@
 
 import {
   clearCells,
+  fillCells,
   insertColumn,
   insertRow,
   moveColumn,
@@ -23,6 +24,7 @@ import {
   removeRows,
   setColumnAlign,
   setColumnWidths,
+  type CellRef,
   type TableModel
 } from '@skrive/table-surface';
 import { generateBlockId, type BlockNode, type InlineNode, type TableAlign } from '../blockmodel';
@@ -573,6 +575,19 @@ export function clearTableCells(
   maxCol: number
 ): BlockNode[] | null {
   return updateTable(blocks, tableId, (m) => clearCells(m, { minRow, minCol, maxRow, maxCol }, emptyCell));
+}
+
+/** Land a grid of cells with its top-left at `at` (the paste); with `grow` the
+ *  table gains the rows and columns the grid needs. Null for an empty grid or a
+ *  landing cell outside the table. */
+export function fillTableCells(
+  blocks: BlockNode[],
+  tableId: string,
+  at: CellRef,
+  grid: InlineNode[][][],
+  grow: boolean
+): BlockNode[] | null {
+  return updateTable(blocks, tableId, (m) => fillCells(m, at, grid, grow, emptyCell));
 }
 
 /** Append one empty row at the header's width. */

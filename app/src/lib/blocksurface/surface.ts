@@ -23,7 +23,7 @@ import { HighlightBus } from './highlight/highlight-bus';
 import { SpellBus } from '../spellcheck/spell-bus';
 import { caretContext, docPosFromDOMPoint, flatOffsetFromDOM, focusedLeafElement, isSelectionBackward, leafCaretContext, leafElement, readSelection, setCaret, setCrossBlockSelection, setSelectionRange, writeSelection } from './selection';
 import { collapsedRange, isCollapsed, samePos, type DocPos, type DocRange, type LeafAddr } from './doc-position';
-import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, insertBlockBefore, insertTableColumn, insertTableRow, mergeBackward, mergeForward, moveBlock, moveTableColumn, moveTableRow, removeBlocks, removeFootnote, removeTableColumns, removeTableRows, replaceAcross, setColumnAlignment, setTableColumnWidths } from './range-ops';
+import { appendTableRow, barrierNeighbor, clearTableCells, deleteAcross, deleteBlock, documentLeaves, exitFootnoteDefinition, fillTableCells, insertBlockBefore, insertTableColumn, insertTableRow, mergeBackward, mergeForward, moveBlock, moveTableColumn, moveTableRow, removeBlocks, removeFootnote, removeTableColumns, removeTableRows, replaceAcross, setColumnAlignment, setTableColumnWidths } from './range-ops';
 import {
   anchorOf,
   cellRect,
@@ -31,6 +31,7 @@ import {
   escalate,
   extend,
   fullSlices,
+  gridCodec,
   normalize,
   stepDown,
   type CellRect,
@@ -3262,6 +3263,13 @@ export class BlockSurface {
     }
     const plain = data.getData('text/plain');
     const html = data.getData('text/html');
+    // A grid (a spreadsheet range, a copied rectangle of cells) pasted with the
+    // caret in a cell fills the table from that cell, growing it to fit. A
+    // one-cell grid is text and takes the ordinary path below.
+    if (this.fillGridAtCaret(plain, html)) {
+      claim();
+      return true;
+    }
     // Rich HTML wins; fall back to interpreting plain text as Markdown.
     const fromHtml = html ? markdownForPaste(html) : null;
     const markdown = fromHtml ?? (plain && plain.length > 0 ? plain : null);
@@ -3503,8 +3511,9 @@ export class BlockSurface {
     plan();
   };
 
-  /** Write the grid selection to the clipboard as tab-separated rows of the
-   *  covered cells' plain text. False when there is nothing to write. */
+  /** Write the grid selection to the clipboard through the lab's codec: the
+   *  covered cells as tab-separated text and as an HTML table, each cell's text
+   *  and rendered markup crossing the seam. False when there is nothing to write. */
   private writeGridSelectionToClipboard(e: ClipboardEvent): boolean {
     const data = e.clipboardData;
     const sel = this.gridSel;
@@ -3512,15 +3521,63 @@ export class BlockSurface {
     const table = this.tableBlockById(sel.tableId);
     if (!table) return false;
     const rect = normalize(sel.selection, dimsOf(table));
-    const lines: string[] = [];
+    const scratch = document.createElement('div');
+    const grid: Array<Array<{ text: string; html: string }>> = [];
     for (let r = rect.minRow; r <= rect.maxRow; r++) {
-      const cells: string[] = [];
-      for (let c = rect.minCol; c <= rect.maxCol; c++) cells.push(inlinePlainText(table.rows[r]?.[c] ?? []));
-      lines.push(cells.join('\t'));
+      const row: Array<{ text: string; html: string }> = [];
+      for (let c = rect.minCol; c <= rect.maxCol; c++) {
+        const inline = table.rows[r]?.[c] ?? [];
+        renderInlineInto(scratch, inline, this.resolveAsset);
+        row.push({ text: inlinePlainText(inline), html: scratch.innerHTML });
+      }
+      grid.push(row);
     }
-    data.setData('text/plain', lines.join('\n'));
+    const { text, html } = gridCodec.encode(grid);
+    data.setData('text/plain', text);
+    data.setData('text/html', html);
     e.preventDefault();
     return true;
+  }
+
+  /** A grid payload pasted with the caret in a cell (the parked home cell of a
+   *  grid selection counts) fills the table from that cell, growing it to fit,
+   *  and lands the caret at the end of the last filled cell. One undo step. False
+   *  when the caret is not in a cell or the payload is not a grid of more than
+   *  one cell, so the ordinary paste keeps everything else. */
+  private fillGridAtCaret(plain: string, html: string): boolean {
+    const cell = this.cellTarget();
+    if (!cell) return false;
+    const grid = gridCodec.decode({ text: plain, html });
+    if (!grid || (grid.length === 1 && grid[0]!.length === 1)) return false;
+    const cells = grid.map((row) => row.map((text) => this.inlineFromCellText(text)));
+    const at = { row: cell.row, col: cell.col };
+    const blocks = fillTableCells(this.doc.blocks, cell.tableId, at, cells, true);
+    if (!blocks) return false;
+    this.clearTableSelectionState();
+    this.nextEditHint = { kind: 'other' };
+    this.doc = { ...this.doc, blocks };
+    this.reconcile();
+    const last = { row: at.row + grid.length - 1, col: at.col + grid[0]!.length - 1 };
+    const table = this.tableBlockById(cell.tableId);
+    if (table) this.focusCellEnd(table, last.row, last.col);
+    this.scheduleSerialize();
+    this.closeSlash();
+    return true;
+  }
+
+  /** A pasted cell's text as inline content, read the way a cell's own paste
+   *  reads text: as inline Markdown when it parses to one line of prose, else
+   *  verbatim. Line breaks inside a cell become hard breaks. */
+  private inlineFromCellText(text: string): InlineNode[] {
+    if (text === '') return [];
+    const lines = text.split('\n');
+    const parsed = lines.map((line) => {
+      const first = parseDocument(line, { inlineHtmlAsText: true }).blocks[0];
+      return first && first.type === 'paragraph' ? first.inline : line === '' ? [] : [{ kind: 'text' as const, text: line, marks: {} }];
+    });
+    let out: InlineNode[] = parsed[0] ?? [];
+    for (let i = 1; i < parsed.length; i++) out = [...insertBreakInInline(out, inlineLength(out)), ...parsed[i]!];
+    return out;
   }
 
   // Write the current selection to the clipboard as Markdown (text/plain) + its

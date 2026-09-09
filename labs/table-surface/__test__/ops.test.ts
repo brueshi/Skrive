@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   clearCells,
+  fillCells,
   insertColumn,
   insertRow,
   moveColumn,
@@ -272,7 +273,54 @@ describe('reduce', () => {
     expect(reduce(grid([['a', 'b', 'c']]), { type: 'remove-columns', from: 0, to: 1 }, empty)!.rows).toEqual([['c']]);
   });
 
-  it('declines fill-cells until the clipboard work lands', () => {
-    expect(reduce(TWO(), { type: 'fill-cells', at: { row: 0, col: 0 }, grid: [['z']], grow: false }, empty)).toBeNull();
+  it('dispatches fill-cells', () => {
+    expect(reduce(TWO(), { type: 'fill-cells', at: { row: 0, col: 0 }, grid: [['z']], grow: false }, empty)!.rows[0]).toEqual(['z', 'b']);
+  });
+});
+
+describe('fillCells', () => {
+  const PASTE = [
+    ['x', 'y'],
+    ['z', 'w']
+  ];
+
+  it('lands the grid with its top-left at the cell', () => {
+    const m = fillCells(grid([['a', 'b', 'c'], ['1', '2', '3'], ['4', '5', '6']]), { row: 1, col: 1 }, PASTE, false, empty)!;
+    expect(m.rows).toEqual([
+      ['a', 'b', 'c'],
+      ['1', 'x', 'y'],
+      ['4', 'z', 'w']
+    ]);
+  });
+
+  it('clips to the table without grow', () => {
+    const m = fillCells(TWO(), { row: 1, col: 1 }, PASTE, false, empty)!;
+    expect(m.rows).toEqual([
+      ['a', 'b'],
+      ['1', 'x']
+    ]);
+  });
+
+  it('grows rows and columns to fit, keeping align and widths in step', () => {
+    const m = fillCells(grid([['a', 'b']], { align: ['left', null], widths: [1, 3] }), { row: 0, col: 1 }, PASTE, true, empty)!;
+    expect(m.rows).toEqual([
+      ['a', 'x', 'y'],
+      ['', 'z', 'w']
+    ]);
+    expect(m.align).toEqual(['left', null, null]);
+    expect(m.widths).toEqual([1, 3, 2]);
+  });
+
+  it('keeps the incoming cells by reference and the untouched ones too', () => {
+    const base = TWO();
+    const m = fillCells(base, { row: 0, col: 0 }, [['q']], false, empty)!;
+    expect(m.rows[0]![0]).toBe('q');
+    expect(m.rows[1]).toBe(base.rows[1]);
+  });
+
+  it('declines an empty grid or a landing cell outside the table', () => {
+    expect(fillCells(TWO(), { row: 0, col: 0 }, [], false, empty)).toBeNull();
+    expect(fillCells(TWO(), { row: 0, col: 0 }, [[]], false, empty)).toBeNull();
+    expect(fillCells(TWO(), { row: 2, col: 0 }, PASTE, true, empty)).toBeNull();
   });
 });
