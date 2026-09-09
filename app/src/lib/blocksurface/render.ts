@@ -9,6 +9,7 @@
 // through a registry that already tolerates an absent element, so windowing later
 // is a feature add, not a rewrite of selection/commands.
 
+import { renderTableElement } from '@skrive/table-surface';
 import type { BlockNode, InlineMarks, InlineNode } from '../blockmodel';
 import { isSafeUrl } from '../security/urls';
 import { languageLabel } from './highlight/languages';
@@ -347,56 +348,13 @@ export function renderBlock(
     case 'horizontal_rule':
       el = document.createElement('hr');
       break;
-    case 'table': {
-      el = document.createElement('table');
-      // Explicit per-column widths (folio-only; `.md` is width-free) switch the
-      // table to fixed layout via a <colgroup>. Absent or malformed widths keep
-      // the browser's auto layout — the default for every `.md`-imported or
-      // freshly-inserted table, so this path is purely additive. Weights are
-      // relative and normalized here (ops never renormalize on a column splice).
-      const cols = block.rows[0]?.length ?? 0;
-      const widths = block.widths;
-      if (widths && widths.length === cols && cols > 0) {
-        let total = 0;
-        for (const w of widths) if (w > 0) total += w;
-        if (total > 0) {
-          el.classList.add('has-col-widths');
-          const colgroup = document.createElement('colgroup');
-          for (let c = 0; c < cols; c++) {
-            const raw = widths[c] ?? 0;
-            const w = raw > 0 ? raw : 0;
-            const colEl = document.createElement('col');
-            colEl.style.width = `${(w / total) * 100}%`;
-            colgroup.appendChild(colEl);
-          }
-          el.appendChild(colgroup);
-        }
-      }
-      const tbody = document.createElement('tbody');
-      block.rows.forEach((row, r) => {
-        const tr = document.createElement('tr');
-        row.forEach((cell, c) => {
-          const cellEl = document.createElement(r === 0 ? 'th' : 'td');
-          // Cells are inline, not blocks, so they carry coordinates (not a block
-          // id); the surface edits a cell by (table id, row, col).
-          cellEl.dataset.cellRow = String(r);
-          cellEl.dataset.cellCol = String(c);
-          // Cells resolve direction individually; the table element itself
-          // stays direction-neutral so the COLUMN order never flips (SKR-232).
-          cellEl.setAttribute('dir', 'auto');
-          // GFM column alignment is physical (left / center / right), so it wins
-          // over the CSS `text-align: start` default; a null column keeps `start`,
-          // which honours the cell's own direction (SKR-232).
-          const align = block.align[c];
-          if (align) cellEl.style.textAlign = align;
-          renderInline(cell, cellEl, resolveAsset);
-          tr.appendChild(cellEl);
-        });
-        tbody.appendChild(tr);
-      });
-      el.appendChild(tbody);
+    case 'table':
+      // The grid is the table surface's; the inline content of each cell stays
+      // here. Cells carry coordinates (not a block id); the surface edits a
+      // cell by (table id, row, col). The table element stays direction-neutral
+      // (below) so the column order never flips.
+      el = renderTableElement(block, (cell, into) => renderInline(cell, into, resolveAsset));
       break;
-    }
     case 'frozen_block':
       // Never editable in place (it can't be canonicalized, so there is nothing
       // to dirty-track): without this a plain div inherits the container's
