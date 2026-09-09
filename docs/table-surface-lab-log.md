@@ -38,3 +38,14 @@ recorded in the contract: `TableStyle = 'prose' | 'grid'`, optional
 `TableModel.style` (folio-only, absent = host default), a `set-style` intent,
 `headerFill` in the tokens, `defaultStyle` in the layout options. Both styles
 share every chrome and selection state; only rules and header fill differ.
+
+### Same day — style is a setting; one selection primitive
+
+Owner: style lives in Settings, grid is the default; the per-table style is
+removed from the contract (`LayoutOptions.style`). Selection redesigned to one
+primitive, the cell rectangle, with shape derived; handle click only selects;
+menu on demand via `requestMenu(selection, anchor, source)`; Backspace clears,
+Cmd+Backspace removes a full slice; rails replaced by one `+` per axis. Grounded
+in the shipped code: a handle click opened the menu as its only action, Delete
+removed the slice, any other key dissolved the selection, and rectangles were
+native text selection. README "Selection model" is the spec.

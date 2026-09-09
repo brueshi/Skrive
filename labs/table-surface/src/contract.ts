@@ -23,8 +23,6 @@ export type TableModel<Cell> = {
   readonly widths?: readonly number[];
   /** Row 0 is the header and is pinned. */
   readonly rows: ReadonlyArray<ReadonlyArray<Cell>>;
-  /** Absent = the host's default style. Folio-only, like widths. */
-  readonly style?: TableStyle;
 };
 
 export type CellRef = { readonly row: number; readonly col: number };
@@ -38,15 +36,18 @@ export type CellRect = {
 };
 
 // ---------------------------------------------------------------------------
-// Selection. Owned and painted by the library; reported to the host so it can
-// route Delete, typing, and copy.
+// Selection. One primitive: a cell rectangle. A row or column is a rectangle
+// that spans the table; its shape is derived against the model, never stored.
+// Owned and painted by the library; reported to the host so it can route
+// Delete, typing, and copy.
 // ---------------------------------------------------------------------------
 
 export type GridSelection =
   | { readonly kind: 'cells'; readonly anchor: CellRef; readonly focus: CellRef }
-  | { readonly kind: 'row'; readonly index: number }
-  | { readonly kind: 'col'; readonly index: number }
   | { readonly kind: 'table' };
+
+/** What a selection amounts to, for menus and key routing. */
+export type SelectionShape = 'cell' | 'cells' | 'row' | 'col' | 'table';
 
 // ---------------------------------------------------------------------------
 // Intents. A gesture becomes an intent; the host applies it to its document
@@ -64,7 +65,6 @@ export type TableIntent<Cell> =
   | { readonly type: 'move-column'; readonly from: number; readonly to: number }
   | { readonly type: 'set-align'; readonly col: number; readonly align: ColumnAlign }
   | { readonly type: 'set-widths'; readonly widths: readonly number[] }
-  | { readonly type: 'set-style'; readonly style: TableStyle | null }
   | { readonly type: 'clear-cells'; readonly rect: CellRect }
   /** A pasted grid landing at `at`; `grow` adds rows/cols to fit. */
   | {
@@ -145,8 +145,8 @@ export type LayoutOptions = {
   /** `pin` breaks content to the measure; `overflow` scrolls. */
   readonly wide: 'pin' | 'overflow';
   readonly stickyHeader: boolean;
-  /** Used when a model carries no `style`. */
-  readonly defaultStyle: TableStyle;
+  /** A host setting, not a per-table property. */
+  readonly style: TableStyle;
 };
 
 // ---------------------------------------------------------------------------
@@ -172,8 +172,8 @@ export interface TableHost<Cell> {
 
   /** Apply to the document and commit one history step. */
   apply(intent: TableIntent<Cell>): void;
-  /** Open the host's own menu for a slice, anchored to a rect. */
-  requestMenu(target: { kind: 'row' | 'col'; index: number }, anchor: DOMRect): void;
+  /** The host's menu for a selection. Never from a plain click. */
+  requestMenu(selection: GridSelection, anchor: DOMRect, source: 'pointer' | 'keyboard'): void;
 
   onSelectionChange(selection: GridSelection | null): void;
 

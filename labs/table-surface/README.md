@@ -48,6 +48,43 @@ Stage 9) tried on one block type before it is tried on the whole surface.
    values and leave as CSS custom properties. The library ships no stylesheet
    that names a host token, and no motion implementation, only parameters.
 
+## Selection model
+
+One primitive: a cell rectangle, `{ anchor, focus }`. A row or a column is a
+rectangle that spans the table, and the shape (cell, cells, row, column,
+table) is derived against the model when a menu or a key needs it. This
+replaces the shipped pair of a grip-selected slice and a cross-cell rectangle
+inferred from native text selection.
+
+Pointer:
+
+- Click in a cell places the caret. Dragging past the origin cell hands the
+  pointer to the library, which paints the rectangle; no text highlight runs
+  across cells.
+- Shift+click extends the rectangle from the caret's cell.
+- A handle click selects its row or column. Nothing else happens.
+- A handle drag reorders, as shipped. The resize strips are unchanged.
+- Right-click, or the keyboard menu key, asks the host for its menu for the
+  current selection. The menu is on demand and never the side effect of a
+  click.
+
+Keyboard:
+
+- Shift+Arrow extends from the caret's cell.
+- Cmd+A escalates: the cell's text, then the cell, then the table.
+- Escape steps back down: rectangle to caret, caret to the table as a block.
+- Backspace and Delete clear the rectangle's cells. Cmd+Backspace removes the
+  row or column when the rectangle spans one in full. Removing structure
+  takes a modifier because a plain Delete on a selected row destroyed data
+  with nothing in the way.
+- Typing over a rectangle clears it and types into the anchor cell, as
+  shipped. Tab and the arrows are unchanged.
+
+What goes away: the click that both selects and opens the menu, the Delete
+that removes a slice, the two append rails, and the second selection state.
+The rails are replaced by one `+` at the end of each axis, sized like the
+block insert button and shown on hover.
+
 ## Environment facts the contract encodes
 
 - WKWebView drops `pointerup` on a motionless press. Toggles bind to `click`;
@@ -58,6 +95,9 @@ Stage 9) tried on one block type before it is tried on the whole surface.
 - Anything beyond GFM (widths, later anything else) is folio-only and must not
   touch `.md` bytes. The model carries `widths` as optional weights for that
   reason; the library never requires them.
+- The table style (prose or grid) is a host setting, not a document property,
+  so the model carries nothing for it and neither format ever sees it. Grid
+  is the default.
 
 ## Invariant
 
