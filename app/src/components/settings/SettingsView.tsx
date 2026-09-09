@@ -417,6 +417,8 @@ function EditorPane() {
   );
   const showMeasureRule = usePreferencesStore((s) => s.showMeasureRule);
   const setShowMeasureRule = usePreferencesStore((s) => s.setShowMeasureRule);
+  const tableStyle = usePreferencesStore((s) => s.tableStyle);
+  const setTableStyle = usePreferencesStore((s) => s.setTableStyle);
   const smartTypography = usePreferencesStore((s) => s.smartTypography);
   const setSmartTypography = usePreferencesStore((s) => s.setSmartTypography);
   const spellcheck = usePreferencesStore((s) => s.spellcheck);
@@ -472,6 +474,21 @@ function EditorPane() {
               checked={showMeasureRule}
               onChange={setShowMeasureRule}
               ariaLabel="Measure rule"
+            />
+          }
+        />
+        <SettingRow
+          label="Table style"
+          desc="Grid rules every cell and fills the header. Prose rules rows only."
+          control={
+            <Segmented
+              value={tableStyle}
+              onChange={setTableStyle}
+              options={[
+                { id: 'grid', label: 'Grid' },
+                { id: 'prose', label: 'Prose' }
+              ]}
+              ariaLabel="Table style"
             />
           }
         />

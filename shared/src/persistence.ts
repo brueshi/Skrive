@@ -245,6 +245,10 @@ export type NewFileNaming = 'title' | 'untitled';
 /** Slug casing for heading anchors and wiki links. */
 export type SlugFormat = 'kebab-case' | 'snake_case';
 
+/** How tables are drawn: `grid` rules every cell and fills the header row;
+ *  `prose` rules rows only. A setting, never a document property. */
+export type TableStyleSetting = 'grid' | 'prose';
+
 export type AppUiState = {
   schemaVersion: 1;
   lastOpenedProject: string | null;
@@ -301,6 +305,8 @@ export type AppUiState = {
   lineMeasureCustomCh: number;
   /** Paint a hairline at the writing column's edge (the measure rule). */
   showMeasureRule: boolean;
+  /** How tables are drawn. */
+  tableStyle: TableStyleSetting;
   /** Curly quotes, em dashes, and ellipses substituted as you type. */
   smartTypography: boolean;
   /** Underline misspelled words while writing. Off leaves the surface exactly
@@ -370,6 +376,7 @@ export const DEFAULT_APP_UI_STATE: AppUiState = {
   lineMeasure: 'normal',
   lineMeasureCustomCh: 70,
   showMeasureRule: false,
+  tableStyle: 'grid',
   smartTypography: true,
   spellcheck: true,
   formatOnSave: false,

@@ -129,6 +129,13 @@ export function App() {
     );
   }, [showMeasureRule]);
 
+  // The table style, stamped the same way: every table restyles in one
+  // repaint and the renderer never learns which style is on.
+  const tableStyle = usePreferencesStore((s) => s.tableStyle);
+  useEffect(() => {
+    document.documentElement.setAttribute('data-table-style', tableStyle);
+  }, [tableStyle]);
+
   // Focus mode, stamped the same way: one root attribute gates every
   // chrome-hiding rule in CSS, so entering the mode is a single repaint and
   // the components themselves stay unaware of it. The block dimming rides

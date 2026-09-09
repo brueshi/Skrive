@@ -27,6 +27,9 @@
      as lighter lines. Both stay soft hairlines on the editor surface. */
   --skrive-muted: light-dark(#73737a, #8d8f95);
   --skrive-rule: light-dark(#d8d9dd, #2f3135);
+  /* Grid-table header fill: one step between the editor surface and the
+     shell rail, so it reads as paper tone rather than a grey bar. */
+  --skrive-table-head: light-dark(#f3f3f5, #26282c);
   --skrive-link: light-dark(#4c5ba6, #8c97d6);
   --skrive-selection: light-dark(
     rgba(76, 91, 166, 0.13),
