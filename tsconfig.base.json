@@ -3,7 +3,9 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2022"],
+    "lib": [
+      "ES2022"
+    ],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
@@ -16,8 +18,15 @@
     "sourceMap": true,
     "incremental": true,
     "paths": {
-      "@skrive/shared": ["./shared/src/index.ts"],
-      "@skrive/shared/*": ["./shared/src/*"]
+      "@skrive/shared": [
+        "./shared/src/index.ts"
+      ],
+      "@skrive/shared/*": [
+        "./shared/src/*"
+      ],
+      "@skrive/table-surface": [
+        "./labs/table-surface/src/index.ts"
+      ]
     },
     "baseUrl": "."
   }

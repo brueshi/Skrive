@@ -18,7 +18,7 @@ import {
   type GutterSlot,
   type HoverCell,
   type TableGeometry
-} from '../../src/lib/blocksurface/table-chrome';
+} from '../src';
 
 /** A 3-column, 3-row table at (100, 200), each column 60 wide, each row 20 tall. */
 function geometry(cols = 3, rows = 3): TableGeometry {

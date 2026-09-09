@@ -19,68 +19,41 @@
 // the arithmetic below it, which is pure and unit-tested without layout (jsdom
 // implements no box geometry).
 
+import {
+  GUTTER_METRICS,
+  dropIndicatorRect,
+  hoverZone,
+  nearestBoundary,
+  normalizeWidths,
+  resizeColumnWidths,
+  tableGutterSlots,
+  tableHandleSlot,
+  tableResizeSlots,
+  zoneContains,
+  type GutterSlot,
+  type HoverCell,
+  type HoverZone,
+  type TableGeometry
+} from '@skrive/table-surface';
+
+// The pure geometry moved to the table-surface lab; re-exported here so the
+// block chrome, the index, and the tests keep their import site.
+export {
+  GUTTER_METRICS,
+  dropIndicatorRect,
+  hoverZone,
+  nearestBoundary,
+  normalizeWidths,
+  resizeColumnWidths,
+  tableGutterSlots,
+  tableHandleSlot,
+  tableResizeSlots,
+  zoneContains
+} from '@skrive/table-surface';
+export type { DropIndicator, GutterMetrics, GutterSlot, HoverCell, HoverZone, TableGeometry } from '@skrive/table-surface';
 import { contentBox, type ContentBox } from './decoration-overlay';
 import { BLOCK_ID_ATTR } from './render';
 import type { BlockSurface } from './surface';
-
-/** A table's measured shape in the scroller's content coordinate space. */
-export type TableGeometry = {
-  /** The table element's own box. */
-  box: ContentBox;
-  /** `cols + 1` x positions: every column's start edge, then the table's right
-   *  edge. Derived from the HEADER row, which is what defines the table's column
-   *  count — a ragged body row is never allowed to widen the gutter. */
-  colEdges: number[];
-  /** `rows + 1` y positions: every row's start edge, then the table's bottom edge. */
-  rowEdges: number[];
-};
-
-/** One painted affordance. `index` is a MODEL coordinate, not a pixel one: a
- *  handle carries the row/column it addresses (for selection and its menu in B2);
- *  an append carries the index a new row/column is inserted AT — the row/column
- *  count — which is exactly what insertTableRowAt / insertTableColumnAt take. */
-export type GutterSlot = {
-  kind: 'col-handle' | 'row-handle' | 'col-append' | 'row-append' | 'col-resize';
-  index: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-
-/** Which row and column the pointer is over, or null when it is over neither (on
- *  a rail, say). Drives which contextual handle shows — the Notion model: one
- *  handle for the hovered column, one for the hovered row, not a full set. */
-export type HoverCell = { row: number | null; col: number | null };
-
-/** Chrome sizing. The gutters are an overlay, so these reserve no layout space —
- *  they only decide how far outside the table the chrome floats. */
-export const GUTTER_METRICS = {
-  /** Short dimension of a row/column handle bar. */
-  handleThickness: 6,
-  /** Gap between a handle and the table's edge. */
-  handleGap: 5,
-  /** Inset at each end of a handle, so a handle spans most of its cell but stops
-   *  short of the neighbours — reads as "this column" without touching the next. */
-  handleInset: 8,
-  /** Short dimension of an append rail (the full-length `+` lanes). */
-  railThickness: 16,
-  /** Gap between an append rail and the table's edge. */
-  railGap: 4,
-  /** Width of the invisible grab strip centred on an interior column boundary (the
-   *  resize affordance). Thin, so it reads as the border rather than as a column,
-   *  and sits within the cell padding on either side of the 1px rule. */
-  resizeGrab: 9
-} as const;
-
-export type GutterMetrics = typeof GUTTER_METRICS;
-
-/** Grace margin, in px, added around the visible chrome to form the hover zone
- *  (see hoverZone). The gutters sit OUTSIDE the table, so reaching from a cell to
- *  a handle or rail crosses scroller background that belongs to no cell; without a
- *  grace zone that crossing reads as leaving the table and dismisses the chrome
- *  the pointer is heading for. */
-const ZONE_SLACK = 10;
 
 /** How long, in ms, the chrome lingers after the pointer leaves the zone. A short
  *  delay (cancelled the instant the pointer returns) keeps a near-miss on a handle
@@ -112,253 +85,6 @@ const REORDERING_CLASS = 'sk-table-reordering';
  *  of the drag — the "what am I moving" half of the feedback, paired with the
  *  drop-indicator line's "where will it land". View-only; cleared on drop. */
 const DRAG_CELL_ATTR = 'data-cell-dragging';
-
-/**
- * The slots for a measured table, Notion-shaped: two full-length append rails (a
- * `+` down the right to add a column, a `+` along the bottom to add a row) that
- * always show while the table is active, plus — contextually — a handle above the
- * hovered COLUMN and a handle left of the hovered ROW. At most four elements, so
- * a hovered table reads as calm rather than as a field of grips.
- *
- * The bottom append inserts at `rows` and the right at `cols` — appends, never a
- * mid-table insert. Mid-table insertion is the handle's job (its B2 menu) and the
- * `⌥⌘`-arrow chords, so nothing here has to guess an interior boundary.
- *
- * Pure: no DOM, no measurement. Everything it needs is in `geom` and `hover`.
- */
-export function tableGutterSlots(
-  geom: TableGeometry,
-  hover: HoverCell,
-  m: GutterMetrics = GUTTER_METRICS
-): GutterSlot[] {
-  const { box, colEdges, rowEdges } = geom;
-  const cols = colEdges.length - 1;
-  const rows = rowEdges.length - 1;
-  if (cols < 1 || rows < 1) return [];
-
-  const slots: GutterSlot[] = [];
-
-  // Right rail: append a column. Full table height, just past the right edge.
-  slots.push({
-    kind: 'col-append',
-    index: cols,
-    x: box.x + box.width + m.railGap,
-    y: box.y,
-    width: m.railThickness,
-    height: box.height
-  });
-
-  // Bottom rail: append a row. Full table width, just below the bottom edge.
-  slots.push({
-    kind: 'row-append',
-    index: rows,
-    x: box.x,
-    y: box.y + box.height + m.railGap,
-    width: box.width,
-    height: m.railThickness
-  });
-
-  // Contextual handles: a bar above the hovered column and left of the hovered row.
-  if (hover.col !== null) {
-    const s = tableHandleSlot(geom, 'col', hover.col, m);
-    if (s) slots.push(s);
-  }
-  if (hover.row !== null) {
-    const s = tableHandleSlot(geom, 'row', hover.row, m);
-    if (s) slots.push(s);
-  }
-
-  return slots;
-}
-
-/**
- * The handle bar for one row or column — a bar left of a row, or above a column,
- * spanning most of the cell but inset from its ends. Returns null when `index` is
- * out of range. Shared by the hover chrome and the persistent selected handle, so
- * a selected slice's handle sits exactly where its hover handle would.
- *
- * Pure: no DOM, no measurement.
- */
-export function tableHandleSlot(
-  geom: TableGeometry,
-  kind: 'row' | 'col',
-  index: number,
-  m: GutterMetrics = GUTTER_METRICS
-): GutterSlot | null {
-  const { box, colEdges, rowEdges } = geom;
-  if (kind === 'col') {
-    const cols = colEdges.length - 1;
-    if (index < 0 || index >= cols) return null;
-    const left = colEdges[index]!;
-    const width = colEdges[index + 1]! - left;
-    return {
-      kind: 'col-handle',
-      index,
-      x: left + m.handleInset,
-      y: box.y - m.handleGap - m.handleThickness,
-      width: Math.max(width - 2 * m.handleInset, m.handleThickness),
-      height: m.handleThickness
-    };
-  }
-  const rows = rowEdges.length - 1;
-  if (index < 0 || index >= rows) return null;
-  const top = rowEdges[index]!;
-  const height = rowEdges[index + 1]! - top;
-  return {
-    kind: 'row-handle',
-    index,
-    x: box.x - m.handleGap - m.handleThickness,
-    y: top + m.handleInset,
-    width: m.handleThickness,
-    height: Math.max(height - 2 * m.handleInset, m.handleThickness)
-  };
-}
-
-/**
- * A thin grab strip centred on every INTERIOR column boundary — the resize
- * affordances (SKR-270). A boundary sits between column `i` and `i + 1`, at
- * `colEdges[i + 1]`; the slot's `index` is the left column `i`, which is what the
- * drag trades against its right neighbour. The two outer edges are not boundaries
- * (there is no neighbour to trade with), so a table with fewer than two columns
- * yields none. Full table height, so the strip reads as the whole border.
- *
- * Pure: no DOM, no measurement.
- */
-export function tableResizeSlots(geom: TableGeometry, m: GutterMetrics = GUTTER_METRICS): GutterSlot[] {
-  const { box, colEdges } = geom;
-  const cols = colEdges.length - 1;
-  if (cols < 2) return [];
-  const slots: GutterSlot[] = [];
-  for (let i = 0; i < cols - 1; i++) {
-    const edge = colEdges[i + 1]!;
-    slots.push({
-      kind: 'col-resize',
-      index: i,
-      x: edge - m.resizeGrab / 2,
-      y: box.y,
-      width: m.resizeGrab,
-      height: box.height
-    });
-  }
-  return slots;
-}
-
-/**
- * Trade width between column `boundary` and its right neighbour by `deltaPx`,
- * clamped so neither falls below `minPx`. Every other column is untouched and the
- * pair's combined width is conserved, so the table's total width never changes —
- * the writer-ergonomic model where resizing a column steals from its neighbour
- * rather than growing the table past the writing measure. Returns a fresh array;
- * a boundary out of range yields an unchanged copy. Pure; unit-tested without
- * layout.
- */
-export function resizeColumnWidths(
-  widths: number[],
-  boundary: number,
-  deltaPx: number,
-  minPx: number
-): number[] {
-  const next = widths.slice();
-  const i = boundary;
-  const j = boundary + 1;
-  if (i < 0 || j >= widths.length) return next;
-  const a = widths[i]!;
-  const b = widths[j]!;
-  // The pair already at/under the floor has no room to trade — leave it be rather
-  // than push a column negative.
-  if (a <= minPx && b <= minPx) return next;
-  // Clamp so column i stays >= min (delta not below -(a-min)) and column j stays
-  // >= min (delta not above b-min).
-  const delta = Math.max(-(a - minPx), Math.min(deltaPx, b - minPx));
-  next[i] = a + delta;
-  next[j] = b - delta;
-  return next;
-}
-
-/**
- * Normalize pixel widths to fractional weights that sum to ~1, rounded to 4 dp for
- * a tidy, stable `.folio` value — so an identical drag commits an identical array
- * and earns no extra undo step. The renderer re-normalizes defensively, so the
- * rounded sum need not be exactly 1. A degenerate all-zero input falls back to
- * equal weights. Pure.
- */
-export function normalizeWidths(widths: number[]): number[] {
-  let total = 0;
-  for (const w of widths) if (w > 0) total += w;
-  if (total <= 0) {
-    const equal = widths.length ? 1 / widths.length : 1;
-    return widths.map(() => equal);
-  }
-  return widths.map((w) => Math.round(((w > 0 ? w : 0) / total) * 1e4) / 1e4);
-}
-
-/** The index of the boundary edge nearest `pos` — an argmin over `edges`. Turns a
- *  reorder drag's pointer position (in the edges' coordinate space) into a drop
- *  target: the boundary the moved row/column would land at. Pure. */
-export function nearestBoundary(edges: number[], pos: number): number {
-  let best = 0;
-  let bestDist = Infinity;
-  for (let i = 0; i < edges.length; i++) {
-    const d = Math.abs(edges[i]! - pos);
-    if (d < bestDist) {
-      bestDist = d;
-      best = i;
-    }
-  }
-  return best;
-}
-
-/** A drop-indicator line: a thin bar at column/row boundary `boundary` (an index
- *  into `colEdges`/`rowEdges`), spanning the table's cross axis. Pure; the drag
- *  positions an element from it. */
-export type DropIndicator = { x: number; y: number; width: number; height: number };
-export function dropIndicatorRect(
-  geom: TableGeometry,
-  kind: 'row' | 'col',
-  boundary: number,
-  thickness = 2
-): DropIndicator {
-  const { box, colEdges, rowEdges } = geom;
-  if (kind === 'col') {
-    const i = Math.max(0, Math.min(boundary, colEdges.length - 1));
-    return { x: colEdges[i]! - thickness / 2, y: box.y, width: thickness, height: box.height };
-  }
-  const i = Math.max(0, Math.min(boundary, rowEdges.length - 1));
-  return { x: box.x, y: rowEdges[i]! - thickness / 2, width: box.width, height: thickness };
-}
-
-/** A viewport-space rectangle: the pointer hit-test region. */
-export type HoverZone = { left: number; top: number; right: number; bottom: number };
-
-/**
- * The pointer zone a table "owns": its own rect, grown to cover the handle bars
- * (top and left) and the append rails (right and bottom), plus a slack margin.
- * While the pointer is inside this, the chrome stays up — so moving from a cell
- * out to a handle or a rail, across gutter background that hit-tests to no cell,
- * no longer reads as leaving the table.
- *
- * Pure over an already-measured rect, so it verifies without layout. `rect` is in
- * whatever space the caller measures in (viewport, at the call site).
- */
-export function hoverZone(
-  rect: { left: number; top: number; right: number; bottom: number },
-  m: GutterMetrics = GUTTER_METRICS,
-  slack = ZONE_SLACK
-): HoverZone {
-  const handleReach = m.handleGap + m.handleThickness;
-  const railReach = m.railGap + m.railThickness;
-  return {
-    left: rect.left - handleReach - slack,
-    top: rect.top - handleReach - slack,
-    right: rect.right + railReach + slack,
-    bottom: rect.bottom + railReach + slack
-  };
-}
-
-/** Whether a point falls inside a zone. */
-export function zoneContains(zone: HoverZone, x: number, y: number): boolean {
-  return x >= zone.left && x <= zone.right && y >= zone.top && y <= zone.bottom;
-}
 
 /** Measure a rendered table into content-space geometry. Returns null for a table
  *  with no rows or no header cells — nothing to hang chrome on. */

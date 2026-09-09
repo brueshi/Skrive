@@ -8,7 +8,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@skrive/shared': resolve(__dirname, '../shared/src/index.ts')
+      '@skrive/shared': resolve(__dirname, '../shared/src/index.ts'),
+      '@skrive/table-surface': resolve(__dirname, '../labs/table-surface/src/index.ts')
     }
   }
 });
