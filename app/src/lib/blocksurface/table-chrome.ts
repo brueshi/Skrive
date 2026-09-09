@@ -82,7 +82,9 @@ export function attachTableChrome({ surface, scroller, layer, blockSurface }: Ta
     onSelectionChange: (fn) => blockSurface.onTableSelectionChange(fn),
     onStructureChange: (fn) => blockSurface.onStructureChange(fn),
     apply,
-    requestMenu: (tableId, target, anchor) => blockSurface.openTableMenu(tableId, target.kind, target.index, anchor),
+    select: (tableId, slice) =>
+      slice.kind === 'col' ? blockSurface.selectTableColumn(tableId, slice.index) : blockSurface.selectTableRow(tableId, slice.index),
+    requestMenu: (tableId, target, anchor) => blockSurface.openTableMenu(tableId, target, anchor),
     clearCaret: () => blockSurface.clearCaret()
   });
 }

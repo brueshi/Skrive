@@ -9,6 +9,7 @@
 // models enough DOM for the cell queries, focusCell, and readSelection to run.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import '../jsdom-range-rect';
 import { BlockSurface, type TableMenuState } from '../../src/lib/blocksurface';
 import { parseDocument, type BlockNode } from '../../src/lib/blockmodel';
 
@@ -215,35 +216,83 @@ describe('deleting the last row or column deletes the table', () => {
   });
 });
 
-describe('the per-row/column menu (B2b)', () => {
+describe('the table menu is on demand, for a cell', () => {
   const rect = { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
 
-  it('opens the menu and selects the slice, and closes on demand', () => {
+  it('opens for a cell target without selecting anything, and closes on demand', () => {
     const surface = new BlockSurface({ container, doc: parseDocument(`${TABLE}\n`) });
     const states: Array<TableMenuState | null> = [];
     surface.onTableMenu((s) => states.push(s));
 
-    surface.openTableMenu(tableId(surface), 'col', 2, rect);
-    // The open state names the slice, and the slice is selected (handle stays lit).
-    expect(states.at(-1)).toMatchObject({ tableId: tableId(surface), kind: 'col', index: 2 });
-    expect(surface.getTableSelection()).toEqual({ tableId: tableId(surface), kind: 'col', index: 2 });
+    surface.openTableMenu(tableId(surface), { row: 1, col: 2 }, rect);
+    expect(states.at(-1)).toMatchObject({ tableId: tableId(surface), row: 1, col: 2 });
+    // On demand: the menu is not a selection, so nothing is tinted.
+    expect(surface.getTableSelection()).toBeNull();
+    expect(container.querySelectorAll('[data-cell-selected]')).toHaveLength(0);
 
     surface.closeTableMenu();
     expect(states.at(-1)).toBeNull();
-    // A dismiss leaves the selection intact.
-    expect(surface.getTableSelection()).not.toBeNull();
   });
 
-  it('closes the menu when the selection dissolves', () => {
+  it('a right-click target inside a cell opens the menu for that cell, anchored at the pointer', () => {
     const surface = new BlockSurface({ container, doc: parseDocument(`${TABLE}\n`) });
     const states: Array<TableMenuState | null> = [];
     surface.onTableMenu((s) => states.push(s));
+    const cell = container.querySelector('[data-cell-row="2"][data-cell-col="1"]')!;
 
-    surface.openTableMenu(tableId(surface), 'row', 1, rect);
-    expect(states.at(-1)).not.toBeNull();
+    expect(surface.openTableMenuAtNode(cell.firstChild, 40, 50)).toBe(true);
+    expect(states.at(-1)).toMatchObject({ tableId: tableId(surface), row: 2, col: 1 });
+    expect(states.at(-1)!.rect.left).toBe(40);
+    expect(states.at(-1)!.rect.top).toBe(50);
+  });
 
-    key(surface, { key: 'Escape' }); // dissolves the selection
-    expect(states.at(-1)).toBeNull();
+  it('a right-click target outside any cell declines, leaving the platform menu', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`hello\n\n${TABLE}\n`) });
+    const states: Array<TableMenuState | null> = [];
+    surface.onTableMenu((s) => states.push(s));
+
+    expect(surface.openTableMenuAtNode(container.querySelector('p')!.firstChild, 0, 0)).toBe(false);
+    expect(surface.openTableMenuAtNode(document.body, 0, 0)).toBe(false);
+    expect(states.filter((s) => s !== null)).toHaveLength(0);
+  });
+
+  it('Shift+F10 and the ContextMenu key open the menu for the caret cell', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`${TABLE}\n`) });
+    const states: Array<TableMenuState | null> = [];
+    surface.onTableMenu((s) => states.push(s));
+    const cell = container.querySelector('[data-cell-row="1"][data-cell-col="2"]')!;
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    const r = document.createRange();
+    r.setStart(cell.firstChild!, 0);
+    r.collapse(true);
+    sel.addRange(r);
+
+    const e = key(surface, { key: 'F10', shiftKey: true });
+    expect(e.defaultPrevented).toBe(true);
+    expect(states.at(-1)).toMatchObject({ tableId: tableId(surface), row: 1, col: 2 });
+
+    surface.closeTableMenu();
+    const e2 = key(surface, { key: 'ContextMenu' });
+    expect(e2.defaultPrevented).toBe(true);
+    expect(states.at(-1)).toMatchObject({ tableId: tableId(surface), row: 1, col: 2 });
+  });
+
+  it('the menu key outside a table is left to the platform', () => {
+    const surface = new BlockSurface({ container, doc: parseDocument(`hello\n\n${TABLE}\n`) });
+    const states: Array<TableMenuState | null> = [];
+    surface.onTableMenu((s) => states.push(s));
+    const p = container.querySelector('p')!;
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    const r = document.createRange();
+    r.setStart(p.firstChild!, 1);
+    r.collapse(true);
+    sel.addRange(r);
+
+    const e = key(surface, { key: 'F10', shiftKey: true });
+    expect(e.defaultPrevented).toBe(false);
+    expect(states.filter((s) => s !== null)).toHaveLength(0);
   });
 
   it('removeTableColumnAt removes the addressed column', () => {

@@ -78,15 +78,16 @@ export type BlockTypeSpec =
  *  Null when the menu is closed. */
 export type SlashMenuState = { rect: DOMRect; query: string; kind: 'block' | 'inline' };
 
-/** What the per-row/column table menu needs (SKR-266 B2b): where to anchor (the
- *  clicked handle's rect), the table it acts on, and which row/column. Null when
- *  the menu is closed. The chrome opens it on a handle click; the React popover
- *  renders insert-around / delete against these coordinates. */
+/** What the table menu needs: where to anchor (the pointer, or the caret), the
+ *  table it acts on, and the cell whose row and column the commands address.
+ *  Null when the menu is closed. Opened on demand by a right-click on a cell or
+ *  the keyboard menu key, never as the side effect of a click; the React popover
+ *  renders insert-around / align / delete against these coordinates. */
 export type TableMenuState = {
   rect: DOMRect;
   tableId: string;
-  kind: 'row' | 'col';
-  index: number;
+  row: number;
+  col: number;
 };
 
 /** What the inline-tag (`#`) autocomplete needs: where to anchor and the query
@@ -387,8 +388,8 @@ export class BlockSurface {
   private lastSelection: SavedSelection | null = null;
   private slash: { blockId: string; slashOffset: number; kind: 'block' | 'inline' } | null = null;
   private slashCb: ((state: SlashMenuState | null) => void) | null = null;
-  // The per-row/column table menu (SKR-266 B2b): open state fed to the React
-  // popover, or null when closed. Set by openTableMenu (a chrome handle click).
+  // The table menu: open state fed to the React popover, or null when closed.
+  // Set by openTableMenu, which the on-demand gestures funnel into.
   private tableMenuCb: ((state: TableMenuState | null) => void) | null = null;
   private tableMenu: TableMenuState | null = null;
   // The inline-tag (`#`) autocomplete session: the block and the flat offset of the
@@ -638,8 +639,8 @@ export class BlockSurface {
     this.slashCb = cb;
   }
 
-  /** Register (or clear) the per-row/column table menu observer. Fired when a
-   *  chrome handle click opens the menu and when it closes (null). */
+  /** Register (or clear) the table menu observer. Fired when a right-click or the
+   *  keyboard menu key opens the menu and when it closes (null). */
   onTableMenu(cb: ((state: TableMenuState | null) => void) | null): void {
     this.tableMenuCb = cb;
     cb?.(this.tableMenu);
@@ -1062,6 +1063,13 @@ export class BlockSurface {
         e.preventDefault();
         this.selectBlock(id);
       }
+      return;
+    }
+    // The keyboard menu key (Shift+F10, or the dedicated ContextMenu key) with the
+    // caret in a table cell opens the table menu for that cell's row and column,
+    // anchored at the caret. Outside a table it keeps its native meaning.
+    if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+      if (this.openTableMenuAtCaret()) e.preventDefault();
       return;
     }
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
@@ -5186,15 +5194,13 @@ export class BlockSurface {
     }
   }
 
-  /** Clear the table-selection state and its tint, without moving the caret. Also
-   *  closes the menu, which is anchored to the selection and must not outlive it. */
+  /** Clear the table-selection state and its tint, without moving the caret. */
   private clearTableSelectionState(): void {
     if (!this.tableSel) return;
     this.tableSel = null;
     for (const el of this.container.querySelectorAll(`[${CELL_SELECTED_ATTR}]`)) {
       el.removeAttribute(CELL_SELECTED_ATTR);
     }
-    this.closeTableMenu();
     this.notifyTableSelection();
   }
 
@@ -5339,15 +5345,50 @@ export class BlockSurface {
     this.closeSlash();
   }
 
-  // --- table menu: the per-row/column popover (SKR-266 B2b) ------------------
+  // --- table menu: the on-demand popover for a cell's row and column ---------
 
-  /** Open the per-row/column menu from a chrome handle click: select the slice
-   *  (so the handle stays lit under the menu) and anchor the popover to the handle
-   *  rect. The React menu renders insert-around / delete against these coords. */
-  openTableMenu(tableId: string, kind: 'row' | 'col', index: number, rect: DOMRect): void {
-    this.setTableSelection(tableId, kind, index);
-    this.tableMenu = { rect, tableId, kind, index };
+  /** Open the table menu for a cell, anchored to `rect`. The menu is on demand:
+   *  it selects nothing and moves no caret, so a dismiss leaves the writer exactly
+   *  where the gesture found them. The React menu renders insert-around / align /
+   *  delete against the cell's row and column. */
+  openTableMenu(tableId: string, target: { row: number; col: number }, rect: DOMRect): void {
+    this.tableMenu = { rect, tableId, row: target.row, col: target.col };
     this.tableMenuCb?.(this.tableMenu);
+  }
+
+  /** Open the table menu for the cell containing `node` (a right-click's target),
+   *  anchored at the pointer. False when `node` is not inside a cell of this
+   *  surface, so the caller can leave the event to the platform menu. */
+  openTableMenuAtNode(node: Node | null, clientX: number, clientY: number): boolean {
+    const cell = this.cellCoordsOf(node);
+    if (!cell) return false;
+    this.openTableMenu(cell.tableId, cell, new DOMRect(clientX, clientY, 0, 0));
+    return true;
+  }
+
+  /** Open the table menu for the caret's cell (the keyboard menu key), anchored at
+   *  the caret, or at the cell when layout gives the caret no rect. False when the
+   *  caret is not in a cell. */
+  openTableMenuAtCaret(): boolean {
+    const cell = this.cellTarget();
+    if (!cell) return false;
+    const rect = this.caretRect() ?? cell.cellEl.getBoundingClientRect();
+    this.openTableMenu(cell.tableId, { row: cell.row, col: cell.col }, rect);
+    return true;
+  }
+
+  /** The table id and grid coordinates of the cell enclosing `node`, or null when
+   *  it sits outside a cell of this surface. */
+  private cellCoordsOf(node: Node | null): { tableId: string; row: number; col: number } | null {
+    if (!node || !this.container.contains(node)) return null;
+    const el = node instanceof HTMLElement ? node : node.parentElement;
+    const cellEl = el?.closest<HTMLElement>('[data-cell-row]') ?? null;
+    const tableId = cellEl?.closest(`[${BLOCK_ID_ATTR}]`)?.getAttribute(BLOCK_ID_ATTR) ?? null;
+    if (!cellEl || !tableId) return null;
+    const row = Number(cellEl.dataset.cellRow);
+    const col = Number(cellEl.dataset.cellCol);
+    if (!Number.isInteger(row) || !Number.isInteger(col)) return null;
+    return { tableId, row, col };
   }
 
   /** Close the table menu, leaving the selection as-is (a dismiss, not an action).

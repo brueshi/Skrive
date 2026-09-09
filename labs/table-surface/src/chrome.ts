@@ -14,7 +14,7 @@
 // a click that closes a motionless press tidies any gesture whose pointerup
 // was dropped.
 
-import { CELL_COL_ATTR, CELL_DRAGGING_ATTR, CELL_ROW_ATTR, type Box, type TableGeometry, type TableIntent } from './contract';
+import { CELL_COL_ATTR, CELL_DRAGGING_ATTR, CELL_ROW_ATTR, type Box, type CellRef, type TableGeometry, type TableIntent } from './contract';
 import {
   dropIndicatorRect,
   hoverZone,
@@ -63,7 +63,7 @@ const RESIZE_MOVE_THRESHOLD_PX = 3;
 const RESIZING_CLASS = 'sk-col-resizing';
 
 /** Pointer travel, in px, before a handle press becomes a reorder drag. Below it the
- *  press stays a click that selects the slice and opens its menu (SKR-266 B2). */
+ *  press stays a click that selects the slice. */
 const REORDER_MOVE_THRESHOLD_PX = 4;
 
 /** Body class held while a row/column is being dragged to a new position, for the
@@ -114,7 +114,12 @@ export type TableChromeHost = {
   onSelectionChange(fn: () => void): () => void;
   onStructureChange(fn: () => void): () => void;
   apply(tableId: string, intent: TableIntent<never>): void;
-  requestMenu(tableId: string, target: { kind: 'row' | 'col'; index: number }, anchor: DOMRect): void;
+  /** Select a whole row or column: what a handle click does, and all it does. */
+  select(tableId: string, slice: { kind: 'row' | 'col'; index: number }): void;
+  /** The host's menu for a cell's row and column. Never from a plain click: the
+   *  host opens it on demand (right-click, the keyboard menu key), so the chrome
+   *  holds this only for a deliberate non-click gesture of its own. */
+  requestMenu(tableId: string, target: CellRef, anchor: DOMRect): void;
   clearCaret(): void;
 };
 
@@ -152,7 +157,7 @@ export function attachTableChrome(host: TableChromeHost): TableChromeHandle {
   let hideTimer = 0;
   let destroyed = false;
   // A handle press that became a reorder drag must swallow the click the browser
-  // fires on release, so a drag doesn't also select the slice and open its menu.
+  // fires on release, so a drag doesn't also re-select the slice at its old index.
   let suppressClick = false;
   // The teardown for an in-flight reorder gesture. Held at attach scope so a click
   // (which WKWebView fires even when it drops the pointerup on a motionless press)
@@ -189,7 +194,7 @@ export function attachTableChrome(host: TableChromeHost): TableChromeHandle {
       activeReorderCleanup?.();
       if (suppressClick) {
         // The click that follows a reorder drag: swallow it so the drop doesn't
-        // also select the slice and open its menu.
+        // also re-select the slice at its old index.
         suppressClick = false;
         e.preventDefault();
         e.stopPropagation();
@@ -204,10 +209,10 @@ export function attachTableChrome(host: TableChromeHost): TableChromeHandle {
           host.apply(blockId, { type: 'insert-row', index });
           break;
         case 'col-handle':
-          host.requestMenu(blockId, { kind: 'col', index }, el.getBoundingClientRect());
+          host.select(blockId, { kind: 'col', index });
           break;
         case 'row-handle':
-          host.requestMenu(blockId, { kind: 'row', index }, el.getBoundingClientRect());
+          host.select(blockId, { kind: 'row', index });
           break;
       }
     });
@@ -222,8 +227,8 @@ export function attachTableChrome(host: TableChromeHost): TableChromeHandle {
     layer.appendChild(el);
   };
 
-  /** Drag a row or column handle to a new position (SKR-271). The press stays a
-   *  click (select + menu) until it crosses the move threshold, at which point it
+  /** Drag a row or column handle to a new position. The press stays a click
+   *  (select the slice) until it crosses the move threshold, at which point it
    *  becomes a reorder: a drop-indicator line tracks the nearest boundary and the
    *  move commits once on release as a single undo step. The header row's handle
    *  never drags (pinned) and nothing drops above the header. Listens on the

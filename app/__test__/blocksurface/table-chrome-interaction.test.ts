@@ -70,7 +70,9 @@ describe('the hovered handle survives moving the pointer onto it', () => {
     expect(colHandle()).not.toBeNull();
   });
 
-  it('clicking the column handle selects that column', () => {
+  it('clicking the column handle selects that column and opens nothing', () => {
+    const menuStates: unknown[] = [];
+    surface.onTableMenu((s) => menuStates.push(s));
     hover(cell(0, 2));
     const handle = colHandle();
     expect(handle).not.toBeNull();
@@ -83,6 +85,8 @@ describe('the hovered handle survives moving the pointer onto it', () => {
       kind: 'col',
       index: 2
     });
+    // The menu is on demand (right-click, the menu key); a click only selects.
+    expect(menuStates.filter((s) => s !== null)).toHaveLength(0);
   });
 });
 
@@ -123,8 +127,8 @@ describe('dragging a column handle reorders the column', () => {
     // The drag tint is cleared on drop.
     expect(surfaceHost.querySelectorAll('[data-cell-dragging]').length).toBe(0);
 
-    // The click the browser fires after a drag is swallowed — no menu re-open — so
-    // the moved column stays grip-selected at its new index 0.
+    // The click the browser fires after a drag is swallowed — no re-select at the
+    // old index — so the moved column stays grip-selected at its new index 0.
     handle.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     expect(surface.getTableSelection()).toEqual({ tableId, kind: 'col', index: 0 });
   });

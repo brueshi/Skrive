@@ -294,17 +294,22 @@ export function BlockEditor({ doc, docPath, history, onChange }: Props): React.R
         onClick={(e) => {
           if (e.target === e.currentTarget) ctx?.surface.placeCaretNearPoint(e.clientX, e.clientY);
         }}
-        // A right-click is the platform's menu unless it landed on a squiggle:
-        // only then is the default prevented and Skrive's correction menu opened.
-        // Everything else about right-clicking the document is unchanged.
+        // A right-click is the platform's menu unless it landed on a squiggle
+        // (Skrive's correction menu) or on a table cell (the table menu for that
+        // cell's row and column). Everything else about right-clicking the
+        // document is unchanged.
         onContextMenu={(e) => {
-          if (!spellcheck || !ctx) return;
-          const at = ctx.surface.positionAtPoint(e.clientX, e.clientY);
-          if (!at) return;
-          const hit = spellcheck.misspellingAt(at.blockId, at.offset);
-          if (!hit) return;
-          e.preventDefault();
-          setSpellTarget({ blockId: at.blockId, ...hit, x: e.clientX, y: e.clientY });
+          if (!ctx) return;
+          if (spellcheck) {
+            const at = ctx.surface.positionAtPoint(e.clientX, e.clientY);
+            const hit = at ? spellcheck.misspellingAt(at.blockId, at.offset) : null;
+            if (at && hit) {
+              e.preventDefault();
+              setSpellTarget({ blockId: at.blockId, ...hit, x: e.clientX, y: e.clientY });
+              return;
+            }
+          }
+          if (ctx.surface.openTableMenuAtNode(e.target as Node, e.clientX, e.clientY)) e.preventDefault();
         }}
       >
         <div ref={hostRef} className="block-editor-surface" />
