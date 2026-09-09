@@ -13,6 +13,9 @@ export const CONTRACT_VERSION = 0;
 
 export type ColumnAlign = 'left' | 'center' | 'right' | null;
 
+/** `prose`: horizontal rules only. `grid`: filled header, all cells ruled. */
+export type TableStyle = 'prose' | 'grid';
+
 export type TableModel<Cell> = {
   /** Per column. Length equals the header row's width. */
   readonly align: readonly ColumnAlign[];
@@ -20,6 +23,8 @@ export type TableModel<Cell> = {
   readonly widths?: readonly number[];
   /** Row 0 is the header and is pinned. */
   readonly rows: ReadonlyArray<ReadonlyArray<Cell>>;
+  /** Absent = the host's default style. Folio-only, like widths. */
+  readonly style?: TableStyle;
 };
 
 export type CellRef = { readonly row: number; readonly col: number };
@@ -59,6 +64,7 @@ export type TableIntent<Cell> =
   | { readonly type: 'move-column'; readonly from: number; readonly to: number }
   | { readonly type: 'set-align'; readonly col: number; readonly align: ColumnAlign }
   | { readonly type: 'set-widths'; readonly widths: readonly number[] }
+  | { readonly type: 'set-style'; readonly style: TableStyle | null }
   | { readonly type: 'clear-cells'; readonly rect: CellRect }
   /** A pasted grid landing at `at`; `grow` adds rows/cols to fit. */
   | {
@@ -106,6 +112,7 @@ export type TableTokens = {
     readonly muted: string;
     readonly rule: string;
     readonly surface: string;
+    readonly headerFill: string;
     readonly accent: string;
     readonly selection: string;
   };
@@ -138,6 +145,8 @@ export type LayoutOptions = {
   /** `pin` breaks content to the measure; `overflow` scrolls. */
   readonly wide: 'pin' | 'overflow';
   readonly stickyHeader: boolean;
+  /** Used when a model carries no `style`. */
+  readonly defaultStyle: TableStyle;
 };
 
 // ---------------------------------------------------------------------------

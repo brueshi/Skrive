@@ -28,3 +28,13 @@ Contract choices worth remembering:
   and takes spring parameters, never an animation implementation.
 
 Linear: SKR-299. Branch: `joe/reimagining`.
+
+### Same day — a second style
+
+Owner review: the prose table is on brand; also wanted is Skrive's version of
+the traditional table, filled header and ruled cells. Designed on the same
+Paper page as "Grid style" (at rest light and dark, plus a states board) and
+recorded in the contract: `TableStyle = 'prose' | 'grid'`, optional
+`TableModel.style` (folio-only, absent = host default), a `set-style` intent,
+`headerFill` in the tokens, `defaultStyle` in the layout options. Both styles
+share every chrome and selection state; only rules and header fill differ.
