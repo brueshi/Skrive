@@ -68,3 +68,29 @@ the table ops left.
 
 Gates: typecheck, vitest app 1606 + lab 59, parity 26/26, latency 64/64, macOS
 smoke PASS, production build clean. Linear: SKR-300.
+
+## 2026-09-08 — Stage 2: render and chrome relocate
+
+`src/render.ts`: `renderTableElement(model, renderCell)` builds the grid
+(colgroup from widths, th/td with coordinates, per-cell direction, physical
+alignment) and `applyLiveColWidths` previews a resize; the app's render case
+is now one call with its inline renderer as the cell renderer. `src/chrome.ts`:
+the shipped painter moved by mechanical substitution (the diff against the
+shipped body is only the host calls), behind `TableChromeHost`: `tableIdOf`,
+`findTable`, `getSelection`, `onSelectionChange`, `onStructureChange`,
+`apply(tableId, intent)`, `requestMenu`, `clearCaret`. The app's
+`table-chrome.ts` builds that host from `BlockSurface`'s existing methods, so
+the editor's attach call, the block chrome, the index, and the interaction
+tests kept their import site and the caret landing and history behavior are
+untouched.
+
+Deliberately not the contract's per-table `mount`/`update` yet: the shipped
+painter is per-surface and stateless per paint, and turning it per-table is the
+selection-model work of stage 3. This stage keeps the seam where the code is.
+
+Verification: rendered table HTML for eight model variants captured before the
+change and diffed byte-identical after (block ids normalized, 6.6 KB). Gates:
+typecheck, vitest app 1606 + lab 66 (render tests added under jsdom), parity
+26/26, latency 64/64, macOS smoke, production build. One trap: a local `host`
+rect inside the reorder drag shadowed the new `host` parameter; renamed. By-hand
+shell pass for hover, resize, and reorder is the owner's.
