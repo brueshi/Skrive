@@ -49,3 +49,22 @@ Cmd+Backspace removes a full slice; rails replaced by one `+` per axis. Grounded
 in the shipped code: a handle click opened the menu as its only action, Delete
 removed the slice, any other key dissolved the selection, and rectangles were
 native text selection. README "Selection model" is the spec.
+
+## 2026-09-08 — Stage 1: the pure parts relocate
+
+`src/ops.ts` holds the structural ops over an opaque cell (insert, remove,
+move, align, widths, clear) and the `reduce` dispatcher; `src/geometry.ts`
+holds the chrome arithmetic (slots, resize trade, normalize, nearest boundary,
+drop indicator, hover zone). The app's `range-ops.ts` became adapters through
+one `updateTable` helper that hands a block across as a `TableModel` and writes
+the result back with `dirty` set; `table-chrome.ts` re-exports the geometry so
+block-chrome, the index, and the tests keep their import site. The lab joined
+the root workspaces and is aliased by name in tsc, vite, and vitest.
+
+Kept out on purpose: `fill-cells` returns null from `reduce` until the
+clipboard work (stage 3), so this commit adds no behavior. One trap: the app's
+`spliceMove` helper also serves block reorder, so it stayed in range-ops when
+the table ops left.
+
+Gates: typecheck, vitest app 1606 + lab 59, parity 26/26, latency 64/64, macOS
+smoke PASS, production build clean. Linear: SKR-300.

@@ -101,18 +101,18 @@ block insert button and shown on hover.
 
 ## Invariant
 
-Nothing in `app/` imports this lab until the first relocation lands, and this
-lab imports nothing from `app/`. `rm -rf labs/table-surface` breaks no Skrive
-build today. When the relocation begins the app consumes the package by name
-as a pinned workspace dependency, never by relative path.
+This lab imports nothing from `app/`. Since stage 1 the app consumes it by
+name as the workspace package `@skrive/table-surface`, never by relative path,
+so the seam is the package boundary and nothing else.
 
 ## Stage ladder
 
-0. **Contract** (this commit): the types in `src/contract.ts`, this document,
-   the Paper brief and first design pass. No code moves.
-1. **Relocate the pure parts**: table ops from `range-ops.ts` and the geometry
-   arithmetic from `table-chrome.ts` move here with their tests. Byte-identical
-   output. A `refactor:` commit.
+0. **Contract** (done): the types in `src/contract.ts`, this document, the
+   Paper brief and first design pass. No code moves.
+1. **Relocate the pure parts** (done): table ops from `range-ops.ts` and the
+   geometry arithmetic from `table-chrome.ts` live in `src/ops.ts` and
+   `src/geometry.ts` with their tests; the app adapts by name. Byte-identical
+   output, one `refactor:` commit.
 2. **Relocate render and chrome** behind the contract; `BlockSurface` becomes
    host one. Byte-identical output. A `refactor:` commit.
 3. **Build against the contract**: grid selection, clipboard grid codec,
