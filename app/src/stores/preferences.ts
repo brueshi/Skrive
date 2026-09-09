@@ -18,6 +18,7 @@ import {
   type EditorFontId,
   clampLineMeasureCh,
   type LineMeasureSetting,
+  type TableStyleSetting,
   type RecentProject,
   type ThemeId,
   type WordCountMetric
@@ -59,6 +60,7 @@ type PreferencesActions = {
    *  active measure — adjusting the number IS choosing Custom. */
   setLineMeasureCustomCh(value: number): void;
   setShowMeasureRule(value: boolean): void;
+  setTableStyle(value: TableStyleSetting): void;
   setSmartTypography(value: boolean): void;
   /** Turn the writing surface's spellchecking on or off. */
   setSpellcheck(value: boolean): void;
@@ -119,6 +121,7 @@ function snapshot(state: PreferencesState): AppUiState {
     lineMeasure: state.lineMeasure,
     lineMeasureCustomCh: state.lineMeasureCustomCh,
     showMeasureRule: state.showMeasureRule,
+    tableStyle: state.tableStyle,
     smartTypography: state.smartTypography,
     spellcheck: state.spellcheck,
     formatOnSave: state.formatOnSave,
@@ -279,6 +282,11 @@ export const usePreferencesStore = create<
   setShowMeasureRule(value) {
     if (get().showMeasureRule === value) return;
     set({ showMeasureRule: value });
+    scheduleSave(get);
+  },
+  setTableStyle(value) {
+    if (get().tableStyle === value) return;
+    set({ tableStyle: value });
     scheduleSave(get);
   },
   setSmartTypography(value) {

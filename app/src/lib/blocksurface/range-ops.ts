@@ -11,6 +11,22 @@
 // no image *block* — an image is an InlineNode embedded in a paragraph, not a
 // barrier in its own right.)
 
+import {
+  clearCells,
+  fillCells,
+  insertColumn,
+  insertRow,
+  moveColumn,
+  moveRow,
+  removeColumn,
+  removeColumns,
+  removeRow,
+  removeRows,
+  setColumnAlign,
+  setColumnWidths,
+  type CellRef,
+  type TableModel
+} from '@skrive/table-surface';
 import { generateBlockId, type BlockNode, type InlineNode, type TableAlign } from '../blockmodel';
 import { coalesceInline, deleteRangeInInline, inlineLength, insertTextInInline } from './inline-ops';
 import { findBlockById, updateBlockById } from './tree';
@@ -520,14 +536,36 @@ export function replaceAcross(
   };
 }
 
-/**
- * Clear the text of every cell in the rectangle [minRow..maxRow] x [minCol..maxCol]
- * of a table, leaving the table and its shape intact. This is the in-table
- * cross-cell delete (SKR-166 / F55): dragging a selection across cells and hitting
- * Backspace empties the covered cells — Google Docs behaviour — rather than
- * deleting the whole table (which a barrier range would otherwise do). Null when
- * `tableId` is not a table.
- */
+// --- table structure ---------------------------------------------------------
+// The arithmetic lives in @skrive/table-surface over an opaque cell type; these
+// adapters address the table by block id, hand it across as a TableModel, and
+// write the result back with `dirty` set. Null semantics are the ops' own, plus
+// null when `tableId` is not a table.
+
+const emptyCell = (): InlineNode[] => [];
+
+function updateTable(
+  blocks: BlockNode[],
+  tableId: string,
+  op: (m: TableModel<InlineNode[]>) => TableModel<InlineNode[]> | null
+): BlockNode[] | null {
+  const table = findBlockById(blocks, tableId);
+  if (!table || table.type !== 'table') return null;
+  const next = op({ align: table.align, rows: table.rows, ...(table.widths ? { widths: table.widths } : {}) });
+  if (!next) return null;
+  return updateBlockById(blocks, tableId, (b) => {
+    if (b.type !== 'table') return b;
+    return {
+      ...b,
+      align: next.align as TableAlign[],
+      ...(next.widths ? { widths: next.widths as number[] } : {}),
+      rows: next.rows as InlineNode[][][],
+      dirty: true
+    } as BlockNode;
+  });
+}
+
+/** Empty the cells in the rectangle; the table and its shape survive. */
 export function clearTableCells(
   blocks: BlockNode[],
   tableId: string,
@@ -536,279 +574,99 @@ export function clearTableCells(
   maxRow: number,
   maxCol: number
 ): BlockNode[] | null {
-  const table = findBlockById(blocks, tableId);
-  if (!table || table.type !== 'table') return null;
-  return updateBlockById(blocks, tableId, (b) => {
-    if (b.type !== 'table') return b;
-    const rows = b.rows.map((row, r) =>
-      r < minRow || r > maxRow ? row : row.map((cell, c) => (c < minCol || c > maxCol ? cell : []))
-    );
-    return { ...b, rows, dirty: true } as BlockNode;
-  });
+  return updateTable(blocks, tableId, (m) => clearCells(m, { minRow, minCol, maxRow, maxCol }, emptyCell));
 }
 
-/**
- * Append one empty row (same column count as row 0) to the end of a table.
- * The minimal Docs/Word muscle-memory slice for table structure editing
- * (SKR-225 / F-tables): Tab in the last cell used to fall through to
- * exitBarrier and leave the table entirely — this gives it somewhere to grow
- * instead. Column ops, row deletion, and a creation-size choice are explicitly
- * deferred (v1.10). Null when `tableId` is not a table.
- */
+/** Land a grid of cells with its top-left at `at` (the paste); with `grow` the
+ *  table gains the rows and columns the grid needs. Null for an empty grid or a
+ *  landing cell outside the table. */
+export function fillTableCells(
+  blocks: BlockNode[],
+  tableId: string,
+  at: CellRef,
+  grid: InlineNode[][][],
+  grow: boolean
+): BlockNode[] | null {
+  return updateTable(blocks, tableId, (m) => fillCells(m, at, grid, grow, emptyCell));
+}
+
+/** Append one empty row at the header's width. */
 export function appendTableRow(blocks: BlockNode[], tableId: string): BlockNode[] | null {
-  const table = findBlockById(blocks, tableId);
-  if (!table || table.type !== 'table') return null;
-  const cols = table.rows[0]?.length ?? 0;
-  return updateBlockById(blocks, tableId, (b) => {
-    if (b.type !== 'table') return b;
-    const row: InlineNode[][] = Array.from({ length: cols }, () => []);
-    return { ...b, rows: [...b.rows, row], dirty: true } as BlockNode;
-  });
+  return updateTable(blocks, tableId, (m) => insertRow(m, m.rows.length, emptyCell));
 }
 
-/**
- * Insert one empty row into a table at `index` (clamped to `[0, rowCount]`). The
- * new row matches the header's column count. Callers pass the caret row for an
- * "above" insert and caret-row + 1 for "below". Null when `tableId` is not a table.
- */
+/** Insert one empty row at `index`, clamped to `[0, rowCount]`. */
 export function insertTableRow(blocks: BlockNode[], tableId: string, index: number): BlockNode[] | null {
-  const table = findBlockById(blocks, tableId);
-  if (!table || table.type !== 'table') return null;
-  const cols = table.rows[0]?.length ?? 0;
-  const at = Math.max(0, Math.min(index, table.rows.length));
-  return updateBlockById(blocks, tableId, (b) => {
-    if (b.type !== 'table') return b;
-    const row: InlineNode[][] = Array.from({ length: cols }, () => []);
-    const rows = [...b.rows.slice(0, at), row, ...b.rows.slice(at)];
-    return { ...b, rows, dirty: true } as BlockNode;
-  });
+  return updateTable(blocks, tableId, (m) => insertRow(m, index, emptyCell));
 }
 
-/**
- * Insert one empty column into a table at `index` (clamped to `[0, colCount]`). An
- * empty cell is spliced into every row and a `null` (no-alignment) entry into
- * `align`, so the delimiter row stays the same width as the header. When the table
- * carries explicit `widths`, the new column takes the average of the existing
- * weights (so it reads as a typical column) and is spliced in lockstep — widths
- * are relative and normalized at render, so no renormalization is needed. A ragged
- * row shorter than `index` gains its cell at its own end (splice clamps) — the row
- * is left ragged, never padded. Null when `tableId` is not a table.
- */
+/** Insert one empty column at `index`; align and widths stay in lockstep. */
 export function insertTableColumn(blocks: BlockNode[], tableId: string, index: number): BlockNode[] | null {
-  const table = findBlockById(blocks, tableId);
-  if (!table || table.type !== 'table') return null;
-  const cols = table.rows[0]?.length ?? 0;
-  const at = Math.max(0, Math.min(index, cols));
-  return updateBlockById(blocks, tableId, (b) => {
-    if (b.type !== 'table') return b;
-    const rows = b.rows.map((row) => {
-      const next = [...row];
-      next.splice(at, 0, []);
-      return next;
-    });
-    const align = [...b.align];
-    align.splice(at, 0, null);
-    const widths = spliceColumnWidth(b.widths, at);
-    return { ...b, align, ...(widths ? { widths } : {}), rows, dirty: true } as BlockNode;
-  });
+  return updateTable(blocks, tableId, (m) => insertColumn(m, index, emptyCell));
 }
 
-/**
- * Remove row `index` from a table. Removing the header row (index 0) simply lets
- * the next row become the header — `align` is column-indexed, so it survives and
- * the table stays valid GFM. Returns null when `tableId` is not a table OR the
- * removal would empty the table (it holds only that one row); the surface routes a
- * null-from-a-known-table to whole-table deletion.
- */
+/** Remove row `index`. Null when it would empty the table; the surface
+ *  routes that to whole-table deletion. */
 export function removeTableRow(blocks: BlockNode[], tableId: string, index: number): BlockNode[] | null {
-  const table = findBlockById(blocks, tableId);
-  if (!table || table.type !== 'table') return null;
-  if (table.rows.length <= 1 || index < 0 || index >= table.rows.length) return null;
-  return updateBlockById(blocks, tableId, (b) => {
-    if (b.type !== 'table') return b;
-    const rows = [...b.rows.slice(0, index), ...b.rows.slice(index + 1)];
-    return { ...b, rows, dirty: true } as BlockNode;
-  });
+  return updateTable(blocks, tableId, (m) => removeRow(m, index));
 }
 
-/**
- * Remove column `index` from a table: drop that cell from every row, its `align`
- * entry, and (when present) its `widths` weight — keeping all three the header's
- * width. The surviving weights are left as-is; render renormalizes, so the other
- * columns keep their relative proportions. A ragged row with no cell at `index` is
- * untouched (splice on a short row is a no-op) — raggedness is preserved, not
- * repaired. Returns null when `tableId` is not a table OR the table has a single
- * column (removal would leave zero columns); the surface routes that null to
- * whole-table deletion.
- */
+/** Remove rows `from` through `to` (inclusive) as one change. Null when it
+ *  would empty the table; the surface routes that to whole-table deletion. */
+export function removeTableRows(blocks: BlockNode[], tableId: string, from: number, to: number): BlockNode[] | null {
+  return updateTable(blocks, tableId, (m) => removeRows(m, from, to));
+}
+
+/** Remove column `index`. Null on a single-column table; the surface routes
+ *  that to whole-table deletion. */
 export function removeTableColumn(blocks: BlockNode[], tableId: string, index: number): BlockNode[] | null {
-  const table = findBlockById(blocks, tableId);
-  if (!table || table.type !== 'table') return null;
-  const cols = table.rows[0]?.length ?? 0;
-  if (cols <= 1 || index < 0 || index >= cols) return null;
-  return updateBlockById(blocks, tableId, (b) => {
-    if (b.type !== 'table') return b;
-    const rows = b.rows.map((row) => {
-      if (index >= row.length) return row;
-      const next = [...row];
-      next.splice(index, 1);
-      return next;
-    });
-    const align = [...b.align];
-    align.splice(index, 1);
-    const widths = dropColumnWidth(b.widths, index);
-    return { ...b, align, ...(widths ? { widths } : {}), rows, dirty: true } as BlockNode;
-  });
+  return updateTable(blocks, tableId, (m) => removeColumn(m, index));
 }
 
-/**
- * Set column `col`'s alignment. `align` is column-indexed, so the delimiter row
- * re-serializes from it (`:---`, `---:`, `:---:`, or `---` for null) and stays the
- * header's width. Returns null when `tableId` is not a table, `col` is out of the
- * header's range, or the alignment is unchanged (a no-op earns no undo step). The
- * `align` array is defensively padded to the header width first, upholding the
- * length invariant even against a malformed input.
- */
+/** Remove columns `from` through `to` (inclusive) as one change. Null when it
+ *  would leave no column; the surface routes that to whole-table deletion. */
+export function removeTableColumns(blocks: BlockNode[], tableId: string, from: number, to: number): BlockNode[] | null {
+  return updateTable(blocks, tableId, (m) => removeColumns(m, from, to));
+}
+
+/** Set column `col`'s alignment; the delimiter row re-serializes from it.
+ *  Null when unchanged, so a no-op earns no undo step. */
 export function setColumnAlignment(
   blocks: BlockNode[],
   tableId: string,
   col: number,
   align: TableAlign
 ): BlockNode[] | null {
-  const table = findBlockById(blocks, tableId);
-  if (!table || table.type !== 'table') return null;
-  const cols = table.rows[0]?.length ?? 0;
-  if (col < 0 || col >= cols) return null;
-  if ((table.align[col] ?? null) === align) return null;
-  return updateBlockById(blocks, tableId, (b) => {
-    if (b.type !== 'table') return b;
-    const next = [...b.align];
-    while (next.length < cols) next.push(null);
-    next[col] = align;
-    return { ...b, align: next, dirty: true } as BlockNode;
-  });
+  return updateTable(blocks, tableId, (m) => setColumnAlign(m, col, align));
 }
 
-/**
- * Replace a table's per-column width weights — the drag-resize commit. `widths`
- * must match the header's column count and be all-positive finite numbers; a
- * length mismatch, a bad entry, or a set equal to the current one returns null
- * (the last so re-committing identical widths earns no undo step). Weights are
- * relative (the renderer normalizes them), so the caller passes whatever
- * proportions the drag produced. `.folio`-only: `.md` never serializes widths, so
- * byte-stable GFM is untouched. Null also when `tableId` is not a table.
- */
+/** Replace the per-column width weights (the drag-resize commit). Folio-only;
+ *  `.md` never serializes widths. */
 export function setTableColumnWidths(
   blocks: BlockNode[],
   tableId: string,
   widths: number[]
 ): BlockNode[] | null {
-  const table = findBlockById(blocks, tableId);
-  if (!table || table.type !== 'table') return null;
-  const cols = table.rows[0]?.length ?? 0;
-  if (cols === 0 || widths.length !== cols) return null;
-  if (!widths.every((w) => Number.isFinite(w) && w > 0)) return null;
-  if (widthsEqual(table.widths, widths)) return null;
-  return updateBlockById(blocks, tableId, (b) => {
-    if (b.type !== 'table') return b;
-    return { ...b, widths: [...widths], dirty: true } as BlockNode;
-  });
+  return updateTable(blocks, tableId, (m) => setColumnWidths(m, widths));
 }
 
-// Splice a weight for a newly inserted column, in lockstep with `align`/`rows`.
-// No-op (undefined) on a width-free table — it stays under auto layout. The new
-// column takes the average of the existing weights so it reads as a typical
-// column; render normalizes, so the sum need not stay fixed.
-function spliceColumnWidth(widths: number[] | undefined, at: number): number[] | undefined {
-  if (!widths) return undefined;
-  const next = [...widths];
-  const avg = next.length ? next.reduce((sum, w) => sum + w, 0) / next.length : 1;
-  next.splice(at, 0, avg);
-  return next;
+/** Move a body row to drop boundary `to`. The header is pinned. */
+export function moveTableRow(blocks: BlockNode[], tableId: string, from: number, to: number): BlockNode[] | null {
+  return updateTable(blocks, tableId, (m) => moveRow(m, from, to));
 }
 
-// Drop the weight for a removed column. No-op (undefined) on a width-free table.
-function dropColumnWidth(widths: number[] | undefined, index: number): number[] | undefined {
-  if (!widths) return undefined;
-  const next = [...widths];
-  next.splice(index, 1);
-  return next;
+/** Move a column to drop boundary `to`; align and widths follow. */
+export function moveTableColumn(blocks: BlockNode[], tableId: string, from: number, to: number): BlockNode[] | null {
+  return updateTable(blocks, tableId, (m) => moveColumn(m, from, to));
 }
 
-// Exact element-wise equality (weights round-trip verbatim, so no epsilon), with
-// an absent array never equal to a present one.
-function widthsEqual(a: number[] | undefined, b: number[]): boolean {
-  if (!a || a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-  return true;
-}
-
-// Move the element at `from` to sit at `insertAt` (post-removal index), returning a
-// fresh array. Spreads the removed slice back in, so it never trips the
-// possibly-undefined index type.
+// Move the element at `from` to sit at `insertAt` (post-removal index), returning
+// a fresh array.
 function spliceMove<T>(arr: T[], from: number, insertAt: number): T[] {
   const next = arr.slice();
   const removed = next.splice(from, 1);
   next.splice(insertAt, 0, ...removed);
   return next;
-}
-
-/**
- * Move a body row to a new position (drag-to-reorder, SKR-271). `to` is an
- * insertion BOUNDARY in `[0, rowCount]` — the drop line between rows — not a final
- * index, so it maps straight from where the drop indicator sits. The GFM header is
- * PINNED: row 0 never moves and nothing drops above it, so `from` and `to` must both
- * be >= 1 — a data row can never silently become the header. Returns null when
- * `tableId` is not a table, an index is out of range, or the drop would not change
- * the order (`to === from` or `to === from + 1`, the boundaries flanking the row),
- * so a no-op drag earns no undo step. The moved row lands at index
- * `to > from ? to - 1 : to`.
- */
-export function moveTableRow(blocks: BlockNode[], tableId: string, from: number, to: number): BlockNode[] | null {
-  const table = findBlockById(blocks, tableId);
-  if (!table || table.type !== 'table') return null;
-  const n = table.rows.length;
-  if (from < 1 || from >= n) return null; // header pinned; row must be a body row
-  if (to < 1 || to > n) return null; // never drop above the header
-  if (to === from || to === from + 1) return null; // flanking boundaries: no move
-  const insertAt = to > from ? to - 1 : to;
-  return updateBlockById(blocks, tableId, (b) => {
-    if (b.type !== 'table') return b;
-    return { ...b, rows: spliceMove(b.rows, from, insertAt), dirty: true } as BlockNode;
-  });
-}
-
-/**
- * Move a column to a new position (drag-to-reorder, SKR-271). `to` is an insertion
- * BOUNDARY in `[0, colCount]`. Every row's cell, plus the `align` entry and (when
- * present) the `widths` weight, move in lockstep — so the delimiter row and the
- * fixed-layout colgroup stay column-aligned. Ragged rows are preserved: a row with
- * no cell at `from` is untouched, and a shorter row reinserts its cell clamped to
- * its own end rather than padding. Returns null when `tableId` is not a table, an
- * index is out of range, or the boundary flanks the column (no reorder). The moved
- * column lands at index `to > from ? to - 1 : to`.
- */
-export function moveTableColumn(blocks: BlockNode[], tableId: string, from: number, to: number): BlockNode[] | null {
-  const table = findBlockById(blocks, tableId);
-  if (!table || table.type !== 'table') return null;
-  const cols = table.rows[0]?.length ?? 0;
-  if (from < 0 || from >= cols) return null;
-  if (to < 0 || to > cols) return null;
-  if (to === from || to === from + 1) return null;
-  const insertAt = to > from ? to - 1 : to;
-  return updateBlockById(blocks, tableId, (b) => {
-    if (b.type !== 'table') return b;
-    const rows = b.rows.map((row) => {
-      if (from >= row.length) return row; // ragged: no cell in this column to move
-      const next = [...row];
-      const removed = next.splice(from, 1);
-      next.splice(Math.min(insertAt, next.length), 0, ...removed);
-      return next;
-    });
-    const align = spliceMove(b.align, from, insertAt);
-    const widths = b.widths ? spliceMove(b.widths, from, insertAt) : undefined;
-    return { ...b, align, ...(widths ? { widths } : {}), rows, dirty: true } as BlockNode;
-  });
 }
 
 /**

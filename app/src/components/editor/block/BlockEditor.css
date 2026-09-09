@@ -305,9 +305,19 @@
   margin: 1.5em 0;
 }
 
+/* ---- Tables. Two styles, chosen in Settings and stamped on the root as
+   data-table-style so a switch is one repaint and the renderer never learns
+   which is on. Grid (the default) rules every cell inside a rounded 1px frame
+   and fills the header row; prose rules rows only, with a muted rule under the
+   header and the first and last columns flush to the prose edges. Both keep
+   the header as a weight step, not a size step. ---- */
+
 .block-editor-surface table {
-  border-collapse: collapse;
   width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--skrive-rule);
+  border-radius: var(--skrive-radius-sm);
 }
 
 /* A table with explicit per-column widths (the <colgroup> the renderer emits)
@@ -326,11 +336,73 @@
 
 .block-editor-surface th,
 .block-editor-surface td {
-  border: 1px solid var(--skrive-rule);
-  padding: 0.4em 0.6em;
+  padding: 0.5em 0.7em;
+  border-right: 1px solid var(--skrive-rule);
+  border-bottom: 1px solid var(--skrive-rule);
   /* start, not left: cells carry dir="auto" (SKR-232), so an RTL cell aligns
      to its own reading direction while the column order stays fixed. */
   text-align: start;
+}
+
+.block-editor-surface th {
+  font-weight: 600;
+  background: var(--skrive-table-head);
+}
+
+.block-editor-surface th:last-child,
+.block-editor-surface td:last-child {
+  border-right: none;
+}
+
+.block-editor-surface tr:last-child > td {
+  border-bottom: none;
+}
+
+/* The frame's radius, carried by the corner cells so the header fill never
+   pokes past the rounded corner (a table ignores overflow clipping). */
+.block-editor-surface tr:first-child > th:first-child {
+  border-top-left-radius: calc(var(--skrive-radius-sm) - 1px);
+}
+.block-editor-surface tr:first-child > th:last-child {
+  border-top-right-radius: calc(var(--skrive-radius-sm) - 1px);
+}
+.block-editor-surface tr:last-child > td:first-child {
+  border-bottom-left-radius: calc(var(--skrive-radius-sm) - 1px);
+}
+.block-editor-surface tr:last-child > td:last-child {
+  border-bottom-right-radius: calc(var(--skrive-radius-sm) - 1px);
+}
+
+/* Prose style: horizontal rules only. */
+:root[data-table-style='prose'] .block-editor-surface table {
+  border: none;
+  border-radius: 0;
+}
+
+:root[data-table-style='prose'] .block-editor-surface th,
+:root[data-table-style='prose'] .block-editor-surface td {
+  padding: 0.53em 0.7em;
+  border-right: none;
+  border-radius: 0;
+}
+
+:root[data-table-style='prose'] .block-editor-surface th {
+  background: transparent;
+  border-bottom-color: var(--skrive-muted);
+}
+
+:root[data-table-style='prose'] .block-editor-surface tr:last-child > td {
+  border-bottom: 1px solid var(--skrive-rule);
+}
+
+:root[data-table-style='prose'] .block-editor-surface th:first-child,
+:root[data-table-style='prose'] .block-editor-surface td:first-child {
+  padding-inline-start: 0;
+}
+
+:root[data-table-style='prose'] .block-editor-surface th:last-child,
+:root[data-table-style='prose'] .block-editor-surface td:last-child {
+  padding-inline-end: 0;
 }
 
 .block-editor-surface a {
@@ -711,17 +783,45 @@
   }
 }
 
-/* Selected row/column tint (SKR-266 B2): a calm accent wash on every cell of the
-   grip-selected slice, matching the block-selection ring's accent family and
-   holding in both themes via color-mix. A view-only marker; the model is
-   untouched until the slice is removed. */
-.block-editor-surface [data-cell-selected] {
+/* The grid selection: one wash and one ring. The wash is a calm accent tint on
+   every covered cell (the chrome marks them), matching the block-selection
+   ring's accent family and holding in both themes via color-mix; the ring is one
+   element in the chrome layer drawn around the rectangle from measured cell
+   rects. View-only; the model is untouched until a key acts on the selection. */
+:root .block-editor-surface th[data-cell-selected],
+:root .block-editor-surface td[data-cell-selected] {
   background: color-mix(in srgb, var(--skrive-accent) 16%, transparent);
 }
 
-/* The append rails: a soft-lifted lane in the toast's visual language, running the
-   full length of the table's right / bottom edge, with a drawn + centred in it.
-   Faint until pointed at, so a hovered table reads as calm. */
+.sk-table-chrome--selection {
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, var(--skrive-accent) 70%, transparent);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* While a press in a cell is being dragged into a rectangle, the browser's own
+   text selection is switched off under the surface so no highlight ever runs
+   across cells; the rectangle is the only thing that grows. */
+.block-editor-surface.sk-grid-selecting {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* While a grid selection holds, the caret is parked (collapsed) in the
+   rectangle's home cell rather than removed, and hidden: the rectangle is the
+   selection. Both the native caret and the custom-drawn one go. */
+.block-editor-surface.sk-grid-selected {
+  caret-color: transparent;
+}
+
+.block-editor-body:has(.block-editor-surface.sk-grid-selected) .skrive-caret {
+  visibility: hidden;
+}
+
+/* The append buttons: one + per axis, centered on the table's right edge and
+   its bottom edge, in the block insert button's language (a soft-lifted square
+   with a drawn +). Faint until pointed at, so a hovered table reads as calm. */
 .sk-table-chrome--col-append,
 .sk-table-chrome--row-append {
   padding: 0;
@@ -1039,7 +1139,8 @@ body.sk-col-resizing {
 /* The slice being dragged tints for the length of the drag — the "what is moving"
    half of the feedback. A touch stronger than the selection wash so it reads as
    actively in flight; view-only, cleared on drop. */
-.block-editor-surface [data-cell-dragging] {
+:root .block-editor-surface th[data-cell-dragging],
+:root .block-editor-surface td[data-cell-dragging] {
   background: color-mix(in srgb, var(--skrive-accent) 24%, transparent);
 }
 

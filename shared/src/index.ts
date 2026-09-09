@@ -102,6 +102,7 @@ export type {
   LayoutMode,
   LineMeasure,
   LineMeasureSetting,
+  TableStyleSetting,
   MarkerMode,
   NewFileLocation,
   NewFileNaming,

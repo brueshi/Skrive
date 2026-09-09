@@ -1,20 +1,21 @@
 {
   "name": "skrive",
   "version": "1.13.1",
-  "description": "A writing app for notes, drafts, and documents — rich, rendered writing in plain files you own.",
+  "description": "A writing app for notes, drafts, and documents \u2014 rich, rendered writing in plain files you own.",
   "type": "module",
   "workspaces": [
     "app",
     "shared",
     "native/diff",
-    "services/bug-relay"
+    "services/bug-relay",
+    "labs/table-surface"
   ],
   "scripts": {
     "start": "bash shell-zig/dev-macos.sh",
     "dev": "vite",
     "start:build": "vite build",
     "start:preview": "vite preview",
-    "typecheck": "tsc -p shared/tsconfig.json && tsc -p app/tsconfig.json",
+    "typecheck": "tsc -p shared/tsconfig.json && tsc -p app/tsconfig.json && tsc -p labs/table-surface/tsconfig.json",
     "perf:fixture": "bun scripts/build-perf-fixture.ts",
     "parity:check": "(cd shell-zig/core && zig build) && bun ./scripts/run-parity-fixtures.ts",
     "test:latency": "playwright test -c harness/playwright.config.ts",

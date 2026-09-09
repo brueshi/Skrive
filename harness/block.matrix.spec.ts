@@ -1123,27 +1123,139 @@ async function caretCell(page: Page): Promise<string> {
   });
 }
 
-// SKR-182 / F56: the table arrow hijack read only e.key, so a MODIFIED arrow was
-// swallowed and re-interpreted as plain cell-to-cell movement. Shift+Arrow must
-// extend a selection, not move the caret.
-test('SKR-182: Shift+Arrow at a cell edge extends a selection instead of moving', async ({ page }) => {
+// The grid selection, as the harness sees it: one cell rectangle addressed to
+// its table, or null. The table chrome is not mounted here, so the specs assert
+// the state the chrome would paint, not the paint.
+async function tableSelection(page: Page): Promise<unknown> {
+  return await page.evaluate(() => window.__skriveBlockSurface?.tableSelection() ?? null);
+}
+const rect = (anchor: [number, number], focus: [number, number]) => ({
+  kind: 'cells',
+  anchor: { row: anchor[0], col: anchor[1] },
+  focus: { row: focus[0], col: focus[1] }
+});
+/** Whether the browser holds a text range of its own inside the surface. */
+async function nativeRange(page: Page): Promise<boolean> {
+  return await page.evaluate(() => {
+    const sel = window.getSelection();
+    return !!sel && sel.rangeCount > 0 && !sel.isCollapsed;
+  });
+}
+
+// SKR-182 / F56 kept the modified arrows out of the cell-to-cell hijack; the grid
+// selection then gives Shift+Arrow at a cell's edge its own meaning: a cell
+// rectangle grows, and no text highlight ever runs across cells.
+test('Table selection: Shift+ArrowRight at a cell edge extends a cell rectangle', async ({ page }) => {
   await open(page, 1);
   await insertViaMenu(page, 'table');
   await page.keyboard.type('AB');
   await page.waitForTimeout(60);
   expect(await caretCell(page), 'caret starts in the header cell').toBe('0,0');
 
-  // The caret sits at the cell's END, which is exactly the edge the hijack owns:
-  // an unmodified ArrowRight there steps to cell (0,1). Shift+ArrowRight used to
-  // do the same, silently discarding the selection the writer asked for. Pressing
-  // it mid-text would prove nothing — mid-text arrows already fall through.
+  // Mid-text the native extension keeps the key: one Shift+ArrowLeft selects "B".
+  await page.keyboard.press('Shift+ArrowLeft');
+  await page.waitForTimeout(60);
+  expect(await nativeRange(page), 'a text range within the cell').toBe(true);
+  expect(await tableSelection(page)).toBeNull();
+  await page.keyboard.press('End');
+
+  // At the cell's END the arrow crosses the edge: a rectangle starts, and the
+  // browser's own range is gone.
   await page.keyboard.press('Shift+ArrowRight');
   await page.waitForTimeout(60);
-  expect(await caretCell(page), 'the caret did not step to the next cell').toBe('0,0');
-  expect(
-    await page.evaluate(() => window.getSelection()?.isCollapsed ?? true),
-    'the selection extended rather than the caret moving'
-  ).toBe(false);
+  expect(await tableSelection(page)).toMatchObject({ selection: rect([0, 0], [0, 1]) });
+  expect(await nativeRange(page), 'no text highlight across cells').toBe(false);
+
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.waitForTimeout(60);
+  expect(await tableSelection(page), 'the focus moves, the anchor stays').toMatchObject({ selection: rect([0, 0], [1, 1]) });
+});
+
+test('Table selection: a drag past the origin cell builds a rectangle that survives the release', async ({ page }) => {
+  await open(page, 1);
+  await insertViaMenu(page, 'table');
+  await page.keyboard.type('H1');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('H2');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('a');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('b');
+  await page.waitForTimeout(60);
+
+  const from = await page.locator('[data-cell-row="0"][data-cell-col="0"]').boundingBox();
+  const to = await page.locator('[data-cell-row="1"][data-cell-col="1"]').boundingBox();
+  expect(from && to, 'both cells laid out').toBeTruthy();
+  await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, { steps: 6 });
+  await page.waitForTimeout(40);
+  expect(await tableSelection(page), 'the rectangle follows the pointer').toMatchObject({ selection: rect([0, 0], [1, 1]) });
+  await page.mouse.up();
+  await page.waitForTimeout(80);
+
+  expect(await tableSelection(page), 'release finalizes; the rectangle stays').toMatchObject({ selection: rect([0, 0], [1, 1]) });
+  expect(await nativeRange(page), 'no text highlight across cells').toBe(false);
+  const md = await serialized(page);
+  expect(md, 'nothing was edited').toContain('| H1 | H2 |');
+});
+
+test('Table selection: Cmd+A climbs the cell text, the cell, the table, then the document', async ({ page }) => {
+  await open(page, 3);
+  await insertViaMenu(page, 'table');
+  await page.keyboard.type('AB');
+  await page.waitForTimeout(60);
+
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.waitForTimeout(40);
+  expect(await nativeRange(page), 'first: the cell text').toBe(true);
+  expect(await tableSelection(page)).toBeNull();
+
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.waitForTimeout(40);
+  expect(await tableSelection(page), 'second: the cell').toMatchObject({ selection: rect([0, 0], [0, 0]) });
+
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.waitForTimeout(40);
+  expect(await tableSelection(page), 'third: the table').toMatchObject({ selection: { kind: 'table' } });
+
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.waitForTimeout(40);
+  expect(await tableSelection(page), 'fourth: hands off').toBeNull();
+  expect(await nativeRange(page), 'the document is selected').toBe(true);
+});
+
+test('Table selection: Backspace clears the rectangle, it never removes structure', async ({ page }) => {
+  await open(page, 1);
+  await insertViaMenu(page, 'table');
+  await page.keyboard.type('H1');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('H2');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('a');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('b');
+  await page.waitForTimeout(60);
+  // Back to the header's first cell, then a rectangle over the first column.
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Home');
+  await page.keyboard.press('ArrowLeft');
+  await page.waitForTimeout(40);
+  expect(await caretCell(page)).toBe('0,0');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.waitForTimeout(40);
+  expect(await tableSelection(page)).toMatchObject({ selection: rect([0, 0], [1, 0]) });
+
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(80);
+
+  const md = await serialized(page);
+  expect(md, 'the column survives, emptied').toContain('|  | H2 |');
+  expect(md).toContain('|  | b |');
+  expect(await tableSelection(page), 'the selection is spent').toBeNull();
+  expect(await caretCell(page), 'the caret lands in the anchor').toBe('0,0');
+  expect(serializeDocument(parseDocument(md)), 'stable').toBe(md);
 });
 
 test('SKR-182: an unmodified arrow still steps cell to cell', async ({ page }) => {

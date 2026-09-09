@@ -18,7 +18,7 @@ import {
   type GutterSlot,
   type HoverCell,
   type TableGeometry
-} from '../../src/lib/blocksurface/table-chrome';
+} from '../src';
 
 /** A 3-column, 3-row table at (100, 200), each column 60 wide, each row 20 tall. */
 function geometry(cols = 3, rows = 3): TableGeometry {
@@ -38,30 +38,30 @@ const one = (slots: GutterSlot[], kind: string): GutterSlot | undefined =>
   slots.find((s) => s.kind === kind);
 
 describe('tableGutterSlots', () => {
-  it('always shows the two append rails while a table is active', () => {
+  it('always shows the two append buttons while a table is active', () => {
     const slots = tableGutterSlots(geometry(3, 3), NONE);
-    // With no hovered cell, only the rails — no contextual handles.
+    // With no hovered cell, only the append buttons — no contextual handles.
     expect(slots.map((s) => s.kind).sort()).toEqual(['col-append', 'row-append']);
   });
 
-  it('runs the column-append rail down the full right edge, appending at col count', () => {
-    const rail = one(tableGutterSlots(geometry(3, 3), NONE), 'col-append')!;
-    const { railGap, railThickness } = GUTTER_METRICS;
-    expect(rail.index).toBe(3); // insert AT the column count == append
-    expect(rail.x).toBe(100 + 180 + railGap); // just past the right edge
-    expect(rail.y).toBe(200); // table top
-    expect(rail.height).toBe(60); // full table height
-    expect(rail.width).toBe(railThickness);
+  it('centers the column-append button on the right edge, appending at col count', () => {
+    const btn = one(tableGutterSlots(geometry(3, 3), NONE), 'col-append')!;
+    const { appendGap, appendSize } = GUTTER_METRICS;
+    expect(btn.index).toBe(3); // insert AT the column count == append
+    expect(btn.x).toBe(100 + 180 + appendGap); // just past the right edge
+    expect(btn.y).toBe(200 + (60 - appendSize) / 2); // vertically centered
+    expect(btn.width).toBe(appendSize);
+    expect(btn.height).toBe(appendSize);
   });
 
-  it('runs the row-append rail along the full bottom edge, appending at row count', () => {
-    const rail = one(tableGutterSlots(geometry(3, 3), NONE), 'row-append')!;
-    const { railGap, railThickness } = GUTTER_METRICS;
-    expect(rail.index).toBe(3);
-    expect(rail.x).toBe(100); // table left
-    expect(rail.y).toBe(200 + 60 + railGap); // just below the bottom edge
-    expect(rail.width).toBe(180); // full table width
-    expect(rail.height).toBe(railThickness);
+  it('centers the row-append button on the bottom edge, appending at row count', () => {
+    const btn = one(tableGutterSlots(geometry(3, 3), NONE), 'row-append')!;
+    const { appendGap, appendSize } = GUTTER_METRICS;
+    expect(btn.index).toBe(3);
+    expect(btn.x).toBe(100 + (180 - appendSize) / 2); // horizontally centered
+    expect(btn.y).toBe(200 + 60 + appendGap); // just below the bottom edge
+    expect(btn.width).toBe(appendSize);
+    expect(btn.height).toBe(appendSize);
   });
 
   it('shows a column handle above the hovered column only', () => {
@@ -101,7 +101,7 @@ describe('tableGutterSlots', () => {
     const slots = tableGutterSlots(geometry(3, 3), { row: 1, col: 2 });
     expect(one(slots, 'col-handle')!.index).toBe(2);
     expect(one(slots, 'row-handle')!.index).toBe(1);
-    // Four elements total: two handles, two rails — the whole calm set.
+    // Four elements total: two handles, two append buttons — the whole calm set.
     expect(slots).toHaveLength(4);
   });
 
@@ -292,9 +292,9 @@ describe('hoverZone', () => {
     expect(zone.top).toBe(200 - reach - 10);
   });
 
-  it('grows the right and bottom edges to cover the append rails plus slack', () => {
+  it('grows the right and bottom edges to cover the append buttons plus slack', () => {
     const zone = hoverZone(rect, GUTTER_METRICS, 10);
-    const reach = GUTTER_METRICS.railGap + GUTTER_METRICS.railThickness;
+    const reach = GUTTER_METRICS.appendGap + GUTTER_METRICS.appendSize;
     expect(zone.right).toBe(400 + reach + 10);
     expect(zone.bottom).toBe(300 + reach + 10);
   });

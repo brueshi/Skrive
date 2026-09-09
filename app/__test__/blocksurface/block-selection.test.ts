@@ -239,7 +239,7 @@ describe('⌘A escalation inside a barrier', () => {
     expect(sel.toString()).toContain('hello');
   });
 
-  it('table cell: leaf text -> whole block -> document', () => {
+  it('table cell: leaf text -> cell -> table (the grid selection) -> document', () => {
     const surface = new BlockSurface({ container, doc: parseDocument(`${TABLE}\n`) });
     const cell = container.querySelector('[data-cell-row="1"][data-cell-col="0"]')! as HTMLElement;
     caretIn(cell.firstChild!, 1);
@@ -248,11 +248,18 @@ describe('⌘A escalation inside a barrier', () => {
     expect(selectedIds(surface)).toEqual([]);
     expect(window.getSelection()!.toString()).toBe('1');
 
+    // In a table the ladder is the grid's, never the block ring: the cell, then
+    // the whole table as a rectangle (see table-selection.test.ts).
     key(surface, { key: 'a', metaKey: true });
-    expect(selectedIds(surface)).toEqual([idOf(surface, 'table')]);
+    expect(selectedIds(surface)).toEqual([]);
+    expect(surface.getTableSelection()?.selection).toEqual({ kind: 'cells', anchor: { row: 1, col: 0 }, focus: { row: 1, col: 0 } });
+
+    key(surface, { key: 'a', metaKey: true });
+    expect(surface.getTableSelection()?.selection).toEqual({ kind: 'table' });
 
     key(surface, { key: 'a', metaKey: true });
     expect(selectedIds(surface)).toEqual([]);
+    expect(surface.getTableSelection()).toBeNull();
     expect(window.getSelection()!.isCollapsed).toBe(false);
   });
 

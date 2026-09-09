@@ -12,3 +12,10 @@ if (typeof Range !== 'undefined' && !Range.prototype.getBoundingClientRect) {
     return new DOMRect(0, 0, 0, 0);
   };
 }
+// Same gap for the per-line rects; an empty list is what "no layout" reads as
+// (caretRect then falls through to the bounding rect above).
+if (typeof Range !== 'undefined' && !Range.prototype.getClientRects) {
+  Range.prototype.getClientRects = function (): DOMRectList {
+    return [] as unknown as DOMRectList;
+  };
+}

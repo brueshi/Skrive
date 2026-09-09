@@ -2,15 +2,36 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "jsx": "react-jsx",
-    "types": ["vite/client", "node"],
+    "types": [
+      "vite/client",
+      "node"
+    ],
     "baseUrl": ".",
     "paths": {
-      "@skrive/shared": ["../shared/src/index.ts"],
-      "@skrive/shared/*": ["../shared/src/*"],
-      "@app/*": ["./src/*"]
+      "@skrive/shared": [
+        "../shared/src/index.ts"
+      ],
+      "@skrive/shared/*": [
+        "../shared/src/*"
+      ],
+      "@app/*": [
+        "./src/*"
+      ],
+      "@skrive/table-surface": [
+        "../labs/table-surface/src/index.ts"
+      ]
     }
   },
-  "include": ["src/**/*", "../shared/src/**/*", "__test__/**/*"]
+  "include": [
+    "src/**/*",
+    "../shared/src/**/*",
+    "__test__/**/*",
+    "../labs/table-surface/src/**/*"
+  ]
 }
