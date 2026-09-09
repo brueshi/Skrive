@@ -28,10 +28,10 @@ export const GUTTER_METRICS = {
   handleGap: 5,
   /** Inset at each end of a handle. */
   handleInset: 8,
-  /** Short dimension of an append rail. */
-  railThickness: 16,
-  /** Gap between an append rail and the table's edge. */
-  railGap: 4,
+  /** Side of the square append button, one per axis. */
+  appendSize: 20,
+  /** Gap between an append button and the table's edge. */
+  appendGap: 8,
   /** Width of the grab strip on an interior column boundary. */
   resizeGrab: 9
 } as const;
@@ -42,10 +42,11 @@ export type GutterMetrics = typeof GUTTER_METRICS;
 export const ZONE_SLACK = 10;
 
 /**
- * The slots for a measured table: two append rails that always show while the
- * table is active, plus a handle above the hovered column and left of the
- * hovered row. The rails append at `cols` / `rows`; mid-table insertion is the
- * menu's and the chords' job.
+ * The slots for a measured table: one append button per axis, centered on the
+ * right edge and the bottom edge, that show while the table is active, plus a
+ * handle above the hovered column and left of the hovered row. The buttons
+ * append at `cols` / `rows`; mid-table insertion is the menu's and the chords'
+ * job.
  */
 export function tableGutterSlots(
   geom: TableGeometry,
@@ -62,19 +63,19 @@ export function tableGutterSlots(
   slots.push({
     kind: 'col-append',
     index: cols,
-    x: box.x + box.width + m.railGap,
-    y: box.y,
-    width: m.railThickness,
-    height: box.height
+    x: box.x + box.width + m.appendGap,
+    y: box.y + (box.height - m.appendSize) / 2,
+    width: m.appendSize,
+    height: m.appendSize
   });
 
   slots.push({
     kind: 'row-append',
     index: rows,
-    x: box.x,
-    y: box.y + box.height + m.railGap,
-    width: box.width,
-    height: m.railThickness
+    x: box.x + (box.width - m.appendSize) / 2,
+    y: box.y + box.height + m.appendGap,
+    width: m.appendSize,
+    height: m.appendSize
   });
 
   if (hover.col !== null) {
@@ -224,8 +225,8 @@ export type HoverZone = { left: number; top: number; right: number; bottom: numb
 
 /**
  * The pointer zone a table owns: its rect grown to cover the handle lanes (top
- * and left) and the append rails (right and bottom), plus slack. Inside it the
- * chrome stays up.
+ * and left) and the append buttons (right and bottom), plus slack. Inside it
+ * the chrome stays up.
  */
 export function hoverZone(
   rect: { left: number; top: number; right: number; bottom: number },
@@ -233,12 +234,12 @@ export function hoverZone(
   slack = ZONE_SLACK
 ): HoverZone {
   const handleReach = m.handleGap + m.handleThickness;
-  const railReach = m.railGap + m.railThickness;
+  const appendReach = m.appendGap + m.appendSize;
   return {
     left: rect.left - handleReach - slack,
     top: rect.top - handleReach - slack,
-    right: rect.right + railReach + slack,
-    bottom: rect.bottom + railReach + slack
+    right: rect.right + appendReach + slack,
+    bottom: rect.bottom + appendReach + slack
   };
 }
 

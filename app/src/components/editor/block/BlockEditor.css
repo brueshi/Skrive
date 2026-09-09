@@ -792,9 +792,9 @@
   background: color-mix(in srgb, var(--skrive-accent) 16%, transparent);
 }
 
-/* The append rails: a soft-lifted lane in the toast's visual language, running the
-   full length of the table's right / bottom edge, with a drawn + centred in it.
-   Faint until pointed at, so a hovered table reads as calm. */
+/* The append buttons: one + per axis, centered on the table's right edge and
+   its bottom edge, in the block insert button's language (a soft-lifted square
+   with a drawn +). Faint until pointed at, so a hovered table reads as calm. */
 .sk-table-chrome--col-append,
 .sk-table-chrome--row-append {
   padding: 0;
